@@ -1,6 +1,6 @@
 {
   "name": "@cortex-agent/client",
-  "version": "2026.5.19-2",
+  "version": "2026.5.19-3",
   "type": "module",
   "description": "Cortex remote agent client — receives commands from @cortex-agent/server via WebSocket",
   "main": "dist/client.js",
@@ -11,13 +11,14 @@
     "node": ">=20.0.0"
   },
   "files": [
-    "dist/"
+    "dist/",
+    "README.md"
   ],
   "publishConfig": {
     "access": "public"
   },
   "scripts": {
-    "prepare": "npm run build",
+    "prepare": "cp ../README.md . && npm run build",
     "start": "node dist/client.js",
     "build": "tsc && node scripts/copy-assets.js",
     "typecheck": "tsc --noEmit",

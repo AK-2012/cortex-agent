@@ -1,6 +1,6 @@
 {
   "name": "@cortex-agent/server",
-  "version": "2026.5.19-2",
+  "version": "2026.5.19-3",
   "type": "module",
   "description": "Autonomous agent system for long-running projects — mission-driven, multi-agent pipelines, self-evolving skills.",
   "engines": {
@@ -15,13 +15,14 @@
   "files": [
     "dist/",
     "defaults/",
-    "scripts/postinstall-restart-trigger.mjs"
+    "scripts/postinstall-restart-trigger.mjs",
+    "README.md"
   ],
   "publishConfig": {
     "access": "public"
   },
   "scripts": {
-    "prepare": "npm run build",
+    "prepare": "cp ../README.md . && npm run build",
     "postinstall": "node scripts/postinstall-restart-trigger.mjs",
     "build": "tsc -p tsconfig.build.json && tsc-alias -p tsconfig.build.json && node scripts/copy-assets.js",
     "typecheck": "tsc --noEmit",
