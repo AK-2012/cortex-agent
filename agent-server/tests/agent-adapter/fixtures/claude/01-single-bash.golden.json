@@ -1,0 +1,26 @@
+[
+  {
+    "type": "session_started",
+    "sessionId": "sess-01-single-bash"
+  },
+  {
+    "type": "tool_use",
+    "toolUseId": "toolu_01",
+    "name": "Bash",
+    "input": {
+      "command": "git status",
+      "description": "Show working tree status"
+    }
+  },
+  {
+    "type": "tool_result",
+    "toolUseId": "toolu_01",
+    "ok": true,
+    "content": "On branch main\nnothing to commit, working tree clean"
+  },
+  {
+    "type": "turn_complete",
+    "numTurns": 1,
+    "totalCostUsd": 0.0123
+  }
+]

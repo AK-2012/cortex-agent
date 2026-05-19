@@ -1,0 +1,4 @@
+{"type":"system","subtype":"init","session_id":"sess-01-single-bash","cwd":"/repo","tools":["Bash","Read"],"model":"claude-opus-4-6"}
+{"type":"assistant","message":{"id":"msg_01","role":"assistant","content":[{"type":"tool_use","id":"toolu_01","name":"Bash","input":{"command":"git status","description":"Show working tree status"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_01","content":"On branch main\nnothing to commit, working tree clean","is_error":false}]}}
+{"type":"result","subtype":"success","is_error":false,"num_turns":1,"total_cost_usd":0.0123,"session_id":"sess-01-single-bash","result":"done"}

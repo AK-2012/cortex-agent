@@ -1,0 +1,36 @@
+[
+  {
+    "type": "session_started",
+    "sessionId": "pi-sess-01-single"
+  },
+  {
+    "type": "assistant_text",
+    "text": "Let me check the git status.",
+    "blockId": "msg-01"
+  },
+  {
+    "type": "tool_use",
+    "toolUseId": "tc-01",
+    "name": "bash",
+    "input": {
+      "command": "git status",
+      "description": "Show working tree status"
+    }
+  },
+  {
+    "type": "tool_result",
+    "toolUseId": "tc-01",
+    "ok": true,
+    "content": "On branch main\nnothing to commit, working tree clean"
+  },
+  {
+    "type": "assistant_text",
+    "text": " The working tree is clean.",
+    "blockId": "msg-01"
+  },
+  {
+    "type": "turn_complete",
+    "numTurns": 1,
+    "totalCostUsd": 0.0089
+  }
+]

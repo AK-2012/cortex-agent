@@ -1,0 +1,275 @@
+# Configuration
+
+Cortex loads all configuration from `$CORTEX_HOME/config/` at startup. The
+only required variables are `CORTEX_PLATFORM` and the platform credentials
+(Slack or Feishu). Everything else has sensible defaults and most users
+never touch them.
+
+## File hierarchy
+
+All paths below are relative to `$CORTEX_HOME` (default: `~/.cortex/`).
+
+```
+$CORTEX_HOME/
+├── .env                          # Platform tokens, feature flags
+├── config/
+│   ├── .env                      # Same file (symlinked / canonical location)
+│   ├── profiles.json             # Named agent profiles
+│   ├── thread-templates.json     # Agent definitions and orchestration templates
+│   ├── machines.json             # Machine registry for remote clients
+│   ├── budget.json               # Daily/monthly budget limits
+│   ├── mcp-config.json           # Full MCP server configuration
+│   ├── mcp-config-core.json      # Core-only MCP (remote_* tools)
+│   ├── mcp-config-tui.json       # TUI-mode MCP configuration
+│   └── session-hooks.json        # Session-level hook configuration
+├── data/
+│   ├── mode.json                 # Current runtime mode and profile
+│   ├── schedules.json            # Persistent scheduled task list
+│   ├── executions.json           # Unified execution registry
+│   ├── costs.jsonl               # 90-day rolling cost records
+│   └── sessions.json             # Channel-to-agent session mapping
+├── .claude/
+│   └── settings.json             # Claude Code hooks and permissions
+├── hooks/                        # Hook scripts (.mjs)
+├── plugins/                      # Role-scoped skill plugins
+├── prompts/                      # System prompts, directives, templates
+├── rules/                        # Context rules for agent sessions
+├── context/                      # Dense Context knowledge repository
+│   └── projects/                 # Research project files
+├── logs/                         # Daemon and LLM session logs
+└── tmp/                          # Temporary workspaces (threads, etc.)
+```
+
+## Loading order and precedence
+
+1. **Built-in defaults** (`agent-server/defaults/`) ship with the npm
+   package and provide fallback values for every config file.
+2. **`$CORTEX_HOME/config/.env`** is loaded at daemon startup via
+   `dotenv`. These override the process environment for the daemon and
+   all forked child processes.
+3. **`$CORTEX_HOME/config/profiles.json`** is read on every agent
+   spawn to resolve model, backend, and extra environment.
+4. **`$CORTEX_HOME/.claude/settings.json`** is read by Claude Code
+   (not by Cortex directly) to configure hooks and permissions for the
+   coding-agent backend.
+
+The `.env` file supports standard `KEY=VALUE` syntax and `#` comments.
+Environment variables already set in the shell take precedence over the
+`.env` file (dotenv default behavior).
+
+## Environment variables
+
+All values are loaded from the `.env` file at `$CORTEX_HOME/config/.env`.
+Only `CORTEX_PLATFORM` and your platform credentials are required.
+
+### Paths
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `CORTEX_HOME` | `~/.cortex/` | User data root (config, context, logs, store) |
+| `CORTEX_PROJECTS_DIR` | `<CORTEX_HOME>/context/projects/` | Override project directory |
+| `CORTEX_REPO` | — | Repo path for daemon auto-rebuild / hot-reload |
+
+### Startup
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `CORTEX_MACHINE` | `os.hostname()` | Machine label for startup DM |
+| `CORTEX_RESTART_REASON` | — | Reason string for restart notification |
+| `CORTEX_CLIENT_PORT` | `3002` | WebSocket port for cortex-client manager |
+
+### Platform (Slack)
+
+| Variable | Required | Purpose |
+|---|---|---|
+| `CORTEX_PLATFORM` | yes | `slack` (default) |
+| `SLACK_BOT_TOKEN` | yes | Slack Bot OAuth token (`xoxb-...`) |
+| `SLACK_SIGNING_SECRET` | yes | Slack app signing secret |
+| `SLACK_APP_TOKEN` | yes | Slack app-level token for Socket Mode (`xapp-...`) |
+| `CORTEX_ADMIN_CHANNEL` | no | Admin DM channel ID (auto-detected at runtime) |
+
+### Platform (Feishu / Lark)
+
+| Variable | Required | Purpose |
+|---|---|---|
+| `CORTEX_PLATFORM` | yes | `feishu` |
+| `FEISHU_APP_ID` | yes | Feishu app ID |
+| `FEISHU_APP_SECRET` | yes | Feishu app secret |
+| `FEISHU_ENCRYPT_KEY` | no | Feishu encrypt key |
+| `FEISHU_VERIFICATION_TOKEN` | no | Feishu verification token |
+| `FEISHU_DOMAIN` | no | `feishu` (default) or `lark` |
+
+Feishu support is an optional dependency (`@larksuiteoapi/node-sdk`). If
+the SDK is not installed, the Feishu platform adapter will not load.
+
+### API
+
+| Variable | Purpose |
+|---|---|
+| `ANTHROPIC_API_KEY` | Anthropic API key for direct-API mode |
+| `ANTHROPIC_BASE_URL` | Override API base URL (auto-set by gateway proxy) |
+
+### Rate limiting (Slack)
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `CORTEX_SLACK_RL_GLOBAL_CAPACITY` | `20` | Global API call bucket capacity |
+| `CORTEX_SLACK_RL_GLOBAL_REFILL_PER_SEC` | `1` | Global refill rate per second |
+| `CORTEX_SLACK_RL_CHANNEL_CAPACITY` | `1` | Per-channel bucket capacity |
+| `CORTEX_SLACK_RL_CHANNEL_REFILL_PER_SEC` | `1` | Per-channel refill rate per second |
+
+### Webhook
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `WEBHOOK_PORT` | `3001` | Webhook HTTP server port |
+| `WEBHOOK_HOST` | `127.0.0.1` | Fallback host for remote clients (when Tailscale/LAN IP not detected) |
+| `GITHUB_WEBHOOK_SECRET` | — | GitHub webhook HMAC-SHA256 signing secret |
+
+### Data file overrides
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `CORTEX_EXECUTIONS_FILE` | `<STORE_DIR>/executions.json` | Execution records |
+| `CORTEX_COSTS_FILE` | `<STORE_DIR>/costs.jsonl` | Cost tracking |
+| `CORTEX_BUDGET_FILE` | `<CONFIG_DIR>/budget.json` | Budget configuration |
+
+### Feature flags
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `DEBUG` | — | Enable debug-level log output |
+| `CORTEX_EVENT_LOG` | `on` | Set to `off` to disable event-bus logging |
+| `CORTEX_SHOW_TOOL_CALLS` | — | Inline tool-call rendering in VirtualMessage tails |
+| `CORTEX_INJECT_USER_CONTEXT` | — | Set to `1` to inject `USER.md` context into threads |
+| `CORTEX_GPU_MONITOR_MOCK` | — | Mock GPU data JSON for testing (overrides real nvidia-smi queries) |
+
+## profiles.json
+
+Located at `$CORTEX_HOME/config/profiles.json`. Defines named agent profiles
+that control which backend, model, and extra configuration each agent session
+uses. For a comparison of available backends, see
+[backends.md](./backends.md).
+
+### Schema
+
+```json
+{
+  "defaultProfile": "plan",
+  "profiles": {
+    "plan": {
+      "model": "claude-sonnet-4-20250514",
+      "backend": "claude",
+      "mode": "plan",
+      "claudeBackend": "print",
+      "extraEnv": {},
+      "extraOption": {},
+      "fallback": []
+    },
+    "execute": {
+      "model": "claude-sonnet-4-20250514",
+      "backend": "claude",
+      "mode": "execute",
+      "claudeBackend": "print",
+      "extraEnv": {},
+      "extraOption": {}
+    }
+  }
+}
+```
+
+### Fields
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `defaultProfile` | string | yes | Name of the default profile when none is specified |
+| `profiles` | object | yes | Map of profile name to profile entry |
+| `profiles.<name>.model` | string | yes | Model identifier (e.g. `claude-sonnet-4-20250514`) |
+| `profiles.<name>.backend` | string | no | Backend: `claude`, `pi`, or `codex` (default: `claude`) |
+| `profiles.<name>.mode` | string | no | Operational mode identifier (free-form, e.g. `plan`, `execute`) |
+| `profiles.<name>.extraEnv` | object | no | Extra environment variables passed to the backend process. Keys must match `^[A-Z_][A-Z0-9_]*$`. |
+| `profiles.<name>.extraOption` | object | no | Extra CLI flags passed to the backend. Keys must start with `--`. |
+| `profiles.<name>.claudeBackend` | string | no | Claude adapter mode: `print` (default, uses `-p` + stream-json) or `tui` (interactive Claude under tmux + jsonl tail). Ignored for non-claude backends. |
+| `profiles.<name>.fallback` | array | no | Ordered list of fallback profile entries. If the primary backend fails, Cortex tries each fallback in order. Each fallback inherits unspecified fields from the primary. |
+
+### Profile resolution
+
+At agent spawn time, Cortex resolves the profile through this chain:
+
+1. If a profile name is explicitly provided (via `--profile` or thread
+   template), use it.
+2. Otherwise, use `defaultProfile` from `profiles.json`.
+3. The resolved profile supplies `model`, `backend`, `mode`, `extraEnv`,
+   `extraOption`, and `claudeBackend`.
+4. If the backend call fails with a transient error, Cortex iterates
+   through the `fallback` array (if any), trying each entry in order.
+
+### Validation rules
+
+Profile names must match `^[a-zA-Z0-9_-]+$`. Backend must be one of
+`claude`, `codex`, or `pi`. `claudeBackend` must be `print` or `tui`
+if specified. Unknown fields are silently ignored.
+
+## settings.json
+
+Located at `$CORTEX_HOME/.claude/settings.json`. This file configures
+Claude Code's hook and permission system. Cortex seeds it from
+`defaults/.claude/settings.json` during `cortex init` and never
+overwrites it on subsequent runs.
+
+The file follows Claude Code's settings format with `hooks` and
+`permissions` sections. See [hooks.md](./hooks.md) for the hook
+system documentation.
+
+## defaults/config/ layout
+
+The `agent-server/defaults/` directory in the npm package contains
+shipped defaults that are copied to `$CORTEX_HOME/` during init:
+
+| Source | Destination | Overwrite behavior |
+|---|---|---|
+| `defaults/CORTEX.md` | `$CORTEX_HOME/CORTEX.md` | Never |
+| `defaults/gitignore` | `$CORTEX_HOME/.gitignore` | Never |
+| `defaults/.claude/settings.json` | `$CORTEX_HOME/.claude/settings.json` | Never |
+| `defaults/config/budget.json` | `$CORTEX_HOME/config/budget.json` | Only with `--force` |
+| `defaults/config/thread-templates.json` | `$CORTEX_HOME/config/thread-templates.json` | Only with `--force` |
+| `defaults/config/session-hooks.json` | `$CORTEX_HOME/config/session-hooks.json` | Only with `--force` |
+| `defaults/prompts/` | `$CORTEX_HOME/prompts/` | Per-file: new files always added, existing preserved unless `--force` |
+| `defaults/plugins/` | `$CORTEX_HOME/plugins/` | Per-file: new files always added, existing preserved unless `--force` |
+| `defaults/rules/` | `$CORTEX_HOME/rules/` | Per-file: new files always added, existing preserved unless `--force` |
+| `defaults/hooks/` | `$CORTEX_HOME/hooks/` | Per-file: never overwrite unless `--force` |
+| `defaults/data/schedules.json` | `$CORTEX_HOME/data/schedules.json` | Never (unless `--force`) |
+| `defaults/context/` | `$CORTEX_HOME/context/` | Scaffold files: never overwrite |
+
+This design means npm package upgrades automatically deliver new prompts,
+plugins, rules, and hooks without overwriting user customizations.
+Config files (`thread-templates.json`, `budget.json`, etc.) require
+`--force` to replace.
+
+## Hot-reload behavior
+
+- **`schedules.json`** — watched via file watcher. Changes are picked up
+  within seconds without restart. See [scheduling.md](./scheduling.md)
+  for the full scheduling system.
+- **`profiles.json`** — read fresh on every agent spawn. No restart needed
+  to change profiles.
+- **`thread-templates.json`** — read fresh on every thread launch.
+- **`.env`** — requires a daemon restart to pick up changes (loaded once
+  at startup via dotenv).
+- **Hook scripts (`hooks/*.mjs`)** — read fresh on every hook invocation.
+- **Plugins, prompts, rules** — read fresh on each agent session spawn.
+
+## Where each file lives
+
+| File | Purpose | Path |
+|---|---|---|
+| `.env` | Environment variables | `$CORTEX_HOME/config/.env` |
+| `profiles.json` | Agent profiles | `$CORTEX_HOME/config/profiles.json` |
+| `thread-templates.json` | Thread definitions | `$CORTEX_HOME/config/thread-templates.json` |
+| `machines.json` | Machine registry | `$CORTEX_HOME/config/machines.json` |
+| `budget.json` | Budget limits | `$CORTEX_HOME/config/budget.json` |
+| `mcp-config.json` | MCP server config | `$CORTEX_HOME/config/mcp-config.json` |
+| `settings.json` | Claude hooks/permissions | `$CORTEX_HOME/.claude/settings.json` |
+| `mode.json` | Runtime mode | `$CORTEX_HOME/data/mode.json` |
+| `schedules.json` | Scheduled tasks | `$CORTEX_HOME/data/schedules.json` |
+| `session-hooks.json` | Session hooks | `$CORTEX_HOME/config/session-hooks.json` |

@@ -1,0 +1,36 @@
+[
+  {
+    "type": "session_started",
+    "sessionId": "pi-sess-03-error"
+  },
+  {
+    "type": "assistant_text",
+    "text": "Let me read that file.",
+    "blockId": "msg-c1"
+  },
+  {
+    "type": "tool_use",
+    "toolUseId": "tc-e1",
+    "name": "bash",
+    "input": {
+      "command": "cat /nonexistent/path/file.txt",
+      "description": "Read nonexistent file"
+    }
+  },
+  {
+    "type": "tool_result",
+    "toolUseId": "tc-e1",
+    "ok": false,
+    "content": "cat: /nonexistent/path/file.txt: No such file or directory"
+  },
+  {
+    "type": "assistant_text",
+    "text": "The file does not exist.",
+    "blockId": "msg-c2"
+  },
+  {
+    "type": "turn_complete",
+    "numTurns": 1,
+    "totalCostUsd": 0.0065
+  }
+]

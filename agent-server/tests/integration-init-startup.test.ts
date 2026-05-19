@@ -1,0 +1,316 @@
+// input:  Node test runner, child_process spawn, fs, cli.ts, app.ts
+// output: Integration tests: init (non-interactive), server start/stop, config validation
+// pos:    End-to-end integration test for cortex init + start lifecycle via subprocess fork
+
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { spawn } from 'node:child_process';
+import { mkdtempSync, existsSync, readFileSync, writeFileSync, rmSync, statSync } from 'node:fs';
+import * as path from 'node:path';
+import * as os from 'node:os';
+import { fileURLToPath } from 'node:url';
+
+// ─── Paths ────────────────────────────────────────────────────────
+
+const TEST_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const CLI_TS = path.join(TEST_ROOT, 'src', 'entry', 'cli.ts');
+const APP_TS = path.join(TEST_ROOT, 'src', 'entry', 'app.ts');
+
+const NODE = process.execPath;
+const TSX_FLAGS = ['--import', 'tsx'];
+
+/** Pick a random high port to avoid conflicts with running instances. */
+function randomPort(): number {
+  return 40000 + Math.floor(Math.random() * 25000);
+}
+
+// ─── Helpers ──────────────────────────────────────────────────────
+
+function spawnWait(executable: string, args: string[], opts: {
+  cwd?: string;
+  env?: Record<string, string>;
+  stdin?: string;
+  timeoutMs?: number;
+}): Promise<{ stdout: string; stderr: string; exitCode: number | null }> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(executable, args, {
+      cwd: opts.cwd,
+      env: { ...process.env, ...opts.env },
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+
+    let stdout = '';
+    let stderr = '';
+
+    child.stdout.on('data', (d: Buffer) => { stdout += d.toString(); });
+    child.stderr.on('data', (d: Buffer) => { stderr += d.toString(); });
+
+    if (opts.stdin !== undefined) {
+      child.stdin.write(opts.stdin);
+      child.stdin.end();
+    }
+
+    const timer = setTimeout(() => {
+      child.kill('SIGKILL');
+      reject(new Error(`Process timed out after ${opts.timeoutMs ?? 'default'}ms`));
+    }, opts.timeoutMs ?? 60_000);
+
+    child.on('close', (code) => {
+      clearTimeout(timer);
+      resolve({ stdout, stderr, exitCode: code });
+    });
+
+    child.on('error', (err) => {
+      clearTimeout(timer);
+      reject(err);
+    });
+  });
+}
+
+type TempDir = ReturnType<typeof mkdtempSync>;
+
+/**
+ * Init a cortex data directory via `node --import tsx cli.ts init --home <dir>`.
+ *
+ * `--gateway-config-dir` is also pinned to a tempDir sub-path so the test never touches
+ * the production `~/.aistatus/gateway.yaml` (cortex init writes & backs up that file
+ * by default — see writeGatewayYaml in src/core/gateway-generator.ts).
+ */
+async function cortexInit(homeDir: string, stdinAnswers: string): Promise<void> {
+  const gatewayDir = path.join(homeDir, 'aistatus');
+  const initResult = await spawnWait(NODE, [
+    ...TSX_FLAGS,
+    CLI_TS,
+    'init',
+    '--home', homeDir,
+    '--gateway-config-dir', gatewayDir,
+  ], {
+    env: {},  // inherit process.env
+    stdin: stdinAnswers,
+    timeoutMs: 120_000,
+  });
+
+  // Non-interactive init should succeed
+  assert.equal(initResult.exitCode, 0,
+    `cortex init failed with exitCode=${initResult.exitCode}\nstderr: ${initResult.stderr}`);
+}
+
+// ─── Tests ────────────────────────────────────────────────────────
+
+/**
+ * Snapshot mtime of `~/.aistatus/gateway.yaml` (if it exists) before each test, and
+ * confirm it is unchanged after — regression for "cortex init test accidentally
+ * overwrites production gateway.yaml" when --gateway-config-dir is not passed.
+ */
+function snapshotProdGatewayMtime(): number | null {
+  const prodGateway = path.join(os.homedir(), '.aistatus', 'gateway.yaml');
+  if (!existsSync(prodGateway)) return null;
+  return statSync(prodGateway).mtimeMs;
+}
+
+function assertProdGatewayUntouched(snapshot: number | null): void {
+  const prodGateway = path.join(os.homedir(), '.aistatus', 'gateway.yaml');
+  if (snapshot === null) {
+    assert.ok(!existsSync(prodGateway),
+      `cortex init must not create ~/.aistatus/gateway.yaml when --gateway-config-dir is passed`);
+    return;
+  }
+  assert.ok(existsSync(prodGateway), '~/.aistatus/gateway.yaml went missing during test');
+  const after = statSync(prodGateway).mtimeMs;
+  assert.equal(after, snapshot,
+    `cortex init must not modify production ~/.aistatus/gateway.yaml (mtime drifted from ${snapshot} to ${after})`);
+}
+
+test('Test 1: cortex init creates valid directory structure (non-interactive)', async () => {
+  const tempDir = mkdtempSync(path.join(os.tmpdir(), 'cortex-int-'));
+  const prodGatewaySnap = snapshotProdGatewayMtime();
+  try {
+    // Run init with piped stdin: backend=claude, platform=none, gateway=n, installService=n
+    await cortexInit(tempDir, 'claude\nnone\nn\nn\nn\nn\n');
+    assertProdGatewayUntouched(prodGatewaySnap);
+
+    // Assert core directory structure
+    const dirs = [
+      path.join(tempDir, 'config'),
+      path.join(tempDir, 'data'),
+      path.join(tempDir, 'context'),
+      path.join(tempDir, 'context', 'projects'),
+      path.join(tempDir, 'tmp'),
+      path.join(tempDir, 'tmp', 'threads'),
+      path.join(tempDir, '.claude'),
+    ];
+    for (const dir of dirs) {
+      assert.ok(existsSync(dir), `Expected directory to exist: ${dir}`);
+    }
+
+    // Assert config files
+    const files = [
+      path.join(tempDir, 'config', '.env'),
+      path.join(tempDir, 'config', 'mcp-config.json'),
+      path.join(tempDir, 'data', 'mode.json'),
+      path.join(tempDir, 'config', 'thread-templates.json'),
+    ];
+    for (const f of files) {
+      assert.ok(existsSync(f), `Expected file to exist: ${f}`);
+    }
+
+    // Assert .env contains CORTEX_MACHINE
+    const envContent = readFileSync(path.join(tempDir, 'config', '.env'), 'utf-8');
+    assert.match(envContent, /^CORTEX_MACHINE=/m, '.env should contain CORTEX_MACHINE');
+
+    // Assert machines.json exists and contains local machine entry
+    const machinesJsonPath = path.join(tempDir, 'config', 'machines.json');
+    assert.ok(existsSync(machinesJsonPath),
+      'Expected machines.json to be created by cortex init');
+    const machines = JSON.parse(readFileSync(machinesJsonPath, 'utf-8'));
+    const machineKeys = Object.keys(machines);
+    assert.equal(machineKeys.length, 1, 'machines.json should contain exactly one machine entry');
+    const localEntry = machines[machineKeys[0]];
+    assert.equal(typeof localEntry.cortexPath, 'string', 'local entry should have cortexPath');
+    assert.equal(localEntry.cortexPath, tempDir, 'local entry cortexPath should equal DATA_DIR');
+    assert.equal(typeof localEntry.gpuCount, 'number', 'local entry should have gpuCount');
+    assert.ok(localEntry.gpuCount >= 0, 'gpuCount should be non-negative');
+
+    // Assert mode.json is valid JSON with expected fields
+    const modeContent = readFileSync(path.join(tempDir, 'data', 'mode.json'), 'utf-8');
+    const mode = JSON.parse(modeContent);
+    assert.equal(mode.backend, 'claude');
+    assert.equal(mode.mode, 'plan');
+    assert.ok(mode.claudeModel);
+    assert.ok(mode.activeProfile);
+  } finally {
+    rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
+test('Test 2: Server starts and shuts down cleanly in initialized environment', async () => {
+  const tempDir = mkdtempSync(path.join(os.tmpdir(), 'cortex-int-'));
+  try {
+    // Init first
+    await cortexInit(tempDir, 'claude\nnone\nn\nn\nn\nn\n');
+
+    // Fork app.ts directly with test platform
+    const webhookPort = String(randomPort());
+    const clientPort = String(randomPort());
+
+    const child = spawn(NODE, [...TSX_FLAGS, APP_TS], {
+      env: {
+        ...process.env,
+        CORTEX_HOME: tempDir,
+        CORTEX_PLATFORM: 'test',
+        WEBHOOK_PORT: webhookPort,
+        CORTEX_CLIENT_PORT: clientPort,
+      },
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+
+    let stdout = '';
+    let stderr = '';
+
+    child.stdout.on('data', (d: Buffer) => { stdout += d.toString(); });
+    child.stderr.on('data', (d: Buffer) => { stderr += d.toString(); });
+
+    // Wait for readiness signal (all modules now init before this log)
+    const readySignal = 'Cortex agent is running (mock)';
+    const ready = await new Promise<boolean>((resolve) => {
+      const timeout = setTimeout(() => resolve(false), 60_000);
+      const check = () => {
+        if (stdout.includes(readySignal)) {
+          clearTimeout(timeout);
+          resolve(true);
+        } else {
+          setTimeout(check, 100);
+        }
+      };
+      check();
+    });
+
+    assert.ok(ready, `Server did not emit readiness signal within 60s.\nstdout: ${stdout.slice(0, 2000)}\nstderr: ${stderr.slice(0, 2000)}`);
+
+    // Send SIGTERM and wait for clean exit
+    child.kill('SIGTERM');
+
+    const exitCode = await new Promise<number | null>((resolve) => {
+      const timeout = setTimeout(() => {
+        child.kill('SIGKILL'); // force kill
+        resolve(null);
+      }, 15_000);
+      child.on('close', (code) => {
+        clearTimeout(timeout);
+        resolve(code);
+      });
+    });
+
+    assert.equal(exitCode, 0, `Server exited with code ${exitCode} after SIGTERM.\nstderr: ${stderr.slice(0, 2000)}`);
+
+    // Assert startup messages appear in output
+    assert.match(stdout, /Cortex agent is running/);
+  } finally {
+    rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
+test('Test 3: Initialized environment has correct config content', async () => {
+  const tempDir = mkdtempSync(path.join(os.tmpdir(), 'cortex-int-'));
+  try {
+    await cortexInit(tempDir, 'claude\nnone\nn\nn\nn\nn\n');
+
+    // Verify mode.json content
+    const mode = JSON.parse(readFileSync(path.join(tempDir, 'data', 'mode.json'), 'utf-8'));
+    assert.equal(mode.backend, 'claude');
+    assert.equal(mode.mode, 'plan');
+    assert.equal(mode.claudeModel, 'opus');
+    // activeProfile should be set to profiles.json's defaultProfile, not the __active__ sentinel
+    const profiles = JSON.parse(readFileSync(path.join(tempDir, 'config', 'profiles.json'), 'utf-8'));
+    assert.equal(mode.activeProfile, profiles.defaultProfile);
+    assert.equal(mode.defaultAgent, 'direct');
+
+    // Profile-generator new contract: defaultProfile is unsuffixed 'plan';
+    // no plan-*/execute-*/write-*/qa-* suffixed names should exist.
+    assert.equal(profiles.defaultProfile, 'plan');
+    assert.ok(profiles.profiles.plan, 'profiles.json must contain a "plan" profile');
+    for (const name of Object.keys(profiles.profiles)) {
+      assert.ok(!/^(plan|execute|write|qa)-/.test(name),
+        `profile name "${name}" must not have a plan-/execute-/write-/qa- suffix`);
+      assert.ok(name !== 'write', 'write profile must not be generated');
+      assert.ok(name !== 'qa', 'qa profile must not be generated');
+    }
+
+    // Verify thread-templates.json is valid JSON with expected template names
+    const templates = JSON.parse(readFileSync(path.join(tempDir, 'config', 'thread-templates.json'), 'utf-8'));
+    assert.ok(templates.templates, 'thread-templates.json should have "templates" key');
+    assert.ok(Array.isArray(templates.templates) || typeof templates.templates === 'object',
+      'templates should be an array or object');
+    // Check for known template names
+    const templateNames = Array.isArray(templates.templates)
+      ? templates.templates.map((t: any) => t.name)
+      : Object.keys(templates.templates);
+    assert.ok(templateNames.length > 0, 'Should have at least one thread template');
+
+    // Verify .env content
+    const envContent = readFileSync(path.join(tempDir, 'config', '.env'), 'utf-8');
+    const machineMatch = envContent.match(/^CORTEX_MACHINE=(.+)$/m);
+    assert.ok(machineMatch, '.env should contain CORTEX_MACHINE');
+    assert.equal(machineMatch![1], os.hostname(), 'CORTEX_MACHINE should match current hostname');
+  } finally {
+    rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
+test('Test 4: cortex init with Slack platform writes Slack tokens to .env', async () => {
+  const tempDir = mkdtempSync(path.join(os.tmpdir(), 'cortex-int-'));
+  try {
+    // stdin: backends, platform, gateway, name, org, email, installService, signing_secret, app_token, bot_token, admin_channel
+    await cortexInit(tempDir, 'claude\nslack\nn\nn\nn\nn\nn\nsec123\nxapp-test-app\nxoxb-test-bot\nD0CHANNEL\n');
+
+    const envContent = readFileSync(path.join(tempDir, 'config', '.env'), 'utf-8');
+    assert.match(envContent, /^CORTEX_MACHINE=/m);
+    assert.match(envContent, /^CORTEX_PLATFORM=slack/m);
+    assert.match(envContent, /^SLACK_BOT_TOKEN=xoxb-test-bot/m);
+    assert.match(envContent, /^SLACK_SIGNING_SECRET=sec123/m);
+    assert.match(envContent, /^SLACK_APP_TOKEN=xapp-test-app/m);
+    assert.match(envContent, /^CORTEX_ADMIN_CHANNEL=D0CHANNEL/m);
+  } finally {
+    rmSync(tempDir, { recursive: true, force: true });
+  }
+});

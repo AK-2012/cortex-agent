@@ -1,0 +1,66 @@
+[
+  {
+    "type": "session_started",
+    "sessionId": "pi-sess-02a-first"
+  },
+  {
+    "type": "assistant_text",
+    "text": "Reading the file.",
+    "blockId": "msg-a1"
+  },
+  {
+    "type": "tool_use",
+    "toolUseId": "tc-a1",
+    "name": "read",
+    "input": {
+      "file_path": "/tmp/hello.txt",
+      "description": "Read hello file"
+    }
+  },
+  {
+    "type": "tool_result",
+    "toolUseId": "tc-a1",
+    "ok": true,
+    "content": "hello world"
+  },
+  {
+    "type": "assistant_text",
+    "text": " File read successfully.",
+    "blockId": "msg-a1"
+  },
+  {
+    "type": "turn_complete",
+    "numTurns": 1,
+    "totalCostUsd": 0.005
+  },
+  {
+    "type": "assistant_text",
+    "text": "Now on the second session.",
+    "blockId": "msg-b1"
+  },
+  {
+    "type": "tool_use",
+    "toolUseId": "tc-b1",
+    "name": "bash",
+    "input": {
+      "command": "echo done",
+      "description": "Print done"
+    }
+  },
+  {
+    "type": "tool_result",
+    "toolUseId": "tc-b1",
+    "ok": true,
+    "content": "done"
+  },
+  {
+    "type": "assistant_text",
+    "text": " All done.",
+    "blockId": "msg-b1"
+  },
+  {
+    "type": "turn_complete",
+    "numTurns": 1,
+    "totalCostUsd": 0.007
+  }
+]

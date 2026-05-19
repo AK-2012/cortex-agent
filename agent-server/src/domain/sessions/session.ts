@@ -1,0 +1,18 @@
+// input:  sessions.json file, channel ID, backend name
+// output: { getSessionAsync, setSessionAsync, deleteSessionAsync } — channel session CRUD
+// pos:    thin re-export layer, all session CRUD goes through store/session-repo.ts (AsyncMutex serialization)
+// >>> If I am updated, update my header comment and CORTEX.md <<<
+
+import { sessionRepo } from '@store/session-repo.js';
+
+export async function getSessionAsync(channel: string, backend: string): Promise<string | undefined> {
+  return sessionRepo.getSessionAsync(channel, backend);
+}
+
+export async function setSessionAsync(channel: string, sessionId: string, backend: string): Promise<void> {
+  return sessionRepo.setSessionAsync(channel, sessionId, backend);
+}
+
+export async function deleteSessionAsync(channel: string, backend: string): Promise<void> {
+  return sessionRepo.deleteSessionAsync(channel, backend);
+}

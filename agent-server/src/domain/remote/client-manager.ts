@@ -1,0 +1,528 @@
+// input:  WebSocket connections from cortex-client instances
+// output: start/stop/getOnlineDevices/sendCommand/isDeviceOnline/buildRemoteSpawnCommand
+// pos:    cortex-client WebSocket connection registration, command routing, and
+//         SSH-based remote client lifecycle (spawn / retry / PID tracking)
+// >>> If I am updated, update my header comment and the parent folder's CORTEX.md <<<
+
+import { WebSocketServer, WebSocket } from 'ws';
+import * as crypto from 'crypto';
+import * as fs from 'fs';
+import * as path from 'path';
+import { execFile, spawn } from 'child_process';
+import { getMachineRegistry, type MachineEntry, type MachineRegistry } from '../tasks/dispatch-utils.js';
+import { STORE_DIR, CONFIG_DIR } from '@core/utils.js';
+import { createLogger } from '@core/log.js';
+import { readTasks, findTask } from '../tasks/system/task-lifecycle-edit.js';
+import { completeTask } from '../tasks/system/task-completion.js';
+import { blockTask } from '../tasks/system/task-state.js';
+
+const log = createLogger('client-manager');
+
+// --- Types ---
+
+interface DeviceInfo {
+  device: string;
+  platform: string;
+  capabilities: string[];
+  connectedAt: Date;
+  lastHeartbeat: Date;
+  ws: WebSocket;
+}
+
+interface PendingCommand {
+  resolve: (result: any) => void;
+  reject: (error: Error) => void;
+  timer: ReturnType<typeof setTimeout>;
+  device: string;
+}
+
+interface CommandParams {
+  action: string;
+  params: Record<string, any>;
+  timeout?: number;
+}
+
+// --- State ---
+
+const devices = new Map<string, DeviceInfo>();
+const pendingCommands = new Map<string, PendingCommand>();
+let wss: WebSocketServer | null = null;
+let heartbeatCheckInterval: ReturnType<typeof setInterval> | null = null;
+
+const HEARTBEAT_TIMEOUT_MS = 15_000; // 3 missed 5s heartbeats
+const DEFAULT_COMMAND_TIMEOUT_MS = 120_000; // 2 min for bash
+const FILE_COMMAND_TIMEOUT_MS = 30_000; // 30s for file operations
+
+// --- Server lifecycle ---
+
+function startClientManager(port: number): void {
+  if (wss) {
+    log.warn('Already running');
+    return;
+  }
+
+  wss = new WebSocketServer({ port });
+  log.info(`WebSocket server started on port ${port}`);
+
+  wss.on('connection', (ws) => {
+    let deviceName: string | null = null;
+
+    ws.on('message', (raw) => {
+      let msg: any;
+      try {
+        msg = JSON.parse(raw.toString());
+      } catch {
+        return;
+      }
+
+      if (msg.type === 'hello') {
+        deviceName = msg.device;
+        if (!deviceName) {
+          ws.close(4001, 'Missing device name');
+          return;
+        }
+
+        // If a device with the same name is already connected, reject the new connection
+        const existing = devices.get(deviceName);
+        if (existing && existing.ws !== ws) {
+          log.info(`Device ${deviceName} already connected, rejecting new connection`);
+          ws.close(4002, 'Device already connected');
+          return;
+        }
+
+        devices.set(deviceName, {
+          device: deviceName,
+          platform: msg.platform || 'unknown',
+          capabilities: msg.capabilities || [],
+          connectedAt: new Date(),
+          lastHeartbeat: new Date(),
+          ws,
+        });
+        log.info(`Device connected: ${deviceName} (${msg.platform || 'unknown'})`);
+        return;
+      }
+
+      if (msg.type === 'heartbeat' && deviceName) {
+        const info = devices.get(deviceName);
+        if (info) {
+          info.lastHeartbeat = new Date();
+        }
+        return;
+      }
+
+      if (msg.type === 'result' && msg.commandId) {
+        const pending = pendingCommands.get(msg.commandId);
+        if (pending) {
+          pendingCommands.delete(msg.commandId);
+          clearTimeout(pending.timer);
+          if (msg.success) {
+            pending.resolve(msg.data);
+          } else {
+            pending.reject(new Error(msg.error || 'Command failed'));
+          }
+        }
+        return;
+      }
+
+      if (msg.type === 'task-callback') {
+        handleTaskCallback(ws, msg);
+        return;
+      }
+    });
+
+    ws.on('close', () => {
+      if (deviceName) {
+        const current = devices.get(deviceName);
+        if (current && current.ws === ws) {
+          log.info(`Device disconnected: ${deviceName}`);
+          devices.delete(deviceName);
+          // Reject all pending commands for this device
+          for (const [id, pending] of pendingCommands) {
+            if (pending.device === deviceName) {
+              clearTimeout(pending.timer);
+              pending.reject(new Error(`Device "${deviceName}" disconnected`));
+              pendingCommands.delete(id);
+            }
+          }
+          // Auto-restart remote client
+          scheduleRestart(deviceName);
+        }
+      }
+    });
+
+    ws.on('error', (err) => {
+      log.error(`WebSocket error for ${deviceName || 'unknown'}: ${err.message}`);
+    });
+  });
+
+  // Periodic heartbeat check — mark stale devices as offline
+  heartbeatCheckInterval = setInterval(() => {
+    const now = Date.now();
+    const toEvict: Array<{ name: string; info: DeviceInfo }> = [];
+    for (const [name, info] of devices) {
+      if (now - info.lastHeartbeat.getTime() > HEARTBEAT_TIMEOUT_MS) {
+        toEvict.push({ name, info });
+      }
+    }
+    for (const { name, info } of toEvict) {
+      // Guard: only evict if entry hasn't been replaced by a reconnect
+      const current = devices.get(name);
+      if (current && current.ws === info.ws) {
+        log.info(`Device ${name} heartbeat timeout, marking offline`);
+        try { info.ws.close(4003, 'Heartbeat timeout'); } catch {}
+        devices.delete(name);
+        // Reject pending commands for this device
+        for (const [id, pending] of pendingCommands) {
+          if (pending.device === name) {
+            clearTimeout(pending.timer);
+            pending.reject(new Error(`Device "${name}" heartbeat timeout`));
+            pendingCommands.delete(id);
+          }
+        }
+        // Auto-restart remote client after heartbeat timeout
+        scheduleRestart(name);
+      }
+    }
+  }, 5000);
+
+  wss.on('error', (err) => {
+    log.error(`Server error: ${err.message}`);
+  });
+}
+
+function stopClientManager(): void {
+  if (heartbeatCheckInterval) {
+    clearInterval(heartbeatCheckInterval);
+    heartbeatCheckInterval = null;
+  }
+
+  // Reject all pending commands
+  for (const [id, pending] of pendingCommands) {
+    clearTimeout(pending.timer);
+    pending.reject(new Error('Client manager shutting down'));
+    pendingCommands.delete(id);
+  }
+
+  // Close all connections
+  for (const [, info] of devices) {
+    try { info.ws.close(1001, 'Server shutting down'); } catch {}
+  }
+  devices.clear();
+
+  if (wss) {
+    wss.close();
+    wss = null;
+    log.info('WebSocket server stopped');
+  }
+}
+
+// --- Device queries ---
+
+function getOnlineDevices(): Array<{ device: string; platform: string; connectedAt: Date; lastHeartbeat: Date; capabilities: string[] }> {
+  const result: Array<{ device: string; platform: string; connectedAt: Date; lastHeartbeat: Date; capabilities: string[] }> = [];
+  for (const [, info] of devices) {
+    result.push({
+      device: info.device,
+      platform: info.platform,
+      connectedAt: info.connectedAt,
+      lastHeartbeat: info.lastHeartbeat,
+      capabilities: info.capabilities,
+    });
+  }
+  return result;
+}
+
+function isDeviceOnline(device: string): boolean {
+  return devices.has(device);
+}
+
+// --- Command routing ---
+
+function sendCommand(device: string, command: CommandParams): Promise<any> {
+  const info = devices.get(device);
+  if (!info) {
+    return Promise.reject(new Error(`Device "${device}" is not online`));
+  }
+
+  if (info.ws.readyState !== WebSocket.OPEN) {
+    devices.delete(device);
+    return Promise.reject(new Error(`Device "${device}" WebSocket is not open`));
+  }
+
+  const commandId = crypto.randomBytes(8).toString('hex');
+  const timeoutMs = command.timeout || (
+    command.action === 'bash' ? DEFAULT_COMMAND_TIMEOUT_MS : FILE_COMMAND_TIMEOUT_MS
+  );
+
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      pendingCommands.delete(commandId);
+      reject(new Error(`Command to "${device}" timed out after ${timeoutMs / 1000}s`));
+    }, timeoutMs);
+
+    pendingCommands.set(commandId, { resolve, reject, timer, device });
+
+    try {
+      info.ws.send(JSON.stringify({
+        type: 'command',
+        commandId,
+        action: command.action,
+        params: command.params,
+      }));
+    } catch (err) {
+      pendingCommands.delete(commandId);
+      clearTimeout(timer);
+      reject(new Error(`Failed to send command to "${device}": ${(err as Error).message}`));
+    }
+  });
+}
+
+// --- Remote client lifecycle (SSH nohup start, PID tracking, auto-restart) ---
+
+const PID_FILE = path.join(STORE_DIR, 'client-pids.json');
+const restartTimers = new Map<string, ReturnType<typeof setTimeout>>();
+const RESTART_DELAY_MS = 60_000; // retry every 60s until device reconnects
+
+function loadPids(): Record<string, number> {
+  try { return JSON.parse(fs.readFileSync(PID_FILE, 'utf8')); } catch { return {}; }
+}
+function savePids(pids: Record<string, number>): void {
+  fs.mkdirSync(STORE_DIR, { recursive: true });
+  fs.writeFileSync(PID_FILE, JSON.stringify(pids, null, 2));
+}
+function getPid(device: string): number | undefined { return loadPids()[device]; }
+function setPid(device: string, pid: number): void { const p = loadPids(); p[device] = pid; savePids(p); }
+function deletePid(device: string): void { const p = loadPids(); delete p[device]; savePids(p); }
+
+// Keep in-memory alias for export compatibility
+const clientPids = { get: getPid, set: setPid, delete: deletePid };
+
+function sshExec(host: string, command: string, timeout = 15000): Promise<string> {
+  return new Promise((resolve, reject) => {
+    execFile('ssh', ['-o', 'ConnectTimeout=5', '-o', 'StrictHostKeyChecking=no', host, command], { timeout }, (err, stdout, stderr) => {
+      if (err) reject(new Error(`SSH error: ${err.message}\n${stderr}`));
+      else resolve(stdout.trim());
+    });
+  });
+}
+
+// --- Indirection so tests can swap the SSH executor and registry without spawning ssh ---
+type SshExec = (host: string, command: string, timeout?: number) => Promise<string>;
+let _sshExecImpl: SshExec = sshExec;
+let _getRegistryImpl: () => MachineRegistry = getMachineRegistry;
+
+/**
+ * Build the shell command run over SSH to spawn cortex-client on a remote device.
+ *
+ * Windows note: WMI `Win32_Process.Create` does NOT perform PATH lookup, and
+ * `cortex-client` installed by npm on Windows is a `.cmd` shim
+ * (e.g. `C:\Users\<u>\AppData\Roaming\npm\cortex-client.cmd`). Passing the bare
+ * name returns ReturnValue=9 (Path Not Found) with an empty ProcessId, which
+ * over SSH serializes to "" and the parent caller logs
+ * `Failed to parse PID for <device>: ""`. Wrapping with `cmd.exe /c` makes cmd
+ * do the PATH lookup and run the .cmd shim correctly.
+ *
+ * Linux note: the shell handles PATH lookup; `nohup` detaches and `echo $!`
+ * returns the child PID on stdout.
+ */
+function buildRemoteSpawnCommand(reg: MachineEntry): string {
+  if (reg.win) {
+    return `powershell -Command "(Invoke-WmiMethod -Class Win32_Process -Name Create -ArgumentList 'cmd.exe /c cortex-client').ProcessId"`;
+  }
+  return `nohup cortex-client > /dev/null 2>&1 & echo $!`;
+}
+
+async function isRemotePidAlive(device: string): Promise<boolean> {
+  const reg = _getRegistryImpl()[device];
+  if (!reg?.ssh) return false;
+  const pid = clientPids.get(device);
+  if (!pid) return false;
+  try {
+    const cmd = reg.win
+      ? `tasklist /fi "pid eq ${pid}" /fo csv /nh`
+      : `kill -0 ${pid} 2>/dev/null && echo alive || echo dead`;
+    const result = await _sshExecImpl(reg.ssh, cmd);
+    return reg.win ? result.includes(`"${pid}"`) : result.includes('alive');
+  } catch {
+    return false;
+  }
+}
+
+async function startRemoteClient(device: string): Promise<void> {
+  const reg = _getRegistryImpl()[device];
+  if (!reg) return;
+
+  // Check if already online via WebSocket
+  if (devices.has(device)) return;
+
+  // Check if existing PID still alive
+  if (reg.ssh && await isRemotePidAlive(device)) {
+    log.info(`Client on ${device} already running (PID ${clientPids.get(device)}), waiting for reconnect...`);
+    return;
+  }
+
+  // Local device (no SSH): spawn cortex-client (config managed by LLM)
+  if (!reg.ssh) {
+    try {
+      const child = spawn('cortex-client', [], {
+        detached: true,
+        stdio: 'ignore',
+      });
+      child.on('error', (err) => {
+        const e = err as NodeJS.ErrnoException;
+        if (e.code === 'ENOENT') {
+          log.warn(`cortex-client binary not found on PATH — skipping local client spawn on ${device} (install with: npm i -g cortex-client)`);
+        } else {
+          log.error(`Local client spawn error on ${device}: ${e.message}`);
+        }
+      });
+      child.unref();
+      if (child.pid) {
+        clientPids.set(device, child.pid);
+        log.info(`Started local client on ${device} (PID ${child.pid})`);
+      }
+    } catch (err) {
+      log.error(`Failed to start local client on ${device}: ${(err as Error).message}`);
+    }
+    return;
+  }
+
+  // Remote device: launch cortex-client (config managed by LLM, written once at bootstrap).
+  // On ANY failure path (SSH error, empty/unparseable PID), we MUST schedule a retry —
+  // otherwise a single startup failure leaves the device offline until the next server
+  // restart, because scheduleRestart() is otherwise only triggered by disconnect or
+  // heartbeat-timeout of an already-connected device.
+  try {
+    const pidStr = await _sshExecImpl(reg.ssh, buildRemoteSpawnCommand(reg), 30000);
+    const pid = parseInt(pidStr);
+    if (!isNaN(pid) && pid > 0) {
+      clientPids.set(device, pid);
+      log.info(`Started client on ${device} (PID ${pid})`);
+    } else {
+      log.warn(`Failed to parse PID for ${device}: "${pidStr}" — scheduling retry`);
+      scheduleRestart(device);
+    }
+  } catch (err) {
+    log.error(`Failed to start client on ${device}: ${(err as Error).message} — scheduling retry`);
+    scheduleRestart(device);
+  }
+}
+
+function scheduleRestart(device: string): void {
+  const reg = _getRegistryImpl()[device];
+  if (!reg || restartTimers.has(device)) return;
+
+  const timer = setTimeout(async () => {
+    restartTimers.delete(device);
+    if (devices.has(device)) return; // already reconnected
+
+    log.info(`Auto-restarting client on ${device}...`);
+    try {
+      await startRemoteClient(device);
+    } catch (err) {
+      log.error(`Restart failed for ${device}: ${(err as Error).message}`);
+    }
+    // If still offline, schedule another attempt
+    if (!devices.has(device)) {
+      scheduleRestart(device);
+    }
+  }, RESTART_DELAY_MS);
+
+  restartTimers.set(device, timer);
+}
+
+/** Start clients on all registered devices */
+async function startAllRemoteClients(): Promise<void> {
+  for (const [device] of Object.entries(_getRegistryImpl())) {
+    try {
+      await startRemoteClient(device);
+    } catch (err) {
+      log.error(`Failed to start ${device}: ${(err as Error).message}`);
+    }
+  }
+}
+
+// --- Test hooks ---
+// Tests override sshExec / registry to exercise spawn-failure and retry-scheduling
+// paths without actually invoking the `ssh` binary. _testReset() must clear timers
+// before module state leaks between tests.
+function _setSshExecForTesting(fn: SshExec): void { _sshExecImpl = fn; }
+function _setMachineRegistryProviderForTesting(fn: () => MachineRegistry): void { _getRegistryImpl = fn; }
+function _getRestartTimerCount(): number { return restartTimers.size; }
+function _testReset(): void {
+  for (const [, timer] of restartTimers) clearTimeout(timer);
+  restartTimers.clear();
+  _sshExecImpl = sshExec;
+  _getRegistryImpl = getMachineRegistry;
+}
+
+// --- Task callback handler (DR-0011 §4.4) ---
+
+function sendAck(ws: WebSocket, callbackId: string, ok: boolean, message?: string): void {
+  if (ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({ type: 'task-callback-ack', callbackId, ok, message }));
+  }
+}
+
+function handleTaskCallback(ws: WebSocket, msg: any): void {
+  const { taskProject, taskId, termination, exitCode, durationHuman,
+          remoteResultPath, remoteLogPath, device, callbackId, logTail } = msg;
+
+  // No task linkage: ack-true immediately (client doesn't need to retry)
+  if (!taskProject || !taskId) {
+    sendAck(ws, callbackId, true, 'no task linkage');
+    return;
+  }
+
+  // Read task state from TASKS.yaml for idempotency check
+  const tasks = readTasks(taskProject);
+  const found = findTask(tasks, null, taskId);
+
+  if ('error' in found) {
+    log.info(`Ghost callback: task ${taskId} not found in ${taskProject}`);
+    sendAck(ws, callbackId, true, 'ghost callback');
+    return;
+  }
+
+  const task = found.task;
+  if (task.status === 'done') {
+    sendAck(ws, callbackId, true, 'already done, idempotent');
+    return;
+  }
+
+  const isSuccess = termination === 'completed' && exitCode === 0;
+  const remoteRef = remoteResultPath || remoteLogPath || 'unknown';
+  const note = isSuccess
+    ? `cortex-run on ${device} completed in ${durationHuman || '?'}, exit 0. Remote: ${remoteRef}`
+    : `cortex-run on ${device} ${termination || '?'} after ${durationHuman || '?'}, exit ${exitCode ?? '?'}. Remote: ${remoteRef}\n--- log tail ---\n${logTail || '(no log tail)'}`;
+
+  let result: any;
+  if (isSuccess) {
+    result = completeTask(null, taskProject, note, taskId, true, 'remote-run');
+  } else {
+    result = blockTask(null, taskProject, note, taskId);
+  }
+
+  const ackMessage = result.verify_warning
+    ? `${result.message} (${result.verify_warning})`
+    : result.message;
+  sendAck(ws, callbackId, result.success, ackMessage);
+}
+
+export {
+  startClientManager,
+  stopClientManager,
+  getOnlineDevices,
+  isDeviceOnline,
+  sendCommand,
+  startRemoteClient,
+  startAllRemoteClients,
+  buildRemoteSpawnCommand,
+  clientPids,
+  sshExec,
+  // Test-only hooks (prefixed with _ by convention).
+  _setSshExecForTesting,
+  _setMachineRegistryProviderForTesting,
+  _getRestartTimerCount,
+  _testReset,
+};

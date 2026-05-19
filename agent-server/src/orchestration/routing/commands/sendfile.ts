@@ -1,0 +1,84 @@
+import type { PlatformAdapter } from '@platform/index.js';
+import { getMachineRegistry } from '@domain/tasks/dispatch-utils.js';
+import { statSync, existsSync, mkdirSync, unlinkSync } from 'fs';
+import { execFile } from 'child_process';
+import * as os from 'os';
+import * as path from 'path';
+import { WORKSPACE_DIR } from '@core/utils.js';
+
+async function sendLocalFile(channel: string, adapter: PlatformAdapter, reg: any, filePath: string, machine: string): Promise<void> {
+  let resolved: string;
+  if (filePath.startsWith('~/') || filePath === '~') {
+    resolved = filePath.replace(/^~/, process.env.HOME || os.homedir());
+  } else if (path.isAbsolute(filePath)) {
+    resolved = filePath;
+  } else {
+    resolved = path.resolve(reg.cortexPath, filePath);
+  }
+  if (!existsSync(resolved)) {
+    await adapter.postMessage(channel, { text: `:x: File not found: \`${resolved}\`` });
+    return;
+  }
+  const stat = statSync(resolved);
+  if (!stat.isFile()) {
+    await adapter.postMessage(channel, { text: `:x: Not a file: \`${resolved}\`` });
+    return;
+  }
+  await adapter.uploadFile(channel, resolved, { filename: path.basename(resolved) });
+  await adapter.postMessage(channel, { text: `:white_check_mark: Sent \`${path.basename(resolved)}\` (${(stat.size / 1024).toFixed(1)} KB) from ${machine}` });
+}
+
+async function sendRemoteFile(channel: string, adapter: PlatformAdapter, reg: any, filePath: string, machine: string): Promise<void> {
+  let remotePath: string;
+  if (filePath.startsWith('~/') || filePath === '~') {
+    remotePath = filePath;
+  } else if (path.isAbsolute(filePath) || (reg.win && /^[A-Z]:\\/i.test(filePath))) {
+    remotePath = filePath;
+  } else {
+    remotePath = reg.win ? `${reg.cortexPath}\\${filePath}` : `${reg.cortexPath}/${filePath}`;
+  }
+  const tmpDir = path.join(WORKSPACE_DIR, 'sendfile');
+  mkdirSync(tmpDir, { recursive: true });
+  const fileName = path.basename(remotePath);
+  const localTmp = path.join(tmpDir, `${Date.now()}-${fileName}`);
+  try {
+    await new Promise<void>((resolve, reject) => {
+      execFile('scp', [
+        '-o', 'ConnectTimeout=10',
+        '-o', 'StrictHostKeyChecking=no',
+        `${reg.ssh}:${remotePath}`,
+        localTmp,
+      ], { timeout: 60000 }, (err) => {
+        if (err) reject(new Error(`SCP failed: ${err.message}`));
+        else resolve();
+      });
+    });
+  } catch (err) {
+    await adapter.postMessage(channel, { text: `:x: Failed to fetch from ${machine}: ${(err as Error).message}` });
+    return;
+  }
+  try {
+    const tmpStat = statSync(localTmp);
+    await adapter.uploadFile(channel, localTmp, { filename: fileName });
+    await adapter.postMessage(channel, { text: `:white_check_mark: Sent \`${fileName}\` (${(tmpStat.size / 1024).toFixed(1)} KB) from ${machine}` });
+  } finally {
+    try { unlinkSync(localTmp); } catch {}
+  }
+}
+
+export async function handleSendFileCmd(channel: string, adapter: PlatformAdapter, trimmedMessage: string): Promise<void> {
+  const args = trimmedMessage.split(/\s+/).slice(1);
+  if (args.length < 2) {
+    await adapter.postMessage(channel, { text: 'Usage: `!sendFile <machine> <path>`\nPath can be absolute, relative to Cortex root, or start with `~`' });
+    return;
+  }
+  const machine = args[0];
+  const filePath = args.slice(1).join(' ');
+  const reg = getMachineRegistry()[machine];
+  if (!reg) {
+    await adapter.postMessage(channel, { text: `:x: Unknown machine: \`${machine}\`. Known: ${Object.keys(getMachineRegistry()).join(', ')}` });
+    return;
+  }
+  if (!reg.ssh) return sendLocalFile(channel, adapter, reg, filePath, machine);
+  return sendRemoteFile(channel, adapter, reg, filePath, machine);
+}

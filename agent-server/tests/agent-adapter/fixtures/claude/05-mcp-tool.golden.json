@@ -1,0 +1,31 @@
+[
+  {
+    "type": "session_started",
+    "sessionId": "sess-05-mcp"
+  },
+  {
+    "type": "tool_use",
+    "toolUseId": "toolu_05a",
+    "name": "mcp__cortex__remote_read",
+    "input": {
+      "device": "gpu-server",
+      "file_path": "/home/user/projects/example-research/STATUS.md"
+    }
+  },
+  {
+    "type": "tool_result",
+    "toolUseId": "toolu_05a",
+    "ok": true,
+    "content": "# Example Research\nPhase C in progress"
+  },
+  {
+    "type": "assistant_text",
+    "text": "Example-research is in Phase C per STATUS.md on gpu-server.",
+    "blockId": "msg_05b"
+  },
+  {
+    "type": "turn_complete",
+    "numTurns": 1,
+    "totalCostUsd": 0.018
+  }
+]

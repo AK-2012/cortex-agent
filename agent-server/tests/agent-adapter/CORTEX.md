@@ -1,0 +1,18 @@
+Please update me when files in this folder change
+
+DR-0008 §4.5 fixture-replay tests. Lock down three-backend NormalizedEvent sequences.
+
+| filename | role | function |
+|---|---|---|
+| `replay-harness.ts` | Utility | parseClaudeLine/parseCodexRpc/replayPi + golden |
+| `normalize.test.ts` | Test | Edge cases: parse failure, unknown type, event dispatch |
+| `claude-adapter.test.ts` | Test | Claude fixture replay + shape invariant |
+| `codex-adapter.test.ts` | Test | Codex fixture replay |
+| `pi-adapter.test.ts` | Test | PI fixture replay |
+| `claude-tmux-control.test.ts` | Test | DR-0012 TmuxControl argv + tempfile spec (mock exec injection) |
+| `claude-cost-from-usage.test.ts` | Test | DR-0012 usageToCost pricing math + model normalization |
+| `claude-jsonl-tail.test.ts` | Test | DR-0012 JsonlEventNormalizer + JsonlTail file watcher |
+| `claude-adapter-tui.test.ts` | Test | DR-0012 ClaudeTuiSession turn lifecycle + cancel + cost (mocked tmux/tail) |
+| `fixtures/claude/` | Data | 5 Claude stream-json fixtures + golden |
+| `fixtures/codex/` | Data | 2 Codex JSON-RPC fixtures + golden |
+| `fixtures/pi/` | Data | 3 PI RPC fixtures + golden |

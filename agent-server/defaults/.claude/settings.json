@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "defaultMode": "bypassPermissions"
+  },
+  "skipDangerousModePermissionPrompt": true,
+  "enabledPlugins": {
+    "skill-creator@claude-plugins-official": true
+  },
+  "plansDirectory": "./plan",
+  "env": {
+    "ENABLE_CLAUDEAI_MCP_SERVERS": "false"
+  }
+}

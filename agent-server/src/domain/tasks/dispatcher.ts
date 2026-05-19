@@ -1,0 +1,371 @@
+// input:  task-store, client-manager, execution-registry
+// output: selectAndClaimTask + schedule/interval helpers
+// pos:    programmatic dispatch for task selection and claiming
+// >>> If I am updated, update my header comment and the parent folder's CORTEX.md <<<
+import { createLogger } from '@core/log.js';
+import { isProjectLocked } from './system/task-lock.js';
+
+const log = createLogger('task-dispatch');
+const gpuLog = createLogger('gpu-preflight');
+import { getMachineRegistry, getLocalMachine, type MachineEntry } from './dispatch-utils.js';
+import { isDeviceOnline } from '../remote/client-manager.js';  // still needed for online check before queryGpuSnapshot
+import { queryGpuSnapshot } from '../monitor/gpu-monitor.js';
+import * as executionRegistry from '../executions/registry.js';
+import type { ExecutionRecord } from '../executions/registry.js';
+import { taskStore } from './store.js';
+import { taskMutator } from './mutator.js';
+import { listTemplateNames } from '../threads/template-loader.js';
+
+// --- Interfaces ---
+
+// MachineEntry type imported from dispatch-utils.ts
+
+interface OccupancyGpuInfo {
+  index: number;
+  occupied: boolean;
+  processes: { pid: string; name: string; memoryMB: number }[];
+}
+
+interface GpuOccupancyResult {
+  gpus: OccupancyGpuInfo[];
+  freeIndices: number[];
+  allOccupied: boolean;
+  error?: string;
+}
+
+interface DispatchMatch {
+  source: string;
+  taskId: string | null;
+  machine: string | null;
+}
+
+interface SelectAndClaimResult {
+  task: any;
+  prompt: string;
+  template: string | null;
+}
+
+interface DispatchOutcome {
+  success: boolean;
+  skipped: boolean;
+}
+
+interface FilterDeps {
+  findActiveDispatchMatch?: (task: any, scheduleTaskId: string) => DispatchMatch | null;
+  checkRealGpuOccupancy?: (machine: string) => Promise<GpuOccupancyResult>;
+}
+
+
+// --- Null/empty prompt guard (ISS-CS-005 durable fix) ---
+
+function isValidDispatchPrompt(value: unknown): boolean {
+  if (!value || typeof value === 'object') return false;
+  const s = typeof value === 'string' ? value : String(value);
+  if (!s.trim()) return false;
+  if (s === 'null' || s === 'undefined') return false;
+  return true;
+}
+
+// --- Locked-project filter: skip tasks from projects with active locks ---
+
+function filterLockedProjects(tasks: any[]): any[] {
+  if (!tasks || tasks.length === 0) return tasks;
+
+  const projectCache = new Map<string, boolean>();
+  const lockedProjects = new Map<string, string>();
+
+  const filtered = tasks.filter(task => {
+    if (!projectCache.has(task.project)) {
+      const result = isProjectLocked(task.project);
+      projectCache.set(task.project, result.locked);
+      if (result.locked && result.owner) {
+        lockedProjects.set(task.project, result.owner);
+      }
+    }
+    return !projectCache.get(task.project);
+  });
+
+  if (lockedProjects.size > 0) {
+    const skippedCount = tasks.length - filtered.length;
+    const details = Array.from(lockedProjects.entries())
+      .map(([p, o]) => `${p}:${o}`)
+      .join(', ');
+    log.info(`Skipping ${skippedCount} task(s) from locked projects: [${details}]`);
+  }
+
+  return filtered;
+}
+
+// --- GPU conflict detection via gpu-monitor ---
+
+const IDLE_PROCESS_PATTERNS = [/Xorg/i, /gnome-shell/i, /compiz/i];
+
+async function checkRealGpuOccupancy(machine: string): Promise<GpuOccupancyResult> {
+  const reg: MachineEntry | undefined = getMachineRegistry()[machine];
+  if (!reg) return { gpus: [], freeIndices: [], allOccupied: false, error: `Unknown machine: ${machine}` };
+  if (reg.gpuCount === 0) return { gpus: [], freeIndices: [], allOccupied: false };
+
+  // Check device online via client-manager
+  if (!isDeviceOnline(machine)) {
+    gpuLog.info(`Device ${machine} offline, skipping GPU check`);
+    return { gpus: [], freeIndices: [], allOccupied: true, error: `Device ${machine} offline` };
+  }
+
+  try {
+    const snapshot = await queryGpuSnapshot(machine);
+
+    if (snapshot.gpus.length === 0) {
+      gpuLog.info(`nvidia-smi unavailable on ${machine}, allowing dispatch`);
+      const gpuCount = reg.gpuCount || 0;
+      const freeIndices = Array.from({ length: gpuCount }, (_, i) => i);
+      return { gpus: [], freeIndices, allOccupied: false };
+    }
+
+    // Derive occupancy from snapshot, filtering out idle system processes
+    const gpus: OccupancyGpuInfo[] = snapshot.gpus.map(g => {
+      const activeProcs = g.processes
+        .filter(p => !IDLE_PROCESS_PATTERNS.some(pat => pat.test(p.name)))
+        .map(p => ({ pid: p.pid, name: p.name, memoryMB: p.memoryMB }));
+      return { index: g.index, occupied: activeProcs.length > 0, processes: activeProcs };
+    });
+
+    const freeIndices = gpus.filter(g => !g.occupied).map(g => g.index);
+    const allOccupied = gpus.length > 0 && freeIndices.length === 0;
+    gpuLog.info(`${machine}: ${gpus.length} GPU(s), ${freeIndices.length} free [${freeIndices.join(',')}]`);
+    return { gpus, freeIndices, allOccupied };
+  } catch (err) {
+    gpuLog.error(`Failed to check GPU on ${machine}: ${(err as Error).message}`);
+    const gpuCount = reg.gpuCount || 0;
+    const freeIndices = Array.from({ length: gpuCount }, (_, i) => i);
+    return { gpus: [], freeIndices, allOccupied: false, error: (err as Error).message };
+  }
+}
+
+// --- Task selection ---
+
+function selectTask(tasks: any[] | null): any | null {
+  if (!tasks || tasks.length === 0) return null;
+  return tasks[0];
+}
+
+// --- Duplicate detection (execution registry only, no pending tracker) ---
+
+function findActiveDispatchMatch(task: any, scheduleTaskId: string): DispatchMatch | null {
+  const executionMatch = executionRegistry.findRunningDispatchMatch({
+    scheduleTaskId,
+    taskHash: task.id,
+    project: task.project,
+    taskText: task.text,
+  });
+  if (executionMatch) {
+    return {
+      source: 'execution',
+      taskId: executionMatch.dispatch?.taskId || null,
+      machine: executionMatch.dispatch?.machine || null,
+    };
+  }
+  return null;
+}
+
+// --- Unknown-template warning dedup (per-process, per-(task_hash, template) pair) ---
+
+const _unknownTemplateWarnedKeys = new Set<string>();
+
+function warnOnceUnknownTemplate(task: any): void {
+  const key = `${task.id || task.text}::${task.template}`;
+  if (_unknownTemplateWarnedKeys.has(key)) return;
+  _unknownTemplateWarnedKeys.add(key);
+  log.warn(`Skipping task with unknown template "${task.template}": [${task.project}] ${String(task.text).substring(0, 80)}`);
+}
+
+// --- Filter dispatchable tasks ---
+
+async function filterDispatchableTasks(tasks: any[] | null, scheduleTaskId: string, gpuBusyCounts: Map<string, number> = new Map(), deps: FilterDeps = {}): Promise<any[]> {
+  if (!tasks || tasks.length === 0) return [];
+
+  const findDuplicate = deps.findActiveDispatchMatch || findActiveDispatchMatch;
+  const checkGpu = deps.checkRealGpuOccupancy || checkRealGpuOccupancy;
+  const gpuStatusCache = new Map<string, GpuOccupancyResult>();
+  // Fail-open if templates haven't been loaded yet (size === 0): let downstream
+  // createThread surface the error rather than silently dropping every task.
+  const validTemplates = new Set(listTemplateNames());
+  const eligible: any[] = [];
+
+  for (const task of tasks) {
+    if (!task.template) {
+      continue;
+    }
+    if (validTemplates.size > 0 && !validTemplates.has(task.template)) {
+      warnOnceUnknownTemplate(task);
+      continue;
+    }
+    // Check remote GPU device is online (local machine is always reachable)
+    if (task.gpu && task.gpu !== getLocalMachine() && !isDeviceOnline(task.gpu)) {
+      continue;
+    }
+
+    if (task.gpu) {
+      const targetMachine = task.gpu.toLowerCase();
+      const reg = getMachineRegistry()[targetMachine];
+      const totalSlots = reg?.gpuCount ?? 0;
+      const usedSlots = gpuBusyCounts.get(targetMachine) || 0;
+      const neededSlots = task.gpu_count || 1;
+      if (usedSlots + neededSlots > totalSlots) continue;
+    }
+
+    const duplicateMatch = findDuplicate(task, scheduleTaskId);
+    if (duplicateMatch) continue;
+
+    if (task.gpu) {
+      const targetMachine = task.gpu.toLowerCase();
+      let gpuStatus = gpuStatusCache.get(targetMachine);
+      if (!gpuStatus) {
+        gpuStatus = await checkGpu(targetMachine);
+        gpuStatusCache.set(targetMachine, gpuStatus);
+      }
+      const neededSlots = task.gpu_count || 1;
+      if (gpuStatus.allOccupied || gpuStatus.freeIndices.length < neededSlots) continue;
+      const assignedIndices = gpuStatus.freeIndices.slice(0, neededSlots);
+      task._assignedGpuIndex = neededSlots === 1 ? assignedIndices[0] : assignedIndices.join(',');
+      const remainingFree = gpuStatus.freeIndices.slice(neededSlots);
+      gpuStatusCache.set(targetMachine, { ...gpuStatus, freeIndices: remainingFree, allOccupied: remainingFree.length === 0 });
+    }
+
+    eligible.push(task);
+  }
+
+  return eligible;
+}
+
+// --- Interval computation ---
+
+function computeNextInterval(outcome: DispatchOutcome): number {
+  if (!outcome.success && !outcome.skipped) return 2 * 60 * 1000;
+  return 30 * 1000;
+}
+
+function hasRunningExecutionForSchedule(records: Pick<ExecutionRecord, 'status' | 'kind' | 'scheduleTaskId'>[], scheduleTaskId: string): boolean {
+  return records.some((record) =>
+    record.status === 'running' &&
+    record.kind === 'scheduled' &&
+    record.scheduleTaskId === scheduleTaskId
+  );
+}
+
+async function updateScheduleInterval(scheduler: any, scheduleTaskId: string, newIntervalMs: number): Promise<void> {
+  if (!scheduleTaskId) return;
+  const task = await scheduler.get(scheduleTaskId);
+  if (!task || task.type !== 'interval') return;
+  if (task.intervalMs === newIntervalMs) return;
+  await scheduler.setInterval(scheduleTaskId, newIntervalMs);
+}
+
+// --- Dispatch prompt assembly ---
+
+function buildDispatchPrompt(task: any): string {
+  const sections: string[] = [];
+
+  const taskSpec = [
+    '## Task',
+    '',
+    `**Project:** ${task.project}`,
+    `**Task:** ${task.text}`,
+  ];
+  if (task.why) taskSpec.push(`**Why:** ${task.why}`);
+  if (task.done_when) taskSpec.push(`**Done when:** ${task.done_when}`);
+  taskSpec.push(`**Task ID:** ${task.id}`);
+  if (task.plan) taskSpec.push(`**Plan (MUST read):** ${task.plan}`);
+  sections.push(taskSpec.join('\n'));
+
+  const completion = [
+    '## When Done',
+    '',
+    '**CRITICAL: Before marking any task complete, verify ALL done_when conditions are actually satisfied.**',
+    '',
+    `If launching experiments via cortex-run, ALWAYS pass task info so cortex-run can manage task status:`,
+    `  cortex-run --name NAME --task-project ${task.project} --task-id ${task.id} -- COMMAND`,
+    `cortex-run will auto-mark the task pending on start, then complete on success / block on failure.`,
+    '',
+    `If NOT using cortex-run, verify done_when conditions, then run:`,
+    `  cortex-task complete --project ${task.project} --task-id ${task.id} --note "your completion note"`,
+    '',
+    '- Update the project STATUS.md if the work changed project state',
+    '- Commit and push all files you modified in the Cortex repository. Remember to clean any temporary files you created.',
+    '  - If push is rejected, resolve the conflict, amend your commit, and push again.',
+  ];
+  sections.push(completion.join('\n'));
+
+  return sections.join('\n\n');
+}
+
+// --- Main entry point: select and claim a task for local execution ---
+
+async function selectAndClaimTask({ scheduleTaskId, dryRun = false }: { scheduleTaskId: string; dryRun?: boolean }): Promise<SelectAndClaimResult | null> {
+  log.info('Starting task selection cycle');
+
+  // Get actionable tasks + GPU busy machines
+  let tasks = taskStore.getActionable();
+  tasks = filterLockedProjects(tasks);
+  const gpuBusyMachines = taskStore.getGpuBusyMachines();
+  log.info(`Found ${tasks.length} actionable task(s)`);
+
+  // Filter to dispatchable tasks
+  const dispatchableTasks = await filterDispatchableTasks(tasks, scheduleTaskId, gpuBusyMachines);
+  log.info(`${dispatchableTasks.length} task(s) dispatchable after preflight`);
+
+  // Select task
+  const selectedTask = selectTask(dispatchableTasks);
+  if (!selectedTask) {
+    log.info('No dispatchable tasks available');
+    return null;
+  }
+  log.info(`Selected: [${selectedTask.project}] ${selectedTask.text}`);
+
+  // Guard: reject null/empty/whitespace task text before prompt assembly (ISS-CS-005 mitigation).
+  // Logged at warn level for visibility (repeated triggers = someone is putting bad data into TASKS.yaml).
+  // The defensive unclaim below clears any stale [in-progress] tag from a prior cycle — the task
+  // hasn't been claimed by this dispatch pass yet, but may have been claimed-then-aborted earlier.
+  if (!isValidDispatchPrompt(selectedTask.text)) {
+    log.warn(`Guard dropped task with null/empty text: [${selectedTask.project}] ${selectedTask.id} (schedule=${scheduleTaskId})`);
+    await taskMutator.unclaim(selectedTask.id);
+    return null;
+  }
+
+  // Dry run: return without claiming
+  if (dryRun) {
+    return {
+      task: selectedTask,
+      prompt: buildDispatchPrompt(selectedTask),
+      template: selectedTask.template || null,
+    };
+  }
+
+  // Claim task
+  const claimResult = await taskMutator.claim(selectedTask.id, 'task-dispatcher');
+  if (!claimResult.success) {
+    log.info(`Claim failed: ${claimResult.message}`);
+    return null;
+  }
+
+  const prompt = buildDispatchPrompt(selectedTask);
+
+  return {
+    task: selectedTask,
+    prompt,
+    template: selectedTask.template || null,
+  };
+}
+
+export {
+  selectAndClaimTask,
+  hasRunningExecutionForSchedule,
+  computeNextInterval,
+  updateScheduleInterval,
+  isValidDispatchPrompt,
+  // For testing
+  selectTask,
+  filterLockedProjects,
+  filterDispatchableTasks,
+  findActiveDispatchMatch,
+  checkRealGpuOccupancy,
+};

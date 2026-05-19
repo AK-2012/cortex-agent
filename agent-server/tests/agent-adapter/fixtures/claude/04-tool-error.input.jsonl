@@ -1,0 +1,6 @@
+{"type":"system","subtype":"init","session_id":"sess-04-err","cwd":"/repo","tools":["Bash"],"model":"claude-opus-4-6"}
+{"type":"assistant","message":{"id":"msg_04a","role":"assistant","content":[{"type":"tool_use","id":"toolu_04a","name":"Bash","input":{"command":"git pull --rebase","description":"Pull latest"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_04a","content":"Exit code 128\nerror: cannot pull with rebase: You have unstaged changes.","is_error":true}]}}
+{"type":"assistant","message":{"id":"msg_04b","role":"assistant","content":[{"type":"text","text":"Recovering via stash + pull + pop."},{"type":"tool_use","id":"toolu_04b","name":"Bash","input":{"command":"git stash && git pull --rebase && git stash pop","description":"Stash, rebase, restore"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_04b","content":"ok","is_error":false}]}}
+{"type":"result","subtype":"success","is_error":false,"num_turns":2,"total_cost_usd":0.03,"session_id":"sess-04-err","result":"Recovered."}

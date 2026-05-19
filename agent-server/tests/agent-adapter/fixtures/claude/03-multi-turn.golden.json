@@ -1,0 +1,56 @@
+[
+  {
+    "type": "session_started",
+    "sessionId": "sess-03-multi"
+  },
+  {
+    "type": "tool_use",
+    "toolUseId": "toolu_03a",
+    "name": "Bash",
+    "input": {
+      "command": "git status --short",
+      "description": "Check working tree"
+    }
+  },
+  {
+    "type": "tool_result",
+    "toolUseId": "toolu_03a",
+    "ok": true,
+    "content": " M src/app.ts"
+  },
+  {
+    "type": "tool_use",
+    "toolUseId": "toolu_03b",
+    "name": "Bash",
+    "input": {
+      "command": "git diff src/app.ts",
+      "description": "Inspect staged diff"
+    }
+  },
+  {
+    "type": "tool_result",
+    "toolUseId": "toolu_03b",
+    "ok": true,
+    "content": "@@ -1 +1 @@\n-old\n+new"
+  },
+  {
+    "type": "tool_use",
+    "toolUseId": "toolu_03c",
+    "name": "Bash",
+    "input": {
+      "command": "git log --oneline -3",
+      "description": "Recent commits"
+    }
+  },
+  {
+    "type": "tool_result",
+    "toolUseId": "toolu_03c",
+    "ok": true,
+    "content": "abc123 msg"
+  },
+  {
+    "type": "turn_complete",
+    "numTurns": 3,
+    "totalCostUsd": 0.05
+  }
+]

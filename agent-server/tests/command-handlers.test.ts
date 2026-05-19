@@ -1,0 +1,753 @@
+// input:  Node test runner + command-handlers + deps
+// output: !cost/!cancel/!status/!schedule/!nvtop tests
+// pos:    Command handler regression test
+// >>> If I am updated, update my header comment and the parent folder's CORTEX.md <<<
+
+import test, { before } from 'node:test';
+import assert from 'node:assert/strict';
+import * as fs from 'fs';
+import * as path from 'path';
+import * as os from 'os';
+
+import { registerCommands as createCommandDispatcher } from '../src/orchestration/routing/commands/index.js';
+import { getDefaultProfileName } from '../src/domain/agents/profile-manager.js';
+import { costRepo } from '../src/store/cost-repo.js';
+import { MockAdapter } from '../src/platform/testing.js';
+import { PROJECTS_DIR } from '../src/core/paths.js';
+import { _testSetRegistry } from '../src/domain/tasks/dispatch-utils.js';
+import { runningExecutions } from '../src/core/running-executions.js';
+import { channelQueues } from '../src/orchestration/channel-queue.js';
+import { threadStore } from '../src/store/thread-repo.js';
+
+before(() => {
+  _testSetRegistry({ testbox: { cortexPath: '/tmp/test', gpuCount: 2 } });
+});
+
+const originalSetInterval = global.setInterval;
+const originalClearInterval = global.clearInterval;
+
+function withFakeIntervals(t) {
+  const intervals = [];
+  let nextId = 1;
+  global.setInterval = (((fn, _ms) => {
+    const entry = { id: nextId++, fn };
+    intervals.push(entry);
+    return entry;
+  }) as unknown) as typeof setInterval;
+  global.clearInterval = ((handle) => {
+    const idx = intervals.findIndex(entry => entry === handle || entry.id === handle);
+    if (idx >= 0) intervals.splice(idx, 1);
+  }) as typeof clearInterval;
+  t.after(() => {
+    global.setInterval = originalSetInterval;
+    global.clearInterval = originalClearInterval;
+  });
+  return intervals;
+}
+
+function withMockedGpuExec(t, outputsByCommand) {
+  const originalEnv = process.env.CORTEX_GPU_MONITOR_MOCK;
+  process.env.CORTEX_GPU_MONITOR_MOCK = JSON.stringify(outputsByCommand);
+  t.after(() => {
+    if (originalEnv === undefined) delete process.env.CORTEX_GPU_MONITOR_MOCK;
+    else process.env.CORTEX_GPU_MONITOR_MOCK = originalEnv;
+  });
+}
+function withTempCostData(t, entries) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cortex-cost-'));
+  const costFile = path.join(dir, 'costs.json');
+  const budgetFile = path.join(dir, 'budget.json');
+  fs.writeFileSync(costFile, entries.map((e: any) => JSON.stringify(e)).join('\n') + '\n');
+  fs.writeFileSync(budgetFile, JSON.stringify({ daily_usd: 10, monthly_usd: 100 }, null, 2));
+  process.env.CORTEX_COSTS_FILE = costFile;
+  process.env.CORTEX_BUDGET_FILE = budgetFile;
+  // Reset the lazy JsonRepository so it picks up the new CORTEX_COSTS_FILE/CORTEX_BUDGET_FILE paths.
+  costRepo._testReset();
+  t.after(() => {
+    delete process.env.CORTEX_COSTS_FILE;
+    delete process.env.CORTEX_BUDGET_FILE;
+    costRepo._testReset();
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+}
+
+
+test('!cost <project> filters report to the requested project scope', async (t) => {
+  const now = new Date().toISOString();
+  withTempCostData(t, [
+    { timestamp: now, project: 'proj-a', trigger: 'user', cost_usd: 1.5, mode: 'api' },
+    { timestamp: now, project: 'proj-b', trigger: 'dispatch', cost_usd: 2.0, mode: 'plan' },
+  ]);
+
+  const adapter = new MockAdapter();
+  const dispatchCommand = createCommandDispatcher({
+    scheduler: null,
+  });
+
+  const handled = dispatchCommand('!cost proj-a', 'C123', adapter);
+  assert.equal(handled, true);
+  // formatCostReport is async (costRepo.readCosts reads JSONL file); wait with timeout.
+  const deadline = Date.now() + 5_000;
+  while (adapter.posted.length === 0 && Date.now() < deadline) {
+    await new Promise(resolve => setTimeout(resolve, 10));
+  }
+
+  assert.equal(adapter.posted.length, 1);
+  assert.match(adapter.posted[0].content.text, /Cost Report \(project: proj-a\)/);
+  assert.match(adapter.posted[0].content.text, /Today: \$1\.50/);
+  assert.doesNotMatch(adapter.posted[0].content.text, /proj-b/);
+});
+
+test('!status reports running executions from injected registry summary', async () => {
+  const adapter = new MockAdapter();
+  const dispatchCommand = createCommandDispatcher({
+    scheduler: null,
+    getExecutionStatusReport: () => [
+      'Running executions: 2',
+      '• local C1 proj-a running',
+      '• dispatch lab:t123 proj-b running',
+    ].join('\n'),
+  });
+
+  const handled = dispatchCommand('!status', 'C123', adapter);
+  assert.equal(handled, true);
+  await new Promise(resolve => setImmediate(resolve));
+
+  assert.equal(adapter.posted[0].channel, 'C123');
+  assert.equal(adapter.posted[0].content.text, 'Running executions: 2\n• local C1 proj-a running\n• dispatch lab:t123 proj-b running');
+});
+
+test('!schedule add without --profile fixes task profile to defaultProfile', async () => {
+  const adapter = new MockAdapter();
+  const added = [];
+  const scheduler = {
+    add(type, options) {
+      added.push({ type, options });
+      return {
+        id: 'abcd1234',
+        type,
+        intervalMs: options.intervalMs,
+        message: options.message,
+        channel: options.channel,
+        profile: options.profile,
+        nextRun: Date.now() + options.intervalMs,
+      };
+    },
+    pause() { return null; },
+    resume() { return null; },
+    remove() { return false; },
+    list() { return []; },
+  };
+  const dispatchCommand = createCommandDispatcher({
+    scheduler,
+  });
+
+  assert.equal(dispatchCommand('!schedule add interval 30m test scheduled task', 'C123', adapter), true);
+  await new Promise(resolve => setImmediate(resolve));
+
+  assert.equal(added.length, 1);
+  assert.equal(added[0].type, 'interval');
+  assert.equal(added[0].options.profile, getDefaultProfileName());
+  assert.match(adapter.posted[0].content.text, new RegExp(`profile: \\*${getDefaultProfileName()}\\*`));
+});
+
+test('!schedule add with --profile preserves explicit profile override', async () => {
+  const adapter = new MockAdapter();
+  const added = [];
+  const scheduler = {
+    add(type, options) {
+      added.push({ type, options });
+      return {
+        id: 'abcd1234',
+        type,
+        intervalMs: options.intervalMs,
+        message: options.message,
+        channel: options.channel,
+        profile: options.profile,
+        nextRun: Date.now() + options.intervalMs,
+      };
+    },
+    pause() { return null; },
+    resume() { return null; },
+    remove() { return false; },
+    list() { return []; },
+  };
+  const dispatchCommand = createCommandDispatcher({
+    scheduler,
+  });
+
+  assert.equal(dispatchCommand('!schedule add interval 30m --profile qa test scheduled task', 'C123', adapter), true);
+  await new Promise(resolve => setImmediate(resolve));
+
+  assert.equal(added.length, 1);
+  assert.equal(added[0].options.profile, 'qa');
+  assert.match(adapter.posted[0].content.text, /profile: \*qa\*/);
+});
+
+test('!schedule pause/resume/remove accepts backtick-wrapped 8-char hex schedule ids', async () => {
+  const adapter = new MockAdapter();
+  const pausedIds = [];
+  const resumedIds = [];
+  const removedIds = [];
+  const scheduler = {
+    pause(id) {
+      pausedIds.push(id);
+      return { id, type: 'interval', intervalMs: 3600000, message: 'interval task', profile: null, isPaused: true, pausedAt: Date.now(), nextRun: null };
+    },
+    resume(id) {
+      resumedIds.push(id);
+      return { id, type: 'interval', intervalMs: 3600000, message: 'interval task', profile: null, isPaused: false, pausedAt: null, nextRun: Date.now() + 3600000 };
+    },
+    remove(id) {
+      removedIds.push(id);
+      return true;
+    },
+    list() { return []; },
+  };
+  const dispatchCommand = createCommandDispatcher({
+    scheduler,
+  });
+
+  assert.equal(dispatchCommand('!schedule pause `c8d34e12`', 'C123', adapter), true);
+  await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(pausedIds, ['c8d34e12']);
+  assert.match(adapter.posted[0].content.text, /Paused task `c8d34e12`/);
+
+  assert.equal(dispatchCommand('!schedule resume `c8d34e12`', 'C123', adapter), true);
+  await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(resumedIds, ['c8d34e12']);
+  assert.match(adapter.posted[1].content.text, /Resumed task `c8d34e12`/);
+
+  assert.equal(dispatchCommand('!schedule remove `c8d34e12`', 'C123', adapter), true);
+  await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(removedIds, ['c8d34e12']);
+  assert.match(adapter.posted[2].content.text, /Removed task `c8d34e12`/);
+});
+
+test('!schedule pause/resume/remove accepts 8-char hex schedule ids', async () => {
+  const adapter = new MockAdapter();
+  const removedIds = [];
+  const scheduler = {
+    pause(id) {
+      return { id, type: 'interval', intervalMs: 3600000, message: 'interval task', profile: null, isPaused: true, pausedAt: Date.now(), nextRun: null };
+    },
+    resume(id) {
+      return { id, type: 'interval', intervalMs: 3600000, message: 'interval task', profile: null, isPaused: false, pausedAt: null, nextRun: Date.now() + 3600000 };
+    },
+    remove(id) {
+      removedIds.push(id);
+      return true;
+    },
+    list() { return []; },
+  };
+  const dispatchCommand = createCommandDispatcher({
+    scheduler,
+  });
+
+  assert.equal(dispatchCommand('!schedule pause c8d34e12', 'C123', adapter), true);
+  await new Promise(resolve => setImmediate(resolve));
+  assert.match(adapter.posted[0].content.text, /Paused task `c8d34e12`/);
+
+  assert.equal(dispatchCommand('!schedule resume c8d34e12', 'C123', adapter), true);
+  await new Promise(resolve => setImmediate(resolve));
+  assert.match(adapter.posted[1].content.text, /Resumed task `c8d34e12`/);
+
+  assert.equal(dispatchCommand('!schedule remove c8d34e12', 'C123', adapter), true);
+  await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(removedIds, ['c8d34e12']);
+  assert.match(adapter.posted[2].content.text, /Removed task `c8d34e12`/);
+});
+
+// existing tests
+
+test('!cancel <taskId> cancels a dispatched task via injected handler', async () => {
+  const adapter = new MockAdapter();
+  const calls = [];
+  const dispatchCommand = createCommandDispatcher({
+    scheduler: null,
+    cancelDispatchedTask: async ({ taskId, channel }) => {
+      calls.push({ taskId, channel });
+      return { ok: true, message: 'cancelled abcd' };
+    },
+  });
+
+  const handled = dispatchCommand('!cancel abcd', 'C123', adapter);
+  assert.equal(handled, true);
+  await new Promise(resolve => setImmediate(resolve));
+
+  assert.deepEqual(calls, [{ taskId: 'abcd', channel: 'C123' }]);
+  assert.equal(adapter.posted[0].channel, 'C123');
+  assert.equal(adapter.posted[0].content.text, 'cancelled abcd');
+});
+
+test('plain !cancel still cancels the current active process', async (t) => {
+  const adapter = new MockAdapter();
+  let killed = false;
+  runningExecutions.register('C123', { threadId: null, channel: 'C123', agentSlotId: null, executionId: null, kill: () => { killed = true; return true; }, backend: 'test' });
+  // Simulate a running queue entry so cancel can clear it
+  channelQueues.set('C123', Promise.resolve());
+  t.after(() => { runningExecutions.remove('C123'); channelQueues.delete('C123'); });
+  const dispatchCommand = createCommandDispatcher({
+    scheduler: null,
+    cancelDispatchedTask: async () => ({ ok: false, message: 'should not be called' }),
+  });
+
+  const handled = dispatchCommand('!cancel', 'C123', adapter);
+  assert.equal(handled, true);
+  await new Promise(resolve => setImmediate(resolve));
+
+  assert.equal(killed, true);
+  assert.equal(channelQueues.has('C123'), false);
+  assert.equal(adapter.posted[0].channel, 'C123');
+  assert.equal(adapter.posted[0].content.text, ':octagonal_sign: Cancelled. Session preserved — next message will resume.');
+});
+
+// ── !cancel --all ─────────────────────────────────────────────────────────
+
+test('!cancel --all kills all running executions for current channel, spares other channels', async (t) => {
+  const adapter = new MockAdapter();
+  let killedC1 = false;
+  let killedC2 = false;
+
+  runningExecutions.register('key-C1', { threadId: 'thr_11111111', channel: 'C1', agentSlotId: null, executionId: 'exec-1', kill: () => { killedC1 = true; return true; }, backend: 'test' });
+  runningExecutions.register('key-C2', { threadId: 'thr_22222222', channel: 'C2', agentSlotId: null, executionId: 'exec-2', kill: () => { killedC2 = true; return true; }, backend: 'test' });
+  channelQueues.set('C1', Promise.resolve());
+  t.after(() => { runningExecutions.remove('key-C1'); runningExecutions.remove('key-C2'); channelQueues.delete('C1'); });
+
+  const dispatchCommand = createCommandDispatcher({ scheduler: null });
+  const handled = dispatchCommand('!cancel --all', 'C1', adapter);
+  assert.equal(handled, true);
+  for (let i = 0; i < 5; i++) await new Promise(r => setImmediate(r));
+
+  assert.equal(killedC1, true, 'execution in current channel should be killed');
+  assert.equal(killedC2, false, 'execution in different channel should NOT be killed');
+  assert.equal(channelQueues.has('C1'), false);
+  assert.match(adapter.posted[0].content.text, /Cancelled 1 execution/);
+});
+
+test('!cancel --all with nothing running shows "Nothing running"', async (t) => {
+  const adapter = new MockAdapter();
+  const dispatchCommand = createCommandDispatcher({ scheduler: null });
+  const handled = dispatchCommand('!cancel --all', 'C1', adapter);
+  assert.equal(handled, true);
+  for (let i = 0; i < 5; i++) await new Promise(r => setImmediate(r));
+  assert.match(adapter.posted[0].content.text, /Nothing running/);
+});
+
+// ── !cancel <threadId> ─────────────────────────────────────────────────────
+
+test('!cancel <threadId> kills by threadId', async (t) => {
+  const adapter = new MockAdapter();
+  let killed = false;
+
+  runningExecutions.register('C1', { threadId: 'thr_a1b2c3d4', channel: 'C1', agentSlotId: null, executionId: 'exec-1', kill: () => { killed = true; return true; }, backend: 'test' });
+  t.after(() => { runningExecutions.remove('C1'); });
+
+  const dispatchCommand = createCommandDispatcher({ scheduler: null, cancelDispatchedTask: null });
+  const handled = dispatchCommand('!cancel thr_a1b2c3d4', 'C1', adapter);
+  assert.equal(handled, true);
+  for (let i = 0; i < 5; i++) await new Promise(r => setImmediate(r));
+
+  assert.equal(killed, true);
+  assert.match(adapter.posted[0].content.text, /thr_a1b2c3d4.*cancelled/i);
+  assert.equal(runningExecutions.getByThreadId('thr_a1b2c3d4'), null);
+});
+
+test('!cancel <threadId> with unknown threadId shows not found', async (t) => {
+  const adapter = new MockAdapter();
+  const dispatchCommand = createCommandDispatcher({ scheduler: null, cancelDispatchedTask: null });
+  const handled = dispatchCommand('!cancel thr_ffffffff', 'C1', adapter);
+  assert.equal(handled, true);
+  for (let i = 0; i < 5; i++) await new Promise(r => setImmediate(r));
+  assert.match(adapter.posted[0].content.text, /no running thread|not found/i);
+});
+
+test('!cancel <threadId> with non-thread-id arg falls back to taskId dispatch', async (t) => {
+  const adapter = new MockAdapter();
+  const calls: { taskId: string; channel: string }[] = [];
+  const dispatchCommand = createCommandDispatcher({
+    scheduler: null,
+    cancelDispatchedTask: async ({ taskId, channel }) => {
+      calls.push({ taskId, channel });
+      return { ok: true, message: 'cancelled abcd' };
+    },
+  });
+  const handled = dispatchCommand('!cancel abcd', 'C1', adapter);
+  assert.equal(handled, true);
+  for (let i = 0; i < 5; i++) await new Promise(r => setImmediate(r));
+  assert.deepEqual(calls, [{ taskId: 'abcd', channel: 'C1' }]);
+});
+
+// ── !thread cancel alias ───────────────────────────────────────────────────
+
+test('!thread cancel is alias for !cancel (kills by channel)', async (t) => {
+  const adapter = new MockAdapter();
+  let killed = false;
+  runningExecutions.register('C123', { threadId: null, channel: 'C123', agentSlotId: null, executionId: null, kill: () => { killed = true; return true; }, backend: 'test' });
+  channelQueues.set('C123', Promise.resolve());
+  t.after(() => { runningExecutions.remove('C123'); channelQueues.delete('C123'); });
+
+  const dispatchCommand = createCommandDispatcher({ scheduler: null });
+  const handled = dispatchCommand('!thread cancel', 'C123', adapter);
+  assert.equal(handled, true);
+  for (let i = 0; i < 5; i++) await new Promise(r => setImmediate(r));
+
+  assert.equal(killed, true);
+  assert.equal(channelQueues.has('C123'), false);
+  assert.match(adapter.posted[0].content.text, /Cancelled|cancel/i);
+});
+
+test('!thread cancel with nothing running shows "Nothing running"', async (t) => {
+  const adapter = new MockAdapter();
+  const dispatchCommand = createCommandDispatcher({ scheduler: null });
+  const handled = dispatchCommand('!thread cancel', 'C123', adapter);
+  assert.equal(handled, true);
+  for (let i = 0; i < 5; i++) await new Promise(r => setImmediate(r));
+  assert.match(adapter.posted[0].content.text, /Nothing running/);
+});
+
+// ── !thread list --running ─────────────────────────────────────────────────
+
+test('!thread list --running shows running threads across channels', async (t) => {
+  const adapter = new MockAdapter();
+  runningExecutions.register('key-C1', { threadId: 'thr_a1111111', channel: 'C1', agentSlotId: null, executionId: 'exec-1', kill: () => true, backend: 'test' });
+  runningExecutions.register('key-C2', { threadId: 'thr_b2222222', channel: 'C2', agentSlotId: null, executionId: 'exec-2', kill: () => true, backend: 'codex' });
+  t.after(() => { runningExecutions.remove('key-C1'); runningExecutions.remove('key-C2'); });
+
+  const dispatchCommand = createCommandDispatcher({ scheduler: null });
+  const handled = dispatchCommand('!thread list --running', 'C1', adapter);
+  assert.equal(handled, true);
+  for (let i = 0; i < 5; i++) await new Promise(r => setImmediate(r));
+
+  const text = adapter.posted[0].content.text;
+  assert.match(text, /thr_a1111111/);
+  assert.match(text, /thr_b2222222/);
+  assert.match(text, /C1/);
+  assert.match(text, /C2/);
+});
+
+test('!thread list --running with no running threads shows empty message', async (t) => {
+  const adapter = new MockAdapter();
+  const dispatchCommand = createCommandDispatcher({ scheduler: null });
+  const handled = dispatchCommand('!thread list --running', 'C1', adapter);
+  assert.equal(handled, true);
+  for (let i = 0; i < 5; i++) await new Promise(r => setImmediate(r));
+  assert.match(adapter.posted[0].content.text, /no running/i);
+});
+
+test('!thread list still shows recent threads (existing behavior preserved)', async (t) => {
+  const adapter = new MockAdapter();
+  const dispatchCommand = createCommandDispatcher({ scheduler: null });
+  const handled = dispatchCommand('!thread list', 'C1', adapter);
+  assert.equal(handled, true);
+  for (let i = 0; i < 5; i++) await new Promise(r => setImmediate(r));
+  assert.match(adapter.posted[0].content.text, /Recent Threads|No threads/);
+});
+
+test('!nvtop starts live GPU monitor with sparkline view and updates the same message', async (t) => {
+  const intervals = withFakeIntervals(t);
+  withMockedGpuExec(t, {
+    GPU: [
+      '0, GPU-0, RTX 6000 Ada, 92, 18342, 49140, 67, 241\n1, GPU-1, RTX 6000 Ada, 3, 210, 49140, 41, 28',
+      '0, GPU-0, RTX 6000 Ada, 75, 16000, 49140, 63, 220\n1, GPU-1, RTX 6000 Ada, 12, 512, 49140, 43, 35',
+    ],
+    PROC: [
+      '318421, python train.py, 17980, GPU-0',
+      '318421, python train.py, 15000, GPU-0\n4521, python eval.py, 256, GPU-1',
+    ],
+  });
+
+  const adapter = new MockAdapter();
+  const dispatchCommand = createCommandDispatcher({
+    scheduler: null,
+  });
+
+  assert.equal(dispatchCommand('!nvtop testbox', 'C123', adapter), true);
+  await new Promise(resolve => setImmediate(resolve));
+
+  assert.equal(adapter.posted.length, 1);
+  const firstText = adapter.posted[0].content.text;
+  assert.match(firstText, /testbox/);
+  assert.match(firstText, /GPU0/);
+  assert.match(firstText, /Util \[/);
+  assert.match(firstText, /Spark .*▁|Spark .*▂|Spark .*▃|Spark .*▄|Spark .*▅|Spark .*▆|Spark .*▇|Spark .*█/);
+  assert.equal(intervals.length, 1);
+  assert.match(firstText, /refresh 1s/);
+
+  await intervals[0].fn();
+
+  assert.equal(adapter.updated.length, 1);
+  assert.match(adapter.updated[0].content.text, /eval\.py/);
+  assert.match(adapter.updated[0].content.text, /75%/);
+});
+
+test('!nvtop stop stops active monitor and reports when none is running', async (t) => {
+  const intervals = withFakeIntervals(t);
+  withMockedGpuExec(t, {
+    GPU: ['0, GPU-0, RTX 6000 Ada, 50, 12000, 49140, 55, 180'],
+    PROC: ['123, python train.py, 11000, GPU-0'],
+  });
+
+  const adapter = new MockAdapter();
+  const dispatchCommand = createCommandDispatcher({
+    scheduler: null,
+  });
+
+  dispatchCommand('!nvtop testbox', 'CSTOP', adapter);
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(intervals.length, 1);
+
+  dispatchCommand('!nvtop stop', 'CSTOP', adapter);
+  await new Promise(resolve => setImmediate(resolve));
+
+  assert.equal(intervals.length, 0);
+  assert.match(adapter.posted.at(-1).content.text, /stopped/i);
+
+  dispatchCommand('!nvtop stop', 'CSTOP', adapter);
+  await new Promise(resolve => setImmediate(resolve));
+  assert.match(adapter.posted.at(-1).content.text, /No active nvtop/i);
+});
+
+test('!nvtop rejects unsupported machines', async () => {
+  const adapter = new MockAdapter();
+  const dispatchCommand = createCommandDispatcher({
+    scheduler: null,
+  });
+
+  assert.equal(dispatchCommand('!nvtop my-pc', 'C999', adapter), true);
+  await new Promise(resolve => setImmediate(resolve));
+
+  assert.match(adapter.posted[0].content.text, /not supported|no gpu|unsupported|unknown machine/i);
+});
+
+
+let taskCmdProjSeq = 0;
+function withTempTasksProject(t) {
+  const project = `_test_tcmd_${++taskCmdProjSeq}`;
+  const projectDir = path.join(PROJECTS_DIR, project);
+  fs.mkdirSync(projectDir, { recursive: true });
+  const tasksPath = path.join(projectDir, 'TASKS.yaml');
+  fs.writeFileSync(tasksPath, [
+    'tasks:',
+    '  - id: ab12',
+    '    text: "Build sensor module"',
+    '    why: "Need haptic feedback for grasping"',
+    '    done-when: "sensor data streams at 100Hz"',
+    '    priority: high',
+    '    status: open',
+    '    template: coder-review',
+    '    plan: ""',
+    '',
+    '  - id: cd34',
+    '    text: "Write data loader"',
+    '    why: "Training pipeline needs data"',
+    '    done-when: "loader handles all formats"',
+    '    priority: medium',
+    '    status: done',
+    '    template: coder-review',
+    '    plan: ""',
+    '',
+    '  - id: ef56',
+    '    text: "Design reward function"',
+    '    why: "RL training requires shaped reward"',
+    '    done-when: "reward correlates with task success > 0.8"',
+    '    priority: high',
+    '    status: open',
+    '    template: coder-review',
+    '    plan: ""',
+    '    blocked-by: "waiting for sim"',
+  ].join('\n'));
+  t.after(() => {
+    try { fs.unlinkSync(tasksPath); } catch {}
+    try { fs.rmdirSync(projectDir); } catch {}
+  });
+  return { project, projectDir };
+}
+
+test('!tasks without project name shows usage error', async (t) => {
+  const { project } = withTempTasksProject(t);
+  const adapter = new MockAdapter();
+  const dispatchCommand = createCommandDispatcher({
+    scheduler: null,
+  });
+
+  const handled = dispatchCommand('!tasks', 'C123', adapter);
+  assert.equal(handled, true);
+  await new Promise(resolve => setImmediate(resolve));
+
+  assert.equal(adapter.posted.length, 1);
+  assert.match(adapter.posted[0].content.text, /Usage.*!tasks <project>/);
+});
+
+test('!tasks with unknown project shows error', async (t) => {
+  const { project } = withTempTasksProject(t);
+  const adapter = new MockAdapter();
+  const dispatchCommand = createCommandDispatcher({
+    scheduler: null,
+  });
+
+  const handled = dispatchCommand('!tasks no-such-proj', 'C123', adapter);
+  assert.equal(handled, true);
+  await new Promise(resolve => setImmediate(resolve));
+
+  assert.equal(adapter.posted.length, 1);
+  assert.match(adapter.posted[0].content.text, /no-such-proj/);
+  assert.match(adapter.posted[0].content.text, /No tasks found|not found|unknown/i);
+});
+
+test('!tasks <project> lists all tasks with details', async (t) => {
+  const { project } = withTempTasksProject(t);
+  const adapter = new MockAdapter();
+  const dispatchCommand = createCommandDispatcher({
+    scheduler: null,
+  });
+
+  const handled = dispatchCommand(`!tasks ${project}`, 'C123', adapter);
+  assert.equal(handled, true);
+  await new Promise(resolve => setImmediate(resolve));
+
+  assert.equal(adapter.posted.length, 1);
+  const text = adapter.posted[0].content.text;
+  // Header
+  assert.match(text, new RegExp(project));
+  // All 3 tasks present
+  assert.match(text, /ab12/);
+  assert.match(text, /cd34/);
+  assert.match(text, /ef56/);
+  // Task details
+  assert.match(text, /Build sensor module/);
+  assert.match(text, /Write data loader/);
+  assert.match(text, /Design reward function/);
+  // Status indicators: completed task should show differently
+  assert.match(text, /high/i);
+  // Blocked task indicator
+  assert.match(text, /blocked/i);
+});
+
+// --- !dispatch command ---
+
+function makeDispatchThreadRecord(id: string, channel: string, overrides: Record<string, any> = {}): any {
+  const now = new Date().toISOString();
+  return {
+    id, channel,
+    templateName: null,
+    status: 'running',
+    platformThreadId: null,
+    userMessage: 'dispatch task',
+    userMessageTs: '111.000',
+    workspacePath: '',
+    artifactPath: '',
+    agents: { main: { slotId: 'main', profile: '__active__', sessionId: null, sessionName: null, status: 'idle', lastOutput: null, persistSession: false } },
+    activeAgent: 'main',
+    activeStage: null,
+    currentStepIndex: 0,
+    steps: [],
+    iterationCounts: {},
+    totalCostUsd: 0,
+    createdAt: now,
+    updatedAt: now,
+    endedAt: null,
+    error: null,
+    abortReason: null,
+    metadata: { trigger: 'task-dispatch', scheduleTaskId: 'sched-1', project: 'test-proj', profileOverride: 'default' },
+    ...overrides,
+  };
+}
+
+test('!dispatch --profile updates profileOverride on running dispatch thread', async (t) => {
+  const threadId = threadStore.generateId();
+  const thread = makeDispatchThreadRecord(threadId, 'C123');
+  await threadStore.set(thread);
+  t.after(() => threadStore.delete(threadId).catch(() => {}));
+
+  const adapter = new MockAdapter();
+  const dispatchCommand = createCommandDispatcher({ scheduler: null });
+
+  const handled = dispatchCommand(`!dispatch ${threadId} --profile execute`, 'C123', adapter);
+  assert.equal(handled, true);
+  // Drain microtask queue: dispatchCommand is fire-and-forget via catchHandlerError,
+  // and threadStore.mutate inside the handler awaits the persist queue.
+  for (let i = 0; i < 10; i++) {
+    await new Promise(resolve => setImmediate(resolve));
+  }
+
+  const updated = threadStore.get(threadId);
+  assert.equal(updated?.metadata?.profileOverride, 'execute');
+});
+
+test('!dispatch without args shows usage', async () => {
+  const adapter = new MockAdapter();
+  const dispatchCommand = createCommandDispatcher({ scheduler: null });
+
+  const handled = dispatchCommand('!dispatch', 'C123', adapter);
+  assert.equal(handled, true);
+  await new Promise(resolve => setImmediate(resolve));
+
+  assert.equal(adapter.posted.length, 1);
+  assert.match(adapter.posted[0].content.text, /usage|Usage|!dispatch/i);
+});
+
+test('!dispatch on non-existent thread shows error', async () => {
+  const adapter = new MockAdapter();
+  const dispatchCommand = createCommandDispatcher({ scheduler: null });
+
+  const handled = dispatchCommand('!dispatch thr_nonexistent --profile execute', 'C123', adapter);
+  assert.equal(handled, true);
+  await new Promise(resolve => setImmediate(resolve));
+
+  assert.match(adapter.posted[0].content.text, /not found|error|Error|unknown/i);
+});
+
+test('!dispatch with invalid profile name shows error', async (t) => {
+  const threadId = threadStore.generateId();
+  const thread = makeDispatchThreadRecord(threadId, 'C123');
+  await threadStore.set(thread);
+  t.after(() => threadStore.delete(threadId).catch(() => {}));
+
+  const adapter = new MockAdapter();
+  const dispatchCommand = createCommandDispatcher({ scheduler: null });
+
+  const handled = dispatchCommand(`!dispatch ${threadId} --profile nonexistent_profile`, 'C123', adapter);
+  assert.equal(handled, true);
+  for (let i = 0; i < 10; i++) {
+    await new Promise(resolve => setImmediate(resolve));
+  }
+
+  assert.match(adapter.posted[0].content.text, /unknown|not found|error/i);
+});
+
+test('!dispatch on completed thread shows warning', async (t) => {
+  const threadId = threadStore.generateId();
+  const thread = makeDispatchThreadRecord(threadId, 'C123', { status: 'completed' });
+  await threadStore.set(thread);
+  t.after(() => threadStore.delete(threadId).catch(() => {}));
+
+  const adapter = new MockAdapter();
+  const dispatchCommand = createCommandDispatcher({ scheduler: null });
+
+  const handled = dispatchCommand(`!dispatch ${threadId} --profile execute`, 'C123', adapter);
+  assert.equal(handled, true);
+  for (let i = 0; i < 10; i++) {
+    await new Promise(resolve => setImmediate(resolve));
+  }
+
+  assert.match(adapter.posted[0].content.text, /warning|completed/i);
+});
+
+test('!dispatch on non-dispatch thread shows error', async (t) => {
+  const threadId = threadStore.generateId();
+  const thread = makeDispatchThreadRecord(threadId, 'C123', { metadata: { trigger: 'scheduled' } });
+  await threadStore.set(thread);
+  t.after(() => threadStore.delete(threadId).catch(() => {}));
+
+  const adapter = new MockAdapter();
+  const dispatchCommand = createCommandDispatcher({ scheduler: null });
+
+  const handled = dispatchCommand(`!dispatch ${threadId} --profile execute`, 'C123', adapter);
+  assert.equal(handled, true);
+  for (let i = 0; i < 10; i++) {
+    await new Promise(resolve => setImmediate(resolve));
+  }
+
+  assert.match(adapter.posted[0].content.text, /not a dispatch thread|is not/i);
+});

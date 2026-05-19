@@ -1,0 +1,79 @@
+import type { PlatformAdapter } from '@platform/index.js';
+import { statSync, openSync, readSync, closeSync } from 'fs';
+import * as path from 'path';
+import { moduleDir } from '@core/utils.js';
+
+const DAEMON_LOG_PATH = path.join(moduleDir(import.meta.url), '..', '..', '..', '..', 'logs', 'daemon.log');
+
+interface TailState {
+  interval: ReturnType<typeof setInterval>;
+  offset: number;
+  adapter: PlatformAdapter;
+}
+
+const activeTails = new Map<string, TailState>();
+
+async function stopTail(channel: string, adapter: PlatformAdapter): Promise<void> {
+  const active = activeTails.get(channel);
+  if (!active) {
+    await adapter.postMessage(channel, { text: 'No active tail in this channel.' });
+    return;
+  }
+  clearInterval(active.interval);
+  activeTails.delete(channel);
+  await adapter.postMessage(channel, { text: ':octagonal_sign: Tail stopped.' });
+}
+
+async function sendInitialTailPreview(channel: string, adapter: PlatformAdapter): Promise<number | null> {
+  try {
+    const stat = statSync(DAEMON_LOG_PATH);
+    const previewBytes = Math.min(4096, stat.size);
+    const buf = Buffer.alloc(previewBytes);
+    const fd = openSync(DAEMON_LOG_PATH, 'r');
+    readSync(fd, buf, 0, previewBytes, stat.size - previewBytes);
+    closeSync(fd);
+    const lines = buf.toString('utf-8').split('\n').filter(Boolean).slice(-30);
+    await adapter.postMessage(channel, { text: `:scroll: *Tailing daemon.log* (last ${lines.length} lines, refresh every 3s)\n\`\`\`\n${lines.join('\n')}\n\`\`\`\nUse \`!tail stop\` to stop.` });
+    return stat.size;
+  } catch (err) {
+    await adapter.postMessage(channel, { text: `:x: Cannot read daemon.log: ${(err as Error).message}` });
+    return null;
+  }
+}
+
+function startTailInterval(channel: string, adapter: PlatformAdapter, offset: number): void {
+  const interval = setInterval(async () => {
+    try {
+      const stat = statSync(DAEMON_LOG_PATH);
+      const active = activeTails.get(channel);
+      if (!active) return;
+      if (stat.size <= active.offset) {
+        if (stat.size < active.offset) active.offset = stat.size;
+        return;
+      }
+      const bytesToRead = Math.min(stat.size - active.offset, 8192);
+      const buf = Buffer.alloc(bytesToRead);
+      const fd = openSync(DAEMON_LOG_PATH, 'r');
+      readSync(fd, buf, 0, bytesToRead, active.offset);
+      closeSync(fd);
+      active.offset += bytesToRead;
+      const newContent = buf.toString('utf-8').trim();
+      if (newContent) await adapter.postMessage(channel, { text: `\`\`\`\n${newContent}\n\`\`\`` });
+    } catch {
+      // File gone or unreadable — silently skip
+    }
+  }, 3000);
+  activeTails.set(channel, { interval, offset, adapter });
+}
+
+export async function handleTailCmd(channel: string, adapter: PlatformAdapter, trimmedMessage: string): Promise<void> {
+  const args = trimmedMessage.split(/\s+/).slice(1);
+  if (args[0] === 'stop') return stopTail(channel, adapter);
+  if (activeTails.has(channel)) {
+    await adapter.postMessage(channel, { text: 'Already tailing. Use `!tail stop` to stop first.' });
+    return;
+  }
+  const offset = await sendInitialTailPreview(channel, adapter);
+  if (offset === null) return;
+  startTailInterval(channel, adapter, offset);
+}

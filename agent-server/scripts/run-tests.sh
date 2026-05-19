@@ -1,0 +1,79 @@
+#!/usr/bin/env bash
+# Run Cortex test suite against an isolated, seeded CORTEX_HOME.
+#
+# Creates a temp directory, runs `cortex init` non-interactively, seeds
+# test-compatible configs, then runs the full test suite. Cleans up on exit.
+#
+# Usage:
+#   bash scripts/run-tests.sh              # full suite
+#   bash scripts/run-tests.sh --quick      # skip depcruise (faster iteration)
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+AGENT_DIR="$(dirname "$SCRIPT_DIR")"
+
+cd "$AGENT_DIR"
+
+QUICK=false
+if [[ "${1:-}" == "--quick" ]]; then
+  QUICK=true
+fi
+
+# ── Create isolated CORTEX_HOME ──────────────────────────────────
+
+CORTEX_HOME=$(mktemp -d)
+cleanup() { rm -rf "$CORTEX_HOME"; }
+trap cleanup EXIT
+
+export CORTEX_HOME
+
+# ── Init ─────────────────────────────────────────────────────────
+
+echo "[run-tests] cortex init → $CORTEX_HOME"
+
+printf 'claude\nnone\nn\n\n\n\nn\n\n\n' | node --import tsx src/entry/cli.ts init \
+  --home "$CORTEX_HOME" \
+  --gateway-config-dir "$CORTEX_HOME/gateway" \
+  2>/dev/null
+
+# ── Seed test configs ────────────────────────────────────────────
+
+bash "$SCRIPT_DIR/seed-test-config.sh" "$CORTEX_HOME"
+
+# ── Dependency check (skip in --quick mode) ─────────────────────
+
+if ! $QUICK; then
+  echo "[run-tests] dependency-cruise"
+  npx depcruise src --validate
+fi
+
+# ── Run tests ────────────────────────────────────────────────────
+
+echo "[run-tests] running test suite"
+
+# Match the same glob pattern as the original npm test command.
+# Use nullglob to handle the case where no files match a pattern.
+shopt -s nullglob
+TEST_FILES=(
+  tests/*.test.ts
+  tests/core/*.test.ts
+  tests/agent-adapter/*.test.ts
+  tests/store/*.test.ts
+  tests/events/*.test.ts
+  tests/orch/*.test.ts
+  tests/threads/*.test.ts
+  tests/domain/**/*.test.ts
+)
+shopt -u nullglob
+
+# Filter out debug/shim files
+FILTERED=()
+for f in "${TEST_FILES[@]}"; do
+  case "$(basename "$f")" in
+    _shims-*|_combined*|_plan*) ;;
+    *) FILTERED+=("$f") ;;
+  esac
+done
+
+node --import tsx --test --test-force-exit --test-timeout=15000 "${FILTERED[@]}"

@@ -1,0 +1,53 @@
+// input:  JobRunner callbacks registered at module load
+// output: dispatch(key, payload) → registered runner
+// pos:    scheduled task dispatch table (extracted from scheduled-runner.ts in S9)
+
+import type { EventBus } from '@events/index.js';
+import type { PlatformAdapter } from '@platform/index.js';
+import type { Scheduler } from './scheduler.js';
+import { createLogger } from '@core/log.js';
+
+const log = createLogger('job-registry');
+
+export type JobRunner = (payload: unknown) => Promise<void>;
+
+const _registry = new Map<string, JobRunner>();
+
+/** Interactive callbacks factory for plan_written / ask_user_question events. */
+export type InteractiveCallbacksFactory = (channel: string, sessionId: string | null) => {
+  onToolUse: ((name: string, input: any) => void);
+  onPlanWritten: ((event: { path: string; content: string; toolUseId: string }) => void);
+  onAskUserQuestion: ((event: { toolUseId: string; questions: Array<{ question: string; options?: string[]; multi?: boolean }> }) => void);
+};
+
+// Shared context set by runner.ts after init
+export const ctx: { adapter: PlatformAdapter | null; schedulerRef: Scheduler | null; bus: EventBus | null; buildInteractiveCallbacks: InteractiveCallbacksFactory | null } = {
+  adapter: null,
+  schedulerRef: null,
+  bus: null,
+  buildInteractiveCallbacks: null,
+};
+
+export function register(key: string, runner: JobRunner): void {
+  if (_registry.has(key)) {
+    log.warn(`Overwriting existing runner for key "${key}"`);
+  }
+  _registry.set(key, runner);
+}
+
+export function dispatch(key: string, payload: unknown): boolean {
+  const runner = _registry.get(key);
+  if (!runner) {
+    log.warn(`No runner registered for key "${key}"`);
+    return false;
+  }
+  runner(payload).catch((err) => {
+    log.error(`Runner "${key}" failed:`, err);
+  });
+  return true;
+}
+
+/** Exposed for testing — returns a copy of registered keys */
+export function registeredKeys(): string[] {
+  return Array.from(_registry.keys());
+}

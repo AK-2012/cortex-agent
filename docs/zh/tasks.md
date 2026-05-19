@@ -1,0 +1,297 @@
+# Cortex 任务系统
+
+
+任务系统是 Cortex 的结构化工作队列。任务存储在 `TASKS.yaml` 文件中——每个项目一个——并通过 `cortex-task` CLI 管理。系统支持将任务分发给队列工作器、追踪远程机器上的执行情况以及归档已完成的工作。
+
+## TASKS.yaml 格式
+
+每个项目的 `TASKS.yaml` 包含一个扁平的任务列表。每个任务有以下字段：
+
+| 字段 | 类型 | 必需 | 描述 |
+|-------|------|----------|-------------|
+| `id` | string（4 个十六进制字符） | 是 | 项目内唯一任务标识符（如 `f7cf`、`6a07`） |
+| `text` | string | 是 | 动词开头的任务描述 |
+| `why` | string | 是 | 理由——为什么这个任务重要 |
+| `done-when` | string | 是 | 可验证的完成标准 |
+| `priority` | `high` \| `medium` \| `low` | 是 | 任务优先级 |
+| `status` | `open` \| `done` \| `pending` | 是 | 核心状态（仅存储这 3 种；派生状态是计算得出的） |
+| `template` | string | 是 | 分发时使用的线程模板名称（如 `coder-review`） |
+| `plan` | string | 否 | 设计文档的路径 |
+| `depends-on` | string[] | 否 | 此任务依赖的任务 ID 列表 |
+| `gpu` | string \| null | 否 | 目标机器名称（如 `lab2`） |
+| `gpu-count` | number | 否 | 所需 GPU 数量（默认：1） |
+| `blocked-by` | string \| null | 否 | 外部阻塞原因（自由文本） |
+| `claimed-by` | string \| null | 否 | 认领此任务的智能体标识符 |
+| `claimed-at` | string \| null | 否 | 认领的 ISO 时间戳 |
+| `paused` | boolean | 否 | 任务是否已暂停 |
+| `approval-needed` | boolean | 否 | 分发前是否需要审批 |
+| `approved-at` | string \| null | 否 | 审批的 ISO 时间戳 |
+| `not-before` | string \| null | 否 | 日期门控：在此 ISO 日期之前不分发 |
+| `completed-at` | string \| null | 否 | 完成的 ISO 时间戳 |
+| `completed-note` | string \| null | 否 | 完成时添加的备注 |
+| `pending-at` | string \| null | 否 | 标记为 pending 时的 ISO 时间戳（cortex-run） |
+
+YAML 键使用 kebab-case（`done-when`、`depends-on`、`claimed-by` 等），内部映射为 snake_case 字段。
+
+### 任务示例
+
+```yaml
+- id: f7cf
+  text: "用统一的 adapter.runWithAdapter 替换后端分发"
+  why: "Claude 和 Codex 的两条独立分发路径是维护负担"
+  done-when: "mode-manager.ts 对两个后端使用 runWithAdapter；fixture 回放测试通过"
+  priority: high
+  status: open
+  template: coder-review
+  plan: decisions/0002-unified-backend-dispatch.md
+
+- id: 5349
+  text: "完整管道集成测试"
+  why: "各阶段单独通过但端到端尚未验证"
+  done-when: "完整管道运行（prompt → VLA → dataset）完成，生成阶段成功率 >=80%"
+  priority: high
+  status: open
+  template: experiment-runner
+  gpu: lab2
+  gpu-count: 1
+```
+
+### 项目锁
+
+`TASKS.yaml` 可以可选地包含一个防止并发修改的 `lock` 部分：
+
+```yaml
+lock:
+  owner: "exec_local_abc"
+  acquired_at: "2026-04-23T12:00:00.000Z"
+  expires_at: "2026-04-23T12:20:00.000Z"
+  note: "重构任务"
+```
+
+锁有固定的 20 分钟 TTL。修改任务列表的命令（`add`、`edit`、`batch-edit`、`decompose`）要求调用者持有锁。当拥有的执行完成时，锁会自动释放。
+
+## 任务生命周期
+
+### 核心状态（存储的）
+
+任务有三个存储在 YAML 中的核心状态：
+
+- **`open`** — 可被认领
+- **`done`** — 已完成（终止状态）
+- **`pending`** — 已分发到远程机器，等待 cortex-run 完成
+
+### 派生状态（计算得出的）
+
+附加状态从布尔标志计算得出：
+
+| 条件 | 派生状态 |
+|-----------|---------------|
+| `claimed_by` 已设置 | `in-progress` |
+| `blocked_by` 已设置 | `blocked` |
+| `paused` 为 true | `paused` |
+| `approval_needed` 为 true 且 `approved_at` 为 null | `approval-needed` |
+| `approved_at` 已设置 | `approved`（可被分发） |
+
+### 状态转换
+
+```
+open ──claim──→ in-progress ──complete──→ done
+ │                  │
+ ├──block──→ blocked ├──unclaim──→ open
+ │    │               │
+ │    └──unblock──→ open
+ │
+ ├──pause──→ paused ──resume──→ open（清除认领）
+ │
+ ├──request-approval──→ approval-needed ──approve──→ open（approved_at 已设置）
+ │
+ └──pending──→ pending ──(cortex-run 结果)──→ done / blocked
+```
+
+**守卫规则：**
+
+- 不能认领已被认领的任务（409 错误）
+- 不能认领已阻塞或已完成的任务
+- 不能完成已阻塞或已暂停的任务
+- 设置 `blocked_by` 自动清除 `claimed_by`、`claimed_at` 和 `pending_at`
+- 暂停任务清除 `claimed_by` 和 `claimed_at`
+- `pending` 清除 `claimed_by` 和 `blocked_by`，设置 `pending_at`
+
+## Done-When 纪律
+
+`done-when` 字段是任务中最重要的字段。它必须描述**可验证的完成标准**，而不是模糊的意图。
+
+**好例子：**
+
+- `"mode-manager.ts:310-311 替换为 runWithAdapter；两个后端通过同一函数路由；fixture 回放测试通过"`
+- `"完整管道运行完成，生成阶段成功率 >=80%"`
+- `"docs/architecture.md 存在，所有六层已记录并对照实际代码验证"`
+
+**坏例子（太模糊）：**
+
+- `"修复 bug"`
+- `"提高性能"`
+- `"写文档"`
+
+### 完成验证
+
+当通过 `cortex-task complete` 将任务标记为完成时，系统运行自动验证（`verifyCompletionEvidence`）：
+
+1. **Git 日志检查**：运行 `git log --oneline --grep=<taskId>` 查找引用任务 ID 的提交。必须存在至少一个不是认领/取消认领提交的提交。
+2. **产物检查**：如果 git 检查失败，检查 `done-when` 文本中提到的任何文件路径是否存在于数据目录中。
+
+如果两项检查都不通过，命令返回错误：`"no evidence of work: no matching git commit and no Done-when artifact found in repo"`。用户可以通过 `--skip-verify` 绕过（可选地附带 `--skip-verify-reason`）。
+
+## Blocked-By 语义
+
+`blocked_by` 字段用于**仅外部阻塞**——无法通过编写代码或配置工具来解决的事情。有效阻塞的例子：等待 GPU 分配、等待数据集交付、等待 API 访问审批。
+
+将任务设置为 blocked 会自动取消认领。不能完成被阻塞的任务——必须先解除阻塞。
+
+### 自动阻塞隔离
+
+任务调度系统有一个自动隔离机制：如果一个已分发的任务连续失败 3 次，任务会自动被阻塞，`blocked_by` 中填入最后的错误消息。这防止调度器重复尝试一个损坏的任务。
+
+## 陈旧认领检测
+
+3 天规则：如果一个任务被智能体 `claimed_by` 超过 3 天而没有完成，它被视为陈旧/孤立认领，应进行调查。这是一个手动约定，目前未在代码中自动执行。
+
+另外，pending 任务追踪器对远程机器上已分发的任务有 4 小时超时——如果已分发的任务在 4 小时内没有回报，其追踪状态被清除。
+
+## 任务分发
+
+分发管道是任务如何自动执行的机制。
+
+### 触发
+
+一个 `task-dispatch` 调度器作业周期性触发（通常每 30 秒）。它驱动完整的分发循环。
+
+### 分发流程
+
+1. **预演选择**：找到一个可以分发的任务（尚未认领）
+2. **速率限制检查**：确保系统未被限速
+3. **选择并认领**：`selectAndClaimTask()` 选择最高优先级的可操作任务
+4. **GPU 检查**：如果任务需要 GPU，验证目标机器在线且有空闲 GPU
+5. **去重**：如果类似任务已在运行则跳过（通过执行注册表检查）
+6. **线程创建**：从任务的模板创建线程，带项目上下文运行（线程执行模型参见 [threads.md](./threads.md)）
+7. **任务完成**：线程成功时自动完成任务。失败时递增失败计数器（3 次连续失败 → 自动阻塞）
+
+### 选择优先级
+
+任务按以下顺序选择：
+
+1. 高优先级项目的任务优先
+2. 有 `done-when` 字段的任务优先于没有的
+3. 更高 `priority` 值的任务优先（`high` > `medium` > `low`）
+
+### Pending 任务
+
+当任务被分发到远程机器进行长时间运行（通过 `cortex-run`）时，它被标记为 `pending`。远程机器的 `cortex-run-watcher` 追踪进程并通过 WebSocket `task-callback` 消息回报成功/失败。服务器随后相应地完成或阻塞任务。
+
+## Cortex-Run 看门狗（DR-0011）
+
+`cortex-run` 系统处理远程机器上的长时间运行任务执行。完整的 `cortex-run` CLI 参考参见 [cli-reference.md](./cli-reference.md)，任务调度器如何驱动此管道参见 [scheduling.md](./scheduling.md)。
+
+- **服务器端**：`cortex-run` CLI 通过 `sendCommand` 转发到远程客户端
+- **客户端端**：`cortex-run-watcher.ts` 将用户命令作为分离的子进程生成，用两层停滞检测（输出字节停滞和进度行停滞）监控它，通过 `nvidia-smi` 自动选择 GPU，写入状态/输出/结果文件，并在完成时发送 `task-callback` WebSocket 消息
+- **客户端端**：`cortex-run-launch.ts` 处理启动/取消/刷新周期，带僵尸进程的孤立检测
+
+三层进程模型：
+
+```
+cortex-client（到服务器的 WebSocket 连接）
+  └── cortex-run-watcher（分离的，unref'd）
+        └── 用户命令（如 python train.py）
+```
+
+## 任务归档
+
+已完成的任务在 3 天后自动归档（`ARCHIVE_AGE_DAYS = 3`）。归档由 `task-archive` 调度器作业驱动（通常每 6 小时）。
+
+**归档流程：**
+
+1. 扫描 `context/projects/` 中的所有项目
+2. 找到 `status: done` 且 `completed-at` 超过 3 天的任务
+3. 从 `TASKS.yaml` 中移除它们
+4. 以 markdown 清单格式追加到 `tasks-archive.md`，包含 text、id、why、done-when、priority、完成日期和备注
+5. 自动提交，消息为：`auto-archive: completed tasks (<project>: <N> tasks)`
+
+没有 `completed-at` 日期的任务永远不会被归档。
+
+## Cortex-Task CLI
+
+`cortex-task` CLI 提供完整的任务生命周期管理。完整的 CLI 参考（包括每个子命令和标志）参见 [cli-reference.md](./cli-reference.md)。所有命令操作当前工作目录中的项目，或接受 `--project` 标志。
+
+### 读取命令
+
+| 命令 | 描述 |
+|---------|-------------|
+| `list` | 显示可操作任务（默认）。使用 `--all` 查看所有任务包括 done/blocked/paused |
+| `query` | 按状态、优先级、文本模式或任务 ID 过滤任务 |
+| `show --task-id <id>` | 显示一个任务的详细信息 |
+| `deps --task-id <id>` | 显示任务的依赖图 |
+| `lint` | 验证任务结构（缺失 ID、悬空依赖、循环） |
+| `stats` | 每项目任务供给统计（按状态和优先级计数） |
+
+### 状态命令
+
+| 命令 | 描述 |
+|---------|-------------|
+| `claim --task-id <id>` | 将任务标记为进行中（`--agent` 默认为 `cortex-local`） |
+| `unclaim --task-id <id>` | 移除进行中状态 |
+| `pause --task-id <id>` | 暂停任务（清除认领） |
+| `resume --task-id <id>` | 恢复暂停的任务 |
+| `pending --task-id <id>` | 标记为 pending（等待 cortex-run 结果） |
+| `complete --task-id <id>` | 标记完成（`--note`、`--skip-verify` 绕过验证） |
+| `uncomplete --task-id <id>` | 撤销已完成的任务回到 open |
+
+### 审批命令
+
+| 命令 | 描述 |
+|---------|-------------|
+| `request-approval --task-id <id>` | 设置 approval-needed 标志 |
+| `approve --task-id <id>` | 审批（设置 approved_at，清除 approval-needed） |
+| `clear-approval --task-id <id>` | 清除审批状态 |
+
+### 阻塞命令
+
+| 命令 | 描述 |
+|---------|-------------|
+| `block --task-id <id> --reason "..."` | 以某个原因阻塞任务 |
+| `unblock --task-id <id>` | 解除阻塞任务 |
+
+### 修改命令
+
+| 命令 | 描述 |
+|---------|-------------|
+| `add` | 添加新任务（`--text`、`--why`、`--done-when`、`--template`、`--priority` 等） |
+| `edit --task-id <id>` | 编辑任务字段 |
+| `batch-edit --task-ids <id1,id2>` | 对多个任务应用相同编辑 |
+| `decompose --task-id <id> --subtasks-file <path>` | 用子任务替换一个任务 |
+
+### 锁命令
+
+| 命令 | 描述 |
+|---------|-------------|
+| `lock-acquire` | 获取项目锁（20 分钟 TTL） |
+| `lock-release` | 释放项目锁 |
+| `lock-status` | 显示所有或一个项目的锁状态 |
+| `lock-force-release` | 强制释放项目锁 |
+
+### 维护命令
+
+| 命令 | 描述 |
+|---------|-------------|
+| `assign-ids` | 自动为缺少 ID 的任务分配 4 位十六进制 ID |
+| `validate` | 验证所有项目的所有任务 ID（检查重复、缺失引用） |
+| `stop --task-id <id>` | 终止已分发的任务进程 |
+
+修改命令（`add`、`edit`、`batch-edit`、`decompose`）要求调用者持有项目锁。
+
+## 一个标准，一个任务（DR-0006）
+
+每个任务应只有一个可验证的完成标准。具有多个独立标准的任务应使用 `decompose` 命令分解为子任务。这确保了清晰的分发、明确的所有权和无歧义的完成验证。
+
+## 任务分发并发
+
+任务分发器强制执行最多 4 个并发分发执行以防止资源耗尽。这在每次分发尝试前检查。

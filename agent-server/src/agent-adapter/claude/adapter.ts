@@ -1,0 +1,890 @@
+// input:  user message + session context, AgentSpawnConfig
+// output: runClaude / closeSession / ClaudeAdapter
+// pos:    Claude CLI session pool and AgentAdapter implementation
+// >>> If I am updated, update my header comment and the parent folder's CORTEX.md <<<
+
+import { spawn, ChildProcess } from 'child_process';
+import { createWriteStream, WriteStream } from 'fs';
+import { createInterface, Interface } from 'readline';
+import * as path from 'path';
+import * as crypto from 'crypto';
+import { DATA_DIR, readableTimestamp } from '@core/utils.js';
+import { createLogger } from '@core/log.js';
+import { handleRateLimitEvent } from '@domain/costs/rate-limit-throttle.js';
+import { fromCanonical } from '../normalize/tool-names.js';
+import { Capability, CAPABILITIES_BY_BACKEND } from '../capabilities.js';
+import type { AgentAdapter, AgentSpawnConfig, AgentProcess, Backend, UserMessage } from '../types.js';
+import type { AgentResult } from '@core/types/agent-types.js';
+import type { NormalizedEvent } from '../normalize/event-types.js';
+import { createEventStream } from '../normalize/event-stream.js';
+import {
+  CancelledError,
+  CORE_MCP_CONFIG,
+  DEFAULT_TOOLS,
+  IDLE_SESSION_TIMEOUT,
+  LOGS_DIR,
+  MAX_TIMEOUT,
+  TURN_IDLE_TIMEOUT,
+} from './defaults.js';
+import { buildHooksSettings } from './hooks-builder.js';
+import { buildClaudeEnv, buildSpawnArgs, ClaudeSpawnOptions, CortexAgentContext } from './spawn-args.js';
+import { ClaudeTuiSession, defaultTailFactory, type ClaudeTuiSessionConfig } from './adapter-tui.js';
+import { TmuxControl, type TmuxExec } from './tmux-control.js';
+import { TUI_TMUX_NAME_PREFIX } from './defaults.js';
+import {
+  buildPrompt,
+  clearActivePlanFile,
+  extractAskUserQuestions,
+  extractResult,
+  formatEvent,
+  getCurrentPlanFilePath,
+  isPlanFilePath,
+  mergeSubstantialOutput,
+  setActivePlanFile,
+} from './event-parser.js';
+
+const log = createLogger('claude-bridge');
+
+// --- Persistent session ---
+
+interface PendingTurn {
+  resolve: (value: any) => void;
+  reject: (error: Error) => void;
+  resultData: any;
+  planFilePath: string | null;
+  enteredPlanMode: boolean;
+  exitedPlanMode: boolean;
+  askUserQuestions: any[];
+  finalOutput: string | null;
+  longestOutput: string | null;
+  turnCount: number;
+  onProgress: ((progress: any) => void) | null;
+  onAssistantMessage: ((text: string) => void) | null;
+  onToolUse: ((name: string, input: any) => void) | null;
+  rawStream: WriteStream;
+  txtStream: WriteStream;
+  killed: boolean;
+}
+
+interface ClaudeSessionOptions {
+  needsResume: boolean;
+  model?: string | null;
+  isUserInitiated?: boolean;
+  callbackSource?: string | null;
+  scheduleTaskId?: string | null;
+  sessionKey?: string | null;
+  claudeAgent?: string | null;
+  systemPrompt?: string | null;
+  appendSystemPrompt?: string | null;
+  outputStyle?: string | null;
+  tools?: string | null;
+  pluginDirs?: string[] | null;
+  anthropicBaseUrl?: string;
+  extraEnv?: Record<string, string>;
+  /** Extra CLI options from profile (e.g. {"--thinking": "xhigh"}). */
+  extraOption?: Record<string, string>;
+  /** Cortex execution context surfaced to the MCP server child as CORTEX_THREAD_ID/PROFILE/PROJECT/SESSION_NAME env vars.
+   *  Captured at spawn time; later turns on the same session reuse the original snapshot. */
+  context?: CortexAgentContext;
+}
+
+/** Single source of truth for ClaudeSession fields → ClaudeSpawnOptions CLI args translation.
+ *  Used by both ClaudeSession.toSpawnOptions() (production) and _test.computeSpawnArgs (lock-in test). */
+function deriveClaudeSpawnOptions(fields: {
+  tools: string | null;
+  systemPrompt: string | null;
+  appendSystemPrompt: string | null;
+  model: string | null;
+  claudeAgent: string | null;
+  pluginDirs: string[] | null;
+  outputStyle: string | null;
+  extraOption: Record<string, string> | undefined;
+  needsResume: boolean;
+  sessionId: string;
+}): ClaudeSpawnOptions {
+  return {
+    tools: fields.tools,
+    systemPrompt: fields.systemPrompt,
+    appendSystemPrompt: fields.appendSystemPrompt,
+    model: fields.model,
+    claudeAgent: fields.claudeAgent,
+    pluginDirs: fields.pluginDirs,
+    outputStyle: fields.outputStyle,
+    extraOption: fields.extraOption,
+    needsResume: fields.needsResume,
+    sessionId: fields.sessionId,
+  };
+}
+
+class ClaudeSession {
+  private proc: ChildProcess | null = null;
+  private rl: Interface | null = null;
+  sessionId: string;
+  private channel: string;
+  private sessionKey: string;
+  /** Model name requested via --model CLI arg (used as fallback for cost_record). */
+  modelName: string | null;
+  private isUserInitiated: boolean;
+  private callbackSource: string | null;
+  private scheduleTaskId: string | null;
+  private claudeAgent: string | null;
+  private systemPrompt: string | null;
+  private appendSystemPrompt: string | null;
+  private outputStyle: string | null;
+  private tools: string | null;
+  private pluginDirs: string[] | null;
+  private anthropicBaseUrl: string | undefined;
+  private extraEnv: Record<string, string> | undefined;
+  private extraOption: Record<string, string> | undefined;
+  private context: CortexAgentContext | undefined;
+  private currentTurn: PendingTurn | null = null;
+  private alive: boolean = false;
+  private needsResume: boolean;
+  private idleTimer: ReturnType<typeof setTimeout> | null = null;
+  private turnIdleTimer: ReturnType<typeof setTimeout> | null = null;
+  private maxTimer: ReturnType<typeof setTimeout> | null = null;
+  private stderr: string = '';
+  private cumulativeCostUsd: number = 0;
+  /** Captured from result event's modelUsage key for cost_record. */
+  lastModelName: string | null = null;
+  /** Captured from result event's usage for cost_record (per-turn, non-cumulative). */
+  lastTokenUsage: { input: number; output: number; cacheCreation: number; cacheRead: number } | null = null;
+
+  constructor(channel: string, sessionId: string, options: ClaudeSessionOptions) {
+    this.channel = channel;
+    this.sessionId = sessionId;
+    this.sessionKey = options.sessionKey || channel;
+    this.needsResume = options.needsResume;
+    this.modelName = options.model || null;
+    this.isUserInitiated = options.isUserInitiated || false;
+    this.callbackSource = options.callbackSource || null;
+    this.scheduleTaskId = options.scheduleTaskId || null;
+    this.claudeAgent = options.claudeAgent || null;
+    this.systemPrompt = options.systemPrompt || null;
+    this.appendSystemPrompt = options.appendSystemPrompt ?? null;
+    this.outputStyle = options.outputStyle || null;
+    this.tools = options.tools || null;
+    this.pluginDirs = options.pluginDirs || null;
+    this.anthropicBaseUrl = options.anthropicBaseUrl;
+    this.extraEnv = options.extraEnv;
+    this.extraOption = options.extraOption;
+    this.context = options.context;
+    this.spawnProcess();
+  }
+
+  private toSpawnOptions(): ClaudeSpawnOptions {
+    return deriveClaudeSpawnOptions({
+      tools: this.tools,
+      systemPrompt: this.systemPrompt,
+      appendSystemPrompt: this.appendSystemPrompt,
+      model: this.modelName,
+      claudeAgent: this.claudeAgent,
+      pluginDirs: this.pluginDirs,
+      outputStyle: this.outputStyle,
+      extraOption: this.extraOption,
+      needsResume: this.needsResume,
+      sessionId: this.sessionId,
+    });
+  }
+
+  private handleProcessClose(code: number | null): void {
+    log.info(`Process closed: ${this.sessionId.substring(0, 8)} code=${code}`);
+    this.alive = false;
+    clearActivePlanFile(this.sessionId);
+    if (this.currentTurn) {
+      const turn = this.currentTurn;
+      this.currentTurn = null;
+      this.closeTurnLogs(turn);
+      if (this.turnIdleTimer) clearTimeout(this.turnIdleTimer);
+      if (turn.killed) {
+        turn.reject(new CancelledError());
+      } else {
+        const result = extractResult(turn.resultData, this.sessionId, false, code || 1, this.stderr,
+          turn.planFilePath, turn.enteredPlanMode, turn.exitedPlanMode, turn.askUserQuestions,
+          turn.finalOutput, turn.longestOutput);
+        if (result.resolved) turn.resolve(result.value);
+        else turn.reject(result.error);
+      }
+    }
+    sessions.delete(this.sessionKey);
+  }
+
+  private spawnProcess(): void {
+    const env = buildClaudeEnv(this.channel, this.sessionId, this.callbackSource, this.scheduleTaskId, this.anthropicBaseUrl, this.extraEnv, this.context);
+    const spawnOptions = this.toSpawnOptions();
+    // Template thread sessions load only the core MCP server (remote_* tools).
+    // Default / direct sessions load both core and ext servers.
+    if (this.context?.useCoreMcp) {
+      spawnOptions.mcpConfigPath = CORE_MCP_CONFIG;
+    }
+    const args = buildSpawnArgs(spawnOptions);
+    log.info(`Spawning persistent process: ${this.sessionId.substring(0, 8)} ${this.needsResume ? '(resume)' : '(new)'}`);
+
+    this.proc = spawn('claude', args, { cwd: DATA_DIR, env, stdio: ['pipe', 'pipe', 'pipe'] });
+    this.stderr = '';
+    this.rl = createInterface({ input: this.proc.stdout!, crlfDelay: Infinity });
+    this.rl.on('line', (line) => this.handleLine(line));
+    this.proc.stderr!.on('data', (d) => { this.stderr += d.toString(); });
+    this.proc.on('close', (code) => this.handleProcessClose(code));
+
+    this.alive = true;
+    this.resetIdleTimer();
+    this.maxTimer = setTimeout(() => {
+      log.info(`Session ${this.sessionId.substring(0, 8)} hit max timeout, killing`);
+      this.kill();
+    }, MAX_TIMEOUT);
+  }
+
+  private createTurnStreams(userMessage: string): { rawStream: WriteStream; txtStream: WriteStream } {
+    const ts = readableTimestamp();
+    const rawStream = createWriteStream(path.join(LOGS_DIR, `claude-output-${ts}.jsonl`), { flags: 'a' });
+    const txtStream = createWriteStream(path.join(LOGS_DIR, `claude-output-${ts}.txt`), { flags: 'a' });
+    txtStream.write(`=== Cortex session started at ${new Date().toISOString()} ===\n=== channel=${this.channel}, session=${this.sessionId} ===\n\n`);
+    txtStream.write(`[user-input] ${userMessage}\n\n`);
+    return { rawStream, txtStream };
+  }
+
+  private registerTurn(resolve: any, reject: any, streams: { rawStream: WriteStream; txtStream: WriteStream }, options: any): void {
+    clearActivePlanFile(this.sessionId);
+    this.currentTurn = {
+      resolve, reject,
+      resultData: null,
+      planFilePath: null,
+      enteredPlanMode: false,
+      exitedPlanMode: false,
+      askUserQuestions: [],
+      finalOutput: null,
+      longestOutput: null,
+      turnCount: 0,
+      onProgress: options.onProgress || null,
+      onAssistantMessage: options.onAssistantMessage || null,
+      onToolUse: options.onToolUse || null,
+      rawStream: streams.rawStream,
+      txtStream: streams.txtStream,
+      killed: false,
+    };
+  }
+
+  private writeTurnStdin(prompt: string): void {
+    const stdinMsg = JSON.stringify({
+      type: 'user',
+      message: { role: 'user', content: prompt },
+      session_id: this.sessionId,
+    }) + '\n';
+    try {
+      this.proc!.stdin!.write(stdinMsg);
+    } catch (e: any) {
+      this.alive = false;
+      if (this.currentTurn) {
+        const turn = this.currentTurn;
+        this.currentTurn = null;
+        this.closeTurnLogs(turn);
+        turn.reject(new Error(`Failed to write to claude stdin: ${e.message}`));
+      }
+      sessions.delete(this.sessionKey);
+      throw new Error(`Claude process stdin write failed: ${e.message}`);
+    }
+  }
+
+  private startTurnIdleTimer(): void {
+    this.turnIdleTimer = setTimeout(() => {
+      log.info(`Session ${this.sessionId.substring(0, 8)} turn idle for 60min, killing`);
+      this.kill();
+    }, TURN_IDLE_TIMEOUT);
+  }
+
+  async sendMessage(userMessage: string, options: {
+    files?: any[];
+    callbackSource?: string | null;
+    scheduleTaskId?: string | null;
+    isUserInitiated?: boolean;
+    onProgress?: ((progress: any) => void) | null;
+    onAssistantMessage?: ((text: string) => void) | null;
+    onToolUse?: ((name: string, input: any) => void) | null;
+  }): Promise<any> {
+    if (!this.alive) {
+      this.needsResume = true;
+      this.spawnProcess();
+    }
+    this.resetIdleTimer();
+    const prompt = buildPrompt(userMessage, options.files || []);
+    const streams = this.createTurnStreams(userMessage);
+
+    const turnPromise = new Promise<any>((resolve, reject) => {
+      this.registerTurn(resolve, reject, streams, options);
+    });
+
+    this.writeTurnStdin(prompt);
+    this.startTurnIdleTimer();
+
+    const result = await turnPromise;
+    if (this.turnIdleTimer) clearTimeout(this.turnIdleTimer);
+    this.turnIdleTimer = null;
+    this.resetIdleTimer();
+    return result;
+  }
+
+  private bumpTurnIdleTimer(): void {
+    if (!this.turnIdleTimer) return;
+    clearTimeout(this.turnIdleTimer);
+    this.startTurnIdleTimer();
+  }
+
+  private handleResultEvent(turn: PendingTurn, data: any): void {
+    // Reset per-turn capture fields so we never leak stale data from a previous turn
+    this.lastTokenUsage = null;
+    this.lastModelName = null;
+
+    const cumulativeCost = data.total_cost_usd ?? 0;
+    const turnCost = cumulativeCost - this.cumulativeCostUsd;
+    this.cumulativeCostUsd = cumulativeCost;
+    turn.resultData = { ...data, total_cost_usd: turnCost > 0 ? turnCost : 0 };
+
+    // Capture token data from the result event for cost_record (per-turn, non-cumulative)
+    if (data.usage) {
+      this.lastTokenUsage = {
+        input: data.usage.input_tokens ?? 0,
+        output: data.usage.output_tokens ?? 0,
+        cacheCreation: data.usage.cache_creation_input_tokens ?? 0,
+        cacheRead: data.usage.cache_read_input_tokens ?? 0,
+      };
+    }
+    // modelUsage keys contain the actual model name(s) used
+    if (data.modelUsage) {
+      const keys = Object.keys(data.modelUsage);
+      if (keys.length > 0) this.lastModelName = keys[0];
+    }
+
+    const result = extractResult(turn.resultData, this.sessionId, false, 0, '',
+      turn.planFilePath, turn.enteredPlanMode, turn.exitedPlanMode, turn.askUserQuestions,
+      turn.finalOutput, turn.longestOutput);
+    this.currentTurn = null;
+    if (this.turnIdleTimer) clearTimeout(this.turnIdleTimer);
+    this.turnIdleTimer = null;
+
+    const formatted = formatEvent(data);
+    if (formatted) turn.txtStream.write(formatted + '\n');
+    turn.txtStream.write(`\n=== Turn finished at ${new Date().toISOString()} ===\n`);
+    turn.rawStream.end();
+    turn.txtStream.end();
+
+    if (result.resolved) turn.resolve(result.value);
+    else turn.reject(result.error);
+  }
+
+  private handleAssistantEvent(turn: PendingTurn, data: any): void {
+    turn.turnCount += 1;
+    for (const block of (data.message?.content || [])) {
+      if (block.type === 'tool_use') {
+        if (block.name === 'Write' && isPlanFilePath(block.input?.file_path)) {
+          turn.planFilePath = block.input.file_path;
+          setActivePlanFile(this.sessionId, block.input.file_path);
+        }
+        if (block.name === 'EnterPlanMode') {
+          turn.enteredPlanMode = true;
+        }
+        if (block.name === 'ExitPlanMode') {
+          turn.exitedPlanMode = true;
+        }
+        if (typeof turn.onToolUse === 'function') {
+          try { turn.onToolUse(block.name || '?', block.input || {}); }
+          catch (e) { log.warn('onToolUse threw:', (e as Error).message); }
+        }
+      }
+      if (block.type === 'text' && block.text) {
+        turn.finalOutput = block.text;
+        if (block.text.length > (turn.longestOutput?.length || 0)) turn.longestOutput = block.text;
+        if (typeof turn.onAssistantMessage === 'function') turn.onAssistantMessage(block.text);
+      }
+    }
+    if (typeof turn.onProgress === 'function') {
+      turn.onProgress({ num_turns: turn.turnCount, total_cost_usd: null, duration_ms: null });
+    }
+  }
+
+  private handleLine(line: string) {
+    if (!line) return;
+    this.resetIdleTimer();
+    this.bumpTurnIdleTimer();
+    if (this.currentTurn?.rawStream) this.currentTurn.rawStream.write(line + '\n');
+
+    try {
+      const data = JSON.parse(line);
+      if (data.type === 'rate_limit_event' && data.rate_limit_info) {
+        const mode = this.anthropicBaseUrl?.match(/\/m\/([^/]+)\//)?.[1] || undefined;
+        handleRateLimitEvent(data.rate_limit_info, mode).catch(e => log.error('handleRateLimitEvent error:', e));
+      }
+      if (data.type === 'result' && this.currentTurn) {
+        this.handleResultEvent(this.currentTurn, data);
+        return;
+      }
+      if (data.type === 'assistant' && this.currentTurn) this.handleAssistantEvent(this.currentTurn, data);
+      const formatted = formatEvent(data);
+      if (formatted && this.currentTurn?.txtStream) this.currentTurn.txtStream.write(formatted + '\n');
+    } catch {
+      if (this.currentTurn?.txtStream) this.currentTurn.txtStream.write(`[raw] ${line}\n`);
+    }
+    log.info('stream:', line.substring(0, 200));
+  }
+
+  private closeTurnLogs(turn: PendingTurn) {
+    try {
+      turn.txtStream.write(`\n=== Turn ended at ${new Date().toISOString()} ===\n`);
+      turn.rawStream.end();
+      turn.txtStream.end();
+    } catch {}
+  }
+
+  private resetIdleTimer() {
+    if (this.idleTimer) clearTimeout(this.idleTimer);
+    this.idleTimer = setTimeout(() => {
+      log.info(`Session ${this.sessionId.substring(0, 8)} idle for 65min, closing`);
+      this.close();
+    }, IDLE_SESSION_TIMEOUT);
+  }
+
+  close() {
+    if (this.idleTimer) clearTimeout(this.idleTimer);
+    if (this.maxTimer) clearTimeout(this.maxTimer);
+    if (this.turnIdleTimer) clearTimeout(this.turnIdleTimer);
+    if (!this.proc || !this.alive) {
+      sessions.delete(this.sessionKey);
+      return;
+    }
+    this.alive = false;
+    sessions.delete(this.sessionKey);
+
+    try {
+      this.proc.stdin!.end();
+    } catch {}
+
+    const graceTimer = setTimeout(() => {
+      if (this.proc && this.proc.exitCode === null) {
+        try { this.proc.kill('SIGTERM'); } catch {}
+        setTimeout(() => {
+          if (this.proc && this.proc.exitCode === null) {
+            try { this.proc.kill('SIGKILL'); } catch {}
+          }
+        }, 10_000);
+      }
+    }, 30_000);
+
+    this.proc.on('close', () => clearTimeout(graceTimer));
+  }
+
+  kill(): boolean {
+    if (this.idleTimer) clearTimeout(this.idleTimer);
+    if (this.maxTimer) clearTimeout(this.maxTimer);
+    if (this.turnIdleTimer) clearTimeout(this.turnIdleTimer);
+    if (!this.proc || this.proc.exitCode !== null) return false;
+    this.alive = false;
+    sessions.delete(this.sessionKey);
+    if (this.currentTurn) {
+      this.currentTurn.killed = true;
+    }
+    try { this.proc.kill('SIGTERM'); return true; } catch { return false; }
+  }
+
+  isAlive(): boolean {
+    return this.alive;
+  }
+}
+
+// --- Session pool ---
+
+const sessions = new Map<string, ClaudeSession>();
+
+function getOrCreateSession(channel: string, sessionId: string, options: ClaudeSessionOptions): ClaudeSession {
+  const key = options.sessionKey || channel;
+  let session = sessions.get(key);
+
+  if (!session || !session.isAlive() || (options.needsResume && session.sessionId !== sessionId)) {
+    if (session) session.close();
+    session = new ClaudeSession(channel, sessionId, { ...options, sessionKey: key });
+    sessions.set(key, session);
+  }
+
+  return session;
+}
+
+export function closeSession(channel: string, sessionKey?: string): void {
+  const key = sessionKey || channel;
+  const session = sessions.get(key);
+  if (session) session.close();
+}
+
+/** Close all sessions whose key starts with the given prefix (used by Thread cleanup). */
+export function closeSessionsByPrefix(prefix: string): void {
+  for (const [key, session] of sessions) {
+    if (key.startsWith(prefix)) session.close();
+  }
+}
+
+export function closeAllSessions(): void {
+  for (const [, session] of sessions) session.close();
+  sessions.clear();
+}
+
+// --- runClaude (legacy top-level API, unchanged signature) ---
+
+export interface RunClaudeOptions {
+  channel: string;
+  sessionId?: string | null;
+  files?: any[];
+  callbackSource?: string | null;
+  scheduleTaskId?: string | null;
+  model?: string | null;
+  isUserInitiated?: boolean;
+  onProgress?: any;
+  onAssistantMessage?: any;
+  onToolUse?: ((name: string, input: any) => void) | null;
+  sessionKey?: string | null;
+  claudeAgent?: string | null;
+  systemPrompt?: string | null;
+  outputStyle?: string | null;
+  tools?: string | null;
+  pluginDirs?: string[] | null;
+  anthropicBaseUrl?: string;
+}
+
+export function runClaude(userMessage: string, opts: RunClaudeOptions) {
+  const effectiveSessionId = opts.sessionId || crypto.randomUUID();
+  const session = getOrCreateSession(opts.channel, effectiveSessionId, { ...opts, needsResume: !!opts.sessionId });
+  const promise = session.sendMessage(userMessage, {
+    files: opts.files || [],
+    callbackSource: opts.callbackSource ?? null,
+    scheduleTaskId: opts.scheduleTaskId ?? null,
+    isUserInitiated: opts.isUserInitiated ?? false,
+    onProgress: opts.onProgress ?? null,
+    onAssistantMessage: opts.onAssistantMessage ?? null,
+    onToolUse: opts.onToolUse ?? null,
+  });
+  return { promise, kill() { return session.kill(); }, sessionId: effectiveSessionId };
+}
+
+// --- DR-0012: TUI-mode session pool + dispatch helpers ---
+
+/** Module-scoped TUI session pool, keyed by sessionKey (parallel to `sessions` for print mode). */
+const tuiSessions = new Map<string, ClaudeTuiSession>();
+
+/** Shared TmuxControl singleton — stateless, safe to reuse across all TUI sessions. */
+const sharedTmux = new TmuxControl();
+
+/** Pure dispatch: select claude adapter mode from an AgentSpawnConfig.
+ *  Defaults to 'print' for missing or unrecognized values (conservative — never silently
+ *  flips a session into the experimental TUI path). */
+export function selectClaudeMode(config: AgentSpawnConfig): 'print' | 'tui' {
+  return (config as any).claudeBackend === 'tui' ? 'tui' : 'print';
+}
+
+function getOrCreateTuiSession(config: AgentSpawnConfig, sessionIdEffective: string): ClaudeTuiSession {
+  const key = config.sessionKey;
+  let session = tuiSessions.get(key);
+  // If existing session has a different sessionId (e.g. user passed --new), close and recreate.
+  if (session && session.sessionId !== sessionIdEffective) {
+    session.kill();
+    session = undefined;
+  }
+  if (!session) {
+    const channel = config.channel ?? config.env?.SLACK_CHANNEL ?? config.sessionKey;
+    const cwd = config.cwd || DATA_DIR;
+    const opts = sessionOptionsFromSpawnConfig({ ...config, sessionId: sessionIdEffective });
+    const sessionConfig: ClaudeTuiSessionConfig = {
+      channel,
+      sessionId: sessionIdEffective,
+      sessionKey: key,
+      cwd,
+      needsResume: config.resume,
+      tools: opts.tools,
+      systemPrompt: opts.systemPrompt,
+      appendSystemPrompt: opts.appendSystemPrompt,
+      model: opts.model,
+      claudeAgent: opts.claudeAgent,
+      pluginDirs: opts.pluginDirs,
+      outputStyle: opts.outputStyle,
+      extraOption: opts.extraOption ?? null,
+      callbackSource: opts.callbackSource,
+      scheduleTaskId: opts.scheduleTaskId,
+      anthropicBaseUrl: opts.anthropicBaseUrl,
+      extraEnv: opts.extraEnv,
+      context: opts.context,
+      deps: { tmux: sharedTmux, tailFactory: defaultTailFactory },
+    };
+    session = new ClaudeTuiSession(sessionConfig);
+    tuiSessions.set(key, session);
+  }
+  return session;
+}
+
+// --- ClaudeAdapter — DR-0008 §3.2 generic AgentAdapter entry point ---
+//
+// task f7cf scope:
+//   - spawn() returns a real AgentProcess that drives one turn through the pooled ClaudeSession
+//     via event-emitting callbacks (onAssistantMessage / onToolUse), then derives
+//     ask_user_question / plan_written / rate_limit events from the resolved AgentResult
+//     before pushing turn_complete and returning the AgentResult from send().
+//   - AgentSpawnConfig.hooks (NormalizedHookSpec[]) is still NOT consumed; buildHooksSettings
+//     uses the native tools string per DR-0008 §3.5 (Phase 3 work).
+//   - AgentSpawnConfig.mcpServers is still NOT consumed; --mcp-config still references
+//     agent-server/mcp-config.json per DR-0008 §3.6 (Phase 3 work).
+//   - Claude-specific passthrough fields (channel / claudeAgent / callbackSource / scheduleTaskId /
+//     isUserInitiated / rawTools / anthropicBaseUrl) are read directly from AgentSpawnConfig;
+//     they're Phase-3 cleanup targets (see types.ts).
+
+function canonicalToolsToNative(tools: string[] | undefined): string | null {
+  if (!tools || tools.length === 0) return null;
+  const native = tools
+    .map(t => fromCanonical('claude', t))
+    .filter((n): n is string => typeof n === 'string');
+  return native.length ? native.join(',') : null;
+}
+
+function sessionOptionsFromSpawnConfig(config: AgentSpawnConfig): ClaudeSessionOptions & { sessionIdEffective: string } {
+  const sessionIdEffective = config.sessionId || crypto.randomUUID();
+  // rawTools (if set) overrides canonical→native translation so legacy callers that already pass Claude-native
+  // "Bash,Read,..." strings via mode-manager do not need to be refactored in this task.
+  const tools = config.rawTools ?? canonicalToolsToNative(config.tools);
+  return {
+    sessionIdEffective,
+    needsResume: config.resume,
+    model: config.model ?? null,
+    sessionKey: config.sessionKey,
+    systemPrompt: config.systemPrompt ?? null,
+    appendSystemPrompt: config.appendSystemPrompt ?? null,
+    outputStyle: config.outputStyle ?? null,
+    tools,
+    pluginDirs: config.pluginDirs ?? null,
+    isUserInitiated: !!config.isUserInitiated,
+    callbackSource: config.callbackSource ?? null,
+    scheduleTaskId: config.scheduleTaskId ?? null,
+    claudeAgent: config.claudeAgent ?? null,
+    anthropicBaseUrl: config.anthropicBaseUrl,
+    extraEnv: config.env,
+    extraOption: config.extraOption,
+    context: config.cortexContext,
+  };
+}
+
+/** Test hook: mirror of ClaudeSession.toSpawnOptions() for the AgentSpawnConfig entry point.
+ *  Must stay in sync with ClaudeSession constructor + toSpawnOptions — both paths derive
+ *  ClaudeSpawnOptions through deriveClaudeSpawnOptions(), so any field added to that helper
+ *  is covered here without divergence. */
+function computeSpawnArgsForConfig(config: AgentSpawnConfig): string[] {
+  const opts = sessionOptionsFromSpawnConfig(config);
+  const spawnOptions = deriveClaudeSpawnOptions({
+    tools: opts.tools ?? null,
+    systemPrompt: opts.systemPrompt ?? null,
+    appendSystemPrompt: opts.appendSystemPrompt ?? null,
+    model: opts.model ?? null,
+    claudeAgent: opts.claudeAgent ?? null,
+    pluginDirs: opts.pluginDirs ?? null,
+    outputStyle: opts.outputStyle ?? null,
+    extraOption: opts.extraOption,
+    needsResume: opts.needsResume,
+    sessionId: opts.sessionIdEffective,
+  });
+  return buildSpawnArgs(spawnOptions);
+}
+
+export class ClaudeAdapter implements AgentAdapter {
+  readonly backend: Backend = 'claude';
+  readonly capabilities: Set<Capability> = CAPABILITIES_BY_BACKEND.claude;
+
+  spawn(config: AgentSpawnConfig): AgentProcess {
+    // DR-0012: route to TUI implementation when profile selects it.
+    if (selectClaudeMode(config) === 'tui') return this.spawnTui(config);
+    const { sessionIdEffective, ...sessionOptions } = sessionOptionsFromSpawnConfig(config);
+    const channel = config.channel ?? config.env?.SLACK_CHANNEL ?? config.sessionKey;
+    const session = getOrCreateSession(channel, sessionIdEffective, sessionOptions);
+    const stream = createEventStream<NormalizedEvent>();
+    let started = false;
+
+    return {
+      sessionKey: config.sessionKey,
+      get sessionId(): string | null { return session.sessionId; },
+      async send(message: UserMessage): Promise<AgentResult> {
+        if (!started) {
+          stream.push({ type: 'session_started', sessionId: session.sessionId });
+          started = true;
+        }
+        const files = (message.attachments || []).map((a) => ({
+          mimetype: a.mimeType, localPath: a.path, name: path.basename(a.path),
+        }));
+        try {
+          const result = await session.sendMessage(message.text, {
+            files,
+            onAssistantMessage: (text: string) => stream.push({ type: 'assistant_text', text }),
+            onToolUse: (name: string, input: any) =>
+              stream.push({ type: 'tool_use', toolUseId: '', name, input }),
+            onProgress: (p: { num_turns?: number } | null) => {
+              stream.push({ type: 'turn_progress', numTurns: p?.num_turns ?? 0 });
+            },
+          });
+          // Derived events, in order, before the terminating turn_complete.
+          for (const q of (result.askUserQuestions || [])) {
+            stream.push({
+              type: 'ask_user_question',
+              toolUseId: q.toolUseId ?? '',
+              questions: q.questions as any,
+            });
+          }
+          if (result.planFilePath) {
+            stream.push({
+              type: 'plan_written',
+              toolUseId: '',
+              path: result.planFilePath,
+              content: '',
+            });
+          }
+          if (result.rateLimited) {
+            stream.push({ type: 'rate_limit', raw: { message: result.rateLimitMessage } });
+          }
+          // Emit cost_record from Claude CLI result data (tokens from usage, model from modelUsage)
+          if (result.total_cost_usd != null || session.lastTokenUsage) {
+            const tu = session.lastTokenUsage;
+            stream.push({
+              type: 'cost_record',
+              provider: 'anthropic',
+              model: session.lastModelName || session.modelName || 'unknown',
+              tokens_in: tu?.input ?? 0,
+              tokens_out: tu?.output ?? 0,
+              cost_usd: result.total_cost_usd ?? null,
+            });
+          }
+          stream.push({
+            type: 'turn_complete',
+            numTurns: result.num_turns ?? 0,
+            totalCostUsd: result.total_cost_usd ?? null,
+          });
+          return result;
+        } catch (err: any) {
+          if (!err?.cancelled) {
+            stream.push({ type: 'error', message: String(err?.message ?? err), fatal: true });
+          }
+          stream.close();                         // unblock any for-await consumer
+          throw err;
+        }
+      },
+      events: stream.iterable,
+      // Intentionally does NOT call session.close(): sessions are pooled per sessionKey and
+      // reused across runAgentOnce turns. Pool-level cleanup goes through ClaudeAdapter.close(key)
+      // or the legacy closeSession / closeSessionsByPrefix exports.
+      async close(): Promise<void> { stream.close(); },
+      kill(): boolean { return session.kill(); },
+    };
+  }
+
+  /**
+   * DR-0012 TUI-mode dispatch. Returns an AgentProcess whose send() pushes ALL NormalizedEvents
+   * (including derived ones — ask_user_question, plan_*, cost_record, turn_complete) via
+   * ClaudeTuiSession's onEvent stream, then resolves with the TuiAgentResult cast to AgentResult.
+   *
+   * Sessions are pooled in `tuiSessions` by sessionKey; multi-turn reuses the same tmux session.
+   * kill() forwards to ClaudeTuiSession.kill() which tears down the tmux session.
+   */
+  private spawnTui(config: AgentSpawnConfig): AgentProcess {
+    const sessionIdEffective = config.sessionId || crypto.randomUUID();
+    const session = getOrCreateTuiSession(config, sessionIdEffective);
+    const stream = createEventStream<NormalizedEvent>();
+    let started = false;
+
+    return {
+      sessionKey: config.sessionKey,
+      get sessionId(): string | null { return session.sessionId; },
+      async send(message: UserMessage): Promise<AgentResult> {
+        if (!started) {
+          stream.push({ type: 'session_started', sessionId: session.sessionId });
+          started = true;
+        }
+        const files = (message.attachments || []).map((a) => ({
+          mimetype: a.mimeType, localPath: a.path, name: path.basename(a.path),
+        }));
+        try {
+          const tuiResult = await session.sendMessage(message.text, {
+            files,
+            onEvent: (ev: NormalizedEvent) => stream.push(ev),
+          });
+          // TuiAgentResult shape lines up with AgentResult — only structural cast needed.
+          return tuiResult as unknown as AgentResult;
+        } catch (err: any) {
+          if (!err?.cancelled) {
+            stream.push({ type: 'error', message: String(err?.message ?? err), fatal: true });
+          }
+          stream.close();
+          throw err;
+        }
+      },
+      events: stream.iterable,
+      async close(): Promise<void> { stream.close(); },
+      kill(): boolean { return session.kill(); },
+    };
+  }
+
+  async close(sessionKey: string): Promise<void> {
+    closeSession(sessionKey, sessionKey);
+    // Also clean up any TUI session under this key (DR-0012).
+    const tui = tuiSessions.get(sessionKey);
+    if (tui) {
+      tui.close();
+      tuiSessions.delete(sessionKey);
+    }
+  }
+
+  kill(sessionKey: string): boolean {
+    const session = sessions.get(sessionKey);
+    if (session) return session.kill();
+    const tui = tuiSessions.get(sessionKey);
+    if (tui) {
+      const killed = tui.kill();
+      tuiSessions.delete(sessionKey);
+      return killed;
+    }
+    return false;
+  }
+
+  listSessions(): string[] {
+    return [...sessions.keys(), ...tuiSessions.keys()];
+  }
+}
+
+/**
+ * DR-0012 §3.6 startup hook — sweep orphan tmux sessions matching the cortex-claude- prefix.
+ *
+ * Rationale: tmux sessions are independent of agent-server's process lifetime, but the in-memory
+ * `tuiSessions` Map is not. After an agent-server restart we have no record of channel/sessionKey
+ * → tmux mapping (it was never persisted), so we cannot re-adopt existing tmux sessions into the
+ * pool. The honest choice is to kill them at startup; otherwise they accumulate forever and a
+ * later session reusing the same sessionId would conflict with `tmux new-session -s <name>`
+ * (which fails on duplicate). Logs the killed names so operators can investigate if needed.
+ *
+ * Full re-adoption (preserving an in-flight TUI session across restart) requires persisting
+ * sessionKey + cwd + needsResume metadata to disk — deferred as a follow-up.
+ *
+ * Override `exec` in tests so we don't touch the real tmux server.
+ */
+export function recoverTuiOrphans(exec?: TmuxExec): { found: string[]; killed: string[] } {
+  const tmux = exec ? new TmuxControl(exec) : sharedTmux;
+  const found = tmux.listSessions(TUI_TMUX_NAME_PREFIX);
+  if (found.length === 0) return { found: [], killed: [] };
+  const killed: string[] = [];
+  for (const name of found) {
+    try {
+      tmux.killSession(name);
+      killed.push(name);
+    } catch (e) {
+      log.warn(`recoverTuiOrphans: failed to kill ${name}: ${(e as Error).message}`);
+    }
+  }
+  log.info(`recoverTuiOrphans: swept ${killed.length}/${found.length} orphan tmux sessions (prefix=${TUI_TMUX_NAME_PREFIX})`);
+  return { found, killed };
+}
+
+export const _test = {
+  extractAskUserQuestions,
+  mergeSubstantialOutput,
+  computeSpawnArgs: computeSpawnArgsForConfig,
+};
+
+// Re-exported for webhook consumer (parity with pre-refactor claude-bridge.ts:286 export)
+export { getCurrentPlanFilePath };
+export { CancelledError };

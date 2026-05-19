@@ -1,0 +1,88 @@
+// input:  ScheduleTarget + lookup callbacks (channel/session/thread stores)
+// output: planScheduledDispatch — pure decision tree picking how to land a fired schedule
+// pos:    extracted from scheduled-task.ts so the 4-way target dispatch is unit-testable
+//         without spinning up the platform adapter, execution registry, or thread runner.
+// >>> If I am updated, update my header comment and the parent folder's CORTEX.md <<<
+
+import type { ScheduleTarget, ScheduleTask } from '@store/schedule-repo.js';
+import type { ThreadRecord } from '@core/types/thread-types.js';
+import type { SessionRecord } from '@store/session-registry-repo.js';
+
+/** What scheduled-task.ts should do at fire time. Each kind maps to one runtime branch:
+ *  - fresh / default-thread → createDefaultThread + runThreadExec (default-path)
+ *  - continue-thread → continueThread (resumes the existing thread's slot session)
+ *  - skip → record lastSkipped, post a one-line Slack note, do not run.
+ */
+export type DispatchPlan =
+  | { kind: 'fresh'; channel: string }
+  | { kind: 'default-thread'; channel: string; existingSessionId: string | null }
+  | { kind: 'continue-thread'; channel: string; threadId: string }
+  | { kind: 'skip'; reason: string };
+
+export interface DispatchLookups {
+  /** Active thread (status running|waiting) for the channel, or null. */
+  findActiveThread(channel: string): ThreadRecord | null;
+  /** Channel-default sessionId (the one a fresh user message would resume), or undefined. */
+  getChannelSession(channel: string): Promise<string | undefined>;
+  /** Look up a cortex-XXXX session record. Null if it's been GC'd or never registered. */
+  lookupSession(sessionName: string): Promise<SessionRecord | null>;
+  /** Look up a thread record by id. Null if missing. */
+  getThread(threadId: string): ThreadRecord | null;
+}
+
+export interface DispatchPlanInput {
+  target: ScheduleTarget | undefined;
+  fallback: ScheduleTask['fallback'];
+  /** Channel to use when falling back to fresh — typically the schedule's own task.channel. */
+  fallbackChannel: string;
+  lookups: DispatchLookups;
+}
+
+function applyFallback(input: DispatchPlanInput, reason: string): DispatchPlan {
+  const policy = input.fallback ?? 'fresh';
+  if (policy === 'skip') return { kind: 'skip', reason };
+  // 'wait' falls through to fresh too — the timer-level wait/retry isn't the planner's job;
+  // see scheduled-task.ts for the future "wait" implementation that re-arms a short-delay timer.
+  return { kind: 'fresh', channel: input.fallbackChannel };
+}
+
+export async function planScheduledDispatch(input: DispatchPlanInput): Promise<DispatchPlan> {
+  const target = input.target ?? { kind: 'fresh' };
+
+  if (target.kind === 'fresh') {
+    return { kind: 'fresh', channel: input.fallbackChannel };
+  }
+
+  if (target.kind === 'channel') {
+    const active = input.lookups.findActiveThread(target.channel);
+    if (active) {
+      return { kind: 'continue-thread', channel: target.channel, threadId: active.id };
+    }
+    const sessionId = (await input.lookups.getChannelSession(target.channel)) ?? null;
+    return { kind: 'default-thread', channel: target.channel, existingSessionId: sessionId };
+  }
+
+  if (target.kind === 'session') {
+    const record = await input.lookups.lookupSession(target.sessionName);
+    if (!record) {
+      return applyFallback(input, `session ${target.sessionName} no longer exists`);
+    }
+    return { kind: 'default-thread', channel: record.channel, existingSessionId: record.sessionId };
+  }
+
+  if (target.kind === 'thread') {
+    const thread = input.lookups.getThread(target.threadId);
+    if (!thread) {
+      return applyFallback(input, `thread ${target.threadId} no longer exists`);
+    }
+    if (thread.status !== 'running' && thread.status !== 'waiting') {
+      return applyFallback(input, `thread ${target.threadId} is ${thread.status}`);
+    }
+    return { kind: 'continue-thread', channel: thread.channel, threadId: target.threadId };
+  }
+
+  // Exhaustive check — TS will flag if a new ScheduleTarget kind is added.
+  const _exhaustive: never = target;
+  void _exhaustive;
+  return { kind: 'fresh', channel: input.fallbackChannel };
+}

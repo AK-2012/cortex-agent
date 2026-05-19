@@ -1,0 +1,25 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "NodeNext",
+    "moduleDetection": "force",
+    "moduleResolution": "NodeNext",
+    "strict": false,
+    "noImplicitAny": false,
+    "esModuleInterop": true,
+    "resolveJsonModule": true,
+    "skipLibCheck": true,
+    "types": ["node"],
+    "baseUrl": ".",
+    "paths": {
+      "@core/*":     ["src/core/*"],
+      "@store/*":    ["src/store/*"],
+      "@events/*":   ["src/events/*"],
+      "@domain/*":   ["src/domain/*"],
+      "@platform/*": ["src/platform/*"],
+      "@orch/*":     ["src/orchestration/*"],
+      "@entry/*":    ["src/entry/*"]
+    }
+  },
+  "include": ["src/**/*.ts", "tests/**/*.ts"]
+}

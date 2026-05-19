@@ -1,0 +1,155 @@
+// input:  profiles.json + JsonRepository
+// output: ProfileRepo (read / readSync / save / mutate / flush) + startProfileWatcher
+// pos:    Profile persistence layer. Based on JsonRepository abstraction (Pattern A), AsyncMutex serializes reads/writes of profiles.json.
+//         Read-heavy, write-light; profile-manager.ts historically used sync readFileSync-driven config reading. To avoid
+//         converting the sync API to async (which would cascade to mode-manager/scheduler/command-handlers/tests and dozens of other call sites),
+//         readSync() is provided: the first read uses readFileSync, then shares the cache; subsequent writes use async save()/mutate()
+//         and update the cache synchronously, ensuring sync reads always see the latest value.
+//         startProfileWatcher() watches profiles.json for changes, invalidates the cache and reloads, making external edits effective immediately.
+//         ValidationException is handled by the caller (profile-manager.ts) to avoid
+//         forming a circular dependency (type-only import).
+// >>> If I am updated, update my header comment and the parent folder's CORTEX.md <<<
+
+import { readFileSync, watch, existsSync, type FSWatcher } from 'fs';
+import * as path from 'path';
+import { JsonRepository } from './json-repository.js';
+import { CONFIG_DIR } from '@core/paths.js';
+import { createLogger } from '@core/log.js';
+import type { ProfilesFile } from '@domain/agents/profile-manager.js';
+
+const log = createLogger('profile-repo');
+
+export const PROFILES_FILE = path.join(CONFIG_DIR, 'profiles.json');
+
+export class ProfileRepo {
+  private readonly _repo: JsonRepository<ProfilesFile>;
+  private readonly _filePath: string;
+  private _syncCache: ProfilesFile | null = null;
+
+  constructor(filePath: string = PROFILES_FILE) {
+    this._filePath = filePath;
+    this._repo = new JsonRepository<ProfilesFile>({
+      filePath,
+      // profiles.json is required; throw immediately if not present.
+      // Matches existing loadProfilesFile() behavior which throws on ENOENT.
+      defaultValue: () => { throw new Error(`profiles.json not found at ${filePath}`); },
+      // Basic cast; full schema validation is performed by profile-manager.ts callers
+      // (validateProfilesFile) to avoid a circular runtime import.
+      migrate: (raw) => raw as ProfilesFile,
+    });
+  }
+
+  async read(): Promise<ProfilesFile> {
+    const data = await this._repo.read();
+    this._syncCache = data;
+    return data;
+  }
+
+  /**
+   * Synchronous read for legacy sync callers (profile-manager.ts public API).
+   * First call reads from disk; subsequent calls serve from cache. save()/mutate()
+   * update the cache on success so sync readers see fresh data.
+   */
+  readSync(): ProfilesFile {
+    if (this._syncCache) return this._syncCache;
+    const raw = readFileSync(this._filePath, 'utf8');
+    const parsed = JSON.parse(raw) as ProfilesFile;
+    this._syncCache = parsed;
+    return parsed;
+  }
+
+  async save(data: ProfilesFile): Promise<void> {
+    await this._repo.write(data);
+    this._syncCache = data;
+  }
+
+  async mutate<R>(fn: (cur: ProfilesFile) => { next: ProfilesFile; result: R }): Promise<R> {
+    return this._repo.mutate((cur) => {
+      const { next, result } = fn(cur);
+      this._syncCache = next;
+      return { next, result };
+    });
+  }
+
+  /** Drop the in-memory cache so the next read() fetches from disk. Test hook. */
+  invalidate(): void {
+    this._repo.invalidate();
+    this._syncCache = null;
+  }
+
+  /** Wait for any in-flight mutate() to complete. For graceful SIGTERM drain. */
+  flush(): Promise<void> {
+    return this._repo.flush();
+  }
+}
+
+export const profileRepo = new ProfileRepo();
+
+// --- Admin notification (hot-reload → Slack) ---
+let _adminNotifier: ((text: string) => void) | null = null;
+export function setAdminNotifier(fn: (text: string) => void): void { _adminNotifier = fn; }
+
+/**
+ * Watch profiles.json for external edits and hot-reload the cache.
+ * Mirrors the pattern used by startMachineRegistryWatcher() in dispatch-utils.ts.
+ *
+ * Returns a stop function — call it to tear down the watcher (e.g. in tests or SIGTERM).
+ *
+ * @param repo     ProfileRepo instance to invalidate on change (defaults to singleton).
+ * @param filePath Path to watch (defaults to PROFILES_FILE).
+ */
+export function startProfileWatcher(
+  repo: ProfileRepo = profileRepo,
+  filePath: string = PROFILES_FILE,
+): () => void {
+  if (!existsSync(filePath)) return () => {};
+
+  let watcher: FSWatcher | null = null;
+  let reloadTimer: ReturnType<typeof setTimeout> | null = null;
+
+  const reload = () => {
+    try {
+      // Validate the file is parseable BEFORE touching the cache.
+      // This prevents invalidate() from leaving cache null if the file is corrupt.
+      const raw = readFileSync(filePath, 'utf8');
+      JSON.parse(raw); // throws on invalid JSON — cache stays intact
+      repo.invalidate();
+      repo.readSync(); // re-fill cache from the validated content
+      log.info('Hot-reload: profiles.json reloaded');
+      _adminNotifier?.(':arrows_counterclockwise: `profiles.json` hot-reloaded');
+    } catch (e) {
+      log.error(`Hot-reload profiles.json failed: ${(e as Error).message} — keeping previous config`);
+      _adminNotifier?.(`:warning: \`profiles.json\` hot-reload FAILED — keeping previous config`);
+    }
+  };
+
+  const setup = () => {
+    try {
+      if (watcher) watcher.close();
+      watcher = watch(filePath, (eventType) => {
+        if (eventType === 'rename') {
+          // File was atomically replaced (inode changed); reload now and re-create
+          // the watcher on the new inode after a short settle delay.
+          reload();
+          setTimeout(() => setup(), 100);
+          return;
+        }
+        // 'change' event — debounce to coalesce rapid writes.
+        if (reloadTimer) clearTimeout(reloadTimer);
+        reloadTimer = setTimeout(() => {
+          reloadTimer = null;
+          reload();
+        }, 300);
+      });
+    } catch (e) {
+      log.error(`Failed to watch profiles.json: ${(e as Error).message}`);
+    }
+  };
+
+  setup();
+
+  return () => {
+    if (watcher) { watcher.close(); watcher = null; }
+    if (reloadTimer) { clearTimeout(reloadTimer); reloadTimer = null; }
+  };
+}

@@ -1,0 +1,80 @@
+# Dependencies
+node_modules/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+
+# Runtime state
+agent-server/sessions.json
+agent-server/session-registry.json
+agent-server/mode.json
+agent-server/costs.json
+agent-server/costs.jsonl
+agent-server/pending-tasks.json
+agent-server/threads.json
+agent-server/conversation-ledger.json
+agent-server/schedules.json
+agent-server/orient-state.json
+agent-server/executions.json
+agent-server/logs/
+agent-server/logs/session-activity/
+agent-server/logs/events/
+agent-server/tmp/
+agent-server/tasks/
+agent-server/data/pi/
+agent-server/dist/
+agent-server/src/**/*.js
+agent-server/tests/**/*.js
+agent-server/prompts/
+agent-server/plugins/
+agent-server/hooks/
+
+client/dist/
+client/cortex-client-*.tgz
+agent-server/cortex-agent-server-*.tgz
+
+# Machine-specific (generated per host)
+CORTEX.local.md
+agent-server/mcp-config.json
+agent-server/.env
+agent-server/session-hooks.json
+.cortex-task.md
+.cortex-task-*.md
+.cortex-status
+.cortex-status-*
+.cortex-pid
+.cortex-pid-*
+.cortex-log
+.cortex-log.txt
+logs/
+.claude/
+
+# Task execution artifacts
+tmp/
+*.pid
+
+# Crash dumps
+core_*.nvcudmp
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# Generated: memory index files (auto-rebuilt by memory-watcher / memory-index-regen)
+research-context/projects/*/experiments/index.md
+research-context/projects/*/knowledge/index.md
+research-context/projects/*/patterns/index.md
+
+# Local worktrees
+.claude/worktrees/
+
+data/client-pids.json
+data/client-version.json
+agent-server/.env.client
+agent-server/src/data/

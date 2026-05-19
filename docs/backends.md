@@ -1,0 +1,176 @@
+# Backends
+
+A backend is Cortex's adapter for a specific coding-agent CLI. Cortex
+does not call LLM APIs directly. It spawns a coding agent (Claude Code,
+PI, or Codex) as a child process, sends messages to it, and consumes a
+normalized event stream. Each backend implements the `AgentAdapter`
+interface defined in `agent-server/src/agent-adapter/types.ts`.
+
+## Supported backends
+
+| Backend | Status | Binary | npm package | Feature level |
+|---|---|---|---|---|
+| Claude Code | Supported | `claude` | `@anthropic-ai/claude-code` | Full (8/8 capabilities) |
+| PI | Supported | `pi` | `@mariozechner/pi-coding-agent` | Full (8/8 capabilities) |
+| Codex | Planned | `codex` | — | Partial (3/8 capabilities) |
+
+## How backends work
+
+When an agent session starts, Cortex resolves the active profile (from
+`profiles.json` or the `--profile` flag) to determine which backend to use.
+It then calls `getAdapter(backend)` to get the adapter instance and calls
+`adapter.spawn(config)` to start a session.
+
+The `AgentSpawnConfig` carries the full session context: system prompt,
+plugin directories, tool allowlist, MCP server config, hooks, model name,
+and backend-specific passthroughs. The adapter translates this into
+backend-native CLI arguments and spawns the coding agent.
+
+From there, Cortex sends user messages and receives a normalized event
+stream. The normalization layer (`agent-adapter/normalize/`) translates
+each backend's native event format into a common `NormalizedEvent`
+discriminated union, so the orchestration layer never needs to know which
+backend is running.
+
+## Feature matrix
+
+Cortex defines eight capabilities that a backend may support. The
+orchestration layer checks capabilities before attempting backend-specific
+operations.
+
+| Capability | Claude Code | PI | Codex | Description |
+|---|---|---|---|---|
+| `hooks` | yes | yes | no | PreToolUse/PostToolUse/Stop hooks via hook-bridge |
+| `plugins` | yes | yes | no | Role-scoped skill plugins via `--skill` or equivalent |
+| `mcp` | yes | yes | yes | MCP tool server integration |
+| `plan-mode` | yes | yes | no | EnterPlanMode/ExitPlanMode tool support |
+| `ask-user-question` | yes | yes | no | AskUserQuestion tool support |
+| `system-prompt-override` | yes | yes | yes | Custom system prompt injection |
+| `session-resume` | yes | yes | yes | Resume an existing session |
+| `tool-allowlist` | yes | yes | no | Restrict available tools to a subset |
+
+## Claude Code
+
+The reference backend. Supports all eight capabilities natively. Two
+adapter modes are available:
+
+**Print mode** (`claudeBackend: "print"`, default). Uses `claude -p
+--stream-json` for one-shot turns. Each user message spawns a fresh Claude
+invocation. Fast, stateless, and the recommended mode for most use cases.
+
+**TUI mode** (`claudeBackend: "tui"`). Spawns an interactive Claude session
+under tmux and tails the session's JSONL file for events. Supports
+multi-turn conversation with session persistence. Heavier resource usage
+but allows interactive workflows.
+
+Claude Code adapter session pool is keyed by channel for session reuse.
+Cost reporting reverse-derives USD from `message.usage` token counts using
+Anthropic's published pricing.
+
+## PI
+
+Full feature parity with Claude Code. PI's adapter bridges the gap where
+PI's native feature set differs:
+
+- **MCP** — implemented via `mcp-bridge.ts`, an extension that connects PI
+  to Cortex's MCP server. Auto-injected via `--extension` at spawn time.
+- **PlanMode / AskUserQuestion** — implemented via `tool-shims.ts` pseudo
+  tools that register `ask`, `exit_plan`, and `todo` as first-class PI
+  tools, routing responses through `extension_ui_response`.
+- **Hooks** — implemented via `hook-bridge.ts`, which translates PI tool
+  events to Cortex hook scripts.
+- **Plugins** — PI's native `--skill` flag maps to Cortex's plugin system.
+
+PI sessions use `--session <path>` for resume and `--system-prompt` for
+system prompt override. The adapter handles LF-only NDJSON framing for
+PI's event stream.
+
+## Codex
+
+Codex currently supports three capabilities: MCP, system prompt override,
+and session resume. The adapter is present in the codebase but the backend
+is marked as planned rather than supported.
+
+## Selecting a backend
+
+Backends are selected per profile in `$CORTEX_HOME/config/profiles.json`
+(see [configuration.md](./configuration.md) for the full profiles schema):
+
+```json
+{
+  "defaultProfile": "plan",
+  "profiles": {
+    "plan": {
+      "model": "claude-sonnet-4-20250514",
+      "backend": "claude"
+    },
+    "execute": {
+      "model": "claude-sonnet-4-20250514",
+      "backend": "pi"
+    }
+  }
+}
+```
+
+The `backend` field accepts `"claude"`, `"pi"`, or `"codex"`. If omitted,
+it defaults to `"claude"`.
+
+Thread templates can also specify a profile per agent, allowing different
+agents in the same pipeline to use different backends. See
+[threads.md](./threads.md) for template configuration.
+
+## Fallback behavior
+
+Each profile entry can specify a `fallback` array of alternative profiles.
+If the primary backend call fails with a transient error (network timeout,
+rate limit, authentication), Cortex iterates through the fallback chain in
+order. Each fallback entry inherits unspecified fields from the primary.
+
+Example:
+
+```json
+{
+  "plan": {
+    "model": "claude-sonnet-4-20250514",
+    "backend": "claude",
+    "fallback": [
+      { "model": "claude-sonnet-4-20250514", "backend": "pi" }
+    ]
+  }
+}
+```
+
+## Cost reporting
+
+Cost reporting differs by backend:
+
+- **Claude Code** — reverse-derives USD cost from `message.usage` token
+  counts (input/output) using Anthropic's published per-model pricing.
+  Costs are written to `$CORTEX_HOME/data/costs.jsonl`.
+- **PI** — cost reporting depends on the PI coding agent's provider
+  configuration. The adapter captures whatever cost metadata PI emits.
+- **Codex** — cost reporting is not yet implemented.
+
+All cost records follow the same JSONL format and are subject to a 90-day
+rolling retention window. Cost queries via MCP tools aggregate across all
+backends — see [mcp.md](./mcp.md) for the `cost_query` tool.
+
+## Adding a new backend
+
+New backends implement the `AgentAdapter` interface in a new directory
+under `agent-server/src/agent-adapter/`. The required surface:
+
+1. **`adapter.ts`** — implements `AgentAdapter` with `spawn()`, `close()`,
+   `kill()`, and `listSessions()`. Returns an `AgentProcess` from `spawn()`.
+2. **`AgentProcess`** — exposes `send(message)` for user messages and
+   `events` as an async iterable of `NormalizedEvent`. Must also support
+   `close()` and `kill()`.
+3. **`event-parser.ts`** — translates the backend's native event format to
+   `NormalizedEvent` discriminated union members.
+4. **Registration** — add the adapter to the `ADAPTERS` map in
+   `agent-adapter/index.ts`, add capabilities to `capabilities.ts`, and
+   include the backend label in the `Backend` type union in `types.ts`.
+
+The normalization layer (`agent-adapter/normalize/`) provides shared
+utilities for event stream queuing, tool name translation, and hook
+specification that all backends use.

@@ -1,0 +1,8 @@
+{"type":"system","subtype":"init","session_id":"sess-03-multi","cwd":"/repo","tools":["Bash","Read"],"model":"claude-opus-4-6"}
+{"type":"assistant","message":{"id":"msg_03a","role":"assistant","content":[{"type":"tool_use","id":"toolu_03a","name":"Bash","input":{"command":"git status --short","description":"Check working tree"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_03a","content":" M src/app.ts","is_error":false}]}}
+{"type":"assistant","message":{"id":"msg_03b","role":"assistant","content":[{"type":"tool_use","id":"toolu_03b","name":"Bash","input":{"command":"git diff src/app.ts","description":"Inspect staged diff"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_03b","content":"@@ -1 +1 @@\n-old\n+new","is_error":false}]}}
+{"type":"assistant","message":{"id":"msg_03c","role":"assistant","content":[{"type":"tool_use","id":"toolu_03c","name":"Bash","input":{"command":"git log --oneline -3","description":"Recent commits"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_03c","content":"abc123 msg","is_error":false}]}}
+{"type":"result","subtype":"success","is_error":false,"num_turns":3,"total_cost_usd":0.05,"session_id":"sess-03-multi","result":"ok"}

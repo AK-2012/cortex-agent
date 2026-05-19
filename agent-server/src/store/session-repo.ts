@@ -1,0 +1,71 @@
+// input:  sessions.json + JsonRepository
+// output: SessionRepo (async getSessionAsync / setSessionAsync / deleteSessionAsync)
+// pos:    Session persistence layer. Based on JsonRepository abstraction, AsyncMutex serializes reads/writes of sessions.json.
+// >>> If I am updated, update my header comment and the parent folder's CORTEX.md <<<
+
+import * as path from 'path';
+import { JsonRepository } from './json-repository.js';
+import { STORE_DIR } from '@core/paths.js';
+
+const SESSIONS_FILE = path.join(STORE_DIR, 'sessions.json');
+
+/** Shape of sessions.json: `{"backend:channel": sessionId, "legacyChannel": sessionId, ...}` */
+export type SessionsData = Record<string, string>;
+
+/** Key format: `backend:channel`. */
+function sessionKey(backend: string, channel: string): string {
+  return `${backend}:${channel}`;
+}
+
+/** Whether a channel name should be treated as "bare" (eligible for legacy-key cleanup). */
+function isBareChannel(channel: string): boolean {
+  return !channel.includes(':');
+}
+
+/** Remove a legacy bare-channel key if the channel qualifies. */
+function removeLegacyKey(sessions: SessionsData, channel: string): void {
+  if (isBareChannel(channel) && channel in sessions) {
+    delete sessions[channel];
+  }
+}
+
+class SessionRepo {
+  private _repo = new JsonRepository<SessionsData>({
+    filePath: SESSIONS_FILE,
+    defaultValue: () => ({}),
+    migrate: (raw) => (typeof raw === 'object' && raw !== null ? (raw as SessionsData) : ({})),
+  });
+
+  async getSessionAsync(channel: string, backend: string): Promise<string | undefined> {
+    const sessions = await this._repo.read();
+    return sessions[sessionKey(backend, channel)] ?? sessions[channel] ?? undefined;
+  }
+
+  async setSessionAsync(channel: string, sessionId: string, backend: string): Promise<void> {
+    await this._repo.mutate((sessions) => {
+      sessions[sessionKey(backend, channel)] = sessionId;
+      removeLegacyKey(sessions, channel);
+      return { next: sessions, result: undefined };
+    });
+  }
+
+  async deleteSessionAsync(channel: string, backend: string): Promise<void> {
+    await this._repo.mutate((sessions) => {
+      delete sessions[sessionKey(backend, channel)];
+      removeLegacyKey(sessions, channel);
+      return { next: sessions, result: undefined };
+    });
+  }
+
+  /** Drop the in-memory cache so the next read() fetches from disk. Test hook. */
+  invalidate(): void {
+    this._repo.invalidate();
+  }
+
+  /** Wait for any in-flight mutate() to complete. For graceful SIGTERM drain. */
+  flush(): Promise<void> {
+    return this._repo.flush();
+  }
+}
+
+export const sessionRepo = new SessionRepo();

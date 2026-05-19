@@ -1,0 +1,150 @@
+// input:  tmux command argv (string[])
+// output: TmuxControl class with hasSession / newSession / killSession / sendKeys / pasteText / capturePane / listSessions
+// pos:    Foundational utility for Claude TUI adapter (DR-0012 Phase 1) — wraps tmux CLI behind an injectable exec
+// >>> If I am updated, update my header comment and the parent folder's CORTEX.md <<<
+
+import { spawnSync } from 'child_process';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
+import * as crypto from 'crypto';
+
+export interface TmuxExecResult {
+  stdout: string;
+  stderr: string;
+  status: number;
+}
+
+export type TmuxExec = (args: string[]) => TmuxExecResult;
+
+/** Default exec: forks real tmux via spawnSync. Tests inject a mock exec to avoid touching the real tmux server. */
+export const defaultTmuxExec: TmuxExec = (args) => {
+  const r = spawnSync('tmux', args, { encoding: 'utf-8' });
+  return {
+    stdout: r.stdout ?? '',
+    stderr: r.stderr ?? '',
+    status: typeof r.status === 'number' ? r.status : -1,
+  };
+};
+
+export interface NewSessionOptions {
+  /** tmux session name, e.g. "cortex-claude-<sessionId>" */
+  name: string;
+  /** Command argv to run inside the session, e.g. ['claude', '--session-id', '...'] */
+  command: string[];
+  /** Working directory for the spawned shell/command (tmux -c) */
+  cwd: string;
+  /** Extra environment variables surfaced to the child via tmux -e (each entry becomes "-e KEY=VAL") */
+  env?: Record<string, string>;
+  /** Pane columns (tmux -x). Default 200. */
+  cols?: number;
+  /** Pane rows (tmux -y). Default 50. */
+  rows?: number;
+}
+
+/**
+ * Stateless tmux command wrapper. All side effects flow through the injected exec — tests inject mocks,
+ * production uses {@link defaultTmuxExec}. No internal state means safe concurrent use.
+ *
+ * @see DR-0012 §3.1 (architecture) — this is the bottom-most utility used by adapter-tui.
+ */
+export class TmuxControl {
+  constructor(private readonly exec: TmuxExec = defaultTmuxExec) {}
+
+  /** Returns true iff `tmux has-session -t <name>` exits 0. */
+  hasSession(name: string): boolean {
+    const r = this.exec(['has-session', '-t', name]);
+    return r.status === 0;
+  }
+
+  /**
+   * Create a detached tmux session running the given command in the given cwd.
+   * Throws on tmux non-zero exit (e.g. duplicate session name).
+   */
+  newSession(opts: NewSessionOptions): void {
+    const cols = opts.cols ?? 200;
+    const rows = opts.rows ?? 50;
+    const args: string[] = [
+      'new-session', '-d', '-s', opts.name,
+      '-c', opts.cwd,
+      '-x', String(cols), '-y', String(rows),
+    ];
+    if (opts.env) {
+      for (const [k, v] of Object.entries(opts.env)) {
+        args.push('-e', `${k}=${v}`);
+      }
+    }
+    args.push('--');
+    args.push(...opts.command);
+    const r = this.exec(args);
+    if (r.status !== 0) {
+      throw new Error(`tmux new-session failed (status=${r.status}): ${r.stderr.trim() || r.stdout.trim() || '<no stderr>'}`);
+    }
+  }
+
+  /** Kill a tmux session. Idempotent: missing session is not an error (matches tmux's own semantics for our use case). */
+  killSession(name: string): void {
+    this.exec(['kill-session', '-t', name]);
+    // Intentionally ignore status — if the session is already gone, we're done.
+  }
+
+  /**
+   * Send one or more tmux key tokens to the session. Tokens are passed verbatim to tmux,
+   * so callers can use 'Enter', 'Escape', 'C-u', etc. No-op when no keys supplied.
+   */
+  sendKeys(name: string, ...keys: string[]): void {
+    if (keys.length === 0) return;
+    this.exec(['send-keys', '-t', name, ...keys]);
+  }
+
+  /**
+   * Paste arbitrary text (including multi-line + non-ASCII + shell metachars) into the session's
+   * input area without submitting it. Internally: write text to a tempfile → tmux load-buffer (named
+   * buffer to avoid concurrent collisions) → tmux paste-buffer -d (free buffer after paste) → unlink tempfile.
+   *
+   * Does NOT send Enter — caller decides whether to submit (typically `sendKeys(name, 'Enter')` after).
+   *
+   * Why a named buffer + -d: tmux has a global anonymous paste buffer; concurrent sessions on the same
+   * tmux server would race. Named buffers + -d (auto-delete after paste) avoid that.
+   *
+   * @see DR-0012 spike §4 — paste-buffer is more reliable than send-keys -l for special chars.
+   */
+  pasteText(name: string, text: string): void {
+    const bufName = `cortex-${crypto.randomBytes(6).toString('hex')}`;
+    const tmpfile = path.join(os.tmpdir(), `cortex-tmux-paste-${bufName}.txt`);
+    fs.writeFileSync(tmpfile, text, 'utf8');
+    try {
+      const r1 = this.exec(['load-buffer', '-b', bufName, tmpfile]);
+      if (r1.status !== 0) {
+        throw new Error(`tmux load-buffer failed (status=${r1.status}): ${r1.stderr.trim()}`);
+      }
+      const r2 = this.exec(['paste-buffer', '-d', '-b', bufName, '-t', name]);
+      if (r2.status !== 0) {
+        throw new Error(`tmux paste-buffer failed (status=${r2.status}): ${r2.stderr.trim()}`);
+      }
+    } finally {
+      try { fs.unlinkSync(tmpfile); } catch { /* best effort */ }
+    }
+  }
+
+  /** Read the current visible pane content. Used only for diagnostics — production paths rely on jsonl. */
+  capturePane(name: string): string {
+    const r = this.exec(['capture-pane', '-t', name, '-p']);
+    return r.stdout;
+  }
+
+  /**
+   * List all tmux session names on the server, optionally filtered by prefix.
+   * Returns [] if no tmux server is running (status != 0) — graceful for the "agent-server startup
+   * with no prior tmux state" case.
+   *
+   * @see DR-0012 §3.6 — used at agent-server startup to discover orphan TUI sessions for re-adoption.
+   */
+  listSessions(prefix?: string): string[] {
+    const r = this.exec(['list-sessions', '-F', '#{session_name}']);
+    if (r.status !== 0) return [];
+    const names = r.stdout.split('\n').map(s => s.trim()).filter(s => s.length > 0);
+    if (!prefix) return names;
+    return names.filter(n => n.startsWith(prefix));
+  }
+}

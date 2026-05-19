@@ -1,0 +1,478 @@
+---
+name: thread
+description: "Use when working with the Cortex thread system — understanding thread architecture, writing or modifying thread-templates.json (agents, templates, transitions, hooks), debugging thread execution, or when the user asks about multi-agent pipelines, agent orchestration, or the !thread command. Also trigger when modifying prompts/directives/, prompts/systemPrompts/, or prompts/promptTemplates/ files that feed into threads."
+author: Cortex
+version: 1.0.0
+allowed-tools:
+  - Read
+  - Write
+  - Edit
+  - Bash
+  - Grep
+  - Glob
+date: 2026-04-12
+---
+
+# Thread System
+
+You are Cortex, working with the Thread multi-agent orchestration system.
+
+## Arguments
+$ARGUMENTS
+
+---
+
+## What Is a Thread?
+
+A Thread is a **multi-agent orchestration work unit** — a managed pipeline that coordinates one or more Claude Code agent instances. Each thread has:
+
+- A unique `ThreadId` (`thr_XXXXX`)
+- A file-system workspace at `{REPO_ROOT}/tmp/threads/thr_XXXX/`
+- A shared `artifact.md` file through which agents communicate
+- A lifecycle with states: `running` → `completed` | `failed` | `cancelled` | `aborted`
+- Cost tracking and step history
+
+Threads can be **template-based** (following a predefined multi-agent pipeline) or **ad-hoc** (dynamically assembled by adding agents one at a time).
+
+### Architecture Layer Diagram
+
+```
+Slack message / Scheduler / Task Dispatch
+         │
+   message-router.ts / scheduled-runner.ts
+         │
+   thread-manager.ts  (orchestration: create, step, transition, prompt assembly)
+         │
+   thread-runner.ts   (execution loop: run agents, hooks, Slack output)
+         │
+   runAgent() → claude-bridge.ts → Claude Code CLI process
+         │
+   VirtualSlackMessage → Slack
+```
+
+### Thread Lifecycle States
+
+| State | Meaning | Terminal? |
+|-------|---------|-----------|
+| `running` | An agent step is in progress | No |
+| `waiting` | Paused, waiting for user input | No |
+| `completed` | All steps done | Yes |
+| `failed` | Unrecoverable error | Yes |
+| `cancelled` | User cancelled via `!thread cancel` | Yes |
+| `aborted` | Agent self-aborted via `[ABORT]` marker in artifact | Yes |
+
+---
+
+## Abort Mechanism
+
+When an agent determines its task cannot be completed or is blocked by an irrecoverable condition, it can terminate the thread early by writing an abort marker to the artifact file.
+
+### How Agents Know About Abort
+
+The abort capability is **auto-injected** by the thread system — you do **not** need to add anything to an agent's directive. `thread-manager.buildStepPrompt` prepends a short `THREAD_PROTOCOL_PREAMBLE` block (defined in `agent-server/src/thread-manager.ts`) to every step prompt of any thread that owns a workspace artifact. The preamble is skipped for auto-record / default / direct paths (no artifact to write to) and skipped on `--resume` of a persistent session (already delivered on first trigger).
+
+Practical consequence: adding a new artifact-writing agent to `thread-templates.json` automatically gets the abort capability without editing directive / promptTemplate / systemPrompt.
+
+### Marker Format
+
+- `[ABORT]` — terminate with no reason
+- `[ABORT: <reason>]` — terminate with a free-text reason (trimmed, stored in `thread.abortReason`)
+
+The marker is matched with regex `/\[ABORT(?::\s*([^\]\n]*))?\]/`. It may appear anywhere in the artifact, but placement at the end is recommended for clarity.
+
+### When to Use
+
+An agent should write `[ABORT: <reason>]` when:
+
+- **Upstream is missing or malformed** — required inputs (previous agent's artifact section, referenced files, dependencies) are absent or corrupt and cannot be produced by retrying.
+- **Hardware / external resource unavailable** — e.g., target machine offline, GPU exhausted, external API permanently unreachable.
+- **Specification unresolvable** — the user/task requirements contain a contradiction that cannot be decided autonomously.
+- **Repeated failure without signal of progress** — the agent is stuck in a loop that more retries will not fix.
+
+Do **not** abort for:
+
+- Normal retry situations (use the `[REVISED]` convention and let the reviewer loop handle it).
+- Minor warnings that do not block the task.
+- Disagreements with the plan that can be recorded as feedback in the artifact.
+
+### Execution Semantics
+
+When the thread-runner detects the marker after a step completes:
+
+1. Thread status → `aborted`; `abortReason` is recorded.
+2. No further steps execute (transitions are skipped).
+3. `onEnd` hook still fires — `/compound-simple`, git commit, and other cleanup work normally.
+4. `finalizeThread` reads the artifact as the final output and flushes to Slack.
+
+### Comparison with Other Terminators
+
+| Mechanism | Who writes it | Effect |
+|-----------|---------------|--------|
+| `[APPROVED]` / `[IMPL-APPROVED]` | Reviewer agent | Convergence marker — reviewer approves, transition to next agent |
+| `[REVISED]` | Doer agent (after retry) | Signals retry complete; `output_not_contains` transition terminates loop |
+| `[ABORT[: reason]]` | Any agent | Global abort — thread enters `aborted` terminal state, overrides all transitions |
+| `!thread cancel` | User (Slack command) | Thread enters `cancelled` terminal state |
+
+### Quoting Caveat
+
+If an agent needs to quote or reference the literal string `[ABORT]` (e.g., reviewer explaining the mechanism), it should wrap it in backticks (`` `[ABORT]` ``) or escape the brackets. The marker regex matches unescaped bracketed text anywhere in the artifact, so unquoted references can accidentally trigger abort.
+
+---
+
+## Configuration File: thread-templates.json
+
+Location: `agent-server/thread-templates.json`
+
+This file has two top-level sections: `agents` (independent agent definitions) and `templates` (multi-agent pipeline templates). The config supports **hot-reload** — changes are detected automatically via `fs.watch` with a 300ms debounce.
+
+### Agents Section
+
+Each agent is an independent definition with its own identity, profile, and prompt configuration. Agents are referenced by templates but can also be used standalone via `!thread <agent-name> <message>`.
+
+```json
+{
+  "agents": {
+    "my-agent": {
+      "name": "my-agent",
+      "description": "Human-readable description",
+      "profile": "execute",
+      "persistSession": false,
+      "directive": "You are a specialized agent for...",
+      "promptTemplate": "{{input}}\n\nWrite your output to {{artifactPath}}.",
+      "tools": "Agent,Bash,Edit,Glob,Grep,Read,Write"
+    }
+  }
+}
+```
+
+#### Agent Fields Reference
+
+| Field | Required | Type | Description |
+|-------|----------|------|-------------|
+| `name` | Yes | string | Agent ID, must match the key in the agents map |
+| `description` | No | string | Human-readable label shown in `!thread agents` |
+| `profile` | Yes | string | Profile from `profiles.json`, or `"__active__"` for current runtime profile |
+| `persistSession` | Yes | boolean | `true`: reuse Claude Code session across loop iterations. `false`: fresh session each time |
+| `directive` | No | string | Role/identity text prepended to the prompt. Supports `file:filename.md` to load from `prompts/directives/` |
+| `systemPrompt` | No | string | Full system prompt override via `--system-prompt` flag. Supports `file:filename.md` to load from `prompts/systemPrompts/` |
+| `promptTemplate` | Yes | string | Handlebars-style template with variables. Supports `file:filename.md` to load from `prompts/promptTemplates/` |
+| `claudeAgent` | No | string | Claude Code agent name, loaded via `--agent` flag from `.claude/agents/` |
+| `outputStyle` | No | string | Injected via Claude CLI `--settings '{"outputStyle":"<value>"}'` |
+| `tools` | No | string | Comma-separated tool list for `--tools` flag. Overrides the default tool set |
+| `pluginDirs` | No | string[] | Plugin directories passed via `--plugin-dir` flags |
+
+#### persistSession Explained
+
+- `true` — The Claude Code process stays alive between loop iterations. The agent retains full conversation history. Use for agents that iterate on feedback (planner revising after review, writer revising after critique).
+- `false` — A fresh Claude Code session is spawned each time the agent runs. Use for stateless evaluators (reviewer, QA) where independence from prior context is important.
+
+#### file: Reference Mechanism
+
+Directive, systemPrompt, and promptTemplate values starting with `file:` are loaded from corresponding subdirectories under `prompts/`:
+
+```
+prompts/
+├── directives/       ← for directive: "file:director.md"
+├── systemPrompts/    ← for systemPrompt: "file:web.md"
+└── promptTemplates/  ← for promptTemplate: "file:my-template.md"
+```
+
+Loaded files are processed through `template-resolver.ts`, which supports:
+- **YAML frontmatter** with `extends:` (template inheritance) and variable declarations
+- **`@fill(name)` / `@endfill`** blocks to fill template slots
+- **`@block(name)` / `@endblock`** for default content slots in base templates
+- **`${var}` / `${var:-default}`** variable interpolation
+- **`@if(var)` / `@if(!var)` / `@endif`** conditional sections
+- **`{{runtime_vars}}`** (e.g., `{{currentDateTime}}`) pass through untouched for runtime resolution
+
+### Templates Section
+
+Templates define multi-agent pipelines by composing agents with transition rules.
+
+```json
+{
+  "templates": {
+    "my-pipeline": {
+      "name": "my-pipeline",
+      "description": "Description of what this pipeline does",
+      "agents": ["agent-a", {"ref": "agent-b", "promptTemplate": "override..."}],
+      "transitions": [
+        {"from": "agent-a", "to": "agent-b", "condition": {"type": "always"}}
+      ],
+      "entryAgent": "agent-a",
+      "maxTotalSteps": 6,
+      "maxTotalCostUsd": 5.0,
+      "hooks": {
+        "onEnd": {
+          "command": "node ~/.cortex/hooks/post-task-hook.mjs",
+          "args": ["agent-a"],
+          "timeout": 10000
+        }
+      }
+    }
+  }
+}
+```
+
+#### Template Fields Reference
+
+| Field | Required | Type | Description |
+|-------|----------|------|-------------|
+| `name` | Yes | string | Template ID, must match the key |
+| `description` | Yes | string | Human-readable description |
+| `agents` | Yes | TemplateAgentRef[] | Ordered list of agent references (string name or override object) |
+| `transitions` | Yes | TransitionRule[] | Rules governing agent-to-agent transitions |
+| `entryAgent` | Yes | string | Which agent starts the pipeline |
+| `maxTotalSteps` | Yes | number | Hard cap on total agent steps |
+| `maxTotalCostUsd` | No | number | Cost limit in USD. Pipeline stops when exceeded |
+| `hooks` | No | ThreadHooks | Lifecycle hooks (onStart, onTransition, onEnd) |
+
+#### Agent References in Templates
+
+Templates reference agents in two ways:
+
+**Simple reference** (string): Uses the agent definition as-is.
+```json
+"agents": ["planner", "reviewer"]
+```
+
+**Override reference** (object): Overrides specific fields for this template only.
+```json
+"agents": [
+  {
+    "ref": "planner",
+    "promptTemplate": "Custom template for this pipeline...",
+    "persistSession": true
+  },
+  "reviewer"
+]
+```
+
+Override objects support: `ref` (required), `promptTemplate`, `directive`, `systemPrompt`, `persistSession`, `claudeAgent`, `outputStyle`, `tools`, `pluginDirs`.
+
+---
+
+## Prompt Template Variables
+
+The `promptTemplate` field supports these variables, resolved at step execution time:
+
+| Variable | Description |
+|----------|-------------|
+| `{{input}}` | The original user message that started the thread |
+| `{{artifactPath}}` | Absolute path to the workspace's `artifact.md` file |
+| `{{previousOutput}}` | The full output from the last completed agent step |
+| `{{modifiedFiles}}` | Bullet list of files edited/written by the previous agent (from session-activity logs) |
+| `{{modifiedFilesWithDiff}}` | Same files plus a fenced ```diff``` block per file showing the previous agent's net change. Covers local Edit/Write **and** remote `mcp__cortex__remote_edit/write`. Reconstructed without trusting `record[i>0].originalFile` so other agents touching the same file between/after operations don't pollute attribution. Falls back to raw hunks + warning when external interleaving breaks patch context. |
+| `{{currentDateTime}}` | Current timestamp in Asia/Shanghai timezone |
+
+Conditional blocks are supported:
+```
+{{#if previousOutput}}
+Review feedback:
+{{previousOutput}}
+Please revise based on the feedback.
+{{/if}}
+```
+
+Directive and systemPrompt fields also support `{{currentDateTime}}` and other system variables via `resolveSystemVars()`.
+
+---
+
+## Transition Rules
+
+Transitions define how agents hand off to each other. Each rule has `from`, `to`, and a `condition`.
+
+### Condition Types
+
+| Type | Fields | Behavior |
+|------|--------|----------|
+| `always` | — | Always transition to the next agent |
+| `convergence` | `marker`, `maxIterations` | Loop until `marker` string found in artifact content, or `maxIterations` reached |
+| `output_contains` | `pattern` | Transition if the artifact content matches the regex `pattern` |
+| `output_not_contains` | `pattern` | Transition if the artifact content does NOT match the regex `pattern` |
+
+### Common Transition Patterns
+
+**Linear pipeline** (A → B → C):
+```json
+"transitions": [
+  {"from": "A", "to": "B", "condition": {"type": "always"}},
+  {"from": "B", "to": "C", "condition": {"type": "always"}}
+]
+```
+
+**Convergence loop** (A ↔ B until marker):
+```json
+"transitions": [
+  {"from": "A", "to": "B", "condition": {"type": "always"}},
+  {"from": "B", "to": "A", "condition": {"type": "convergence", "marker": "[APPROVED]", "maxIterations": 5}}
+]
+```
+
+The convergence condition means: if `[APPROVED]` is NOT found in the artifact, loop back to A. If found (or maxIterations hit), the pipeline stops.
+
+**Conditional branching** (B → C if approved, B → A if not):
+```json
+"transitions": [
+  {"from": "A", "to": "B", "condition": {"type": "always"}},
+  {"from": "B", "to": "C", "condition": {"type": "output_contains", "pattern": "\\[APPROVED\\]"}},
+  {"from": "B", "to": "A", "condition": {"type": "output_not_contains", "pattern": "\\[APPROVED\\]"}}
+]
+```
+
+Transitions are evaluated in order — the first matching rule wins.
+
+---
+
+## Hooks System
+
+Templates can define lifecycle hooks that execute external scripts at key moments.
+
+```json
+"hooks": {
+  "onStart": { "script": "path/to/script.mjs", "args": ["arg1"], "timeout": 30000 },
+  "onTransition": { "script": "...", "timeout": 10000 },
+  "onEnd": { "script": "...", "args": ["target-agent"], "timeout": 10000 }
+}
+```
+
+| Hook | When | Use Case |
+|------|------|----------|
+| `onStart` | Before the first agent step | Setup, validation |
+| `onTransition` | After each transition, before the next step | Intermediate processing |
+| `onEnd` | After all steps complete | Cleanup, compound, git commit |
+
+Hook scripts receive `HookContext` on stdin (JSON) and return `HookResult` on stdout (JSON):
+
+**HookContext** (input):
+```typescript
+{
+  threadId, templateName, phase, currentStepIndex,
+  steps, activeAgent, previousAgent,
+  artifactContent, userMessage, totalCostUsd
+}
+```
+
+**HookResult** (output) — two modes:
+1. `insertAgent: true` — Creates a temporary new agent to execute the prompt
+2. `targetAgent: "slotId"` — Sends a prompt to an existing agent's persistent session (process alive → stdin, dead → `--resume`)
+
+Example hook script (`post-task-hook.mjs`): Checks if `/compound-simple` should run and if there are uncommitted git changes, then sends a combined prompt to the worker agent's session.
+
+---
+
+## Agent Communication
+
+Agents in a thread communicate through three mechanisms:
+
+1. **Artifact file** (`{{artifactPath}}`): A shared `artifact.md` in the thread workspace. Agents read from and write to this file. This is the primary structured communication channel.
+
+2. **Output passing** (`{{previousOutput}}`): The full text output of the previous agent step is available to the next agent via this variable.
+
+3. **Modified files list** (`{{modifiedFiles}}`): A bullet list of files the previous agent edited/wrote, extracted from session-activity JSONL logs.
+
+4. **Modified files with diff** (`{{modifiedFilesWithDiff}}`): Same files plus a per-file fenced ```diff``` block showing the previous agent's net change. Covers local Edit/Write **and** remote `mcp__cortex__remote_edit/write` (uses the diff snapshot embedded by mcp-server in the tool response). Reconstruction never re-reads disk and never trusts `record[i>0].originalFile`, so other agents touching the same file between or after the previous agent's operations don't pollute attribution. When external interleaving breaks patch context, the variable falls back to raw hunks plus a warning.
+
+For ad-hoc threads (no template), the previous agent's output is automatically injected into the next agent's prompt even without `{{previousOutput}}` in the template.
+
+---
+
+## Task Dispatch Integration
+
+Tasks in TASKS.md use the `[template: <name>]` tag to specify which thread template to use when dispatched:
+
+```markdown
+- [ ] Run ablation study [template: <template-name>]
+  Why: Need to isolate tactile contribution
+  Done when: Results in experiments/EXP-NNN.md
+```
+
+The `[template:]` tag is **required** for all dispatchable tasks. Tasks without it are flagged by the `task-parser.ts` lint check (`missing-template`).
+
+Dispatch flow: `task-dispatcher.ts` selects a task → extracts template name → `createThread({templateName})` → `runThreadExec()`.
+
+---
+
+## Key Source Files
+
+| File | Role |
+|------|------|
+| `agent-server/thread-templates.json` | Agent + template configuration |
+| `agent-server/src/thread-types.ts` | All TypeScript interfaces |
+| `agent-server/src/thread-store.ts` | In-memory cache + threads.json persistence |
+| `agent-server/src/thread-manager.ts` | Core orchestration (create, step, transition, prompt assembly) |
+| `agent-server/src/thread-runner.ts` | Execution loop (run agents, hooks, Slack output) |
+| `agent-server/src/template-resolver.ts` | `file:` reference expansion for prompts |
+| `agent-server/src/message-router.ts` | Slack message → thread routing |
+| `agent-server/src/scheduled-runner.ts` | Scheduler + dispatch → thread creation |
+| `agent-server/src/task-dispatcher.ts` | Task selection and dispatch prompt building |
+| `~/.cortex/hooks/post-task-hook.mjs` | onEnd hook for scheduler/worker templates |
+
+---
+
+## How to Add a New Agent
+
+1. Add the agent definition to the `agents` section of `thread-templates.json`
+2. If using a `file:` directive, create the directive file in `prompts/directives/`
+3. If using a `file:` systemPrompt, create it in `prompts/systemPrompts/`
+4. Choose the right `profile` (plan/execute/qa/__active__)
+5. Choose `persistSession` based on whether the agent needs to retain context across iterations
+6. The config hot-reloads — no restart needed
+
+## How to Add a New Template
+
+1. Define any new agents needed in the `agents` section
+2. Add the template to the `templates` section with:
+   - `agents`: list of agent refs (simple strings or override objects)
+   - `transitions`: rules connecting agents
+   - `entryAgent`: the starting agent
+   - `maxTotalSteps`: safety cap
+3. Optionally add `maxTotalCostUsd` for cost limits
+4. Optionally add `hooks` for lifecycle automation
+5. Test via `!thread <template-name> <test-message>` in Slack
+
+## Common Patterns for New Templates
+
+**Single-agent with hook** (like worker/scheduler):
+```json
+{
+  "name": "my-task",
+  "agents": ["my-agent"],
+  "transitions": [],
+  "entryAgent": "my-agent",
+  "maxTotalSteps": 1,
+  "hooks": { "onEnd": { "command": "node ~/.cortex/hooks/post-task-hook.mjs", "args": ["my-agent"], "timeout": 10000 } }
+}
+```
+
+**Two-agent convergence loop** (doer ↔ checker iteration):
+```json
+{
+  "name": "my-loop",
+  "agents": ["doer", "checker"],
+  "transitions": [
+    {"from": "doer", "to": "checker", "condition": {"type": "always"}},
+    {"from": "checker", "to": "doer", "condition": {"type": "convergence", "marker": "[PASS]", "maxIterations": 3}}
+  ],
+  "entryAgent": "doer",
+  "maxTotalSteps": 8
+}
+```
+
+**Linear pipeline with optional prompt overrides**:
+```json
+{
+  "name": "my-pipeline",
+  "agents": [
+    {"ref": "scout", "promptTemplate": "Focus on {{input}}\n\nWrite findings to {{artifactPath}}."},
+    "analyzer",
+    "reporter"
+  ],
+  "transitions": [
+    {"from": "scout", "to": "analyzer", "condition": {"type": "always"}},
+    {"from": "analyzer", "to": "reporter", "condition": {"type": "always"}}
+  ],
+  "entryAgent": "scout",
+  "maxTotalSteps": 4
+}
+```
