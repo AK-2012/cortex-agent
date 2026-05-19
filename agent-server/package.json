@@ -2,7 +2,7 @@
   "name": "@cortex-agent/server",
   "version": "2026.5.19",
   "type": "module",
-  "description": "Slack bot that bridges messages to Claude CLI",
+  "description": "Autonomous agent system for long-running projects — mission-driven, multi-agent pipelines, self-evolving skills.",
   "engines": {
     "node": ">=20.0.0"
   },
