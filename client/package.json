@@ -1,6 +1,6 @@
 {
   "name": "@cortex-agent/client",
-  "version": "2026.5.19-1",
+  "version": "2026.5.19-2",
   "type": "module",
   "description": "Cortex remote agent client — receives commands from @cortex-agent/server via WebSocket",
   "main": "dist/client.js",
