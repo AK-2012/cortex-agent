@@ -31,5 +31,12 @@
     "tsx": "^4.21.0",
     "typescript": "^5.9.3"
   },
-  "repository": "https://github.com/fangxm233/cortex-agent"
+  "repository": "https://github.com/fangxm233/cortex-agent",
+  "keywords": [
+    "agent",
+    "ai-agent",
+    "remote-execution",
+    "websocket-client",
+    "cortex-agent"
+  ]
 }
