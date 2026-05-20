@@ -10,6 +10,7 @@ import './jobs/scheduled-task.js';
 import './jobs/task-dispatch.js';
 import './jobs/memory-index-regen.js';
 import './jobs/task-archive.js';
+import './jobs/sync-public.js';
 
 import { Scheduler } from './scheduler.js';
 import type { EventBus } from '@events/index.js';
@@ -27,6 +28,7 @@ export function createScheduler(): Scheduler {
     {
       'memory-index-regen': async (params) => { dispatch('memory-index-regen', params); },
       'task-archive': async (params) => { dispatch('task-archive', params); },
+      'sync-public': async (params) => { dispatch('sync-public', params); },
     },
   );
   ctx.schedulerRef = sched;
