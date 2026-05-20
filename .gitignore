@@ -34,6 +34,9 @@ agent-server/prompts/
 agent-server/plugins/
 agent-server/hooks/
 
+# MkDocs build output
+site/
+
 client/dist/
 client/cortex-client-*.tgz
 agent-server/cortex-agent-server-*.tgz

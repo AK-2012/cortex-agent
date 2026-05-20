@@ -1,0 +1,77 @@
+site_name: Cortex
+site_description: Autonomous agent system for long-running projects
+site_author: Cortex Team
+repo_url: https://github.com/fangxm233/cortex-agent
+repo_name: fangxm233/cortex-agent
+edit_uri: edit/main/docs/
+
+theme:
+  name: material
+  language: en
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - navigation.tracking
+    - navigation.sections
+    - navigation.expand
+    - navigation.indexes
+    - toc.follow
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+    - content.code.annotate
+
+markdown_extensions:
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.superfences
+  - admonition
+  - pymdownx.details
+  - toc:
+      permalink: true
+
+plugins:
+  - search
+  - i18n:
+      docs_structure: folder
+      languages:
+        - locale: en
+          default: true
+          name: English
+          build: true
+        - locale: zh
+          name: 中文
+          build: true
+
+nav:
+  - Home: index.md
+  - Quickstart: quickstart.md
+  - Slack Setup: slack-setup.md
+  - Configuration: configuration.md
+  - CLI Reference: cli-reference.md
+  - Backends: backends.md
+  - Architecture: architecture.md
+  - Threads: threads.md
+  - Tasks: tasks.md
+  - Memory: memory.md
+  - Skills & Plugins: skills-and-plugins.md
+  - Scheduling: scheduling.md
+  - Safety & Approvals: safety-and-approvals.md
+  - Hooks: hooks.md
+  - MCP: mcp.md
+  - Cross-machine: cross-machine.md
