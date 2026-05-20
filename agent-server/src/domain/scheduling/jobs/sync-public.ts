@@ -19,7 +19,7 @@ register('sync-public', async (payload: unknown) => {
     });
     const lines = output.trim().split('\n');
     const lastLine = lines[lines.length - 1] || '';
-    if (lastLine.includes('0 failed') || lastLine.includes('everything in sync')) {
+    if (lastLine.includes('0 failed') || lastLine.includes('everything in sync') || lastLine.includes('OK:') || lastLine.includes('SKIP:')) {
       // Quiet success — no message needed unless there were actual syncs
       const countLine = lines.find(l => l.includes('cherry-picked'));
       if (countLine && !countLine.includes('0 cherry-picked')) {
