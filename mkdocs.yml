@@ -1,4 +1,5 @@
 site_name: Cortex
+site_url: https://fangxm233.github.io/cortex-agent/
 site_description: Autonomous agent system for long-running projects
 site_author: Cortex Team
 repo_url: https://github.com/fangxm233/cortex-agent
@@ -57,6 +58,23 @@ plugins:
         - locale: zh
           name: 中文
           build: true
+          nav_translations:
+            Home: 首页
+            Quickstart: 快速入门
+            Slack Setup: Slack 设置
+            Configuration: 配置
+            CLI Reference: CLI 参考
+            Backends: 后端
+            Architecture: 架构
+            Threads: 线程
+            Tasks: 任务
+            Memory: 记忆
+            Skills & Plugins: 技能与插件
+            Scheduling: 调度
+            Safety & Approvals: 安全与审批
+            Hooks: 钩子
+            MCP: MCP
+            Cross-machine: 跨机器
 
 nav:
   - Home: index.md
