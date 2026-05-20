@@ -82,10 +82,6 @@ cortex start
 Once running, message Cortex from Slack — it reads your project context,
 plans the work, and dispatches agents automatically.
 
-For a detailed step-by-step guide covering setup wizard prompts, what files
-are created, and how to send your first message, see
-[docs/quickstart.md](./docs/quickstart.md).
-
 ## How a project looks
 
 Each project lives under `.cortex/context/projects/<name>/` with a

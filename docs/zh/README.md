@@ -51,6 +51,9 @@ cortex start
 
 一旦运行，从 Slack 向 Cortex 发送消息——它会读取你的项目上下文、规划工作并自动调度智能体。
 
+详细的分步指南（涵盖设置向导提示、创建的文件说明以及如何发送第一条消息）见
+[quickstart.md](./quickstart.md)。
+
 ## 项目结构
 
 每个项目位于 `.cortex/context/projects/<name>/` 下，具有可预测的布局：
