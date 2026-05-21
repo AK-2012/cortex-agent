@@ -130,28 +130,25 @@ or by editing `$CORTEX_HOME/config/.env`.
 ### 2.3 Slack app setup (step by step in the browser)
 
 Cortex first prints a complete **Slack App Manifest** and asks if you
-want it copied to your clipboard. Answer **Yes** — the manifest JSON
+want it copied to your clipboard. Press **c** — the manifest JSON
 is now in your clipboard.
 
-Now switch to your browser. Here is exactly where to go and what to
-click.
 
 #### a) Open the Slack API apps page
 
 Go to **[https://api.slack.com/apps](https://api.slack.com/apps)**.
 
-![Slack API apps page](./images/slack-api-apps.png)
 
 #### b) Create a new app from manifest
 
 Click the green **Create New App** button, then click **From a
-manifest**.
+manifest**. If you don't have a workspace yet, create one first.
 
 ![Create New App → From a manifest](./images/slack-create-from-manifest.png)
 
 #### c) Pick your workspace and paste the manifest
 
-1. Select your Slack workspace from the dropdown (top-right corner).
+1. Select your Slack workspace from the dropdown.
 2. Paste the manifest JSON into the text area (Ctrl+V / Cmd+V). The
    manifest was copied to your clipboard by `cortex init`, so just paste.
 3. Click **Next**.
@@ -349,7 +346,6 @@ The first DM is what Cortex uses to auto-detect your admin channel if
 you left `CORTEX_ADMIN_CHANNEL` blank. You should get a reply within a
 few seconds.
 
-![First DM: hello](./images/slack-first-dm.png)
 
 ### 4.2 Create your first project
 
@@ -364,7 +360,6 @@ simple web dashboard that shows the weather in my city
 Cortex replies with the project structure it created, the initial
 tasks it decomposed, and asks if you want it to start working on them.
 
-![Creating a project via DM](./images/slack-create-project.png)
 
 ### 4.3 Create a task in an existing project
 
@@ -378,7 +373,6 @@ chart using Chart.js
 Cortex adds the task to the project's `TASKS.yaml`, assigns it a hex
 ID, sets priority and dependencies, and confirms back.
 
-![Creating a task via DM](./images/slack-create-task.png)
 
 ### 4.4 Check project status
 
