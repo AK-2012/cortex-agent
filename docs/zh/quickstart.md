@@ -22,7 +22,7 @@ node --version
 
 你应该看到类似 `v22.14.0` 的输出。如果版本低于 20，或看到 `command not found: node`，请使用以下方法安装或升级 Node.js。
 
-![在终端中检查 Node.js 版本](./images/node-version-check.png)
+
 
 ### 安装 Node.js
 

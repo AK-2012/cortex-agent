@@ -1,6 +1,6 @@
 # Cortex — Autonomous Project Owner
 
-[中文文档](./docs/zh/)
+[中文文档](./docs/zh/) | [Docs](https://fangxm233.github.io/cortex-agent/)
 
 Cortex is an autonomous agent system for long-running projects. You give
 it a mission with a success criterion, and it plans the work, dispatches

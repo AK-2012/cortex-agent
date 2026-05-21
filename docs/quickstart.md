@@ -34,7 +34,7 @@ You should see something like `v22.14.0`. If the version is below 20,
 or if you see `command not found: node`, install or upgrade Node.js
 using one of the methods below.
 
-![Checking Node.js version in terminal](./images/node-version-check.png)
+
 
 ### Installing Node.js
 

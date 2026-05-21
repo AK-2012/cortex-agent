@@ -1,6 +1,6 @@
 # Cortex — 自主项目负责人
 
-[English documentation](../README.md)
+[English documentation](../README.md) | [文档](https://fangxm233.github.io/cortex-agent/)
 
 Cortex 是一个面向长期项目的自主智能体系统。你给它一个带有成功标准的使命，它会规划工作、调度智能体管道来执行、在你的仓库中保留结构化的进度日志，并在每次提交前自我审查——跨越数天或数周的无人值守工作。
 
