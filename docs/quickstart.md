@@ -12,9 +12,7 @@ shows you exactly where to click in Slack.
 
 - **Node.js ≥ 20** (Cortex itself targets 20+; the bundled coding-agent
   backends prefer 22).
-- **A Slack workspace** where you can create an app. (Feishu / Lark is
-  also supported — see [slack-setup.md](./slack-setup.md) for the
-  equivalent flow.)
+- **A Slack workspace** where you can create an app.
 - **About 2 GB of free disk** for backends, plugins, and logs.
 
 You do **not** need to install `claude` (Claude Code) or `pi`

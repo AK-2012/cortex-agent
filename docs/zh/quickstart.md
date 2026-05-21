@@ -7,7 +7,7 @@
 ## 前置条件
 
 - **Node.js ≥ 20**（Cortex 本身要求 20+；捆绑的编程智能体后端推荐 22）。
-- **一个 Slack 工作区**，你可以在其中创建应用。（也支持飞书/Lark——参见 [slack-setup.md](./slack-setup.md) 了解等效流程。）
+- **一个 Slack 工作区**，你可以在其中创建应用。
 - **大约 2 GB 空闲磁盘空间**，用于后端、插件和日志。
 
 你**不需要**预先安装 `claude`（Claude Code）或 `pi`（pi-coding-agent）。不需要预先安装 `git`。不需要预先创建任何目录或 env 文件。`cortex init` 会为你安装所有这些。
