@@ -198,14 +198,5 @@ cortex restart        # touches $STORE_DIR/.restart
 Or, if you ran `cortex start` in the foreground, Ctrl-C and start
 again.
 
-## Feishu / Lark setup
-
-Cortex also speaks Feishu. The init flow is the same shape — you
-create an app at <https://open.feishu.cn/app>, subscribe to
-`im.message.receive_v1`, and paste `FEISHU_APP_ID` + `FEISHU_APP_SECRET`
-(plus optional `FEISHU_ENCRYPT_KEY` / `FEISHU_VERIFICATION_TOKEN` /
-`FEISHU_DOMAIN`) when `cortex init` asks. Select "Feishu" instead of
-"Slack" at the platform-selection prompt.
-
 The admin channel auto-detection and DM trust model have safety implications —
 see [safety-and-approvals.md](./safety-and-approvals.md).

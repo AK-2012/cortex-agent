@@ -27,7 +27,7 @@ Server lifecycle and initialization CLI.
 
 Interactive initialization wizard. Creates the `CORTEX_HOME` directory
 structure, prompts for backends (Claude Code / PI), interaction platform
-(Slack / Feishu), gateway usage, and system service registration.
+(Slack), gateway usage, and system service registration.
 Generates `.env` with platform tokens, copies default configs, and
 auto-generates `mcp-config.json` and `mode.json`.
 
@@ -40,7 +40,7 @@ Options:
 
 Fork `dist/entry/app.js` as a child process, inherit stdio. This is the
 primary way to run Cortex in the foreground. The child process runs the
-Slack/Feishu bot, webhook server, and all agent orchestration.
+Slack bot, webhook server, and all agent orchestration.
 
 **`cortex daemon`**
 

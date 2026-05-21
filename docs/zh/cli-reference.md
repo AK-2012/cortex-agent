@@ -25,7 +25,7 @@ cortex <command> [options]
 
 **`cortex init [--home <path>] [--gateway-config-dir <path>] [--force]`**
 
-交互式初始化向导。创建 `CORTEX_HOME` 目录结构，提示选择后端（Claude Code / PI）、交互平台（Slack / 飞书）、网关使用和系统服务注册。生成带平台令牌的 `.env`，复制默认配置，并自动生成 `mcp-config.json` 和 `mode.json`。
+交互式初始化向导。创建 `CORTEX_HOME` 目录结构，提示选择后端（Claude Code / PI）、交互平台（Slack）、网关使用和系统服务注册。生成带平台令牌的 `.env`，复制默认配置，并自动生成 `mcp-config.json` 和 `mode.json`。
 
 选项：
 - `--home <path>` — 设置 `CORTEX_HOME`（默认：`$CORTEX_HOME` 或 `~/.cortex/`）
@@ -34,7 +34,7 @@ cortex <command> [options]
 
 **`cortex start`**
 
-Fork `dist/entry/app.js` 作为子进程，继承 stdio。这是在前台运行 Cortex 的主要方式。子进程运行 Slack/飞书机器人、webhook 服务器和所有智能体编排。
+Fork `dist/entry/app.js` 作为子进程，继承 stdio。这是在前台运行 Cortex 的主要方式。子进程运行 Slack 机器人、webhook 服务器和所有智能体编排。
 
 **`cortex daemon`**
 

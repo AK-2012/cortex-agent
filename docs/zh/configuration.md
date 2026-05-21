@@ -1,7 +1,7 @@
 # 配置
 
 
-Cortex 在启动时从 `$CORTEX_HOME/config/` 加载所有配置。唯一必需的变量是 `CORTEX_PLATFORM` 和平台凭据（Slack 或飞书）。其他所有内容都有合理的默认值，大多数用户无需修改。
+Cortex 在启动时从 `$CORTEX_HOME/config/` 加载所有配置。唯一必需的变量是 `CORTEX_PLATFORM` 和平台凭据（Slack）。其他所有内容都有合理的默认值，大多数用户无需修改。
 
 ## 文件层次结构
 
@@ -76,19 +76,6 @@ $CORTEX_HOME/
 | `SLACK_SIGNING_SECRET` | 是 | Slack 应用签名密钥 |
 | `SLACK_APP_TOKEN` | 是 | Socket Mode 的 Slack 应用级令牌（`xapp-...`） |
 | `CORTEX_ADMIN_CHANNEL` | 否 | 管理私信频道 ID（运行时自动检测） |
-
-### 平台（飞书/Lark）
-
-| 变量 | 必需 | 用途 |
-|---|---|---|
-| `CORTEX_PLATFORM` | 是 | `feishu` |
-| `FEISHU_APP_ID` | 是 | 飞书应用 ID |
-| `FEISHU_APP_SECRET` | 是 | 飞书应用密钥 |
-| `FEISHU_ENCRYPT_KEY` | 否 | 飞书加密密钥 |
-| `FEISHU_VERIFICATION_TOKEN` | 否 | 飞书验证令牌 |
-| `FEISHU_DOMAIN` | 否 | `feishu`（默认）或 `lark` |
-
-飞书支持是一个可选依赖（`@larksuiteoapi/node-sdk`）。如果未安装 SDK，飞书平台适配器将不会加载。
 
 ### API
 

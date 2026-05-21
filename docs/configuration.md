@@ -2,7 +2,7 @@
 
 Cortex loads all configuration from `$CORTEX_HOME/config/` at startup. The
 only required variables are `CORTEX_PLATFORM` and the platform credentials
-(Slack or Feishu). Everything else has sensible defaults and most users
+(Slack). Everything else has sensible defaults and most users
 never touch them.
 
 ## File hierarchy
@@ -87,20 +87,6 @@ Only `CORTEX_PLATFORM` and your platform credentials are required.
 | `SLACK_SIGNING_SECRET` | yes | Slack app signing secret |
 | `SLACK_APP_TOKEN` | yes | Slack app-level token for Socket Mode (`xapp-...`) |
 | `CORTEX_ADMIN_CHANNEL` | no | Admin DM channel ID (auto-detected at runtime) |
-
-### Platform (Feishu / Lark)
-
-| Variable | Required | Purpose |
-|---|---|---|
-| `CORTEX_PLATFORM` | yes | `feishu` |
-| `FEISHU_APP_ID` | yes | Feishu app ID |
-| `FEISHU_APP_SECRET` | yes | Feishu app secret |
-| `FEISHU_ENCRYPT_KEY` | no | Feishu encrypt key |
-| `FEISHU_VERIFICATION_TOKEN` | no | Feishu verification token |
-| `FEISHU_DOMAIN` | no | `feishu` (default) or `lark` |
-
-Feishu support is an optional dependency (`@larksuiteoapi/node-sdk`). If
-the SDK is not installed, the Feishu platform adapter will not load.
 
 ### API
 

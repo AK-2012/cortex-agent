@@ -1,7 +1,7 @@
 # Cortex 架构
 
 
-Cortex 是一个用于机器人学和 AI/ML 的自主研究智能体系统。它采用服务器-客户端架构运行：**agent-server** 编排工作——任务调度、线程执行、定时任务、Slack/飞书集成和 MCP 工具——而远程 **agent clients** 通过 WebSocket 连接在远程机器上执行命令。关于这些子系统的深入探讨，参见 [threads.md](./threads.md)、[tasks.md](./tasks.md) 和 [memory.md](./memory.md)。
+Cortex 是一个用于机器人学和 AI/ML 的自主研究智能体系统。它采用服务器-客户端架构运行：**agent-server** 编排工作——任务调度、线程执行、定时任务、Slack 集成和 MCP 工具——而远程 **agent clients** 通过 WebSocket 连接在远程机器上执行命令。关于这些子系统的深入探讨，参见 [threads.md](./threads.md)、[tasks.md](./tasks.md) 和 [memory.md](./memory.md)。
 
 ## 两个软件包
 
@@ -9,7 +9,7 @@ Cortex 由两个 npm 包和一组插件组成：
 
 | 包 | 路径 | 用途 |
 |---------|------|---------|
-| `@cortex-agent/server` | `agent-server/` | 主服务器：Slack/飞书机器人、LLM 编排、定时任务、任务系统、MCP 工具。提供三个 CLI 可执行文件：`cortex`、`cortex-task`、`cortex-run`。 |
+| `@cortex-agent/server` | `agent-server/` | 主服务器：Slack 机器人、LLM 编排、定时任务、任务系统、MCP 工具。提供三个 CLI 可执行文件：`cortex`、`cortex-task`、`cortex-run`。 |
 | `@cortex-agent/client` | `client/` | 轻量级远程智能体守护进程。通过 WebSocket 连接，在本地执行 shell/文件命令，支持用于长时间运行任务执行的 `cortex-run`。 |
 | 插件 | `plugins/cortex-*` | 8 个角色限定的插件包，包含技能。不是 npm 包——在运行时作为目录加载。 |
 
@@ -29,7 +29,7 @@ L5  entry/         → 所有层（组合根）
 另外两个目录位于层次结构之外，因为它们被多个层导入：
 
 - **`agent-adapter/`** — 三个 LLM 后端的抽象（Claude Code、Codex、PI）
-- **`platform/`** — 消息平台抽象（Slack、飞书/Lark）
+- **`platform/`** — 消息平台抽象（Slack）
 
 ### 第 0 层：`core/` — 零依赖基础
 
@@ -158,7 +158,7 @@ L5  entry/         → 所有层（组合根）
 
 ## 平台适配器
 
-`platform/` 目录在 `PlatformAdapter` 接口后抽象 Slack 和飞书：
+`platform/` 目录在 `PlatformAdapter` 接口后抽象 Slack：
 
 | 方法 | 用途 |
 |--------|---------|

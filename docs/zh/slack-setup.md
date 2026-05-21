@@ -155,8 +155,4 @@ cortex restart        # 触碰 $STORE_DIR/.restart
 
 或者，如果你是在前台运行 `cortex start`，按 Ctrl-C 后重新启动。
 
-## 飞书/Lark 设置
-
-Cortex 也支持飞书。初始流程类似——你在 <https://open.feishu.cn/app> 创建一个应用，订阅 `im.message.receive_v1`，然后在 `cortex init` 询问时粘贴 `FEISHU_APP_ID` + `FEISHU_APP_SECRET`（以及可选的 `FEISHU_ENCRYPT_KEY` / `FEISHU_VERIFICATION_TOKEN` / `FEISHU_DOMAIN`）。在平台选择提示中选择"Feishu"而不是"Slack"。
-
 管理频道的自动检测和私信信任模型有安全影响——参见 [safety-and-approvals.md](./safety-and-approvals.md)。

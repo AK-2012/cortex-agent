@@ -1,6 +1,6 @@
 # Cortex Architecture
 
-Cortex is an autonomous research agent system for robotics and AI/ML. It runs as a server-client architecture: the **agent-server** orchestrates work — task dispatch, thread execution, scheduling, Slack/Feishu integration, and MCP tools — while remote **agent clients** connect via WebSocket to execute commands on remote machines. For deeper dives into these subsystems, see [threads.md](./threads.md), [tasks.md](./tasks.md), and [memory.md](./memory.md).
+Cortex is an autonomous research agent system for robotics and AI/ML. It runs as a server-client architecture: the **agent-server** orchestrates work — task dispatch, thread execution, scheduling, Slack integration, and MCP tools — while remote **agent clients** connect via WebSocket to execute commands on remote machines. For deeper dives into these subsystems, see [threads.md](./threads.md), [tasks.md](./tasks.md), and [memory.md](./memory.md).
 
 ## Two Packages
 
@@ -8,7 +8,7 @@ Cortex consists of two npm packages plus a set of plugins:
 
 | Package | Path | Purpose |
 |---------|------|---------|
-| `@cortex-agent/server` | `agent-server/` | Main server: Slack/Feishu bot, LLM orchestration, scheduling, task system, MCP tools. Provides three CLI binaries: `cortex`, `cortex-task`, `cortex-run`. |
+| `@cortex-agent/server` | `agent-server/` | Main server: Slack bot, LLM orchestration, scheduling, task system, MCP tools. Provides three CLI binaries: `cortex`, `cortex-task`, `cortex-run`. |
 | `@cortex-agent/client` | `client/` | Lightweight remote agent daemon. Connects via WebSocket, executes shell/file commands locally, supports `cortex-run` for long-running task execution. |
 | Plugins | `plugins/cortex-*` | 8 role-scoped plugin bundles containing skills. Not npm packages — loaded as directories at runtime. |
 
@@ -28,7 +28,7 @@ L5  entry/         → everything (composition root)
 Two additional directories sit outside the layer hierarchy because they are imported across multiple layers:
 
 - **`agent-adapter/`** — the three-LLM-backend abstraction (Claude Code, Codex, PI)
-- **`platform/`** — the messaging platform abstraction (Slack, Feishu/Lark)
+- **`platform/`** — the messaging platform abstraction (Slack)
 
 ### Layer 0: `core/` — Zero-Dependency Foundation
 
@@ -158,7 +158,7 @@ A normalization layer (`normalize/`) converts backend-specific events into a uni
 
 ## Platform Adapter
 
-The `platform/` directory abstracts Slack and Feishu behind a `PlatformAdapter` interface:
+The `platform/` directory abstracts Slack behind a `PlatformAdapter` interface:
 
 | Method | Purpose |
 |--------|---------|
