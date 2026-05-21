@@ -1,6 +1,6 @@
 # Quickstart
 
-From zero to a Cortex agent answering you in Slack in about 15 minutes,
+From zero to a Cortex agent answering you in Slack in about 5 minutes,
 most of which is waiting for `npm` and clicking through Slack's app
 creation page.
 
