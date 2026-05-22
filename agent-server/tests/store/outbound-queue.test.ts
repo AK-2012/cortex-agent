@@ -63,7 +63,6 @@ function createMockAdapter(overrides: {
     downloadFile: async () => ({ localPath: '', mimetype: '', name: '' }),
     getPermalink: async () => null,
     postEphemeral: async () => {},
-    getAdminChannel: () => null,
     getRawClient: () => ({} as any),
   } as any;
 }

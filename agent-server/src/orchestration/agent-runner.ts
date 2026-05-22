@@ -4,7 +4,7 @@
 // >>> If I am updated, update my header comment and the parent folder's CORTEX.md <<<
 
 import * as path from 'path';
-import type { PlatformAdapter, MessageRef, DownloadedFile, IncomingMessage, PlatformFileRef, VirtualMessage } from '@platform/index.js';
+import type { Destination, PlatformAdapter, MessageRef, DownloadedFile, IncomingMessage, PlatformFileRef, VirtualMessage } from '@platform/index.js';
 import type { AgentResult } from '@core/types/agent-types.js';
 import type { ThreadRunResult } from '@domain/threads/runner.js';
 import { channelQueues, enqueue } from './channel-queue.js';
@@ -98,13 +98,14 @@ export class AgentRunner {
     const startTime = Date.now();
     const sessionId = await getSessionAsync(channel, resolveBackendForChannel(channel));
     const sessionName = await resolveSessionName(sessionId, channel, userMessage);
+    const dest: Destination = { type: 'interactive-reply', conduit: channel, sessionId: sessionId ?? '' };
 
     // 1. Orchestration side effects (keep — ledger, status, hook-bridge)
     const statusText = buildUserProcessingMessage({ startTime, profileName: getActiveProfile(channel), sessionName, sessionId });
     const blocksTemplate = { channel, sessionName, isDm: true };
     // Post status message WITHOUT Cancel button initially — Cancel is added after
     // createDefaultThread gives us a threadId (A3: execution-scoped Cancel).
-    const statusMsg = await adapter.postMessage(channel, {
+    const statusMsg = await adapter.postMessage(dest, {
       text: statusText,
       richBlocks: buildSealedStatusActionBlocks(statusText, blocksTemplate),
     }, threadTs ? { threadId: threadTs } : undefined);
@@ -129,7 +130,7 @@ export class AgentRunner {
     initStatusBlocks(statusMsg, blocksTemplateWithThread);
 
     // 4. Build agent callbacks (streaming, fallback, progress — passed to runThread)
-    const callbacks = buildAgentCallbacks(adapter, channel, statusMsg, threadTs, startTime, sessionName, sessionId, onMessagePosted);
+    const callbacks = buildAgentCallbacks(adapter, dest, statusMsg, threadTs, startTime, sessionName, sessionId, onMessagePosted);
 
     // 5. Build PI interactive-event callbacks (plan approval / ask-user-question routing)
     const interactiveCallbacks = buildInteractiveCallbacks(channel, sessionId, thread.id);
@@ -154,7 +155,7 @@ export class AgentRunner {
       });
       result = threadResult.lastAgentResult;
       clearStreamingCallback(channel);
-      await maybeNotifyCodexLowUsage({ adapter, channel, result });
+      await maybeNotifyCodexLowUsage({ adapter, result });
       await handleDefaultAgentResult({
         result, channel, adapter, statusMsg, startTime, userMessage,
         executionId: threadResult.executionId,
@@ -224,11 +225,11 @@ async function resolveSessionName(sessionId: string | null, channel: string, use
   return sessionStore.generateSessionName();
 }
 
-function buildAgentCallbacks(adapter: PlatformAdapter, channel: string, statusMsg: MessageRef, threadTs: string | null, startTime: number, sessionName: string, sessionId: string | null, onMessagePosted: (ref: MessageRef) => void): AgentCallbacks {
-  const onFallback = makeFallbackNotifier(channel, statusMsg, adapter);
+function buildAgentCallbacks(adapter: PlatformAdapter, destination: Destination, statusMsg: MessageRef, threadTs: string | null, startTime: number, sessionName: string, sessionId: string | null, onMessagePosted: (ref: MessageRef) => void): AgentCallbacks {
+  const onFallback = makeFallbackNotifier(destination.conduit, statusMsg, adapter);
   const queue = getOutboundQueue();
   const durable = queue ? buildDurableHooks(queue) : null;
-  const baseAssistantMsg = makeStreamingMessageCallback(adapter, channel, threadTs, onMessagePosted, durable);
+  const baseAssistantMsg = makeStreamingMessageCallback(adapter, destination, threadTs, onMessagePosted, durable);
 
   // Tool trace: when CORTEX_SHOW_TOOL_CALLS is enabled, emit a compact per-tool Slack line
   // that merges consecutive same-tool calls and splits on different tool / assistant text.

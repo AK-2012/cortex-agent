@@ -60,12 +60,7 @@ async function getFreeBytes(path: string): Promise<number> {
 
 function sendDM(text: string): void {
   if (!_adapter) return;
-  const adminChannel = _adapter.getAdminChannel();
-  if (!adminChannel) {
-    log.info('No admin channel configured, skipping DM');
-    return;
-  }
-  _adapter.postMessage(adminChannel, { text }).catch(e => {
+  _adapter.postMessage({ type: 'system-notice' }, { text }).catch(e => {
     log.error(`DM failed: ${(e as Error).message}`);
   });
 }

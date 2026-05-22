@@ -19,7 +19,7 @@ test('sendStartupDmIfConfigured posts one startup message to the admin channel',
 
   assert.equal(sent, true);
   assert.equal(adapter.posted.length, 1);
-  assert.equal(adapter.posted[0].channel, 'D0AH43A75EZ');
+  assert.equal(adapter.posted[0].destination.type, 'system-notice');
   assert.equal(adapter.posted[0].content.text, 'Cortex agent started on local.');
 });
 

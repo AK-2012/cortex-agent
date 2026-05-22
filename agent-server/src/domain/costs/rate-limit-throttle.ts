@@ -30,9 +30,7 @@ export interface ThrottlePersistence {
 // --- Admin DM (fire-and-forget) ---
 function sendDM(text: string) {
   if (!_adapter) return;
-  const adminChannel = _adapter.getAdminChannel();
-  if (!adminChannel) return;
-  _adapter.postMessage(adminChannel, { text }).catch(e => {
+  _adapter.postMessage({ type: 'system-notice' }, { text }).catch(e => {
     log.error(`DM failed: ${(e as Error).message}`);
   });
 }

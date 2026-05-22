@@ -3,7 +3,7 @@
 // pos:    Agent runtime lifecycle handling (success/failure/approval/resume)
 // >>> If I am updated, update my header comment and the parent folder's CORTEX.md <<<
 import { createLogger } from '@core/log.js';
-import type { PlatformAdapter, MessageRef } from '@platform/index.js';
+import type { Destination, PlatformAdapter, MessageRef } from '@platform/index.js';
 import type { AgentResult } from '@core/types/agent-types.js';
 import type { ExecutionRecord } from '@domain/executions/registry.js';
 import { trackPendingTask } from './busy-tracker.js';
@@ -141,11 +141,12 @@ export async function handleAgentError({ error, channel, adapter, statusMsg, sta
   finalizeLocalExecution({ executionId, status: 'failed', error, durationS: elapsedS });
   const errorText = `:x: ${sessionTag}Error (${elapsedStr}s)`;
   await sealStatus(adapter, statusMsg, errorText, buildSealedStatusActionBlocks(errorText, { channel, sessionName, isDm: true }));
+  const errorDest: Destination = { type: 'interactive-reply', conduit: channel, sessionId: resolvedSessionId ?? '' };
   const queue = getOutboundQueue();
   if (queue) {
-    await durablePost(queue, adapter, channel, { text: `Error: ${error.message}` }, threadTs ? { threadId: threadTs } : undefined);
+    await durablePost(queue, adapter, errorDest, { text: `Error: ${error.message}` }, threadTs ? { threadId: threadTs } : undefined);
   } else {
-    await adapter.postMessage(channel, { text: `Error: ${error.message}` }, threadTs ? { threadId: threadTs } : undefined);
+    await adapter.postMessage(errorDest, { text: `Error: ${error.message}` }, threadTs ? { threadId: threadTs } : undefined);
   }
 }
 
@@ -164,7 +165,8 @@ async function persistErrorSession(resolvedSessionId: string | null, sessionName
 // --- AskUserQuestion resume ---
 
 export async function resumeAskUserQuestionGroup({ adapter, group, responseText }: { adapter: PlatformAdapter; group: { channel: string; sessionId: string; groupId: string; threadId?: string | null }; responseText: string }): Promise<void> {
-  const statusMsg = await adapter.postMessage(group.channel, { text: ':hourglass_flowing_sand: Processing AskUserQuestion response...' });
+  const askDest: Destination = { type: 'interactive-reply', conduit: group.channel, sessionId: group.sessionId };
+  const statusMsg = await adapter.postMessage(askDest, { text: ':hourglass_flowing_sand: Processing AskUserQuestion response...' });
   const startTime = Date.now();
   let executionId = null;
   let handle;
@@ -180,12 +182,12 @@ export async function resumeAskUserQuestionGroup({ adapter, group, responseText 
     executionId = execution.id;
     const askQueue = getOutboundQueue();
     const askDurable = askQueue ? buildDurableHooks(askQueue) : null;
-    const onAssistantMsg = makeStreamingMessageCallback(adapter, group.channel, null, null, askDurable);
+    const onAssistantMsg = makeStreamingMessageCallback(adapter, askDest, null, null, askDurable);
     handle = runAgent(responseText, { channel: group.channel, sessionId: group.sessionId, files: [], project: projectStore.resolveFromMessage(responseText)?.id ?? 'general', trigger: 'ask-user-question', onAssistantMessage: onAssistantMsg });
     runningExecutions.register(group.channel, { threadId: group.threadId ?? null, channel: group.channel, agentSlotId: null, executionId, kill: () => handle.kill(), backend: askBackend });
     const result = await handle.promise;
     runningExecutions.complete(group.channel, result?.total_cost_usd ?? 0);
-    await maybeNotifyCodexLowUsage({ adapter, channel: group.channel, result });
+    await maybeNotifyCodexLowUsage({ adapter, result });
     await handleAgentSuccess({ result, channel: group.channel, adapter, statusMsg, startTime, userMessage: responseText, executionId, trigger: 'ask-user-question', onAssistantMessage: onAssistantMsg });
   } catch (error) {
     await handleAgentError({ error: error as { message: string; cancelled?: boolean }, channel: group.channel, adapter, statusMsg, startTime, executionId, effectiveSessionId: handle?.sessionId });
@@ -212,11 +214,12 @@ async function executeRetry(channel: string, text: string, adapter: PlatformAdap
   const sessionId = opts.sessionId ?? await getSessionAsync(channel, resolveBackendForChannel(channel));
   const sessionName = opts.sessionName || await sessionStore.generateSessionName();
   const userMessageTs = opts.originalTs;
+  const retryDest: Destination = { type: 'interactive-reply', conduit: channel, sessionId: sessionId ?? '' };
 
   const retryPrefix = ':arrows_counterclockwise: Retry (edited) | ';
   const retryStatusText = retryPrefix + buildUserProcessingMessage({ startTime, profileName: getActiveProfile(channel), sessionName, sessionId });
   const retryBlocksTemplate = { channel, sessionName, isDm: true };
-  const statusMsg = await adapter.postMessage(channel, {
+  const statusMsg = await adapter.postMessage(retryDest, {
     text: retryStatusText,
     richBlocks: buildStatusActionBlocks(retryStatusText, retryBlocksTemplate),
   });
@@ -225,10 +228,10 @@ async function executeRetry(channel: string, text: string, adapter: PlatformAdap
   updateRetryPermalinks(adapter, channel, userMessageTs, statusMsg, opts.supersededStatusTimestamps, retryPrefix, startTime, sessionName, sessionId);
   await initTurnTracking(channel, sessionId, sessionName, userMessageTs, text, statusMsg.messageId);
   const onMessagePosted = (ref: MessageRef) => void conversationLedger.addResponseTs(channel, userMessageTs, ref.messageId).catch((e) => log.error(e));
-  await runRetryAgent({ channel, text, adapter, statusMsg, startTime, sessionId, sessionName, userMessageTs, retryPrefix, onMessagePosted });
+  await runRetryAgent({ channel, text, adapter, statusMsg, startTime, sessionId, sessionName, userMessageTs, retryPrefix, onMessagePosted, retryDest });
 }
 
-async function runRetryAgent({ channel, text, adapter, statusMsg, startTime, sessionId, sessionName, userMessageTs, retryPrefix, onMessagePosted }: { channel: string; text: string; adapter: PlatformAdapter; statusMsg: MessageRef; startTime: number; sessionId: string | null; sessionName: string | null; userMessageTs: string; retryPrefix: string; onMessagePosted: (ref: MessageRef) => void }): Promise<void> {
+async function runRetryAgent({ channel, text, adapter, statusMsg, startTime, sessionId, sessionName, userMessageTs, retryPrefix, onMessagePosted, retryDest }: { channel: string; text: string; adapter: PlatformAdapter; statusMsg: MessageRef; startTime: number; sessionId: string | null; sessionName: string | null; userMessageTs: string; retryPrefix: string; onMessagePosted: (ref: MessageRef) => void; retryDest: Destination }): Promise<void> {
   const agentMessage = normalizeSkillCommandPrefix(text || '');
   let executionId = null;
   let handle;
@@ -240,7 +243,7 @@ async function runRetryAgent({ channel, text, adapter, statusMsg, startTime, ses
     }).id;
     const retryQueue = getOutboundQueue();
     const retryDurable = retryQueue ? buildDurableHooks(retryQueue) : null;
-    const onAssistantMsg = makeStreamingMessageCallback(adapter, channel, null, onMessagePosted, retryDurable);
+    const onAssistantMsg = makeStreamingMessageCallback(adapter, retryDest, null, onMessagePosted, retryDurable);
     setStreamingCallback(channel, onAssistantMsg);
     handle = runAgent(agentMessage, {
       channel, sessionId, files: [], profileName: getActiveProfile(channel),
@@ -253,7 +256,7 @@ async function runRetryAgent({ channel, text, adapter, statusMsg, startTime, ses
     const result = await handle.promise;
     runningExecutions.complete(channel, result?.total_cost_usd ?? 0);
     clearStreamingCallback(channel);
-    await maybeNotifyCodexLowUsage({ adapter, channel, result });
+    await maybeNotifyCodexLowUsage({ adapter, result });
 
     if (result?.rateLimited) {
       const { elapsedStr } = computeElapsed(startTime);

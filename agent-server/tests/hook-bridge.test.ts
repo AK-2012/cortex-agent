@@ -59,7 +59,7 @@ test('ask-user.requested subscriber calls MockAdapter.postMessage (Slack side ef
   bus.subscribe('ask-user.requested', async (e) => {
     const ev = e as Extract<CortexEvent, { type: 'ask-user.requested' }>;
     const text = `Questions (${ev.questions.length})`;
-    await mockAdapter.postMessage(ev.channel, { text });
+    await mockAdapter.postMessage({ type: 'interactive-reply', conduit: ev.channel, sessionId: ev.sessionId }, { text });
   });
 
   const resultPromise = hb.registerAskQuestion('req-2', 'C_ASK', 'sess-2', [{ q: 'Pick one?' }]);
@@ -69,7 +69,7 @@ test('ask-user.requested subscriber calls MockAdapter.postMessage (Slack side ef
   await new Promise(setImmediate as any);
 
   assert.equal(mockAdapter.posted.length, 1, 'exactly one message posted to mock adapter');
-  assert.equal(mockAdapter.posted[0].channel, 'C_ASK');
+  assert.equal(mockAdapter.posted[0].destination.conduit, 'C_ASK');
   assert.equal((mockAdapter.posted[0].content as any).text, 'Questions (1)');
 
   hb.resolveRequest('req-2', { answers: {} });
@@ -87,7 +87,7 @@ test('registerPlanApproval publishes plan.submitted and subscriber calls MockAda
 
   bus.subscribe('plan.submitted', async (e) => {
     const ev = e as Extract<CortexEvent, { type: 'plan.submitted' }>;
-    await mockAdapter.postInteractive(ev.channel, {
+    await mockAdapter.postInteractive({ type: 'interactive-reply', conduit: ev.channel, sessionId: ev.sessionId }, {
       text: 'Plan approval',
       richBlocks: [],
       actions: [{ type: 'button', text: 'Approve', value: ev.requestId, actionId: 'plan_approve' }],
@@ -99,7 +99,7 @@ test('registerPlanApproval publishes plan.submitted and subscriber calls MockAda
   await new Promise(setImmediate as any);
 
   assert.equal(mockAdapter.posted.length, 1, 'exactly one interactive message posted');
-  assert.equal(mockAdapter.posted[0].channel, 'C_PLAN');
+  assert.equal(mockAdapter.posted[0].destination.conduit, 'C_PLAN');
   assert.equal((mockAdapter.posted[0].content as any).text, 'Plan approval');
 
   const actions = mockAdapter.posted[0].actions ?? [];

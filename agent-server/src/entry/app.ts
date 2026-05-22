@@ -89,8 +89,7 @@ const adapter: PlatformAdapter = createAdapterFromEnv({
 
 // --- Wire hot-reload admin notifiers ---
 const notifyAdmin = (text: string) => {
-  const ch = adapter.getAdminChannel();
-  if (ch) adapter.postMessage(ch, { text }).catch(() => {});
+  adapter.postMessage({ type: 'system-notice' }, { text }).catch(() => {});
 };
 setProfileNotifier(notifyAdmin);
 setConfigNotifier(notifyAdmin);
@@ -234,10 +233,7 @@ process.on('SIGTERM', async () => {
       const updateResult = await checkAndUpdateClients();
       if (updateResult) {
         log.info(`Client hot-reload: ${updateResult.devices.length} devices updated in ${updateResult.duration}ms`);
-        const adminChannel = adapter.getAdminChannel();
-        if (adminChannel) {
-          await adapter.postMessage(adminChannel, { text: formatUpdateSlackMessage(updateResult) }).catch((e: any) => log.warn(`Hot-reload DM failed: ${e.message}`));
-        }
+        await adapter.postMessage({ type: 'system-notice' }, { text: formatUpdateSlackMessage(updateResult) }).catch((e: any) => log.warn(`Hot-reload DM failed: ${e.message}`));
       }
     } catch (e) {
       log.error(`Client hot-reload check failed: ${(e as Error).message}`);

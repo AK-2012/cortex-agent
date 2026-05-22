@@ -128,7 +128,7 @@ async function runScheduledTaskAsync({ normalizedMessage, message, channel, sche
   try {
     const threadResult = await dispatchByPlan({ plan, normalizedMessage, message, scheduleTaskId, effectiveProfile, statusMsg, startTime, sessionName });
     const result = threadResult.lastAgentResult as any;
-    await maybeNotifyCodexLowUsage({ adapter, channel: plan.channel, result });
+    await maybeNotifyCodexLowUsage({ adapter, result });
 
     if (result?.rateLimited) {
       const { elapsedStr } = computeElapsed(startTime);

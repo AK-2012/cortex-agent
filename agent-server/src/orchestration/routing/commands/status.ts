@@ -36,7 +36,7 @@ export function createStatusHandler(getExecutionStatusReport: (() => string) | n
     const text = getExecutionStatusReport ? getExecutionStatusReport() : 'Execution status reporting is not available in this process.';
 
     if (!router) {
-      await adapter.postMessage(channel, { text });
+      await adapter.postMessage({ type: 'interactive-reply', conduit: channel, sessionId: '' }, { text });
       return;
     }
 
@@ -177,7 +177,7 @@ export function createHelpHandler(router?: CommandActionRouter) {
     const text = buildHelpText();
 
     if (!router) {
-      await adapter.postMessage(channel, { text });
+      await adapter.postMessage({ type: 'interactive-reply', conduit: channel, sessionId: '' }, { text });
       return;
     }
 

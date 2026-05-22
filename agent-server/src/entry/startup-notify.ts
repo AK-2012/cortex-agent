@@ -16,12 +16,14 @@ async function sendStartupDmIfConfigured(
   adapter: PlatformAdapter,
   { machine, restartReason }: { machine?: string; restartReason?: string } = {},
 ) {
-  const adminChannel = adapter.getAdminChannel();
-  if (!adminChannel) return false;
-  await adapter.postMessage(adminChannel, {
-    text: buildStartupMessage({ machine, restartReason }),
-  });
-  return true;
+  try {
+    await adapter.postMessage({ type: 'system-notice' }, {
+      text: buildStartupMessage({ machine, restartReason }),
+    });
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 export { buildStartupMessage, sendStartupDmIfConfigured };

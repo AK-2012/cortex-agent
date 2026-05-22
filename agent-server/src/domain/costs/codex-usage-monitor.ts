@@ -45,7 +45,7 @@ function collectLowEntries(result) {
   return entries.sort((a, b) => a.remainingPercent - b.remainingPercent);
 }
 
-async function maybeNotifyCodexLowUsage({ adapter, channel, result }: { adapter: PlatformAdapter; channel: string; result: any }) {
+async function maybeNotifyCodexLowUsage({ adapter, result }: { adapter: PlatformAdapter; result: any }) {
   const lowEntries = collectLowEntries(result);
   if (!lowEntries.length) return;
 
@@ -68,7 +68,7 @@ async function maybeNotifyCodexLowUsage({ adapter, channel, result }: { adapter:
   const text = [`:warning: Codex usage low (threshold: ${THRESHOLD_PERCENT}%)`, ...lines].join('\n') + logHint;
 
   try {
-    await adapter.postMessage(channel, { text });
+    await adapter.postMessage({ type: 'system-notice' }, { text });
   } catch (error) {
     log.error('Failed to send low-usage alert:', (error as Error).message);
   }
