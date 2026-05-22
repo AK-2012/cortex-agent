@@ -6,7 +6,7 @@
 
 import type { ScheduleTarget, ScheduleTask } from '@store/schedule-repo.js';
 import type { ThreadRecord } from '@core/types/thread-types.js';
-import type { SessionRecord } from '@store/session-registry-repo.js';
+import type { Session } from '@store/session-registry-repo.js';
 
 /** What scheduled-task.ts should do at fire time. Each kind maps to one runtime branch:
  *  - fresh / default-thread → createDefaultThread + runThreadExec (default-path)
@@ -25,7 +25,7 @@ export interface DispatchLookups {
   /** Channel-default sessionId (the one a fresh user message would resume), or undefined. */
   getChannelSession(channel: string): Promise<string | undefined>;
   /** Look up a cortex-XXXX session record. Null if it's been GC'd or never registered. */
-  lookupSession(sessionName: string): Promise<SessionRecord | null>;
+  lookupSession(sessionName: string): Promise<Session | null>;
   /** Look up a thread record by id. Null if missing. */
   getThread(threadId: string): ThreadRecord | null;
 }

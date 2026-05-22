@@ -3,16 +3,20 @@
 // pos:    cortex-XXXX short name ↔ session UUID registry persistence layer (Pattern A, JsonRepository)
 // >>> If I am updated, update my header comment and the parent folder's CORTEX.md <<<
 
+import * as fs from 'fs';
 import * as path from 'path';
 import * as crypto from 'crypto';
 import { JsonRepository } from './json-repository.js';
 import { STORE_DIR } from '@core/paths.js';
+import { CHANNEL_REGISTRY_FILE } from './channel-repo.js';
 import { sessionRepo } from './session-repo.js';
 
 export const REGISTRY_FILE = path.join(STORE_DIR, 'session-registry.json');
 
-export interface SessionRecord {
+export interface Session {
+  name: string;
   sessionId: string;
+  projectId: string;
   channel: string;
   backend: string;
   kind: 'local' | 'scheduled';
@@ -23,7 +27,7 @@ export interface SessionRecord {
   profileName: string | null;
 }
 
-export type SessionRegistryData = Record<string, SessionRecord>;
+export type SessionRegistryData = Record<string, Session>;  // keyed by sessionId (UUID)
 
 export class SessionRegistryRepo {
   private readonly _repo: JsonRepository<SessionRegistryData>;
@@ -32,25 +36,77 @@ export class SessionRegistryRepo {
     this._repo = new JsonRepository<SessionRegistryData>({
       filePath,
       defaultValue: () => ({}),
-      migrate: (raw) => (typeof raw === 'object' && raw !== null ? (raw as SessionRegistryData) : ({})),
+      migrate: (raw) => {
+        if (typeof raw !== 'object' || raw === null) return {};
+        const data = raw as Record<string, any>;
+        const entries = Object.entries(data);
+        if (entries.length === 0) return {};
+
+        // Detect new format: first entry's value has 'name' field
+        const firstVal = entries[0][1];
+        if (firstVal && typeof firstVal === 'object' && 'name' in firstVal) {
+          return data as SessionRegistryData;
+        }
+
+        // Old format: name-keyed (cortex-XXXX → SessionRecord), values lack 'name' field.
+        // Build channel → project reverse map from channel-registry.json.
+        const channelToProject: Record<string, string> = {};
+        try {
+          const channelRegistryRaw = fs.readFileSync(CHANNEL_REGISTRY_FILE, 'utf8');
+          const channelRegistry = JSON.parse(channelRegistryRaw) as Record<string, string>;
+          // channelRegistry is projectName → channelId; reverse to channelId → projectName.
+          for (const [project, channel] of Object.entries(channelRegistry)) {
+            channelToProject[channel] = project;
+          }
+        } catch {
+          // channel-registry.json may not exist yet — all projectIds default to 'general'.
+        }
+
+        // Re-key from name → sessionId, deduplicate by lastUsedAt.
+        const sessionMap = new Map<string, { name: string; record: any }>();
+        for (const [name, record] of entries) {
+          if (!record || typeof record !== 'object') continue;
+          const sid: string = typeof record.sessionId === 'string' ? record.sessionId : '';
+          if (!sid) continue;
+
+          const existing = sessionMap.get(sid);
+          if (existing && existing.record.lastUsedAt > record.lastUsedAt) continue;
+          sessionMap.set(sid, { name, record });
+        }
+
+        // Build new format: sessionId-keyed, with name and projectId fields added.
+        const result: Record<string, any> = {};
+        for (const [sid, { name, record }] of sessionMap) {
+          const channel: string = typeof record.channel === 'string' ? record.channel : '';
+          result[sid] = {
+            ...record,
+            name,
+            projectId: channelToProject[channel] || 'general',
+          };
+        }
+        return result as SessionRegistryData;
+      },
     });
   }
 
   async generateSessionName(): Promise<string> {
     const registry = await this._repo.read();
+    const knownNames = new Set(Object.values(registry).map((s) => s.name));
     for (let i = 0; i < 100; i++) {
       const hex = crypto.randomBytes(3).toString('hex');
       const name = `cortex-${hex}`;
-      if (!registry[name]) return name;
+      if (!knownNames.has(name)) return name;
     }
     return `cortex-${crypto.randomBytes(4).toString('hex')}`;
   }
 
-  async registerSession(name: string, opts: { sessionId: string; channel: string; backend: string; kind: 'local' | 'scheduled'; label?: string | null; profileName?: string | null }): Promise<void> {
+  async registerSession(name: string, opts: { sessionId: string; channel: string; backend: string; kind: 'local' | 'scheduled'; projectId?: string; label?: string | null; profileName?: string | null }): Promise<void> {
     const now = new Date().toISOString();
     await this._repo.mutate((registry) => {
-      registry[name] = {
+      registry[opts.sessionId] = {
+        name,
         sessionId: opts.sessionId,
+        projectId: opts.projectId ?? 'general',
         channel: opts.channel,
         backend: opts.backend,
         kind: opts.kind,
@@ -63,35 +119,39 @@ export class SessionRegistryRepo {
     });
   }
 
-  async updateSession(name: string, updates: Partial<Pick<SessionRecord, 'sessionId' | 'lastUsedAt' | 'label' | 'profileName'>>): Promise<void> {
+  async updateSession(name: string, updates: Partial<Pick<Session, 'sessionId' | 'lastUsedAt' | 'label' | 'profileName'>>): Promise<void> {
     await this._repo.mutate((registry) => {
-      const record = registry[name];
-      if (!record) return { next: registry, result: undefined };
-      if (updates.sessionId !== undefined) record.sessionId = updates.sessionId;
-      if (updates.lastUsedAt !== undefined) record.lastUsedAt = updates.lastUsedAt;
-      if (updates.label !== undefined) record.label = updates.label?.substring(0, 60) || null;
-      if (updates.profileName !== undefined) record.profileName = updates.profileName;
+      // Records are keyed by sessionId; find the target by name.
+      for (const record of Object.values(registry)) {
+        if (record.name === name) {
+          if (updates.sessionId !== undefined) record.sessionId = updates.sessionId;
+          if (updates.lastUsedAt !== undefined) record.lastUsedAt = updates.lastUsedAt;
+          if (updates.label !== undefined) record.label = updates.label?.substring(0, 60) || null;
+          if (updates.profileName !== undefined) record.profileName = updates.profileName;
+          break;
+        }
+      }
       return { next: registry, result: undefined };
     });
   }
 
-  async lookupSession(name: string): Promise<SessionRecord | null> {
+  async lookupSession(name: string): Promise<Session | null> {
     const registry = await this._repo.read();
-    return registry[name] || null;
-  }
-
-  async lookupBySessionId(sessionId: string): Promise<string | null> {
-    const registry = await this._repo.read();
-    for (const [name, record] of Object.entries(registry)) {
-      if (record.sessionId === sessionId) return name;
+    for (const record of Object.values(registry)) {
+      if (record.name === name) return record;
     }
     return null;
   }
 
-  async listRecentSessions(limit = 10): Promise<Array<{ name: string } & SessionRecord>> {
+  async lookupBySessionId(sessionId: string): Promise<string | null> {
     const registry = await this._repo.read();
-    return Object.entries(registry)
-      .map(([name, record]) => ({ name, ...record }))
+    const record = registry[sessionId];
+    return record?.name ?? null;
+  }
+
+  async listRecentSessions(limit = 10): Promise<Session[]> {
+    const registry = await this._repo.read();
+    return Object.values(registry)
       .sort((a, b) => b.lastUsedAt.localeCompare(a.lastUsedAt))
       .slice(0, limit);
   }

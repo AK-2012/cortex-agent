@@ -24,6 +24,7 @@ const log = createLogger('agent-runner');
 import { createToolTrace } from '@platform/index.js';
 import { setStreamingCallback, clearStreamingCallback, publishPlanSubmitted, publishAskUserRequested } from './routing/hook-bridge.js';
 import { maybeNotifyCodexLowUsage } from '@domain/costs/codex-usage-monitor.js';
+import { detectProject } from '@domain/costs/cost-tracker.js';
 import { getAgent, createDefaultThread } from '@domain/threads/index.js';
 import { runThread } from '@domain/threads/runner.js';
 import { downloadFiles as downloadPlatformFiles } from './routing/file-handler.js';
@@ -216,7 +217,7 @@ async function resolveSessionName(sessionId: string | null, channel: string, use
     const existing = await sessionRegistryRepo.lookupBySessionId(sessionId);
     if (existing) return existing;
     const name = await sessionRegistryRepo.generateSessionName();
-    await sessionRegistryRepo.registerSession(name, { sessionId, channel, backend: resolveBackendForChannel(channel), kind: 'local', label: userMessage?.substring(0, 60), profileName: getActiveProfile(channel) });
+    await sessionRegistryRepo.registerSession(name, { sessionId, channel, backend: resolveBackendForChannel(channel), kind: 'local', label: userMessage?.substring(0, 60), profileName: getActiveProfile(channel), projectId: detectProject(userMessage) });
     return name;
   }
   return sessionRegistryRepo.generateSessionName();

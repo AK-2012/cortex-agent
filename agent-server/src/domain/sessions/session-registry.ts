@@ -8,17 +8,17 @@
 // >>> If I am updated, update my header comment and the parent folder's CORTEX.md <<<
 
 import { sessionRegistryRepo } from '@store/session-registry-repo.js';
-export { sessionRegistryRepo, type SessionRecord, type SessionRegistryData } from '@store/session-registry-repo.js';
+export { sessionRegistryRepo, type Session, type SessionRegistryData } from '@store/session-registry-repo.js';
 
 export function generateSessionName(): Promise<string> {
   return sessionRegistryRepo.generateSessionName();
 }
 
-export function registerSession(name: string, opts: { sessionId: string; channel: string; backend: string; kind: 'local' | 'scheduled'; label?: string | null; profileName?: string | null }): Promise<void> {
+export function registerSession(name: string, opts: { sessionId: string; channel: string; backend: string; kind: 'local' | 'scheduled'; projectId?: string; label?: string | null; profileName?: string | null }): Promise<void> {
   return sessionRegistryRepo.registerSession(name, opts);
 }
 
-export function updateSession(name: string, updates: { sessionId?: string; lastUsedAt?: string; label?: string | null }): Promise<void> {
+export function updateSession(name: string, updates: { sessionId?: string; lastUsedAt?: string; label?: string | null; profileName?: string | null }): Promise<void> {
   return sessionRegistryRepo.updateSession(name, updates);
 }
 

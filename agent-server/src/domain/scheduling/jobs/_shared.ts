@@ -39,6 +39,7 @@ export async function finalizeThreadSuccess(adapter: PlatformAdapter, channel: s
       backend: getActiveBackend(), kind: sessionKind,
       label,
       profileName: getActiveProfile(channel),
+      projectId: project,
     });
   }
   const metrics = formatMetricsSuffix({ costUsd: threadResult.totalCostUsd, numTurns: threadResult.totalNumTurns });

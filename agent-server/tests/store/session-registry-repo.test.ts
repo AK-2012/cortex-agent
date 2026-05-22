@@ -32,7 +32,7 @@ function createRepoWithPath(): { repo: SessionRegistryRepo; filePath: string } {
 }
 
 function makeOpts(sessionId: string) {
-  return { sessionId, channel: 'C001', backend: 'claude', kind: 'local' as const, label: null };
+  return { sessionId, channel: 'C001', backend: 'claude', kind: 'local' as const, label: null, projectId: 'test-project' };
 }
 
 // ── (a) Concurrent mutate: no lost entries ─────────────────────
@@ -88,7 +88,7 @@ test('SessionRegistryRepo - cache serves write value; invalidate() picks up disk
 
   // Overwrite the file on disk directly, bypassing the repo cache.
   // The cache should still serve the original value — disk changes are invisible until invalidate().
-  await fs.writeFile(filePath, JSON.stringify({ 'cortex-aabbcc': { ...record, sessionId: 'STALE-FROM-DISK' } }, null, 2));
+  await fs.writeFile(filePath, JSON.stringify({ 'sess-abc': { ...record, sessionId: 'STALE-FROM-DISK' } }, null, 2));
   const cachedRecord = await repo.lookupSession('cortex-aabbcc');
   assert.equal(cachedRecord!.sessionId, 'sess-abc',
     'cache should serve original value; disk bypass must not be visible');

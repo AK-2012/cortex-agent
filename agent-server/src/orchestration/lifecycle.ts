@@ -36,7 +36,7 @@ const log = createLogger('lifecycle');
 export async function handleAgentSuccess({ result, channel, adapter, statusMsg, startTime, userMessage, executionId, trigger = 'user', sessionName = null, threadTs = null, userMessageTs = null, onAssistantMessage = null }: { result: AgentResult; channel: string; adapter: PlatformAdapter; statusMsg: MessageRef; startTime: number; userMessage: string; executionId: string | null; trigger?: string; sessionName?: string | null; threadTs?: string | null; userMessageTs?: string | null; onAssistantMessage?: ((text: string) => void) | null }): Promise<void> {
   if (result?.sessionId) await setSessionAsync(channel, result.sessionId, resolveBackendForChannel(channel));
 
-  await registerOrUpdateSession(result, sessionName, channel, trigger);
+  await registerOrUpdateSession(result, sessionName, channel, trigger, detectProject(userMessage));
   await backfillLedgerSessionId(result, channel);
 
   const { elapsedStr, elapsedS } = computeElapsed(startTime);
@@ -85,7 +85,7 @@ export async function handleAgentSuccess({ result, channel, adapter, statusMsg, 
   }
 }
 
-async function registerOrUpdateSession(result: AgentResult | null, sessionName: string | null, channel: string, trigger: string): Promise<void> {
+async function registerOrUpdateSession(result: AgentResult | null, sessionName: string | null, channel: string, trigger: string, projectId = 'general'): Promise<void> {
   if (!result?.sessionId || !sessionName) return;
   const existing = await sessionRegistryRepo.lookupBySessionId(result.sessionId);
   if (!existing) {
@@ -95,6 +95,7 @@ async function registerOrUpdateSession(result: AgentResult | null, sessionName: 
       kind: trigger === 'scheduled' ? 'scheduled' : 'local',
       label: null,
       profileName: getActiveProfile(channel),
+      projectId,
     });
   } else {
     await sessionRegistryRepo.updateSession(existing, { lastUsedAt: new Date().toISOString() });
@@ -155,7 +156,7 @@ async function persistErrorSession(resolvedSessionId: string | null, sessionName
   if (!sessionName) return;
   const existing = await sessionRegistryRepo.lookupBySessionId(resolvedSessionId);
   if (!existing) {
-    await sessionRegistryRepo.registerSession(sessionName, { sessionId: resolvedSessionId, channel, backend, kind: 'local', profileName: getActiveProfile(channel) });
+    await sessionRegistryRepo.registerSession(sessionName, { sessionId: resolvedSessionId, channel, backend, kind: 'local', profileName: getActiveProfile(channel), projectId: 'general' });
   }
 }
 
