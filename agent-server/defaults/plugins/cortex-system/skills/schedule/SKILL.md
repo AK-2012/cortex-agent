@@ -35,7 +35,7 @@ Scheduled tasks allow Cortex to automatically execute messages at set times — 
 
 **Targets (where the fired task lands):**
 - `fresh` *(default)* — new isolated thread + new session (current behavior; safest for unrelated tasks)
-- `current-channel` — into the channel's active thread if any, otherwise channel-default session
+- `current-project` — spawn a fresh session in the project (default for project-addressed schedules)
 - `current-session` — reuse the current cortex-XXXX session (same conversation)
 - `current-thread` — continue the current thread (only valid while it's running/waiting)
 
@@ -49,7 +49,7 @@ When you (the LLM) need to add or manage schedules from inside an agent session,
 
 ```
 mcp__cortex__cortex_context()
-  → { channel, sessionId, sessionName, threadId, profile, project, backend, ... }
+  → { sessionId, sessionName, threadId, profile, project, backend, ... }
 
 mcp__cortex__cortex_schedule_add({
   type: 'interval' | 'daily' | 'weekly' | 'once',
@@ -58,7 +58,7 @@ mcp__cortex__cortex_schedule_add({
   time?: '09:00',                            // for daily/weekly
   dayOfWeek?: 'mon' | 0-6,                   // for weekly
   delay?: '2h' | '90m',                      // for once
-  target?: 'fresh' | 'current-channel' | 'current-session' | 'current-thread' | { kind, ... },
+  target?: 'fresh' | 'current-project' | 'current-session' | 'current-thread' | { kind, ... },
   fallback?: 'fresh' | 'skip' | 'wait',      // when target session/thread is gone at fire time
   profile?: 'fast-worker',
   channel?: 'C123',                          // override; defaults to current context
@@ -74,7 +74,7 @@ mcp__cortex__cortex_schedule_resume({ id })
 
 > User: "Remind me to run /orient every morning at 9, send results to current channel"
 >
-> Call `mcp__cortex__cortex_schedule_add({ type: 'daily', time: '09:00', message: '/orient', target: 'current-channel' })` — done. No need to call `cortex_context` first; the shorthand resolves automatically.
+> Call `mcp__cortex__cortex_schedule_add({ type: 'daily', time: '09:00', message: '/orient', target: 'current-project' })` — done. No need to call `cortex_context` first; the shorthand resolves automatically.
 
 > User: "Report training status in this conversation after 30 minutes"
 >

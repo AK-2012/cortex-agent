@@ -1,8 +1,9 @@
 // input:  McpServer + scheduleRepo + Scheduler (for timing math) + cortex_context resolver
 // output: cortex_schedule_{add,list,get,remove,pause,resume} tool registrations
 // pos:    MCP entry that lets the running LLM CRUD scheduled tasks without shelling out
-//         to bin/schedule. Resolves __current__ shorthand against the live execution context
-//         at create time so the persisted record always shows real channel/session/thread IDs.
+//         to bin/schedule. Resolves __current__ shorthand (current-project/current-session/
+//         current-thread) against the live execution context at create time so the persisted
+//         record always shows real project/session/thread IDs.
 // >>> If I am updated, update my header comment and the parent folder's CORTEX.md <<<
 
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
@@ -154,7 +155,7 @@ async function runScheduleAdd(input: z.infer<z.ZodObject<typeof addInputShape>>,
   let channel: string | null = input.channel ?? null;
   if (!channel && target.kind !== 'fresh') channel = (target as { channel: string }).channel;
   if (!channel) channel = ctxSnapshot.channel;
-  if (!channel) throw new Error('No channel: pass --channel or run inside a context with SLACK_CHANNEL set.');
+  if (!channel) throw new Error('No channel resolved for fresh-fallback: pass --channel or run inside a context with a resolved channel.');
 
   // Resolve projectId: explicit > channel-to-project reverse lookup > 'general'.
   const projectId = input.projectId ?? channelToProjectId(channel) ?? 'general';

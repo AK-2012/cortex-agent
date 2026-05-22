@@ -1,6 +1,6 @@
 // input:  McpServer + route-context-file + CORTEX_* env + thread/session stores
 // output: cortex_context tool registration
-// pos:    MCP tool letting the running LLM self-discover its channel/thread/session/profile,
+// pos:    MCP tool letting the running LLM self-discover its project/thread/session/profile,
 //         so cortex_schedule_add can target the current scope without guessing IDs.
 // >>> If I am updated, update my header comment and the parent folder's CORTEX.md <<<
 
@@ -24,8 +24,23 @@ interface RouteContextFile {
   updatedAt?: string;
 }
 
-interface CortexContextResponse {
+/** Internal context — includes channel for downstream consumers (schedule.ts session/thread
+ *  target resolution). Not exposed via MCP. */
+interface CortexContextInternal {
   channel: string | null;
+  sessionId: string | null;
+  sessionName: string | null;
+  threadId: string | null;
+  profile: string | null;
+  project: string | null;
+  backend: string | null;
+  scheduleTaskId: string | null;
+  callbackSource: string | null;
+}
+
+/** Public context returned by the cortex_context MCP tool. No channel — consumers
+ *  address by project/sessionId/threadId instead. */
+interface CortexContextResponse {
   sessionId: string | null;
   sessionName: string | null;
   threadId: string | null;
@@ -49,7 +64,7 @@ function readRouteContext(routeContextFile: string | null): RouteContextFile | n
  *  per turn for Codex) and falling back to the env vars set at MCP server spawn time
  *  (Claude path; sticky for the session lifetime). When sessionId is known but sessionName
  *  is not, look up the session-registry to get the cortex-XXXX short name. */
-export async function resolveCortexContext(deps: ContextToolDeps): Promise<CortexContextResponse> {
+export async function resolveCortexContext(deps: ContextToolDeps): Promise<CortexContextInternal> {
   const route = readRouteContext(deps.routeContextFile);
   const sessionId = route?.sessionId ?? process.env.CORTEX_SESSION_ID ?? null;
   let sessionName = route?.sessionName ?? process.env.CORTEX_SESSION_NAME ?? null;
@@ -72,12 +87,14 @@ export async function resolveCortexContext(deps: ContextToolDeps): Promise<Corte
 export function registerContextTools(server: McpServer, deps: ContextToolDeps): void {
   server.tool(
     'cortex_context',
-    'Return the current Cortex execution context: channel, sessionId, sessionName (cortex-XXXX), threadId, profile, project, backend. Use this to discover the current scope before calling cortex_schedule_add with target=current-project/current-session/current-thread.',
+    'Return the current Cortex execution context: sessionId, sessionName (cortex-XXXX), threadId, profile, project, backend. Use this to discover the current scope before calling cortex_schedule_add with target=current-project/current-session/current-thread.',
     {},
     { readOnlyHint: true },
     async () => {
       try {
-        const ctxResponse = await resolveCortexContext(deps);
+        const ctxInternal = await resolveCortexContext(deps);
+        // Strip channel from public response — consumers address by project/sessionId/threadId.
+        const { channel: _channel, ...ctxResponse } = ctxInternal;
         return { content: [{ type: 'text', text: JSON.stringify(ctxResponse, null, 2) }] };
       } catch (e) {
         return { content: [{ type: 'text', text: `Failed to resolve context: ${(e as Error).message}` }], isError: true };
