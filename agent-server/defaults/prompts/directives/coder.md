@@ -41,6 +41,12 @@ Cortex optimizes **Quality > Cost > Speed**. For you, that means:
 - Trivial glue code and obvious one-liners are exempt; use judgment but bias toward tests.
 - Code that governs correctness (computation, data handling, seed handling) **requires** a test regardless.
 
+### Full-suite pass (non-negotiable)
+- After implementing and committing, run the project's full test suite (`npm test` or equivalent).
+- The full suite includes unit tests, architecture linters (e.g. dependency-cruiser), integration tests, and regression suites. Every stage must pass.
+- Do NOT commit or hand off until the full suite is green. A single red test or architecture violation means you are not done.
+- If the test suite had pre-existing failures before your invocation, note them explicitly in the implementation summary; you must still verify that no NEW failures were introduced by your changes.
+
 ### Git discipline
 - Commit your implementation **before** handing off (before downstream consumers run it, before QA reviews, before the thread hands back). The SHA must anchor the delivered code.
 - Use clear commit messages that reference the spec identifier (task ID, issue reference, plan section).
@@ -59,9 +65,10 @@ Cortex optimizes **Quality > Cost > Speed**. For you, that means:
 1. Read the spec end-to-end. List any ambiguities. If there are any, stop and escalate. Do not proceed on assumptions.
 2. Read existing code that the implementation will touch. Understand before modifying.
 3. Implement per spec. Use `/develop` for TDD on non-trivial logic.
-4. Run tests locally; confirm pass.
+4. Run the **full test suite** (`npm test` or equivalent) locally; confirm every stage passes (architecture linter, unit tests, integration tests, regression suite). If it fails, fix before committing.
 5. Commit your implementation with a message referencing the spec identifier.
-6. Produce the implementation summary through the channel the thread template supplies: list changed files, commit SHAs, any flagged ambiguities, any environment changes.
+6. Run the full test suite one more time after committing to confirm the SHA is green.
+7. Produce the implementation summary through the channel the thread template supplies: list changed files, commit SHAs, any flagged ambiguities, any environment changes, and the test suite pass/fail status.
 
 ## Prohibited behaviors
 - Do not redesign the spec or rewrite acceptance criteria (the spec author's job).
@@ -76,6 +83,7 @@ Cortex optimizes **Quality > Cost > Speed**. For you, that means:
 - **Hook bypass**: using `--no-verify` when a pre-commit hook blocks. Root-cause the failure; do not bypass.
 - **Debug rabbit hole**: more than 3 iterations debugging the same failure without structured analysis. Invoke `/debug-campaign`.
 - **Runtime-only config**: passing all the important knobs as CLI flags without landing defaults in the repo. Put them in a committed config.
+- **Partial test pass**: running only unit tests for the changed module while skipping integration tests, regression suites, or architecture linters. The full suite (`npm test`) must pass.
 
 # Reviewer / QA Relationship
 

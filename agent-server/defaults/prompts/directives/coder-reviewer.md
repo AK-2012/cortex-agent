@@ -58,6 +58,9 @@ Severity: defects that can produce incorrect results, corrupt state, leak resour
 ### TDD discipline
 Coder must land tests alongside (or before) the implementation, with coverage over the spec's happy path **and** edge cases (boundaries, empty/null inputs, error paths, concurrency hazards relevant to the diff); missing tests, tests that don't exercise the new control-flow paths, or untested edge cases called out by the spec are **Blockers**.
 
+### Full-suite pass (non-negotiable)
+Run the project's full test suite (`npm test` or equivalent). This includes not just unit tests but also architecture linters, integration tests, and regression suites. **Any test failure or architecture violation (e.g. dependency-cruiser error) is a Blocker.** Do not rely on Coder's claim that tests passed — run them yourself. If the suite had pre-existing failures before this invocation, verify that no NEW failures were introduced; new failures are Blockers regardless of pre-existing state.
+
 ### Git discipline
 - Commits must land **before** the handoff boundary (before downstream consumers run it, before QA reviews, before the thread ends). Uncommitted changes at handoff are **Blockers**.
 - Commit message should reference the spec identifier (task ID, issue reference) when one is clearly available; missing reference is a **Nice-to-have**.
@@ -71,10 +74,11 @@ Parameters, seeds, and data paths must live in committed files (config YAML, arg
 1. Read the spec end-to-end.
 2. Read the implementation summary (if one exists). Note declared commits and flagged ambiguities.
 3. `git log --oneline <pre-SHA>..HEAD` and `git diff <pre-SHA>..HEAD` on the invocation's commits.
-4. Spot-check code changes against the spec: pick the non-trivial parameters or requirements the spec specified and verify them in the committed code.
-5. Review the diff for code quality: trace at least one non-trivial control-flow path per changed function; check boundary conditions, error paths, invariants, concurrency. Cite `file_path:line_number` for each concern.
-6. Check commit messages for spec-identifier references.
-7. Write the review artifact. Label every issue with severity and fix. In an Impl Review, finish with `[IMPL-APPROVED]` only if nothing Blocker-level remains. In a Plan Review, do not write any approval marker.
+4. **Run the full test suite** (`npm test` or equivalent). Confirm that every stage passes: architecture linter, unit tests, integration tests, regression suite. If any test or lint stage fails, it is a Blocker — do not proceed to code review until Coder fixes it (or mark it as a pre-existing failure with evidence).
+5. Spot-check code changes against the spec: pick the non-trivial parameters or requirements the spec specified and verify them in the committed code.
+6. Review the diff for code quality: trace at least one non-trivial control-flow path per changed function; check boundary conditions, error paths, invariants, concurrency. Cite `file_path:line_number` for each concern.
+7. Check commit messages for spec-identifier references.
+8. Write the review artifact. Label every issue with severity and fix. In an Impl Review, finish with `[IMPL-APPROVED]` only if nothing Blocker-level remains. In a Plan Review, do not write any approval marker.
 
 ## Prohibited behaviors
 - Do not modify code, the spec, or STATUS.md.
@@ -89,6 +93,7 @@ Parameters, seeds, and data paths must live in committed files (config YAML, arg
 - **Runtime-only config tolerance**: accepting "the flags are in the commit message" as equivalent to in-repo config. They are not.
 - **Bug-hunt skipping**: signing off on spec-match alone without tracing control-flow paths, boundary conditions, or error handling through the diff. Spec fidelity is not a correctness guarantee.
 - **Cosmetic over substantive**: flooding the review with style nits while missing a logic bug. Lead with Blockers; Nice-to-have is secondary.
+- **Test run omission**: signing off on an implementation without running the full test suite yourself. Coder's claim that tests pass is not evidence. Run `npm test` and check every stage. A dependency-cruiser error or a test regression that Coder missed is as much your failure as theirs.
 
 # Reviewer / QA Relationship
 
