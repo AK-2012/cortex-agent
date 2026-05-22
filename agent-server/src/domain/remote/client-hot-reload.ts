@@ -1,11 +1,13 @@
-// Client hot-reload via npm update — replaces the old SCP-based approach.
-// On startup, checks all registered remote devices for outdated cortex-client
-// and runs `npm update -g cortex-client` + restart when needed.
+// Client hot-reload — two modes:
+//   Dev mode  (CORTEX_REPO set):    build client from source, check tgz mtime,
+//                                   SCP to remotes + npm install -g + restart.
+//   Release mode (CORTEX_REPO unset): check npm registry vs remote installed
+//                                   version, npm update -g + restart.
 import * as fs from 'fs';
 import * as path from 'path';
-import { execSync } from 'child_process';
+import { execSync, execFile } from 'child_process';
 import { getMachineRegistry, type MachineEntry } from '../tasks/dispatch-utils.js';
-import { sshExec, clientPids } from './client-manager.js';
+import { sshExec, clientPids, buildRemoteSpawnCommand } from './client-manager.js';
 import { STORE_DIR } from '@core/utils.js';
 import { createLogger } from '@core/log.js';
 
@@ -25,29 +27,54 @@ interface DeviceResult {
 }
 
 interface ClientUpdateResult {
+  mode: 'dev' | 'release';
   oldVersion: string | null;
   newVersion: string;
   devices: DeviceResult[];
   duration: number;
 }
 
-// --- Version helpers ---
+interface StoredState {
+  mode: 'dev' | 'release';
+  dev?: { mtime: number; tgzPath: string };
+  release?: { version: string };
+  updatedAt: string;
+}
 
-function getLocalClientVersion(): string | null {
+// --- Mode detection ---
+
+function isDevMode(): boolean {
+  const repo = process.env.CORTEX_REPO;
+  if (!repo) return false;
   try {
-    const result = execSync('npm ls -g cortex-client --json 2>/dev/null || true', { encoding: 'utf8', timeout: 10000 });
-    try {
-      const parsed = JSON.parse(result);
-      return parsed?.dependencies?.['cortex-client']?.version || null;
-    } catch {
-      return null;
-    }
+    return fs.existsSync(repo) && fs.statSync(repo).isDirectory();
   } catch {
-    return null;
+    return false;
   }
 }
 
-function loadStoredVersion(): { version: string; updatedAt: string } | null {
+function resolveClientRepo(): string | null {
+  // Explicit override
+  if (process.env.CORTEX_CLIENT_REPO) {
+    const p = process.env.CORTEX_CLIENT_REPO;
+    try {
+      if (fs.existsSync(p) && fs.statSync(p).isDirectory()) return p;
+    } catch {}
+  }
+
+  // Derive from CORTEX_REPO (sibling directory)
+  const repo = process.env.CORTEX_REPO;
+  if (!repo) return null;
+  const clientPath = path.resolve(repo, '..', 'client');
+  try {
+    if (fs.existsSync(clientPath) && fs.statSync(clientPath).isDirectory()) return clientPath;
+  } catch {}
+  return null;
+}
+
+// --- Version state persistence ---
+
+function loadStoredState(): StoredState | null {
   try {
     return JSON.parse(fs.readFileSync(VERSION_FILE, 'utf8'));
   } catch {
@@ -55,9 +82,114 @@ function loadStoredVersion(): { version: string; updatedAt: string } | null {
   }
 }
 
-function saveVersion(ver: string): void {
+function saveDevState(mtime: number, tgzPath: string): void {
   fs.mkdirSync(STORE_DIR, { recursive: true });
-  fs.writeFileSync(VERSION_FILE, JSON.stringify({ version: ver, updatedAt: new Date().toISOString() }, null, 2));
+  fs.writeFileSync(VERSION_FILE, JSON.stringify({
+    mode: 'dev' as const,
+    dev: { mtime, tgzPath },
+    updatedAt: new Date().toISOString(),
+  }, null, 2));
+}
+
+function saveReleaseState(version: string): void {
+  fs.mkdirSync(STORE_DIR, { recursive: true });
+  fs.writeFileSync(VERSION_FILE, JSON.stringify({
+    mode: 'release' as const,
+    release: { version },
+    updatedAt: new Date().toISOString(),
+  }, null, 2));
+}
+
+// --- Dev mode: client build ---
+
+function buildClient(repoPath: string): { tgzPath: string; mtime: number } | null {
+  try {
+    log.info(`Building client in ${repoPath}...`);
+
+    // Step 1: build
+    const buildStart = Date.now();
+    execSync('npm run build', { cwd: repoPath, encoding: 'utf8', timeout: 120000, stdio: 'pipe' });
+    log.info(`  build: ${Date.now() - buildStart}ms`);
+
+    // Step 2: clean old tgz
+    try {
+      const oldTgzs = fs.readdirSync(repoPath).filter(f =>
+        f.startsWith('cortex-agent-client-') && f.endsWith('.tgz')
+      );
+      for (const f of oldTgzs) {
+        fs.unlinkSync(path.join(repoPath, f));
+      }
+    } catch {}
+
+    // Step 3: pack
+    const packStart = Date.now();
+    execSync('npm pack', { cwd: repoPath, encoding: 'utf8', timeout: 60000, stdio: 'pipe' });
+    log.info(`  pack: ${Date.now() - packStart}ms`);
+
+    // Step 4: find the produced tgz
+    const candidates = fs.readdirSync(repoPath)
+      .filter(f => f.startsWith('cortex-agent-client-') && f.endsWith('.tgz'))
+      .map(f => ({ f, mtime: fs.statSync(path.join(repoPath, f)).mtimeMs }))
+      .sort((a, b) => b.mtime - a.mtime);
+
+    if (candidates.length === 0) {
+      log.error('Build succeeded but no cortex-agent-client-*.tgz found');
+      return null;
+    }
+
+    const tgzPath = path.join(repoPath, candidates[0].f);
+    log.info(`Client built: ${candidates[0].f} (mtime=${candidates[0].mtime})`);
+    return { tgzPath, mtime: candidates[0].mtime };
+  } catch (err) {
+    log.error(`Client build failed: ${(err as Error).message}`);
+    return null;
+  }
+}
+
+// --- Dev mode: SCP to remote ---
+
+function scpToRemote(host: string, localPath: string, remotePath: string, timeout = 60000): Promise<string> {
+  return new Promise((resolve, reject) => {
+    execFile('scp', [
+      '-o', 'ConnectTimeout=10',
+      '-o', 'StrictHostKeyChecking=no',
+      localPath,
+      `${host}:${remotePath}`,
+    ], { timeout }, (err, stdout, stderr) => {
+      if (err) reject(new Error(`SCP error: ${err.message}\n${stderr}`));
+      else resolve(stdout.trim());
+    });
+  });
+}
+
+// --- Release mode: npm registry helpers ---
+
+function getNpmRegistryVersion(): string | null {
+  try {
+    const result = execSync('npm view @cortex-agent/client version 2>/dev/null || true', {
+      encoding: 'utf8',
+      timeout: 15000,
+      stdio: 'pipe',
+    }).trim();
+    return result || null;
+  } catch {
+    return null;
+  }
+}
+
+async function getRemoteInstalledVersion(host: string): Promise<string | null> {
+  try {
+    const cmd = 'npm ls -g @cortex-agent/client --json 2>/dev/null || true';
+    const result = await sshExec(host, cmd, 15000);
+    try {
+      const parsed = JSON.parse(result);
+      return parsed?.dependencies?.['@cortex-agent/client']?.version || null;
+    } catch {
+      return null;
+    }
+  } catch {
+    return null;
+  }
 }
 
 // --- Per-device operations ---
@@ -81,42 +213,106 @@ async function killClientOnDevice(device: string, reg: MachineEntry): Promise<bo
   }
 }
 
-async function updateClientOnDevice(device: string, reg: MachineEntry): Promise<DeviceResult> {
-  const res: DeviceResult = { device, updated: false, restarted: false };
-
+async function restartClientOnDevice(device: string, reg: MachineEntry): Promise<boolean> {
   try {
-    if (!reg.ssh) {
-      // Local device: npm update + restart handled externally
-      res.error = 'Local client update not yet supported (use npm update -g cortex-client manually)';
-      return res;
-    }
-
-    // Kill existing client
-    await killClientOnDevice(device, reg);
-
-    // npm update
-    const updateCmd = 'npm update -g cortex-client 2>&1';
-    const updateOutput = await sshExec(reg.ssh, updateCmd, 60000);
-    res.updated = true;
-    log.info(`  ${device}: npm update output: ${updateOutput.slice(0, 200)}`);
-
-    // Restart (config file is managed by LLM, not rewritten here)
     if (reg.win) {
-      const wmiArg = 'cortex-client';
+      const wmiArg = 'cmd.exe /c cortex-client';
       await sshExec(reg.ssh,
         `powershell -Command "(Invoke-WmiMethod -Class Win32_Process -Name Create -ArgumentList '${wmiArg}').ProcessId"`,
         30000
       );
     } else {
-      await sshExec(reg.ssh,
-        `nohup cortex-client > /dev/null 2>&1 & echo $!`,
-        30000
-      );
+      await sshExec(reg.ssh, buildRemoteSpawnCommand(reg), 30000);
     }
-    res.restarted = true;
+    return true;
+  } catch (err) {
+    log.warn(`Failed to restart client on ${device}: ${(err as Error).message}`);
+    return false;
+  }
+}
+
+// --- Dev mode: full per-device update ---
+
+async function updateClientDev(
+  device: string,
+  reg: MachineEntry,
+  tgzPath: string,
+  tgzName: string,
+): Promise<DeviceResult> {
+  const res: DeviceResult = { device, updated: false, restarted: false };
+
+  if (!reg.ssh) {
+    res.error = 'Local client dev-update not supported (use npm install -g with tgz manually)';
+    return res;
+  }
+
+  try {
+    // 1. Kill existing client
+    await killClientOnDevice(device, reg);
+
+    // 2. SCP tgz to remote
+    const remoteTmpPath = `/tmp/${tgzName}`;
+    log.info(`  ${device}: SCP ${tgzName} → ${reg.ssh}:/tmp/`);
+    await scpToRemote(reg.ssh, tgzPath, remoteTmpPath, 60000);
+
+    // 3. Install from tgz
+    const installCmd = `npm install -g ${remoteTmpPath} 2>&1`;
+    const installOutput = await sshExec(reg.ssh, installCmd, 60000);
+    log.info(`  ${device}: npm install -g output: ${installOutput.slice(0, 200)}`);
+    res.updated = true;
+
+    // 4. Clean up remote tgz
+    try {
+      await sshExec(reg.ssh, `rm -f ${remoteTmpPath}`, 10000);
+    } catch {}
+
+    // 5. Restart client
+    res.restarted = await restartClientOnDevice(device, reg);
   } catch (err) {
     res.error = (err as Error).message;
-    log.warn(`  ${device}: update failed — ${res.error}`);
+    log.warn(`  ${device}: dev update failed — ${res.error}`);
+  }
+
+  return res;
+}
+
+// --- Release mode: full per-device update ---
+
+async function updateClientRelease(
+  device: string,
+  reg: MachineEntry,
+  latestVersion: string,
+): Promise<DeviceResult> {
+  const res: DeviceResult = { device, updated: false, restarted: false, oldVersion: '?', newVersion: latestVersion };
+
+  if (!reg.ssh) {
+    res.error = 'Local client update not yet supported (use npm update -g @cortex-agent/client manually)';
+    return res;
+  }
+
+  try {
+    // 1. Check remote installed version
+    const remoteVer = await getRemoteInstalledVersion(reg.ssh);
+    res.oldVersion = remoteVer || '?';
+
+    if (remoteVer === latestVersion) {
+      log.info(`  ${device}: already at latest (${latestVersion})`);
+      return res;
+    }
+
+    // 2. Kill existing client
+    await killClientOnDevice(device, reg);
+
+    // 3. npm update
+    const updateOutput = await sshExec(reg.ssh, 'npm update -g @cortex-agent/client 2>&1', 60000);
+    res.updated = true;
+    log.info(`  ${device}: npm update output: ${updateOutput.slice(0, 200)}`);
+
+    // 4. Restart client
+    res.restarted = await restartClientOnDevice(device, reg);
+  } catch (err) {
+    res.error = (err as Error).message;
+    log.warn(`  ${device}: release update failed — ${res.error}`);
   }
 
   return res;
@@ -125,55 +321,133 @@ async function updateClientOnDevice(device: string, reg: MachineEntry): Promise<
 // --- Main check-and-update ---
 
 async function checkAndUpdateClients(): Promise<ClientUpdateResult | null> {
-  const localVersion = getLocalClientVersion();
-  const stored = loadStoredVersion();
-
-  // First run: save version, skip update
-  if (!stored) {
-    const ver = localVersion || 'unknown';
-    log.info(`First run — saving client version ${ver}, skipping update`);
-    saveVersion(ver);
-    return null;
-  }
-
-  // No local version info (cortex-client not installed locally)
-  if (!localVersion) {
-    log.info('cortex-client not found in local npm — skipping hot-reload');
-    return null;
-  }
-
-  // No change
-  if (stored.version === localVersion) {
-    return null;
-  }
-
-  log.info(`cortex-client updated: ${stored.version} → ${localVersion}`);
+  const dev = isDevMode();
+  const stored = loadStoredState();
   const start = Date.now();
 
-  const registry = getMachineRegistry();
+  if (dev) {
+    return checkAndUpdateDev(stored, start);
+  } else {
+    return checkAndUpdateRelease(stored, start);
+  }
+}
 
+async function checkAndUpdateDev(stored: StoredState | null, start: number): Promise<ClientUpdateResult | null> {
+  const clientRepo = resolveClientRepo();
+  if (!clientRepo) {
+    log.warn('Dev mode: CORTEX_REPO is set but client repo not found — skipping update');
+    return null;
+  }
+
+  // Build client from source
+  const built = buildClient(clientRepo);
+  if (!built) {
+    log.error('Dev mode: client build failed — skipping update');
+    return null;
+  }
+
+  const tgzName = path.basename(built.tgzPath);
+
+  // First run or mode change: save state, skip update
+  if (!stored || stored.mode !== 'dev') {
+    const label = !stored ? 'First run' : 'Mode changed to dev';
+    log.info(`Dev mode — ${label}: saving client mtime=${built.mtime}, skipping update`);
+    saveDevState(built.mtime, built.tgzPath);
+    return null;
+  }
+
+  // Compare mtime
+  const oldMtime = stored.dev?.mtime ?? 0;
+  if (built.mtime === oldMtime) {
+    log.info(`Dev mode: client tgz mtime unchanged (${built.mtime}) — skipping update`);
+    return null;
+  }
+
+  log.info(`Dev mode: client tgz changed — mtime ${oldMtime} → ${built.mtime}`);
+
+  const registry = getMachineRegistry();
   const devices = await Promise.all(
     Object.entries(registry).map(async ([device, reg]): Promise<DeviceResult> => {
-      return updateClientOnDevice(device, reg);
+      return updateClientDev(device, reg, built.tgzPath, tgzName);
     })
   );
 
   const duration = Date.now() - start;
-  saveVersion(localVersion);
+  saveDevState(built.mtime, built.tgzPath);
 
   for (const d of devices) {
     const status = d.updated && d.restarted ? 'OK' : (d.error ? 'FAIL' : 'SKIP');
     log.info(`  ${d.device}: ${status}${d.error ? ` (${d.error})` : ''}`);
   }
 
-  return { oldVersion: stored.version, newVersion: localVersion, devices, duration };
+  return {
+    mode: 'dev',
+    oldVersion: String(oldMtime),
+    newVersion: String(built.mtime),
+    devices,
+    duration,
+  };
+}
+
+async function checkAndUpdateRelease(stored: StoredState | null, start: number): Promise<ClientUpdateResult | null> {
+  // Get latest version from npm registry
+  const latestVersion = getNpmRegistryVersion();
+  if (!latestVersion) {
+    log.warn('Release mode: could not fetch latest version from npm registry — skipping update');
+    return null;
+  }
+
+  // First run or mode change: save state, skip update
+  if (!stored || stored.mode !== 'release') {
+    const label = !stored ? 'First run' : 'Mode changed to release';
+    log.info(`Release mode — ${label}: saving version ${latestVersion}, skipping update`);
+    saveReleaseState(latestVersion);
+    return null;
+  }
+
+  // Compare versions
+  const oldVersion = stored.release?.version ?? '?';
+  if (oldVersion === latestVersion) {
+    log.info(`Release mode: version unchanged (${latestVersion}) — skipping update`);
+    return null;
+  }
+
+  log.info(`Release mode: new version available — ${oldVersion} → ${latestVersion}`);
+
+  const registry = getMachineRegistry();
+  const devices = await Promise.all(
+    Object.entries(registry).map(async ([device, reg]): Promise<DeviceResult> => {
+      return updateClientRelease(device, reg, latestVersion);
+    })
+  );
+
+  const duration = Date.now() - start;
+  saveReleaseState(latestVersion);
+
+  for (const d of devices) {
+    const status = d.updated && d.restarted ? 'OK' : (d.error ? 'FAIL' : 'SKIP');
+    log.info(`  ${d.device}: ${status}${d.error ? ` (${d.error})` : ''}`);
+  }
+
+  return {
+    mode: 'release',
+    oldVersion,
+    newVersion: latestVersion,
+    devices,
+    duration,
+  };
 }
 
 // --- Slack message formatting ---
 
 function formatUpdateSlackMessage(result: ClientUpdateResult): string {
+  const modeLabel = result.mode === 'dev' ? '[dev]' : '[release]';
+  const versionLabel = result.mode === 'dev'
+    ? `mtime \`${result.oldVersion}\` → \`${result.newVersion}\``
+    : `\`${result.oldVersion}\` → \`${result.newVersion}\``;
+
   const lines: string[] = [
-    `:arrows_counterclockwise: *Client hot-reload*  \`${result.oldVersion}\` → \`${result.newVersion}\`  (${(result.duration / 1000).toFixed(1)}s)`,
+    `:arrows_counterclockwise: *Client hot-reload ${modeLabel}*  ${versionLabel}  (${(result.duration / 1000).toFixed(1)}s)`,
   ];
 
   for (const d of result.devices) {
