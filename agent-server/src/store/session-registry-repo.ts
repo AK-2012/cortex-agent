@@ -1,5 +1,5 @@
 // input:  session-registry.json + JsonRepository
-// output: SessionRegistryRepo (async generateSessionName / registerSession / updateSession / lookupSession / lookupBySessionId / listRecentSessions / getActiveSessionName)
+// output: SessionRegistryRepo (async generateSessionName / registerSession / updateSession / lookupSession / lookupBySessionId / getById / listRecentSessions / listByProject / listResumable / markUsed / pruneStale / getActiveSessionName)
 // pos:    cortex-XXXX short name ↔ session UUID registry persistence layer (Pattern A, JsonRepository)
 // >>> If I am updated, update my header comment and the parent folder's CORTEX.md <<<
 
@@ -10,6 +10,9 @@ import { JsonRepository } from './json-repository.js';
 import { STORE_DIR } from '@core/paths.js';
 import { CHANNEL_REGISTRY_FILE } from './channel-repo.js';
 import { sessionRepo } from './session-repo.js';
+import { executionRepo } from './execution-repo.js';
+import { threadStore } from './thread-repo.js';
+import { cleanupAllBackups } from '@domain/sessions/session-backup.js';
 
 export const REGISTRY_FILE = path.join(STORE_DIR, 'session-registry.json');
 
@@ -31,6 +34,8 @@ export type SessionRegistryData = Record<string, Session>;  // keyed by sessionI
 
 export class SessionRegistryRepo {
   private readonly _repo: JsonRepository<SessionRegistryData>;
+  /** name → sessionId index keeping lookupSession O(1). */
+  private _nameIndex = new Map<string, string>();
 
   constructor(filePath: string = REGISTRY_FILE) {
     this._repo = new JsonRepository<SessionRegistryData>({
@@ -89,6 +94,32 @@ export class SessionRegistryRepo {
     });
   }
 
+  // ── name→sessionId index ──────────────────────────────────────
+
+  private _rebuildNameIndex(data: SessionRegistryData): void {
+    this._nameIndex.clear();
+    for (const [sid, record] of Object.entries(data)) {
+      this._nameIndex.set(record.name, sid);
+    }
+  }
+
+  /** Read registry data, rebuilding the name index from cache when empty. */
+  private async _readWithIndex(): Promise<SessionRegistryData> {
+    const data = await this._repo.read();
+    if (this._nameIndex.size === 0) {
+      this._rebuildNameIndex(data);
+    }
+    return data;
+  }
+
+  /** Rebuild the name index from the current cached data (zero I/O on cache hit). */
+  private async _syncIndex(): Promise<void> {
+    const data = await this._repo.read();
+    this._rebuildNameIndex(data);
+  }
+
+  // ── Public API ────────────────────────────────────────────────
+
   async generateSessionName(): Promise<string> {
     const registry = await this._repo.read();
     const knownNames = new Set(Object.values(registry).map((s) => s.name));
@@ -115,6 +146,7 @@ export class SessionRegistryRepo {
         label: opts.label?.substring(0, 60) || null,
         profileName: opts.profileName ?? null,
       };
+      this._nameIndex.set(name, opts.sessionId);
       return { next: registry, result: undefined };
     });
   }
@@ -136,11 +168,10 @@ export class SessionRegistryRepo {
   }
 
   async lookupSession(name: string): Promise<Session | null> {
-    const registry = await this._repo.read();
-    for (const record of Object.values(registry)) {
-      if (record.name === name) return record;
-    }
-    return null;
+    const registry = await this._readWithIndex();
+    const sid = this._nameIndex.get(name);
+    if (!sid) return null;
+    return registry[sid] ?? null;
   }
 
   async lookupBySessionId(sessionId: string): Promise<string | null> {
@@ -156,6 +187,78 @@ export class SessionRegistryRepo {
       .slice(0, limit);
   }
 
+  /** Return a session by sessionId, or null if not found. O(1) key lookup. */
+  async getById(sessionId: string): Promise<Session | null> {
+    const registry = await this._repo.read();
+    return registry[sessionId] ?? null;
+  }
+
+  /** List sessions belonging to a project, most recently used first. */
+  async listByProject(projectId: string): Promise<Session[]> {
+    const registry = await this._repo.read();
+    return Object.values(registry)
+      .filter((s) => s.projectId === projectId)
+      .sort((a, b) => b.lastUsedAt.localeCompare(a.lastUsedAt));
+  }
+
+  /** List resumable (non-scheduled) sessions, optionally filtered by projectId. */
+  async listResumable(projectId?: string): Promise<Session[]> {
+    const registry = await this._repo.read();
+    return Object.values(registry)
+      .filter((s) => s.kind !== 'scheduled')
+      .filter((s) => projectId === undefined || s.projectId === projectId)
+      .sort((a, b) => b.lastUsedAt.localeCompare(a.lastUsedAt));
+  }
+
+  /** Touch the lastUsedAt timestamp of a session to now. No-op if sessionId not found. */
+  async markUsed(sessionId: string): Promise<void> {
+    const now = new Date().toISOString();
+    await this._repo.mutate((registry) => {
+      const record = registry[sessionId];
+      if (record) record.lastUsedAt = now;
+      return { next: registry, result: undefined };
+    });
+  }
+
+  /**
+   * Remove sessions whose lastUsedAt is older than maxAgeMs from now,
+   * and are not referenced by any executionRepo or threadStore record.
+   * Cleans up session backup files. Returns the number of removed sessions.
+   */
+  async pruneStale(maxAgeMs: number): Promise<number> {
+    const cutoff = Date.now() - maxAgeMs;
+
+    // Build set of sessionIds still referenced by active records.
+    const referencedSessionIds = new Set<string>();
+    for (const exec of executionRepo.getAll()) {
+      if (exec.session.sessionId) referencedSessionIds.add(exec.session.sessionId);
+    }
+    for (const thread of threadStore.getAll()) {
+      for (const agent of Object.values(thread.agents)) {
+        if (agent.sessionId) referencedSessionIds.add(agent.sessionId);
+      }
+      for (const step of thread.steps) {
+        if (step.sessionId) referencedSessionIds.add(step.sessionId);
+      }
+    }
+
+    const count = await this._repo.mutate((registry) => {
+      let removed = 0;
+      for (const [sid, record] of Object.entries(registry)) {
+        const usedAt = new Date(record.lastUsedAt).getTime();
+        if (usedAt < cutoff && !referencedSessionIds.has(sid)) {
+          cleanupAllBackups(sid);
+          this._nameIndex.delete(record.name);
+          delete registry[sid];
+          removed++;
+        }
+      }
+      return { next: registry, result: removed };
+    });
+
+    return count;
+  }
+
   async getActiveSessionName(channel: string, backend: string): Promise<string | null> {
     const sessionId = await sessionRepo.getSessionAsync(channel, backend);
     if (!sessionId) return null;
@@ -165,6 +268,7 @@ export class SessionRegistryRepo {
   /** Drop the in-memory cache so the next read() fetches from disk. Test hook. */
   invalidate(): void {
     this._repo.invalidate();
+    this._nameIndex.clear();
   }
 
   /** Wait for any in-flight mutate() to complete. For graceful SIGTERM drain. */
@@ -173,4 +277,6 @@ export class SessionRegistryRepo {
   }
 }
 
-export const sessionRegistryRepo = new SessionRegistryRepo();
+export const sessionStore = new SessionRegistryRepo();
+/** @deprecated Use `sessionStore` instead. Alias for backward compatibility. */
+export const sessionRegistryRepo = sessionStore;

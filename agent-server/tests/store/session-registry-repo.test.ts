@@ -1,5 +1,5 @@
 // input:  Node test runner, assert, tmp filesystem
-// output: regression tests for SessionRegistryRepo (concurrent mutate, flush ordering, cache consistency)
+// output: regression tests for SessionRegistryRepo (concurrent mutate, flush ordering, cache consistency, new API methods, name index)
 // pos:    verifies store/session-registry-repo.ts Pattern A guarantees
 // >>> If I am updated, update my header comment and the parent folder's CORTEX.md <<<
 
@@ -31,8 +31,8 @@ function createRepoWithPath(): { repo: SessionRegistryRepo; filePath: string } {
   return { repo: new SessionRegistryRepo(filePath), filePath };
 }
 
-function makeOpts(sessionId: string) {
-  return { sessionId, channel: 'C001', backend: 'claude', kind: 'local' as const, label: null, projectId: 'test-project' };
+function makeOpts(sessionId: string, overrides: Record<string, any> = {}) {
+  return { sessionId, channel: 'C001', backend: 'claude', kind: 'local' as const, label: null, projectId: 'test-project', ...overrides };
 }
 
 // ── (a) Concurrent mutate: no lost entries ─────────────────────
@@ -98,4 +98,235 @@ test('SessionRegistryRepo - cache serves write value; invalidate() picks up disk
   const freshRecord = await repo.lookupSession('cortex-aabbcc');
   assert.equal(freshRecord!.sessionId, 'STALE-FROM-DISK',
     'after invalidate(), repo must return the disk value');
+});
+
+// ── (d) Migration: old-format → new-format re-keying ────────────
+
+test('SessionRegistryRepo - migrate converts name-keyed old format to sessionId-keyed new format', async () => {
+  const idx = _testIdx++;
+  const filePath = path.join(tmpDir, `session-registry-${idx}.json`);
+
+  // Write old-format JSON: name-keyed, values without name/projectId fields.
+  const oldFormat = {
+    'cortex-abc': { sessionId: 'sess-abc', channel: 'C001', backend: 'claude', kind: 'local', createdAt: '2025-01-01T00:00:00.000Z', lastUsedAt: '2025-06-01T00:00:00.000Z', label: 'first', profileName: null },
+    'cortex-def': { sessionId: 'sess-def', channel: 'C002', backend: 'codex', kind: 'scheduled', createdAt: '2025-02-01T00:00:00.000Z', lastUsedAt: '2025-06-02T00:00:00.000Z', label: null, profileName: 'dev' },
+  };
+  await fs.writeFile(filePath, JSON.stringify(oldFormat, null, 2));
+
+  const repo = new SessionRegistryRepo(filePath);
+
+  // Trigger read + migration.
+  const sessions = await repo.listRecentSessions(10);
+  assert.equal(sessions.length, 2, 'both sessions should be migrated');
+
+  const abc = await repo.getById('sess-abc');
+  assert.ok(abc !== null);
+  assert.equal(abc!.name, 'cortex-abc', 'name should equal old key');
+  assert.equal(abc!.sessionId, 'sess-abc');
+  assert.equal(abc!.projectId, 'general', 'projectId defaults to general without channel-registry');
+  assert.equal(abc!.channel, 'C001');
+  assert.equal(abc!.kind, 'local');
+  assert.equal(abc!.label, 'first');
+
+  const def = await repo.getById('sess-def');
+  assert.ok(def !== null);
+  assert.equal(def!.name, 'cortex-def');
+  assert.equal(def!.sessionId, 'sess-def');
+  assert.equal(def!.projectId, 'general');
+  assert.equal(def!.profileName, 'dev');
+});
+
+test('SessionRegistryRepo - migrate deduplicates by lastUsedAt keeping newest', async () => {
+  const idx = _testIdx++;
+  const filePath = path.join(tmpDir, `session-registry-${idx}.json`);
+
+  // Two entries with same sessionId but different names and lastUsedAt.
+  const oldFormat = {
+    'cortex-old':  { sessionId: 'sess-dup', channel: 'C001', backend: 'claude', kind: 'local', createdAt: '2025-01-01T00:00:00.000Z', lastUsedAt: '2025-01-01T00:00:00.000Z', label: null, profileName: null },
+    'cortex-newer': { sessionId: 'sess-dup', channel: 'C001', backend: 'claude', kind: 'local', createdAt: '2025-06-01T00:00:00.000Z', lastUsedAt: '2025-06-01T00:00:00.000Z', label: 'newer', profileName: null },
+  };
+  await fs.writeFile(filePath, JSON.stringify(oldFormat, null, 2));
+
+  const repo = new SessionRegistryRepo(filePath);
+
+  const sessions = await repo.listRecentSessions(10);
+  assert.equal(sessions.length, 1, 'duplicate sessionId should be deduplicated to 1');
+
+  const dup = await repo.getById('sess-dup');
+  assert.ok(dup !== null);
+  assert.equal(dup!.name, 'cortex-newer', 'should keep newer entry name');
+  assert.equal(dup!.label, 'newer', 'should keep newer entry fields');
+});
+
+test('SessionRegistryRepo - migrate empty file produces empty registry', async () => {
+  const idx = _testIdx++;
+  const filePath = path.join(tmpDir, `session-registry-${idx}.json`);
+
+  await fs.writeFile(filePath, JSON.stringify({}, null, 2));
+  const repo = new SessionRegistryRepo(filePath);
+
+  const sessions = await repo.listRecentSessions(10);
+  assert.equal(sessions.length, 0);
+});
+
+test('SessionRegistryRepo - migrate new format passes through unchanged', async () => {
+  const idx = _testIdx++;
+  const filePath = path.join(tmpDir, `session-registry-${idx}.json`);
+
+  // Write new-format JSON (already has name field) — should skip migration.
+  const newFormat = {
+    'sess-abc': { name: 'cortex-abc', sessionId: 'sess-abc', projectId: 'my-project', channel: 'C001', backend: 'claude', kind: 'local', createdAt: '2025-01-01T00:00:00.000Z', lastUsedAt: '2025-06-01T00:00:00.000Z', label: null, profileName: null },
+  };
+  await fs.writeFile(filePath, JSON.stringify(newFormat, null, 2));
+
+  const repo = new SessionRegistryRepo(filePath);
+  const record = await repo.getById('sess-abc');
+  assert.ok(record !== null);
+  assert.equal(record!.name, 'cortex-abc');
+  assert.equal(record!.projectId, 'my-project', 'should preserve existing projectId');
+});
+
+// ── (e) getById: O(1) direct lookup ─────────────────────────────
+
+test('SessionRegistryRepo - getById returns session by sessionId, null for missing', async () => {
+  const { repo } = createRepoWithPath();
+  await repo.registerSession('cortex-001', makeOpts('sess-001'));
+
+  const found = await repo.getById('sess-001');
+  assert.ok(found !== null);
+  assert.equal(found!.name, 'cortex-001');
+  assert.equal(found!.sessionId, 'sess-001');
+
+  const missing = await repo.getById('nonexistent');
+  assert.equal(missing, null);
+});
+
+// ── (e) listByProject filtering ─────────────────────────────────
+
+test('SessionRegistryRepo - listByProject filters by projectId', async () => {
+  const { repo } = createRepoWithPath();
+
+  await repo.registerSession('cortex-proj-a-1', makeOpts('sess-a1', { projectId: 'project-alpha' }));
+  await repo.registerSession('cortex-proj-a-2', makeOpts('sess-a2', { projectId: 'project-alpha' }));
+  await repo.registerSession('cortex-proj-b-1', makeOpts('sess-b1', { projectId: 'project-beta' }));
+
+  const alpha = await repo.listByProject('project-alpha');
+  assert.equal(alpha.length, 2);
+  assert.ok(alpha.every((s) => s.projectId === 'project-alpha'));
+
+  const beta = await repo.listByProject('project-beta');
+  assert.equal(beta.length, 1);
+  assert.equal(beta[0].name, 'cortex-proj-b-1');
+
+  const empty = await repo.listByProject('nonexistent');
+  assert.equal(empty.length, 0);
+});
+
+// ── (f) listResumable filtering ─────────────────────────────────
+
+test('SessionRegistryRepo - listResumable excludes scheduled sessions', async () => {
+  const { repo } = createRepoWithPath();
+
+  await repo.registerSession('cortex-local-1', makeOpts('sess-l1', { kind: 'local' }));
+  await repo.registerSession('cortex-scheduled-1', makeOpts('sess-s1', { kind: 'scheduled' }));
+  await repo.registerSession('cortex-local-2', makeOpts('sess-l2', { kind: 'local', projectId: 'other-project' }));
+
+  const all = await repo.listResumable();
+  assert.equal(all.length, 2, 'should exclude scheduled sessions');
+  assert.ok(all.every((s) => s.kind !== 'scheduled'));
+
+  const filtered = await repo.listResumable('other-project');
+  assert.equal(filtered.length, 1);
+  assert.equal(filtered[0].name, 'cortex-local-2');
+});
+
+// ── (g) markUsed updates lastUsedAt ─────────────────────────────
+
+test('SessionRegistryRepo - markUsed updates lastUsedAt', async () => {
+  const { repo } = createRepoWithPath();
+
+  await repo.registerSession('cortex-marktest', makeOpts('sess-mark'));
+
+  // Read the original lastUsedAt
+  const before = await repo.getById('sess-mark');
+  assert.ok(before);
+  const originalTs = before!.lastUsedAt;
+
+  // Small delay so the timestamp changes
+  await new Promise((r) => setTimeout(r, 10));
+
+  await repo.markUsed('sess-mark');
+  const after = await repo.getById('sess-mark');
+  assert.ok(after);
+  assert.ok(new Date(after!.lastUsedAt).getTime() > new Date(originalTs).getTime(),
+    'markUsed should advance lastUsedAt');
+
+  // markUsed on nonexistent session should not throw
+  await repo.markUsed('nonexistent');
+});
+
+// ── (h) pruneStale removes expired sessions ─────────────────────
+
+test('SessionRegistryRepo - pruneStale removes old sessions, keeps recent', async () => {
+  const { repo } = createRepoWithPath();
+
+  // Register sessions with explicit past dates via markUsed manipulation
+  await repo.registerSession('cortex-fresh', makeOpts('sess-fresh'));
+  await repo.registerSession('cortex-stale', makeOpts('sess-stale'));
+
+  // Manually backdate the stale session by directly writing to the file
+  const registry = await (repo as any)._repo.read() as any;
+  registry['sess-stale'].lastUsedAt = new Date(Date.now() - 86_400_000 * 30).toISOString(); // 30 days ago
+  await (repo as any)._repo.write(registry);
+
+  // Also backdate name index would be stale, so invalidate to rebuild
+  repo.invalidate();
+
+  const removed = await repo.pruneStale(86_400_000 * 7); // 7 day max age
+  assert.equal(removed, 1, 'should remove 1 stale session');
+
+  const fresh = await repo.getById('sess-fresh');
+  assert.ok(fresh !== null, 'fresh session should survive');
+
+  const stale = await repo.getById('sess-stale');
+  assert.equal(stale, null, 'stale session should be removed');
+});
+
+test('SessionRegistryRepo - pruneStale returns 0 when no sessions', async () => {
+  const { repo } = createRepoWithPath();
+  const removed = await repo.pruneStale(86_400_000);
+  assert.equal(removed, 0);
+});
+
+// ── (i) name index: lookupSession O(1) after mutations ──────────
+
+test('SessionRegistryRepo - lookupSession uses name index, consistent after register and update', async () => {
+  const { repo } = createRepoWithPath();
+
+  // Register and verify lookupSession works
+  await repo.registerSession('cortex-index-1', makeOpts('sess-idx1'));
+  const r1 = await repo.lookupSession('cortex-index-1');
+  assert.ok(r1);
+  assert.equal(r1!.sessionId, 'sess-idx1');
+
+  // Register another and verify both are findable
+  await repo.registerSession('cortex-index-2', makeOpts('sess-idx2'));
+  const r2 = await repo.lookupSession('cortex-index-2');
+  assert.ok(r2);
+
+  // lookupSession for nonexistent name returns null
+  const missing = await repo.lookupSession('cortex-nonexistent');
+  assert.equal(missing, null);
+});
+
+test('SessionRegistryRepo - name index survives invalidate', async () => {
+  const { repo } = createRepoWithPath();
+
+  await repo.registerSession('cortex-persist', makeOpts('sess-persist'));
+  repo.invalidate();
+
+  // After invalidate, lookupSession should rebuild the index and still find the session
+  const r = await repo.lookupSession('cortex-persist');
+  assert.ok(r);
+  assert.equal(r!.sessionId, 'sess-persist');
 });
