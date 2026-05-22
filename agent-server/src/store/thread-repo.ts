@@ -110,6 +110,14 @@ class ThreadRepo {
     return results.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   }
 
+  findByProject(projectId: string): ThreadRecord[] {
+    const results: ThreadRecord[] = [];
+    for (const record of this.map.values()) {
+      if (record.projectId === projectId) results.push(record);
+    }
+    return results.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  }
+
   findByPlatformThread(channel: string, platformThreadId: string): ThreadRecord | null {
     for (const record of this.map.values()) {
       if (record.channel === channel && record.platformThreadId === platformThreadId) {

@@ -558,6 +558,7 @@ test('evaluateTransitions returns no_matching_transition when steps array is emp
     id, channel: 'C-eval-2',
     templateName: 'nonexistent-template-xxxx', // unknown template → still fallback
     status: 'running',
+    projectId: 'general',
     platformThreadId: null,
     userMessage: '', userMessageTs: 'ts',
     workspacePath: tmp, artifactPath,

@@ -118,12 +118,14 @@ async function executeDispatchTask({ selected, selectedTask, channel, scheduleTa
   const thread = createThread(effectiveChannel, {
     templateName: selected.template, userMessage: selected.prompt, userMessageTs: `dispatch_${Date.now()}`,
     platformThreadId: statusMsg?.messageId ?? null,
-    metadata: { scheduleTaskId, trigger: 'task-dispatch', project: selectedTask.project, profileOverride: effectiveProfile },
+    projectId: selectedTask.project,
+    metadata: { scheduleTaskId, trigger: 'task-dispatch', profileOverride: effectiveProfile },
   });
 
   const icb = ctx.buildInteractiveCallbacks?.(effectiveChannel, null);
   const threadResult = await runThreadExec(thread.id, {
     adapter, channel: effectiveChannel, threadTs: statusMsg?.messageId || null, statusMsg, startTime, existingSessionId: null,
+    destination: { type: 'interactive-reply', conduit: effectiveChannel, sessionId: '' },
     onToolUse: icb?.onToolUse ?? null, onPlanWritten: icb?.onPlanWritten ?? null, onAskUserQuestion: icb?.onAskUserQuestion ?? null,
     extraHooks: {
       onEnd: {

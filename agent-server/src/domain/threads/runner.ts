@@ -110,10 +110,8 @@ function initThreadContext(threadId: string, opts: RunThreadOptions): ThreadCont
   const template = thread.templateName ? (getTemplate(thread.templateName) || null) : null;
   // For all non-default threads, aggregate output into a VirtualMessage.
   // Default template passes through opts.onAssistantMessage from app.ts (backward compat).
-  // When opts.destination is set (e.g. project-report from scheduled-task), use it
-  // instead of deriving interactive-reply from channel.
-  const dest = opts.destination ?? { type: 'interactive-reply' as const, conduit: opts.channel, sessionId: '' };
-  const vm = !isDefault ? new VirtualMessage(opts.adapter, dest, { threadId: opts.threadTs }) : null;
+  // The caller supplies the Destination (interactive-reply or project-report).
+  const vm = !isDefault ? new VirtualMessage(opts.adapter, opts.destination, { threadId: opts.threadTs }) : null;
   return { thread, isDefault, template, meta: thread.metadata, vm, lastAgentResult: null, totalNumTurns: 0 };
 }
 
@@ -202,10 +200,11 @@ async function buildStepConfig(
     : 'local';
   const executionTrigger = ctx.meta?.trigger || (ctx.isDefault ? 'user' : 'thread-step');
   const label = formatAgentStageLabel(agentSlotId, stage);
+  const threadRecord = threadStore.get(threadId)!;
   const execution = executionRegistry.startLocalExecution({
     kind: executionKind,
     channel: opts.channel,
-    project: ctx.meta?.project || null,
+    project: threadRecord.projectId,
     trigger: executionTrigger,
     backend: getActiveBackend(),
     billingMode: getClaudeMode(),
@@ -297,7 +296,7 @@ async function executeAndAwaitAgent(
     sessionKey,
     files: isFirstStep ? (opts.files || []) : [],
     profileName,
-    project: meta?.project || undefined,
+    project: threadStore.get(threadId)?.projectId,
     trigger: meta?.trigger || undefined,
     threadId,
     useCoreMcp: !ctx.isDefault,
@@ -374,7 +373,8 @@ async function recordStepOutcome(
   ctx.totalNumTurns += result?.num_turns || 0;
 
   // Register session
-  if (result?.sessionId && sessionName) {
+  const currentThread = threadStore.get(threadId);
+  if (result?.sessionId && sessionName && currentThread) {
     await sessionStore.registerSession(sessionName, {
       sessionId: result.sessionId,
       channel: opts.channel,
@@ -382,7 +382,7 @@ async function recordStepOutcome(
       kind: 'local',
       label: `[${threadId}:${agentSlotId}]`,
       profileName: getActiveProfile(opts.channel),
-      projectId: ctx.meta?.project ?? 'general',
+      projectId: currentThread.projectId,
     });
   }
 

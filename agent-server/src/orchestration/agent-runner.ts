@@ -140,6 +140,7 @@ export class AgentRunner {
     try {
       const threadResult: ThreadRunResult = await runThread(thread.id, {
         adapter, channel,
+        destination: { type: 'interactive-reply', conduit: channel, sessionId: sessionId ?? '' },
         threadTs: threadTs || statusMsg.messageId,
         statusMsg, startTime,
         existingSessionId: sessionId,

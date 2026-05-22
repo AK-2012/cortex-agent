@@ -206,7 +206,7 @@ test('cancelThread returns false after abortThread has terminated the thread (ab
 function minimalAbortedThread(reason: string | null, endedAt: string | null): ThreadRecord {
   return {
     id: 'thr_fake', templateName: null, status: 'aborted',
-    channel: 'C1', platformThreadId: null,
+    channel: 'C1', projectId: 'general', platformThreadId: null,
     userMessage: '', userMessageTs: 'ts',
     workspacePath: '', artifactPath: '',
     agents: { main: { slotId: 'main', profile: '__active__', sessionId: null, sessionName: null, status: 'completed', lastOutput: null, persistSession: false } },

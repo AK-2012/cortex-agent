@@ -226,6 +226,7 @@ export interface ThreadRecord {
   templateName: string | null;       // null for ad-hoc threads (no template)
   status: ThreadStatus;
   channel: string;
+  projectId: string;                 // project for cost attribution & routing; default 'general'
   platformThreadId: string | null;
   userMessage: string;
   userMessageTs: string;
@@ -259,7 +260,6 @@ export interface ThreadRecord {
 export interface ThreadMetadata {
   scheduleTaskId?: string | null;    // schedule task association
   trigger?: string | null;           // execution trigger: 'scheduled' | 'task-dispatch' | 'user' | ...
-  project?: string | null;           // project name for cost attribution
   profileOverride?: string | null;   // override agent's configured profile at runtime
   /** Messages buffered while a step was executing, to be included in the next step's prompt. */
   pendingMessages?: string[];        // Phase 6: dispatch message buffering
@@ -292,10 +292,8 @@ import type { PlatformAdapter, MessageRef, Destination } from '@platform/index.j
 export interface RunThreadOptions {
   adapter: PlatformAdapter;
   channel: string;
-  /** Destination override for the thread's VirtualMessage. When set, the thread
-   *  runner uses this destination instead of deriving interactive-reply from channel.
-   *  Used by scheduled-task to emit project-report for autonomous runs. */
-  destination?: Destination;
+  /** Destination for the thread's VirtualMessage. Caller must supply — never inferred. */
+  destination: Destination;
   threadTs: string | null;
   statusMsg: MessageRef | null;
   startTime: number;

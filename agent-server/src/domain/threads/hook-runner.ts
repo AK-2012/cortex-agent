@@ -184,7 +184,7 @@ async function runHookAgent(
       : meta?.trigger === 'scheduled' ? 'scheduled'
       : 'local',
     channel: opts.channel,
-    project: meta?.project || null,
+    project: thread.projectId,
     trigger: 'thread-hook',
     backend: getActiveBackend(),
     billingMode: getClaudeMode(),
@@ -204,7 +204,7 @@ async function runHookAgent(
     sessionKey,
     files: [],
     profileName,
-    project: meta?.project || undefined,
+    project: thread.projectId,
     trigger: meta?.trigger || undefined,
     onFallback: null,
     isUserInitiated: false,
@@ -255,7 +255,7 @@ async function runHookAgent(
       kind: 'local',
       label: `[${threadId}:${slotId}]`,
       profileName: getActiveProfile(opts.channel),
-      projectId: thread.metadata?.project ?? 'general',
+      projectId: thread.projectId,
     });
   }
 

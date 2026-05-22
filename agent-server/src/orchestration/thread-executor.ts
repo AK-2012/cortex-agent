@@ -142,6 +142,7 @@ async function handleThreadAdd({ threadAddMatch, existingThread, channel, adapte
   const interactiveCallbacks = buildInteractiveCallbacks(channel, null);
   const threadResult = await runThread(targetThread.id, {
     adapter, channel, threadTs: platformThreadId, statusMsg, startTime, existingSessionId: null, files: downloadedFiles,
+    destination: interactiveDest,
     onToolUse: interactiveCallbacks.onToolUse, onPlanWritten: interactiveCallbacks.onPlanWritten, onAskUserQuestion: interactiveCallbacks.onAskUserQuestion,
   });
   const summaryText = buildThreadSummary(threadResult);
@@ -186,6 +187,7 @@ async function handleThreadContinue({ existingThread, agentMessage, channel, ada
   const interactiveCallbacks = buildInteractiveCallbacks(channel, null);
   const threadResult = await continueThread(existingThread.id, agentMessage, {
     adapter, channel, threadTs, statusMsg, startTime, existingSessionId: null, files: downloadedFiles,
+    destination: interactiveDest,
     onToolUse: interactiveCallbacks.onToolUse, onPlanWritten: interactiveCallbacks.onPlanWritten, onAskUserQuestion: interactiveCallbacks.onAskUserQuestion,
   });
 
@@ -232,6 +234,7 @@ async function handleThreadStart({ threadStartMatch, messageId, channel, adapter
   const interactiveCallbacks = buildInteractiveCallbacks(channel, null);
   const threadResult = await runThread(thread.id, {
     adapter, channel, threadTs: platformThreadId, statusMsg, startTime, existingSessionId: null, files: downloadedFiles,
+    destination: interactiveDest,
     onToolUse: interactiveCallbacks.onToolUse, onPlanWritten: interactiveCallbacks.onPlanWritten, onAskUserQuestion: interactiveCallbacks.onAskUserQuestion,
   });
   const startSummaryText = buildThreadSummary(threadResult);

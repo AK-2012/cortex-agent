@@ -64,6 +64,7 @@ function makeThreadRecord(init: Partial<ThreadRecord> & { id: string; channel: s
     templateName: init.templateName ?? null,
     status: init.status ?? 'running',
     channel: init.channel,
+    projectId: init.projectId ?? 'general',
     platformThreadId: init.platformThreadId ?? null,
     userMessage: init.userMessage ?? 'hello',
     userMessageTs: init.userMessageTs ?? '111.000',
@@ -101,6 +102,7 @@ function makeRunOpts(channel: string, overrides: Partial<RunThreadOptions> = {})
   return {
     adapter: new MockAdapter() as any,
     channel,
+    destination: { type: 'interactive-reply', conduit: channel, sessionId: '' },
     threadTs: null,
     statusMsg: null,
     startTime: Date.now(),

@@ -106,6 +106,7 @@ function makeThreadRecord(opts: {
     templateName: opts.templateName ?? 'coder-review',
     status: 'running',
     channel: 'C-stage-test',
+    projectId: 'general',
     platformThreadId: null,
     userMessage: 'the-user-input',
     userMessageTs: 'ts-1',

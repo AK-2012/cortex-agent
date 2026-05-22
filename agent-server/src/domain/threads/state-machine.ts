@@ -70,6 +70,7 @@ function createWorkspace(threadId: string): { workspacePath: string; artifactPat
 interface ThreadRecordInit {
   id: string;
   channel: string;
+  projectId?: string;                // defaults to 'general' in makeThreadRecord
   templateName: string | null;
   platformThreadId: string | null;
   userMessage: string;
@@ -86,6 +87,7 @@ function makeThreadRecord(init: ThreadRecordInit): ThreadRecord {
   const now = new Date().toISOString();
   return {
     ...init,
+    projectId: init.projectId ?? 'general',
     status: 'running',
     currentStepIndex: 0,
     steps: [],
@@ -107,6 +109,7 @@ export function createThread(channel: string, options: {
   userMessage: string;
   userMessageTs: string;
   platformThreadId?: string | null;
+  projectId?: string;
   metadata?: import('@core/types/thread-types.js').ThreadMetadata | null;
 }): ThreadRecord {
   const isTemplate = !!options.templateName;
@@ -121,6 +124,7 @@ export function createThread(channel: string, options: {
 
   const thread = makeThreadRecord({
     id, channel,
+    projectId: options.projectId,
     templateName: options.templateName || null,
     platformThreadId: options.platformThreadId || null,
     userMessage: options.userMessage,
@@ -142,6 +146,7 @@ export function createAutoThreadRecord(channel: string, options: {
   userMessage: string;
   userMessageTs: string;
   platformThreadId?: string | null;
+  projectId?: string;
 }): ThreadRecord {
   const agentConfig = resolveAgentSlotConfigByName(options.agentName);
   if (!agentConfig) throw new Error(`Unknown agent: ${options.agentName}`);
@@ -149,6 +154,7 @@ export function createAutoThreadRecord(channel: string, options: {
 
   const thread = makeThreadRecord({
     id, channel,
+    projectId: options.projectId,
     templateName: null,
     platformThreadId: options.platformThreadId || null,
     userMessage: options.userMessage,
@@ -174,6 +180,7 @@ export function createDefaultThread(channel: string, options: {
   userMessage: string;
   userMessageTs: string;
   platformThreadId?: string | null;
+  projectId?: string;
 }): ThreadRecord {
   const agentConfig = resolveAgentSlotConfigByName(options.agentName);
   if (!agentConfig) throw new Error(`Unknown agent: ${options.agentName}`);
@@ -182,6 +189,7 @@ export function createDefaultThread(channel: string, options: {
 
   const thread = makeThreadRecord({
     id, channel,
+    projectId: options.projectId,
     templateName: 'default',
     platformThreadId: options.platformThreadId || null,
     userMessage: options.userMessage,

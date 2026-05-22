@@ -197,10 +197,11 @@ function dispatchByPlan({ plan, normalizedMessage, message, scheduleTaskId, effe
       userMessage: normalizedMessage,
       userMessageTs: `sched_${Date.now()}`,
       platformThreadId: statusMsg?.messageId || null,
+      projectId: project,
     });
     // Default-thread metadata is unused by createDefaultThread today, so attach trigger / scheduleTaskId
     // post-creation so executionRegistry rows still carry the schedule association.
-    threadStore.set({ ...thread, metadata: { scheduleTaskId, trigger: 'scheduled', project, profileOverride: effectiveProfile } });
+    threadStore.set({ ...thread, metadata: { scheduleTaskId, trigger: 'scheduled', profileOverride: effectiveProfile } });
     return runThreadExec(thread.id, { ...baseRunOpts, existingSessionId: plan.existingSessionId });
   }
 
@@ -209,7 +210,8 @@ function dispatchByPlan({ plan, normalizedMessage, message, scheduleTaskId, effe
     templateName: 'scheduler',
     userMessage: normalizedMessage,
     userMessageTs: `sched_${Date.now()}`,
-    metadata: { scheduleTaskId, trigger: 'scheduled', project, profileOverride: effectiveProfile },
+    projectId: project,
+    metadata: { scheduleTaskId, trigger: 'scheduled', profileOverride: effectiveProfile },
   });
   return runThreadExec(thread.id, { ...baseRunOpts, existingSessionId: null });
 }

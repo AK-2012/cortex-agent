@@ -630,6 +630,7 @@ function makeDispatchThreadRecord(id: string, channel: string, overrides: Record
   const now = new Date().toISOString();
   return {
     id, channel,
+    projectId: 'test-proj',
     templateName: null,
     status: 'running',
     platformThreadId: null,
