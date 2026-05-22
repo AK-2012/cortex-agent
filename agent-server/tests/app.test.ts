@@ -82,10 +82,11 @@ test('scheduled success path creates thread and runs via thread system', async (
   };
 
   const sessionRegistered = [];
-  const sessionRegistryRepo = {
+  const sessionStore = {
     generateSessionName() { return 'cortex-test'; },
     registerSession(name, opts) { sessionRegistered.push({ name, ...opts }); },
   };
+  const projectStore = { resolveFromMessage: () => ({ id: 'my-project' }) };
 
   const createThreadCalls = [];
   const createThread = (channel, opts) => {
@@ -114,6 +115,7 @@ test('scheduled success path creates thread and runs via thread system', async (
     'isValidDispatchPrompt',
     '_bus',
     'getActiveProfile',
+    'projectStore',
     'detectProject',
     'getActiveBackend',
     'getClaudeMode',
@@ -122,7 +124,7 @@ test('scheduled success path creates thread and runs via thread system', async (
     'maybeNotifyCodexLowUsage',
     'recordCost',
     'console',
-    'sessionRegistryRepo',
+    'sessionStore',
     'buildSessionTag',
     'createThread',
     'runThreadExec',
@@ -149,6 +151,7 @@ test('scheduled success path creates thread and runs via thread system', async (
     (value) => value != null && typeof value === 'string' && value.trim().length > 0,
     { publish: () => {} },
     () => 'default',
+    projectStore,
     () => 'proj-scheduled',
     () => 'claude',
     () => 'api',
@@ -157,7 +160,7 @@ test('scheduled success path creates thread and runs via thread system', async (
     async () => {},
     (record) => { costRecords.push(record); },
     console,
-    sessionRegistryRepo,
+    sessionStore,
     (name, id) => { const parts = []; if (name) parts.push(name); if (id) parts.push(`\`${id}\``); return parts.length ? parts.join(' \u00b7 ') + ' | ' : ''; },
     createThread,
     runThreadExec,
@@ -166,7 +169,7 @@ test('scheduled success path creates thread and runs via thread system', async (
     ({ costUsd, numTurns }) => { const t = numTurns != null ? ` \u00b7 ${numTurns} turns` : ''; const c = costUsd != null ? ` \u00b7 $${costUsd.toFixed(4)}` : ''; return `${t}${c}`; },
     async (adapter, channel, statusMsg, { startTime, sessionName, result, threadResult, project, trigger, label, sessionKind, statusPrefix }) => {
       if (result?.sessionId) {
-        sessionRegistryRepo.registerSession(sessionName, {
+        sessionStore.registerSession(sessionName, {
           sessionId: result.sessionId, channel,
           backend: 'claude', kind: sessionKind,
           label,
