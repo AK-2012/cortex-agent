@@ -60,10 +60,6 @@ export interface PlatformAdapter {
   getPermalink(ref: MessageRef): Promise<string | null>;
   postEphemeral(channel: string, userId: string, text: string): Promise<void>;
 
-  /** Access to the underlying platform client for edge cases during migration.
-   *  New code should avoid this — it exists to support incremental Phase 2 adoption. */
-  getRawClient(): unknown;
-
   // --- Output streams ---
 
   /** Open a new OutputStream for streaming agent output to the given destination. */

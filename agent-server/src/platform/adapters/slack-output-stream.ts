@@ -1,5 +1,5 @@
 // input:  SlackAdapter + output-stream interfaces
-// output: SlackOutputStream (port of VirtualMessage logic)
+// output: SlackOutputStream — coalescing OutputStream for Slack
 // pos:    Slack-specific OutputStream — coalesces segments, uses pendingEdits
 //         for chat.update coalescing and rate-limiter sharing.
 // >>> If I am updated, update my header comment and the parent folder's CORTEX.md <<<
@@ -224,7 +224,7 @@ export class SlackOutputStream implements OutputStream {
     return { update: () => {} };
   }
 
-  // --- Internal: queue processors (ported from VirtualMessage) ---
+  // --- Internal: queue processors ---
 
   private async _processAppend(text: string): Promise<void> {
     this._sealMutableTailNow();

@@ -69,7 +69,7 @@ export class OutboundQueue {
   private pending = new Map<string, EnqueueOp>();
   private sentIds = new Set<string>();
   /**
-   * IDs currently being processed by the inline send path (VirtualMessage /
+   * IDs currently being processed by the inline send path (OutputStream /
    * durablePost). drain() skips these to prevent double-sends. Entries are
    * claimed by buildDurableHooks.beforePost/beforeUpdate and released by
    * afterSent (on success) or onSendFailed (on permanent failure).

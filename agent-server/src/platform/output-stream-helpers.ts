@@ -1,14 +1,13 @@
 // input:  PlatformAdapter + Destination
 // output: postOnce free helper
-// pos:    Replaces VirtualMessage.postOnce static
+// pos:    One-shot message post via transient OutputStream
 
 import type { PlatformAdapter } from './adapter.js';
 import type { Destination, MessageRef } from './types.js';
 import type { OutputStream, OpenOutputStreamOpts } from './output-stream.js';
 
 /** Post a single text message and return its parent MessageRef.
- *  Creates a transient OutputStream, emits, flushes, and disposes.
- *  Replaces VirtualMessage.postOnce(). */
+ *  Creates a transient OutputStream, emits, flushes, and disposes. */
 export async function postOnce(
   adapter: PlatformAdapter,
   destination: Destination,

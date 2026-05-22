@@ -130,11 +130,10 @@ test('uploadFile records filePath + opts and downloadFile synthesises localPath'
   assert.equal(downloaded.name, 'a.png');
 });
 
-test('getPermalink returns deterministic mock URL and getRawClient returns null', async () => {
+test('getPermalink returns deterministic mock URL', async () => {
   const adapter = new MockAdapter();
   const ref = { channel: 'C1', messageId: 'M7' };
   assert.equal(await adapter.getPermalink(ref), 'https://mock.test/permalink/C1/M7');
-  assert.equal(adapter.getRawClient(), null);
 });
 
 test('onMessage handlers fire for simulateMessage and receive context with reply()', async () => {

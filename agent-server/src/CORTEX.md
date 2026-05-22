@@ -24,7 +24,7 @@ agent-server's TypeScript ESM runtime source, organized by six-layer structure (
 | Subdirectory | Files |
 |---|---|
 | `agents/` | `config.ts` `facade.ts` `profile-manager.ts` `index.ts` |
-| `sessions/` | `session.ts` `session-registry.ts` `session-backup.ts` `session-hooks.ts` (unified onNew/onMessageEnd hook pipeline — spawn + VirtualMessage display + optional agent injection) |
+| `sessions/` | `session.ts` `session-registry.ts` `session-backup.ts` `session-hooks.ts` (unified onNew/onMessageEnd hook pipeline — spawn + OutputStream display + optional agent injection) |
 | `tasks/` | `parser.ts` `lint.ts` `archiver.ts` `dispatcher.ts` `dispatch-utils.ts` `pending-tracker.ts` `store.ts` `recommendation/` `system/` |
 | `executions/` | `registry.ts` |
 | `costs/` | `cost-tracker.ts` `gateway-manager.ts` `rate-limit-parser.ts` `rate-limit-throttle.ts` `codex-usage-monitor.ts` `codex-event-format.ts` |
@@ -64,5 +64,5 @@ agent-server's TypeScript ESM runtime source, organized by six-layer structure (
 | Directory | Contents |
 |---|---|
 | `agent-adapter/` | Claude/Codex/PI three-backend abstraction layer (unchanged) |
-| `platform/` | Platform abstraction layer Slack/Feishu (unchanged) + `tool-trace.ts` (UI helper for VirtualMessage) |
+| `platform/` | Platform abstraction layer Slack/Feishu (unchanged) + `tool-trace.ts` (UI helper for OutputStream tool traces) |
 | `hooks/` | Thread lifecycle hook scripts (unchanged) |

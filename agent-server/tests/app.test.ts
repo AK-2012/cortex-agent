@@ -85,7 +85,6 @@ test('scheduled success path creates thread and runs via thread system', async (
       return { channel, messageId: 'status-ts', threadId: opts?.threadId };
     },
     updateMessage: async (ref, content) => { statusUpdates.push({ channel: ref.channel, messageId: ref.messageId, text: content.text }); },
-    getRawClient: () => ({ chat: { postMessage: async () => ({}) } }),
   };
 
   const sessionRegistered = [];

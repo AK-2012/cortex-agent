@@ -266,10 +266,6 @@ export class MockAdapter implements PlatformAdapter {
     this.ephemeralMessages.push({ channel, userId, text });
   }
 
-  getRawClient(): null {
-    return null;
-  }
-
   // --- Output stream ---
 
   openOutputStream(destination: Destination, opts?: OpenOutputStreamOpts): OutputStream {

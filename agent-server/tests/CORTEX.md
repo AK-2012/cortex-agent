@@ -60,7 +60,6 @@ Reference implementation: the `freshModuleWithCleanup(t)` helper in `tests/rate-
 | `thread-extra-hooks.test.ts` | Test | per-call extraHooks serial injection |
 | `interaction-handlers.test.ts` | Test | handleModalSubmit -> bus.publish('ask-user.answered') BLK-1 regression |
 | `platform-mock-adapter.test.ts` | Test | MockAdapter 17 method coverage |
-| `virtual-message.test.ts` | Test | VirtualMessage append/tail/retry |
 | `output-stream.test.ts` | Test | SlackOutputStream/FeishuOutputStream/MockOutputStream unit tests (46 cases) |
 | `message-router.test.ts` | Test | Message routing branches |
 | `session.test.ts` | Test | session.ts backend:channel CRUD |
@@ -84,7 +83,7 @@ Reference implementation: the `freshModuleWithCleanup(t)` helper in `tests/rate-
 | `slack-message.test.ts` | Test | mergeSubstantialOutput merging |
 | `slack-adapter-throttle.test.ts` | Test | SlackAdapter.updateMessage per-message throttle + 429 retry-after |
 | `status-helpers.test.ts` | Test | writeStatus/sealStatus serialization |
-| `tool-trace.test.ts` | Test | Tool lines merge into main VM message |
+| `tool-trace.test.ts` | Test | Tool lines merge via OutputStream mutable region |
 | `store/execution-repo.test.ts` | Test | ExecutionRepo concurrent mutate, index consistency, flush draining (Pattern B) |
 | `store/schedule-repo.test.ts` | Test | ScheduleRepo concurrent mutate, flush ordering, CRUD, rateLimitThrottle |
 | `store/cost-repo.test.ts` | Test | CostRepo concurrent recordEntry, 90-day prune, flush ordering, budget roundtrip |

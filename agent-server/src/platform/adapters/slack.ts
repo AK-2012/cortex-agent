@@ -319,7 +319,7 @@ export class SlackAdapter implements PlatformAdapter {
    * shared promise — the intermediate edit is discarded. Once the rate limiter
    * grants a token, the latest content is sent via chat.update.
    *
-   * This eliminates wasted API calls when multiple callers (VirtualMessage
+   * This eliminates wasted API calls when multiple callers (OutputStream
    * streaming, status helpers, lifecycle) concurrently update the same message
    * while rate-limited.
    *
@@ -385,7 +385,7 @@ export class SlackAdapter implements PlatformAdapter {
         }
 
         // Non-429 error: resolve to avoid hanging callers, but re-throw so the
-        // caller (e.g. VirtualMessage) can fall back to posting a new message.
+        // caller (e.g. OutputStream) can fall back to posting a new message.
         this.pendingEdits.delete(key);
         resolve!();
         throw e;
@@ -662,10 +662,6 @@ export class SlackAdapter implements PlatformAdapter {
         // Pre-existing: callers passing raw strings (strict:false compat)
         return { channel: null, kind: 'unknown' };
     }
-  }
-
-  getRawClient(): WebClient {
-    return this.client;
   }
 
   // --- Slack-specific converters ---

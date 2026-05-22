@@ -376,10 +376,6 @@ export class FeishuAdapter implements PlatformAdapter {
     }
   }
 
-  getRawClient(): lark.Client {
-    return this.client;
-  }
-
   // =========================================================================
   // Internal: Inbound event handlers
   // =========================================================================
