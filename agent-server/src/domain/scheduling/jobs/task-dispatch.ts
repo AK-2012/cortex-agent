@@ -103,7 +103,7 @@ async function executeDispatchTask({ selected, selectedTask, channel, scheduleTa
 
   let statusMsg: MessageRef | null = null;
   try {
-    statusMsg = await adapter.postMessage({ type: 'interactive-reply', conduit: channel, sessionId: '' }, {
+    statusMsg = await adapter.postMessage({ type: 'project-report', projectId: selectedTask.project || channel, trigger: 'task-dispatch', sessionId: '' }, {
       text: `:satellite: Dispatching: [${selectedTask.project}] ${selectedTask.text.substring(0, 80)}... | ${sessionName} | ${effectiveProfile}`,
     });
   } catch {}
@@ -123,7 +123,7 @@ async function executeDispatchTask({ selected, selectedTask, channel, scheduleTa
   const icb = ctx.buildInteractiveCallbacks?.(channel, null);
   const threadResult = await runThreadExec(thread.id, {
     adapter, channel: channel, threadTs: statusMsg?.messageId || null, statusMsg, startTime, existingSessionId: null,
-    destination: { type: 'interactive-reply', conduit: channel, sessionId: '' },
+    destination: { type: 'project-report', projectId: selectedTask.project || channel, trigger: 'task-dispatch', sessionId: '' },
     onToolUse: icb?.onToolUse ?? null, onPlanWritten: icb?.onPlanWritten ?? null, onAskUserQuestion: icb?.onAskUserQuestion ?? null,
     extraHooks: {
       onEnd: {
@@ -184,12 +184,14 @@ async function handleDispatchError(error: Error, selectedTask: Record<string, an
     const queue = getOutboundQueue();
     if (blocked && selectedTask) {
       const text = `:no_entry: Auto-blocked after ${DISPATCH_FAILURE_QUARANTINE_THRESHOLD} consecutive dispatch failures. Reason recorded in TASKS.yaml. Task: [${selectedTask.project}] ${String(selectedTask.text).substring(0, 80)}. Last error: ${error.message}. Unblock with \`cortex-task unblock --task-id ${selectedTask.id}\`.`;
-      if (queue) { await durablePost(queue, adapter, { type: 'interactive-reply', conduit: errChannel, sessionId: '' }, { text }); }
-      else { await adapter.postMessage({ type: 'interactive-reply', conduit: errChannel, sessionId: '' }, { text }); }
+      const projDest = { type: 'project-report' as const, projectId: selectedTask.project || errChannel, trigger: 'task-dispatch', sessionId: '' };
+      if (queue) { await durablePost(queue, adapter, projDest, { text }); }
+      else { await adapter.postMessage(projDest, { text }); }
     } else {
       const text = `:x: Task dispatch error: ${error.message}`;
-      if (queue) { await durablePost(queue, adapter, { type: 'interactive-reply', conduit: errChannel, sessionId: '' }, { text }); }
-      else { await adapter.postMessage({ type: 'interactive-reply', conduit: errChannel, sessionId: '' }, { text }); }
+      const projDest = { type: 'project-report' as const, projectId: selectedTask?.project || errChannel, trigger: 'task-dispatch', sessionId: '' };
+      if (queue) { await durablePost(queue, adapter, projDest, { text }); }
+      else { await adapter.postMessage(projDest, { text }); }
     }
   } catch {}
   const noteSuffix = blocked ? ' (blocked)' : '';

@@ -115,7 +115,8 @@ async function onTaskLaunched({ taskId, machine, channel, scheduleTaskId, taskTe
   if (channel && _adapter) {
     (async () => {
       try {
-        const ref = await _adapter!.postMessage(channel, { text: trackingText });
+        const trackingDest = { type: 'project-report' as const, projectId: project || 'general', trigger: 'dispatch', sessionId: '' };
+        const ref = await _adapter!.postMessage(trackingDest, { text: trackingText });
         const t = pendingTasks.get(taskId);
         if (t) {
           t.trackingTs = ref.messageId;
