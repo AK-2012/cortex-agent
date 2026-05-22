@@ -86,17 +86,36 @@ export class ProjectStore {
   /**
    * Resolve a project from a message string using heuristic patterns.
    *
-   * Matches:
-   *   "Project: <name>"       — inline project reference
-   *   "**Project:** <name>"   — markdown bold project reference
+   * Priority:
+   *   1. [project:xxx] explicit tag — always wins
+   *   2. Case-insensitive substring match against scanned project ids
+   *      (longest match wins when multiple project names appear in the message)
+   *   3. 'general' fallback
    *
-   * Returns the matching Project or null.
+   * Returns the matching Project or the default general project.
    */
-  resolveFromMessage(msg: string): Project | null {
-    const match = msg.match(/\*{0,2}Project:\*{0,2}\s+(\S+)/);
-    if (!match) return null;
-    const projectId = match[1];
-    return this.get(projectId) ?? null;
+  resolveFromMessage(msg: string | null | undefined): Project | null {
+    if (!msg) return this.getDefault();
+
+    // 1. [project:xxx] tag — always wins
+    const tagMatch = msg.match(/\[project:([^\]]+)\]/);
+    if (tagMatch) return this.get(tagMatch[1]) ?? this.getDefault();
+
+    // 2. Case-insensitive substring match (longest project id wins)
+    const lower = msg.toLowerCase();
+    let bestMatch: Project | null = null;
+    let bestLen = 0;
+    for (const project of this.projects) {
+      if (project.kind === 'general') continue;
+      const lowerName = project.id.toLowerCase();
+      if (lower.includes(lowerName) && project.id.length > bestLen) {
+        bestMatch = project;
+        bestLen = project.id.length;
+      }
+    }
+
+    // 3. Fallback
+    return bestMatch ?? this.getDefault();
   }
 
   /** Force a rescan of PROJECTS_DIR (e.g. after watcher event or manual trigger). */

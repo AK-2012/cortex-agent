@@ -108,6 +108,8 @@ test('ProjectStore - getDefault returns general', async (t) => {
   assert.equal(d.kind, 'general');
 });
 
+// ── resolveFromMessage: existing patterns (substring match) ──
+
 test('ProjectStore - resolveFromMessage matches Project: <name>', async (t) => {
   const { baseDir, cleanup } = makeTempProjectsDir(['cortex-self']);
   t.after(cleanup);
@@ -132,25 +134,228 @@ test('ProjectStore - resolveFromMessage matches **Project:** <name>', async (t) 
   assert.equal(result!.id, 'my-project');
 });
 
-test('ProjectStore - resolveFromMessage returns null for unknown project', async (t) => {
+test('ProjectStore - resolveFromMessage returns general for unknown project', async (t) => {
   const { baseDir, cleanup } = makeTempProjectsDir();
   t.after(cleanup);
 
   const { store } = await makeStore(baseDir);
   t.after(() => store.destroy());
 
-  assert.equal(store.resolveFromMessage('Project: nonexistent'), null);
+  const result = store.resolveFromMessage('Project: nonexistent');
+  assert.ok(result);
+  assert.equal(result!.id, 'general');
 });
 
-test('ProjectStore - resolveFromMessage returns null when no match', async (t) => {
+test('ProjectStore - resolveFromMessage returns general when no match', async (t) => {
   const { baseDir, cleanup } = makeTempProjectsDir(['cortex-self']);
   t.after(cleanup);
 
   const { store } = await makeStore(baseDir);
   t.after(() => store.destroy());
 
-  assert.equal(store.resolveFromMessage('Hello world'), null);
+  const result = store.resolveFromMessage('Hello world');
+  assert.ok(result);
+  assert.equal(result!.id, 'general');
 });
+
+// ── resolveFromMessage: [project:xxx] tag ──
+
+test('ProjectStore - [project:xxx] tag overrides everything', async (t) => {
+  const { baseDir, cleanup } = makeTempProjectsDir(['dex-hand', 'cortex-self']);
+  t.after(cleanup);
+
+  const { store } = await makeStore(baseDir);
+  t.after(() => store.destroy());
+
+  // Tag with valid project id wins over substring
+  const r1 = store.resolveFromMessage('[project:cortex-self] check dex-hand status');
+  assert.ok(r1);
+  assert.equal(r1!.id, 'cortex-self');
+
+  // Tag alone with valid project
+  const r2 = store.resolveFromMessage('[project:dex-hand] hello');
+  assert.ok(r2);
+  assert.equal(r2!.id, 'dex-hand');
+
+  // Tag with non-existent project returns general
+  const r3 = store.resolveFromMessage('[project:fantasy] something');
+  assert.ok(r3);
+  assert.equal(r3!.id, 'general');
+});
+
+test('ProjectStore - [project:xxx] tag works with empty projects dir', async (t) => {
+  const { baseDir, cleanup } = makeTempProjectsDir();
+  t.after(cleanup);
+
+  const { store } = await makeStore(baseDir);
+  t.after(() => store.destroy());
+
+  // Tag with non-existent project and no user projects — general
+  const r = store.resolveFromMessage('[project:solo] message');
+  assert.ok(r);
+  assert.equal(r!.id, 'general');
+});
+
+// ── resolveFromMessage: dynamic name matching ──
+
+test('ProjectStore - case-insensitive substring match on project names', async (t) => {
+  const { baseDir, cleanup } = makeTempProjectsDir(['MyProject', 'another-app']);
+  t.after(cleanup);
+
+  const { store } = await makeStore(baseDir);
+  t.after(() => store.destroy());
+
+  // Exact case match
+  const r1 = store.resolveFromMessage('fix another-app bug');
+  assert.ok(r1);
+  assert.equal(r1!.id, 'another-app');
+
+  // Lowercase message
+  const r2 = store.resolveFromMessage('debug myproject issue');
+  assert.ok(r2);
+  assert.equal(r2!.id, 'MyProject');
+
+  // Uppercase message
+  const r3 = store.resolveFromMessage('CHECK ANOTHER-APP STATUS');
+  assert.ok(r3);
+  assert.equal(r3!.id, 'another-app');
+});
+
+test('ProjectStore - longest match wins when multiple project names appear', async (t) => {
+  const { baseDir, cleanup } = makeTempProjectsDir(['dex-hand', 'dex-hand-dataset']);
+  t.after(cleanup);
+
+  const { store } = await makeStore(baseDir);
+  t.after(() => store.destroy());
+
+  // Message contains both, longer one wins
+  const r1 = store.resolveFromMessage('check dex-hand-dataset status');
+  assert.ok(r1);
+  assert.equal(r1!.id, 'dex-hand-dataset');
+
+  // Only shorter appears
+  const r2 = store.resolveFromMessage('check dex-hand status');
+  assert.ok(r2);
+  assert.equal(r2!.id, 'dex-hand');
+});
+
+test('ProjectStore - no match returns general', async (t) => {
+  const { baseDir, cleanup } = makeTempProjectsDir(['dex-hand', 'cortex-self']);
+  t.after(cleanup);
+
+  const { store } = await makeStore(baseDir);
+  t.after(() => store.destroy());
+
+  const r1 = store.resolveFromMessage('some unrelated text');
+  assert.ok(r1);
+  assert.equal(r1!.id, 'general');
+
+  const r2 = store.resolveFromMessage('what time is it');
+  assert.ok(r2);
+  assert.equal(r2!.id, 'general');
+});
+
+test('ProjectStore - empty message returns general', async (t) => {
+  const { baseDir, cleanup } = makeTempProjectsDir(['dex-hand']);
+  t.after(cleanup);
+
+  const { store } = await makeStore(baseDir);
+  t.after(() => store.destroy());
+
+  const r = store.resolveFromMessage('');
+  assert.ok(r);
+  assert.equal(r!.id, 'general');
+});
+
+test('ProjectStore - null message returns general', async (t) => {
+  const { baseDir, cleanup } = makeTempProjectsDir(['dex-hand']);
+  t.after(cleanup);
+
+  const { store } = await makeStore(baseDir);
+  t.after(() => store.destroy());
+
+  const r = store.resolveFromMessage(null as any);
+  assert.ok(r);
+  assert.equal(r!.id, 'general');
+});
+
+test('ProjectStore - undefined message returns general', async (t) => {
+  const { baseDir, cleanup } = makeTempProjectsDir(['dex-hand']);
+  t.after(cleanup);
+
+  const { store } = await makeStore(baseDir);
+  t.after(() => store.destroy());
+
+  const r = store.resolveFromMessage(undefined as any);
+  assert.ok(r);
+  assert.equal(r!.id, 'general');
+});
+
+test('ProjectStore - empty projects dir returns general for any message except tag', async (t) => {
+  const { baseDir, cleanup } = makeTempProjectsDir();
+  t.after(cleanup);
+
+  const { store } = await makeStore(baseDir);
+  t.after(() => store.destroy());
+
+  // No user projects — unrelated text returns general
+  const r1 = store.resolveFromMessage('debug dex-hand issue');
+  assert.ok(r1);
+  assert.equal(r1!.id, 'general');
+
+  // No user projects — text referring to non-existent project returns general
+  const r2 = store.resolveFromMessage('cortex-self update');
+  assert.ok(r2);
+  assert.equal(r2!.id, 'general');
+});
+
+test('ProjectStore - project name is substring of another but only partial appears', async (t) => {
+  const { baseDir, cleanup } = makeTempProjectsDir(['vr', 'vr-extra', 'vr-security']);
+  t.after(cleanup);
+
+  const { store } = await makeStore(baseDir);
+  t.after(() => store.destroy());
+
+  // Only "vr" in message, not the longer names
+  const r = store.resolveFromMessage('vr setup');
+  assert.ok(r);
+  assert.equal(r!.id, 'vr');
+});
+
+test('ProjectStore - tag takes priority over dynamic match', async (t) => {
+  const { baseDir, cleanup } = makeTempProjectsDir(['tag-test', 'other']);
+  t.after(cleanup);
+
+  const { store } = await makeStore(baseDir);
+  t.after(() => store.destroy());
+
+  // Tag with valid project id 'other' wins over substring 'tag-test'
+  const r = store.resolveFromMessage('[project:other] fix tag-test');
+  assert.ok(r);
+  assert.equal(r!.id, 'other');
+});
+
+test('ProjectStore - exact project name match in message', async (t) => {
+  const { baseDir, cleanup } = makeTempProjectsDir(['cortex-self', 'flywheel', 'tactile-reasoning']);
+  t.after(cleanup);
+
+  const { store } = await makeStore(baseDir);
+  t.after(() => store.destroy());
+
+  const r1 = store.resolveFromMessage('cortex-self needs a restart');
+  assert.ok(r1);
+  assert.equal(r1!.id, 'cortex-self');
+
+  const r2 = store.resolveFromMessage('flywheel experiment results');
+  assert.ok(r2);
+  assert.equal(r2!.id, 'flywheel');
+
+  const r3 = store.resolveFromMessage('tactile-reasoning paper draft');
+  assert.ok(r3);
+  assert.equal(r3!.id, 'tactile-reasoning');
+});
+
+// ── Scaffolding ──
 
 test('ProjectStore - scaffolding creates general directory on initialize', async (t) => {
   const { baseDir, cleanup } = makeTempProjectsDir();
@@ -183,6 +388,8 @@ test('ProjectStore - scaffolding does not overwrite existing general', async (t)
   assert.equal(content, '# custom');
 });
 
+// ── Dotfile handling ──
+
 test('ProjectStore - ignore dotfiles in project enumeration', async (t) => {
   const { baseDir, cleanup } = makeTempProjectsDir(['real-project']);
   t.after(cleanup);
@@ -198,6 +405,8 @@ test('ProjectStore - ignore dotfiles in project enumeration', async (t) => {
   const ids = projects.map(p => p.id).sort();
   assert.deepEqual(ids, ['general', 'real-project']);
 });
+
+// ── Cache invalidation ──
 
 test('ProjectStore - list after cache refresh picks up new directory', async (t) => {
   const { baseDir, cleanup } = makeTempProjectsDir(['existing']);
@@ -215,4 +424,26 @@ test('ProjectStore - list after cache refresh picks up new directory', async (t)
 
   ids = store.list().map(p => p.id).sort();
   assert.deepEqual(ids, ['existing', 'general', 'new-project']);
+});
+
+test('ProjectStore - fs.watch event triggers cache refresh', async (t) => {
+  const { baseDir, cleanup } = makeTempProjectsDir(['existing']);
+  t.after(cleanup);
+
+  const mod = await import(STORE_MODULE_PATH);
+  const store = new mod.ProjectStore({ projectsDir: baseDir, watchEnabled: true });
+  await store.initialize();
+  t.after(() => store.destroy());
+
+  let ids = store.list().map(p => p.id).sort();
+  assert.deepEqual(ids, ['existing', 'general']);
+
+  // Create new directory — should trigger fs.watch rename event
+  fs.mkdirSync(path.join(baseDir, 'new-project-from-watch'));
+
+  // Wait for debounce (1000ms) + OS event propagation buffer
+  await new Promise(r => setTimeout(r, 1200));
+
+  ids = store.list().map(p => p.id).sort();
+  assert.deepEqual(ids, ['existing', 'general', 'new-project-from-watch']);
 });
