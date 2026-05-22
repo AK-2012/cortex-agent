@@ -50,7 +50,7 @@ import { initRateLimitThrottle } from '@domain/costs/rate-limit-throttle.js';
 import { scheduleRepo } from '@store/schedule-repo.js';
 import { costRepo } from '@store/cost-repo.js';
 import { profileRepo, startProfileWatcher, setAdminNotifier as setProfileNotifier } from '@store/profile-repo.js';
-import { sessionRegistryRepo } from '@store/session-registry-repo.js';
+import { sessionStore } from '@store/session-registry-repo.js';
 import { initDiskMonitor, stopDiskMonitor } from '@domain/monitor/disk-monitor.js';
 import { loadMachinesFromFile, startMachineRegistryWatcher, stopMachineRegistryWatcher, setAdminNotifier as setMachineNotifier } from '@domain/tasks/dispatch-utils.js';
 import { EventBus, createEventLogger } from '@events/index.js';
@@ -157,7 +157,7 @@ process.on('SIGTERM', async () => {
   // `writeFile(tmp)` and `rename(tmp, target)` in atomic-write.ts leaves orphan .tmp.* siblings.
   // Daemon gives 5s before SIGKILL — well over the time needed to flush a few MB of JSON.
   try {
-    await Promise.allSettled([bus.close(), oq.flush(), threadStore.flush(), sessionRepo.flush(), conversationLedger.flush(), taskStore.flush(), executionRepo.flush(), channelRepo.flush(), projectDirRepo.flush(), scheduleRepo.flush(), costRepo.flush(), profileRepo.flush(), sessionRegistryRepo.flush()]);
+    await Promise.allSettled([bus.close(), oq.flush(), threadStore.flush(), sessionRepo.flush(), conversationLedger.flush(), taskStore.flush(), executionRepo.flush(), channelRepo.flush(), projectDirRepo.flush(), scheduleRepo.flush(), costRepo.flush(), profileRepo.flush(), sessionStore.flush()]);
   } catch {}
   await stopGateway(); process.exit(0);
 });

@@ -5,7 +5,7 @@ import type { CommandActionRouter } from '@orch/interactions/command-action-rout
 import { closeSession, getActiveBackend, getActiveProfile, setActiveProfile, resolveBackendForChannel } from '@domain/agents/index.js';
 import { deleteSessionAsync, setSessionAsync } from '@domain/sessions/session.js';
 import { fireAndForgetPreCloseHook } from '@domain/sessions/session-hooks.js';
-import { sessionRegistryRepo } from '@store/session-registry-repo.js';
+import { sessionStore } from '@store/session-registry-repo.js';
 import { conversationLedger } from '@store/conversation-ledger-repo.js';
 import * as sessionBackup from '@domain/sessions/session-backup.js';
 import { planApprovals } from '../../interactions/plan-approvals.js';
@@ -78,7 +78,7 @@ export function createResumeHandler(router?: CommandActionRouter) {
       const adapter = router.getAdapter();
       if (!adapter) return;
       const name = ctx.value;
-      const record = await sessionRegistryRepo.lookupSession(name);
+      const record = await sessionStore.lookupSession(name);
       if (!record) {
         if (ctx.messageRef) {
           await adapter.updateMessage(ctx.messageRef, {
@@ -112,7 +112,7 @@ export function createResumeHandler(router?: CommandActionRouter) {
 
     if (args.length > 0) {
       const name = args[0];
-      const record = await sessionRegistryRepo.lookupSession(name);
+      const record = await sessionStore.lookupSession(name);
       if (!record) {
         await adapter.postMessage(channel, { text: `:x: Session \`${name}\` not found. Run \`!resume\` to list sessions.` });
         return;
@@ -125,12 +125,12 @@ export function createResumeHandler(router?: CommandActionRouter) {
       return;
     }
 
-    const sessions = await sessionRegistryRepo.listRecentSessions(10);
+    const sessions = await sessionStore.listRecentSessions(10);
     if (sessions.length === 0) {
       await adapter.postMessage(channel, { text: 'No sessions recorded yet.' });
       return;
     }
-    const activeId = await sessionRegistryRepo.getActiveSessionName(channel, getActiveBackend());
+    const activeId = await sessionStore.getActiveSessionName(channel, getActiveBackend());
     const now = Date.now();
     const lines = ['*Recent sessions*'];
     for (const s of sessions) {

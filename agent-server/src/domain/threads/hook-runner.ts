@@ -9,7 +9,7 @@ import { threadStore } from '@store/thread-repo.js';
 import { getSessionKey, recordStepResult } from './index.js';
 import { runAgent, getClaudeMode, getActiveBackend, getActiveProfile } from '../agents/index.js';
 import * as executionRegistry from '../executions/registry.js';
-import { sessionRegistryRepo } from '@store/session-registry-repo.js';
+import { sessionStore } from '@store/session-registry-repo.js';
 import { DATA_DIR } from '@core/utils.js';
 import { createLogger } from '@core/log.js';
 import { runningExecutions } from '../../core/running-executions.js';
@@ -195,7 +195,7 @@ async function runHookAgent(
     agentSlotId: slotId,
   });
 
-  const sessionName = isTargetMode ? null : await sessionRegistryRepo.generateSessionName();
+  const sessionName = isTargetMode ? null : await sessionStore.generateSessionName();
   const stepStartTime = new Date().toISOString();
 
   const handle = runAgent(prompt, {
@@ -248,7 +248,7 @@ async function runHookAgent(
   });
 
   if (result?.sessionId && sessionName) {
-    await sessionRegistryRepo.registerSession(sessionName, {
+    await sessionStore.registerSession(sessionName, {
       sessionId: result.sessionId,
       channel: opts.channel,
       backend: getActiveBackend(),

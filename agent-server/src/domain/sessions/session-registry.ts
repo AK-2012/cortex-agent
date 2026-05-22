@@ -7,33 +7,53 @@
 //       continues to compile until the S12 git-mv sweep.
 // >>> If I am updated, update my header comment and the parent folder's CORTEX.md <<<
 
-import { sessionRegistryRepo } from '@store/session-registry-repo.js';
-export { sessionRegistryRepo, type Session, type SessionRegistryData } from '@store/session-registry-repo.js';
+import { sessionStore } from '@store/session-registry-repo.js';
+export { sessionStore, sessionRegistryRepo, type Session, type SessionRegistryData } from '@store/session-registry-repo.js';
 
 export function generateSessionName(): Promise<string> {
-  return sessionRegistryRepo.generateSessionName();
+  return sessionStore.generateSessionName();
 }
 
 export function registerSession(name: string, opts: { sessionId: string; channel: string; backend: string; kind: 'local' | 'scheduled'; projectId?: string; label?: string | null; profileName?: string | null }): Promise<void> {
-  return sessionRegistryRepo.registerSession(name, opts);
+  return sessionStore.registerSession(name, opts);
 }
 
 export function updateSession(name: string, updates: { sessionId?: string; lastUsedAt?: string; label?: string | null; profileName?: string | null }): Promise<void> {
-  return sessionRegistryRepo.updateSession(name, updates);
+  return sessionStore.updateSession(name, updates);
 }
 
 export function lookupSession(name: string) {
-  return sessionRegistryRepo.lookupSession(name);
+  return sessionStore.lookupSession(name);
 }
 
 export function lookupBySessionId(sessionId: string) {
-  return sessionRegistryRepo.lookupBySessionId(sessionId);
+  return sessionStore.lookupBySessionId(sessionId);
 }
 
 export function listRecentSessions(limit = 10) {
-  return sessionRegistryRepo.listRecentSessions(limit);
+  return sessionStore.listRecentSessions(limit);
 }
 
 export function getActiveSessionName(channel: string, backend: string) {
-  return sessionRegistryRepo.getActiveSessionName(channel, backend);
+  return sessionStore.getActiveSessionName(channel, backend);
+}
+
+export function getById(sessionId: string) {
+  return sessionStore.getById(sessionId);
+}
+
+export function listByProject(projectId: string) {
+  return sessionStore.listByProject(projectId);
+}
+
+export function listResumable(projectId?: string) {
+  return sessionStore.listResumable(projectId);
+}
+
+export function markUsed(sessionId: string): Promise<void> {
+  return sessionStore.markUsed(sessionId);
+}
+
+export function pruneStale(maxAgeMs: number): Promise<number> {
+  return sessionStore.pruneStale(maxAgeMs);
 }

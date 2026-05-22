@@ -23,7 +23,7 @@ import {
 import { runAgent, getClaudeMode, getActiveBackend, getActiveProfile } from '../agents/index.js';
 import { closeSessionsByPrefix } from '../agents/index.js';
 import * as executionRegistry from '../executions/registry.js';
-import { sessionRegistryRepo } from '@store/session-registry-repo.js';
+import { sessionStore } from '@store/session-registry-repo.js';
 import { formatDurationCompact } from '@core/utils.js';
 import { VirtualMessage } from '@platform/index.js';
 import { runningExecutions } from '../../core/running-executions.js';
@@ -216,7 +216,7 @@ async function buildStepConfig(
   return {
     agentSlotId, agentConfig, isFirstStep, multiAgent, stage,
     prompt, sessionId, sessionKey,
-    sessionName: (ctx.isDefault && opts.sessionName) ? opts.sessionName : await sessionRegistryRepo.generateSessionName(),
+    sessionName: (ctx.isDefault && opts.sessionName) ? opts.sessionName : await sessionStore.generateSessionName(),
     profileName, execution,
     stepStartTime: new Date().toISOString(),
   };
@@ -372,7 +372,7 @@ async function recordStepOutcome(
 
   // Register session
   if (result?.sessionId && sessionName) {
-    await sessionRegistryRepo.registerSession(sessionName, {
+    await sessionStore.registerSession(sessionName, {
       sessionId: result.sessionId,
       channel: opts.channel,
       backend: getActiveBackend(),

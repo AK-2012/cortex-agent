@@ -10,7 +10,7 @@ import type { ThreadRunResult } from '@domain/threads/runner.js';
 import { channelQueues, enqueue } from './channel-queue.js';
 import { trackPendingTask } from './busy-tracker.js';
 import { getSessionAsync } from '@domain/sessions/session.js';
-import { sessionRegistryRepo } from '@store/session-registry-repo.js';
+import { sessionStore } from '@store/session-registry-repo.js';
 import { conversationLedger } from '@store/conversation-ledger-repo.js';
 import { getActiveProfile, getDefaultAgent, resolveBackendForChannel } from '@domain/agents/index.js';
 import { handleAgentSuccess, handleAgentError, initTurnTracking } from './lifecycle.js';
@@ -214,13 +214,13 @@ async function handleDefaultAgentResult({ result, channel, adapter, statusMsg, s
 
 async function resolveSessionName(sessionId: string | null, channel: string, userMessage: string): Promise<string> {
   if (sessionId) {
-    const existing = await sessionRegistryRepo.lookupBySessionId(sessionId);
+    const existing = await sessionStore.lookupBySessionId(sessionId);
     if (existing) return existing;
-    const name = await sessionRegistryRepo.generateSessionName();
-    await sessionRegistryRepo.registerSession(name, { sessionId, channel, backend: resolveBackendForChannel(channel), kind: 'local', label: userMessage?.substring(0, 60), profileName: getActiveProfile(channel), projectId: detectProject(userMessage) });
+    const name = await sessionStore.generateSessionName();
+    await sessionStore.registerSession(name, { sessionId, channel, backend: resolveBackendForChannel(channel), kind: 'local', label: userMessage?.substring(0, 60), profileName: getActiveProfile(channel), projectId: detectProject(userMessage) });
     return name;
   }
-  return sessionRegistryRepo.generateSessionName();
+  return sessionStore.generateSessionName();
 }
 
 function buildAgentCallbacks(adapter: PlatformAdapter, channel: string, statusMsg: MessageRef, threadTs: string | null, startTime: number, sessionName: string, sessionId: string | null, onMessagePosted: (ref: MessageRef) => void): AgentCallbacks {

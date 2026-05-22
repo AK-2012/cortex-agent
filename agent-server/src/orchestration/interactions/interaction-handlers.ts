@@ -16,7 +16,7 @@ import { planApprovals } from './plan-approvals.js';
 import { runningExecutions } from '../../core/running-executions.js';
 import { channelQueues } from '../channel-queue.js';
 import { setSessionAsync, deleteSessionAsync } from '@domain/sessions/session.js';
-import { sessionRegistryRepo } from '@store/session-registry-repo.js';
+import { sessionStore } from '@store/session-registry-repo.js';
 import { conversationLedger } from '@store/conversation-ledger-repo.js';
 import { closeSession, getActiveBackend, getActiveProfile, setActiveProfile, resolveBackendForChannel } from '@domain/agents/index.js';
 import { fireAndForgetPreCloseHook } from '@domain/sessions/session-hooks.js';
@@ -241,7 +241,7 @@ async function handleStatusCancel(ctx: ActionContext): Promise<void> {
 async function handleStatusResume(ctx: ActionContext): Promise<void> {
   if (!_adapter) return;
   const sessionName = ctx.value;
-  const record = await sessionRegistryRepo.lookupSession(sessionName);
+  const record = await sessionStore.lookupSession(sessionName);
   if (!record) return;
   if (record.profileName) setActiveProfile(record.profileName, ctx.channelId);
   await setSessionAsync(ctx.channelId, record.sessionId, record.backend);

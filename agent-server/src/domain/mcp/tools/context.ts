@@ -6,7 +6,7 @@
 
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import * as fs from 'fs';
-import { sessionRegistryRepo } from '@store/session-registry-repo.js';
+import { sessionStore } from '@store/session-registry-repo.js';
 
 export interface ContextToolDeps {
   /** Path to the per-route context.json written by Codex's writeRouteContext (codex backend only). Null on Claude. */
@@ -54,7 +54,7 @@ export async function resolveCortexContext(deps: ContextToolDeps): Promise<Corte
   const sessionId = route?.sessionId ?? process.env.CORTEX_SESSION_ID ?? null;
   let sessionName = route?.sessionName ?? process.env.CORTEX_SESSION_NAME ?? null;
   if (!sessionName && sessionId) {
-    sessionName = await sessionRegistryRepo.lookupBySessionId(sessionId);
+    sessionName = await sessionStore.lookupBySessionId(sessionId);
   }
   return {
     channel: route?.channel ?? process.env.SLACK_CHANNEL ?? null,

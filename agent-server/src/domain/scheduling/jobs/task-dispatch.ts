@@ -8,7 +8,7 @@ import * as executionRegistry from '../../executions/registry.js';
 
 const log = createLogger('task-dispatch');
 import * as pendingTaskTracker from '../../tasks/pending-tracker.js';
-import { sessionRegistryRepo } from '@store/session-registry-repo.js';
+import { sessionStore } from '@store/session-registry-repo.js';
 import { getActiveProfile, getActiveBackend } from '../../agents/index.js';
 import { detectProject } from '../../costs/cost-tracker.js';
 import { allConfigsRateLimited } from '@domain/agents/facade.js';
@@ -100,7 +100,7 @@ async function executeDispatchTask({ selected, selectedTask, channel, scheduleTa
   selected: Record<string, any>; selectedTask: Record<string, any>; channel: string; scheduleTaskId: string; profileName: string; startTime: number;
 }): Promise<{ success: boolean; skipped: boolean; note: string }> {
   const adapter = ctx.adapter!;
-  const sessionName = await sessionRegistryRepo.generateSessionName();
+  const sessionName = await sessionStore.generateSessionName();
   const effectiveProfile = profileName;
   const effectiveChannel = (selectedTask.project && await channelRepo.getProjectChannel(selectedTask.project)) || channel;
 

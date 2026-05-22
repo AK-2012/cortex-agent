@@ -13,7 +13,7 @@ import { runningExecutions } from '../core/running-executions.js';
 
 import { finalizeLocalExecution, buildSessionTag, buildUserProcessingMessage, makeFallbackNotifier, makeStreamingMessageCallback, computeElapsed, formatMetricsSuffix, writeStatus, sealStatus, buildStatusActionBlocks, buildSealedStatusActionBlocks, initStatusBlocks } from './status-helpers.js';
 import { getSessionAsync, setSessionAsync } from '@domain/sessions/session.js';
-import { sessionRegistryRepo } from '@store/session-registry-repo.js';
+import { sessionStore } from '@store/session-registry-repo.js';
 import { conversationLedger } from '@store/conversation-ledger-repo.js';
 import * as sessionBackup from '@domain/sessions/session-backup.js';
 import { isOnMessageEndHookConfigured, runMessageEndSessionHook } from '@domain/sessions/session-hooks.js';
@@ -87,9 +87,9 @@ export async function handleAgentSuccess({ result, channel, adapter, statusMsg, 
 
 async function registerOrUpdateSession(result: AgentResult | null, sessionName: string | null, channel: string, trigger: string, projectId = 'general'): Promise<void> {
   if (!result?.sessionId || !sessionName) return;
-  const existing = await sessionRegistryRepo.lookupBySessionId(result.sessionId);
+  const existing = await sessionStore.lookupBySessionId(result.sessionId);
   if (!existing) {
-    await sessionRegistryRepo.registerSession(sessionName, {
+    await sessionStore.registerSession(sessionName, {
       sessionId: result.sessionId, channel,
       backend: resolveBackendForChannel(channel),
       kind: trigger === 'scheduled' ? 'scheduled' : 'local',
@@ -98,7 +98,7 @@ async function registerOrUpdateSession(result: AgentResult | null, sessionName: 
       projectId,
     });
   } else {
-    await sessionRegistryRepo.updateSession(existing, { lastUsedAt: new Date().toISOString() });
+    await sessionStore.updateSession(existing, { lastUsedAt: new Date().toISOString() });
   }
 }
 
@@ -154,9 +154,9 @@ async function persistErrorSession(resolvedSessionId: string | null, sessionName
   await setSessionAsync(channel, resolvedSessionId, backend);
   await backfillLedgerSessionId({ sessionId: resolvedSessionId }, channel);
   if (!sessionName) return;
-  const existing = await sessionRegistryRepo.lookupBySessionId(resolvedSessionId);
+  const existing = await sessionStore.lookupBySessionId(resolvedSessionId);
   if (!existing) {
-    await sessionRegistryRepo.registerSession(sessionName, { sessionId: resolvedSessionId, channel, backend, kind: 'local', profileName: getActiveProfile(channel), projectId: 'general' });
+    await sessionStore.registerSession(sessionName, { sessionId: resolvedSessionId, channel, backend, kind: 'local', profileName: getActiveProfile(channel), projectId: 'general' });
   }
 }
 
@@ -209,7 +209,7 @@ export function reprocessMessage(channel: string, text: string, adapter: Platfor
 async function executeRetry(channel: string, text: string, adapter: PlatformAdapter, opts: { originalTs: string; isRetry: boolean; sessionId: string | null; sessionName: string | null; supersededStatusTimestamps?: string[] }): Promise<void> {
   const startTime = Date.now();
   const sessionId = opts.sessionId ?? await getSessionAsync(channel, resolveBackendForChannel(channel));
-  const sessionName = opts.sessionName || await sessionRegistryRepo.generateSessionName();
+  const sessionName = opts.sessionName || await sessionStore.generateSessionName();
   const userMessageTs = opts.originalTs;
 
   const retryPrefix = ':arrows_counterclockwise: Retry (edited) | ';

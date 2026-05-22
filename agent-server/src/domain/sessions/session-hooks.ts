@@ -12,7 +12,7 @@ import { createLogger } from '@core/log.js';
 import type { PlatformAdapter } from '@platform/index.js';
 import { runAgent, resolveBackendForChannel } from '@domain/agents/index.js';
 import { getSessionAsync } from '@domain/sessions/session.js';
-import { sessionRegistryRepo } from '@store/session-registry-repo.js';
+import { sessionStore } from '@store/session-registry-repo.js';
 import { conversationLedger } from '@store/conversation-ledger-repo.js';
 import { VirtualMessage } from '@platform/virtual-message.js';
 
@@ -344,9 +344,9 @@ export async function resolveOnNewProfileName(
 /** Default binding of the registry lookup — composes lookupBySessionId + lookupSession.
  *  Extracted so prepareOnNewRun's call site stays one line and tests can swap in fakes. */
 async function defaultLookupRegistryProfile(sessionId: string): Promise<string | null> {
-  const name = await sessionRegistryRepo.lookupBySessionId(sessionId);
+  const name = await sessionStore.lookupBySessionId(sessionId);
   if (!name) return null;
-  const record = await sessionRegistryRepo.lookupSession(name);
+  const record = await sessionStore.lookupSession(name);
   return record?.profileName ?? null;
 }
 
@@ -370,7 +370,7 @@ async function prepareOnNewRun(
     log.info('onNew hook skipped: no active session for channel', channel);
     return null;
   }
-  const sessionName = (await sessionRegistryRepo.lookupBySessionId(sessionId)) || sessionId.slice(0, 8);
+  const sessionName = (await sessionStore.lookupBySessionId(sessionId)) || sessionId.slice(0, 8);
 
   // Resolve profile BEFORE handleNewCmd clears the ledger (sync, runs after this fn returns).
   // Registry is the per-session truth; ledger is the channel-level fallback.

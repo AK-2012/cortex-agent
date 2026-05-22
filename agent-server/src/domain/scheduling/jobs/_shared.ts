@@ -1,4 +1,4 @@
-// input:  PlatformAdapter + sessionRegistryRepo + status-helpers
+// input:  PlatformAdapter + sessionStore + status-helpers
 // output: finalizeThreadSuccess + buildProgressUpdater
 // pos:    shared helper functions used by both the scheduled-task and task-dispatch jobs
 
@@ -6,7 +6,7 @@ import type { PlatformAdapter, MessageRef } from '@platform/index.js';
 import type { AgentResult } from '@core/types/agent-types.js';
 import { buildSessionTag, buildUserProcessingMessage, computeElapsed, formatMetricsSuffix } from '@core/status-format.js';
 import { createLogger } from '@core/log.js';
-import { sessionRegistryRepo } from '@store/session-registry-repo.js';
+import { sessionStore } from '@store/session-registry-repo.js';
 import { getOutboundQueue, durableUpdate } from '@store/outbound-queue.js';
 import { getActiveBackend, getActiveProfile } from '../../agents/index.js';
 import { detectProject } from '../../costs/cost-tracker.js';
@@ -34,7 +34,7 @@ export async function finalizeThreadSuccess(adapter: PlatformAdapter, channel: s
 }): Promise<void> {
   const { elapsedStr, elapsedS } = computeElapsed(startTime);
   if (result?.sessionId) {
-    await sessionRegistryRepo.registerSession(sessionName, {
+    await sessionStore.registerSession(sessionName, {
       sessionId: result.sessionId, channel,
       backend: getActiveBackend(), kind: sessionKind,
       label,

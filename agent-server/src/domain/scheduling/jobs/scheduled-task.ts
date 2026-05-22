@@ -9,7 +9,7 @@ import * as executionRegistry from '../../executions/registry.js';
 
 const log = createLogger('scheduled-task');
 import * as pendingTaskTracker from '../../tasks/pending-tracker.js';
-import { sessionRegistryRepo } from '@store/session-registry-repo.js';
+import { sessionStore } from '@store/session-registry-repo.js';
 import { sessionRepo } from '@store/session-repo.js';
 import { threadStore } from '@store/thread-repo.js';
 import { getActiveProfile, getActiveBackend, getDefaultAgent } from '../../agents/index.js';
@@ -95,7 +95,7 @@ async function resolveDispatchPlan(channel: string, target: ScheduleTarget | und
     lookups: {
       findActiveThread: (ch) => threadStore.findActive(ch),
       getChannelSession: (ch) => sessionRepo.getSessionAsync(ch, backend),
-      lookupSession: (name) => sessionRegistryRepo.lookupSession(name),
+      lookupSession: (name) => sessionStore.lookupSession(name),
       getThread: (id) => threadStore.get(id),
     },
   });
@@ -106,7 +106,7 @@ async function resolveDispatchPlan(channel: string, target: ScheduleTarget | und
 async function runScheduledTaskAsync({ normalizedMessage, message, channel, scheduleTaskId, profileName, target, fallback }: RunScheduledTaskInput & { normalizedMessage: string }): Promise<void> {
   const startTime = Date.now();
   const effectiveProfile = profileName || getActiveProfile(channel) || 'default';
-  const sessionName = await sessionRegistryRepo.generateSessionName();
+  const sessionName = await sessionStore.generateSessionName();
   const adapter = ctx.adapter!;
 
   const plan = await resolveDispatchPlan(channel, target, fallback);
