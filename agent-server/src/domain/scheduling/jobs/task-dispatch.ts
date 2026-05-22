@@ -12,7 +12,6 @@ import { sessionStore } from '@store/session-registry-repo.js';
 import { getActiveProfile, getActiveBackend } from '../../agents/index.js';
 import { allConfigsRateLimited } from '@domain/agents/facade.js';
 import { selectAndClaimTask, computeNextInterval, updateScheduleInterval } from '../../tasks/dispatcher.js';
-import { channelRepo } from '@store/channel-repo.js';
 import { taskStore } from '../../tasks/store.js';
 import { taskMutator } from '../../tasks/mutator.js';
 import { createThread } from '../../threads/index.js';
@@ -101,11 +100,10 @@ async function executeDispatchTask({ selected, selectedTask, channel, scheduleTa
   const adapter = ctx.adapter!;
   const sessionName = await sessionStore.generateSessionName();
   const effectiveProfile = profileName;
-  const effectiveChannel = (selectedTask.project && await channelRepo.getProjectChannel(selectedTask.project)) || channel;
 
   let statusMsg: MessageRef | null = null;
   try {
-    statusMsg = await adapter.postMessage({ type: 'interactive-reply', conduit: effectiveChannel, sessionId: '' }, {
+    statusMsg = await adapter.postMessage({ type: 'interactive-reply', conduit: channel, sessionId: '' }, {
       text: `:satellite: Dispatching: [${selectedTask.project}] ${selectedTask.text.substring(0, 80)}... | ${sessionName} | ${effectiveProfile}`,
     });
   } catch {}
@@ -115,17 +113,17 @@ async function executeDispatchTask({ selected, selectedTask, channel, scheduleTa
     await taskMutator.unclaim(selectedTask.id);
     return { success: false, skipped: true, note: 'Task missing required [template:] tag' };
   }
-  const thread = createThread(effectiveChannel, {
+  const thread = createThread(channel, {
     templateName: selected.template, userMessage: selected.prompt, userMessageTs: `dispatch_${Date.now()}`,
     platformThreadId: statusMsg?.messageId ?? null,
     projectId: selectedTask.project,
     metadata: { scheduleTaskId, trigger: 'task-dispatch', profileOverride: effectiveProfile },
   });
 
-  const icb = ctx.buildInteractiveCallbacks?.(effectiveChannel, null);
+  const icb = ctx.buildInteractiveCallbacks?.(channel, null);
   const threadResult = await runThreadExec(thread.id, {
-    adapter, channel: effectiveChannel, threadTs: statusMsg?.messageId || null, statusMsg, startTime, existingSessionId: null,
-    destination: { type: 'interactive-reply', conduit: effectiveChannel, sessionId: '' },
+    adapter, channel: channel, threadTs: statusMsg?.messageId || null, statusMsg, startTime, existingSessionId: null,
+    destination: { type: 'interactive-reply', conduit: channel, sessionId: '' },
     onToolUse: icb?.onToolUse ?? null, onPlanWritten: icb?.onPlanWritten ?? null, onAskUserQuestion: icb?.onAskUserQuestion ?? null,
     extraHooks: {
       onEnd: {
@@ -148,7 +146,7 @@ async function executeDispatchTask({ selected, selectedTask, channel, scheduleTa
     }
     return { success: false, skipped: false, note: 'Rate limited — all fallbacks exhausted' };
   }
-  await finalizeThreadSuccess(adapter, effectiveChannel, statusMsg, {
+  await finalizeThreadSuccess(adapter, channel, statusMsg, {
     startTime, sessionName, result, threadResult, project: selectedTask.project, trigger: 'task-dispatch',
     label: selectedTask.text?.substring(0, 60) || null, sessionKind: 'scheduled' as 'scheduled' | 'local',
     statusPrefix: `Done: [${selectedTask.project}] ${selectedTask.text.substring(0, 80)}`,
@@ -163,7 +161,7 @@ async function handleDispatchError(error: Error, selectedTask: Record<string, an
   if (selectedTask) {
     try { await taskMutator.unclaim(selectedTask.id); } catch (e) { log.error(`Failed to unclaim task: ${(e as Error).message}`); }
   }
-  const errChannel = (selectedTask?.project && await channelRepo.getProjectChannel(selectedTask.project)) || channel;
+  const errChannel = channel;
   let blocked = false;
   let blockReason: string | null = null;
   if (selectedTask?.task_hash) {

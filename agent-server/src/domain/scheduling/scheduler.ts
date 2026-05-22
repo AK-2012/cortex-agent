@@ -4,13 +4,12 @@
 // >>> If I am updated, update my header comment and the parent folder's CORTEX.md <<<
 
 import { watch, FSWatcher } from 'fs';
-import { readFileSync } from 'fs';
 import { execSync } from 'child_process';
 import { randomBytes } from 'crypto';
 import { DATA_DIR } from '@core/utils.js';
 import { createLogger } from '@core/log.js';
 import { getDefaultProfileName } from '../agents/profile-manager.js';
-import { ScheduleRepo, scheduleRepo, SCHEDULES_FILE, CHANNEL_REGISTRY_FILE, type ScheduleTask } from '@store/schedule-repo.js';
+import { ScheduleRepo, scheduleRepo, SCHEDULES_FILE, type ScheduleTask } from '@store/schedule-repo.js';
 
 const log = createLogger('scheduler');
 
@@ -129,18 +128,6 @@ function validateTaskPatch(task: ScheduleTask, patch: Record<string, any>): void
 
 function resolveTaskProfile(profile: string | null | undefined): string {
   return profile || getDefaultProfileName();
-}
-
-/** Resolve a projectId → Slack channel via channel-registry.json.
- *  Returns null if the registry file is missing or the project isn't registered. */
-function resolveProjectChannel(projectId: string): string | null {
-  try {
-    const raw = readFileSync(CHANNEL_REGISTRY_FILE, 'utf8');
-    const registry = JSON.parse(raw) as Record<string, string>;
-    return registry[projectId] ?? null;
-  } catch {
-    return null;
-  }
 }
 
 function buildTask(type: string, id: string, now: number, options: Record<string, any>): ScheduleTask {
@@ -561,7 +548,7 @@ class Scheduler {
   // Internal: invoke the runner for a task
   async _runTask(task: ScheduleTask): Promise<void> {
     const profileName = resolveTaskProfile(task.profile);
-    const resolvedChannel = resolveProjectChannel(task.projectId) ?? task.projectId;
+    const resolvedChannel = task.projectId;
     log.info(`Firing task ${task.id} (${task.type}, dispatch=${task.dispatchType || 'llm'}, profile=${profileName}, channel=${resolvedChannel}): "${task.message}"`);
     try {
       if (task.dispatchType === 'task-dispatch' && this.taskDispatchRunner) {

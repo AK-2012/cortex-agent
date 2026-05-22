@@ -42,10 +42,7 @@ export function createAdapter(config: AdapterConfig): PlatformAdapter {
 }
 
 /** Options injected from the composition root for capabilities that cross layer boundaries. */
-export interface AdapterOverrides {
-  /** Resolve a project ID to a Slack channel for project-report destinations. */
-  resolveProjectChannel?: (projectId: string) => Promise<string | null>;
-}
+export interface AdapterOverrides {}
 
 /** Create adapter from environment variables (auto-detect platform). */
 export function createAdapterFromEnv(overrides?: AdapterOverrides): PlatformAdapter {
@@ -65,7 +62,6 @@ export function createAdapterFromEnv(overrides?: AdapterOverrides): PlatformAdap
       signingSecret,
       appToken,
       adminChannel: process.env.CORTEX_ADMIN_CHANNEL || undefined,
-      resolveProjectChannel: overrides?.resolveProjectChannel,
     });
   }
 

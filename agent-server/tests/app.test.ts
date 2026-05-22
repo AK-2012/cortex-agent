@@ -222,8 +222,9 @@ test('scheduled success path creates thread and runs via thread system', async (
   await new Promise((resolve) => setTimeout(resolve, 50));
 
   // Verify thread was created with scheduler template
+  // Channel is projectId — the adapter resolves conduit through getProjectConduits at send time.
   assert.equal(createThreadCalls.length, 1);
-  assert.equal(createThreadCalls[0].channel, 'C123');
+  assert.equal(createThreadCalls[0].channel, 'my-project');
   assert.equal(createThreadCalls[0].templateName, 'scheduler');
   assert.equal(createThreadCalls[0].metadata.scheduleTaskId, 'sched-1');
   assert.equal(createThreadCalls[0].metadata.trigger, 'scheduled');

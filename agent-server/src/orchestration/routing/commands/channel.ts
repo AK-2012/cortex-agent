@@ -2,18 +2,18 @@ import type { PlatformAdapter, Destination } from '@platform/index.js';
 import type { CommandResult } from './command-context.js';
 import type { CommandActionRouter } from '@orch/interactions/command-action-router.js';
 import type { ModalDefinition } from '@platform/types.js';
-import { channelRepo } from '@store/channel-repo.js';
+import { projectStore } from '@domain/projects/index.js';
 import { projectDirRepo } from '@store/project-dir-repo.js';
 import { getMachineRegistry } from '@domain/tasks/dispatch-utils.js';
 
 export async function handleProjectsCmd(channel: string, adapter: PlatformAdapter): Promise<void> {
   const dest: Destination = { type: 'interactive-reply', conduit: channel, sessionId: '' };
-  const projects = await channelRepo.listProjects();
+  const projects = projectStore.list().map(p => p.id);
   if (projects.length === 0) {
     await adapter.postMessage(dest, { text: 'No projects found.' });
     return;
   }
-  const registrations = await channelRepo.getAllRegistrations();
+  const registrations = await adapter.getProjectConduits();
   const lines = projects.map(p => {
     const ch = registrations[p];
     const status = ch ? ` → <#${ch}>` : '';
@@ -31,7 +31,7 @@ export function createRegisterHandler(router?: CommandActionRouter) {
       if (!adapter) return;
       const project = ctx.value;
       try {
-        await channelRepo.setProjectChannel(project, ctx.channelId);
+        await adapter.bindProjectConduit(project, ctx.channelId);
         if (ctx.messageRef) {
           await adapter.updateMessage(ctx.messageRef, {
             text: `:white_check_mark: Registered for \`${project}\` task notifications.`,
@@ -55,19 +55,19 @@ export function createRegisterHandler(router?: CommandActionRouter) {
 
     if (args.length > 0) {
       const project = args[0];
-      const projects = await channelRepo.listProjects();
+      const projects = projectStore.list().map(p => p.id);
       if (!projects.includes(project)) {
         await adapter.postMessage(dest, { text: `:x: Unknown project: \`${project}\`\nAvailable: ${projects.map(p => `\`${p}\``).join(', ')}` });
         return;
       }
-      await channelRepo.setProjectChannel(project, channel);
+      await adapter.bindProjectConduit(project, channel);
       await adapter.postMessage(dest, { text: `:white_check_mark: This channel is now registered for project \`${project}\` task notifications.` });
       return;
     }
 
-    const registrations = await channelRepo.getAllRegistrations();
+    const registrations = await adapter.getProjectConduits();
     const bound = Object.entries(registrations).filter(([, ch]) => ch === channel).map(([p]) => p);
-    const projects = await channelRepo.listProjects();
+    const projects = projectStore.list().map(p => p.id);
     const unbound = projects.filter(p => !bound.includes(p));
 
     const lines: string[] = [];
@@ -114,12 +114,13 @@ export async function handleUnregisterCmd(channel: string, adapter: PlatformAdap
     return;
   }
   const project = args[0];
-  const current = await channelRepo.getProjectChannel(project);
+  const registrations = await adapter.getProjectConduits();
+  const current = registrations[project] ?? null;
   if (!current || current !== channel) {
     await adapter.postMessage(dest, { text: `:x: This channel is not registered for project \`${project}\`.` });
     return;
   }
-  await channelRepo.removeProjectChannel(project);
+  await adapter.unbindProjectConduit(project);
   await adapter.postMessage(dest, { text: `:white_check_mark: Unregistered this channel from project \`${project}\`.` });
 }
 

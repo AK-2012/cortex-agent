@@ -7,7 +7,6 @@ import * as path from 'path';
 import type { PlatformAdapter, MessageRef } from '@platform/index.js';
 import { STORE_DIR, formatDurationCompact } from '@core/utils.js';
 import { createLogger } from '@core/log.js';
-import { channelRepo } from '@store/channel-repo.js';
 import * as executionRegistry from '../executions/registry.js';
 
 const log = createLogger('pending-task-tracker');
@@ -90,12 +89,10 @@ async function onTaskLaunched({ taskId, machine, channel, scheduleTaskId, taskTe
   taskText?: string | null; taskHash?: string | null; project?: string | null;
   sessionName?: string | null; tmuxName?: string | null; pid?: string | null;
 }): Promise<void> {
-  const trackingChannel = (project && await channelRepo.getProjectChannel(project)) || channel;
-
   executionRegistry.registerDispatchExecution({
     taskId,
     machine,
-    channel: trackingChannel,
+    channel,
     project,
     scheduleTaskId,
     taskText,
@@ -106,19 +103,19 @@ async function onTaskLaunched({ taskId, machine, channel, scheduleTaskId, taskTe
   });
 
   pendingTasks.set(taskId, {
-    channel: trackingChannel, machine, launchedAt: Date.now(),
+    channel: channel, machine, launchedAt: Date.now(),
     scheduleTaskId: scheduleTaskId || null, taskText: taskText || null, taskHash: taskHash || null,
     project: project || null, trackingTs: null,
     sessionName: sessionName || null, tmuxName: tmuxName || null, pid: pid || null,
   });
   savePendingTasks();
-  log.info(`Task registered: ${taskId} on ${machine} (channel: ${trackingChannel}, project: ${project || 'none'}, schedule: ${scheduleTaskId || 'none'}, pending: ${pendingTasks.size})`);
+  log.info(`Task registered: ${taskId} on ${machine} (channel: ${channel}, project: ${project || 'none'}, schedule: ${scheduleTaskId || 'none'}, pending: ${pendingTasks.size})`);
 
   const trackingText = buildTrackingMessage({ taskId, machine, taskText, startedAtMs: Date.now(), elapsed_s: 0, turn_count: 0, status: 'running' });
-  if (trackingChannel && _adapter) {
+  if (channel && _adapter) {
     (async () => {
       try {
-        const ref = await _adapter!.postMessage(trackingChannel, { text: trackingText });
+        const ref = await _adapter!.postMessage(channel, { text: trackingText });
         const t = pendingTasks.get(taskId);
         if (t) {
           t.trackingTs = ref.messageId;
@@ -147,11 +144,11 @@ function handleTaskProgress({ task_id, machine, cost_usd, turn_count, elapsed_s 
   }
   if (!t || !t.trackingTs || !_adapter) return;
 
-  const trackingChannel = t.channel;
+  const channel = t.channel;
   const text = buildTrackingMessage({ taskId: task_id, machine: machine || t.machine, taskText: t.taskText, startedAtMs: t.launchedAt, elapsed_s, turn_count, cost_usd, status: 'running' });
   (async () => {
     try {
-      await _adapter!.updateMessage({ channel: trackingChannel, messageId: t.trackingTs! }, { text });
+      await _adapter!.updateMessage({ channel: channel, messageId: t.trackingTs! }, { text });
     } catch (e) {
       log.error(`Failed to update tracking for ${task_id}:`, (e as Error).message);
     }

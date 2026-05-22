@@ -83,9 +83,7 @@ loadMachinesFromFile();
 startMachineRegistryWatcher();
 
 // --- Create platform adapter (replaces direct Slack App instantiation) ---
-const adapter: PlatformAdapter = createAdapterFromEnv({
-  resolveProjectChannel: (projectId) => channelRepo.getProjectChannel(projectId),
-});
+const adapter: PlatformAdapter = createAdapterFromEnv();
 
 // --- Wire hot-reload admin notifiers ---
 const notifyAdmin = (text: string) => {
@@ -223,7 +221,6 @@ process.on('SIGTERM', async () => {
 
   // M1: Initialize project registry (scaffolds general/, scans PROJECTS_DIR, starts fs.watch watcher)
   await projectStore.initialize();
-  channelRepo.setProjectLister(() => projectStore.list().map(p => p.id));
 
   startGateway();
   startClientManager(parseInt(process.env.CORTEX_CLIENT_PORT || '3002', 10));

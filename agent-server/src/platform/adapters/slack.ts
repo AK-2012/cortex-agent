@@ -69,9 +69,6 @@ export interface SlackAdapterConfig {
   signingSecret: string;
   appToken: string;
   adminChannel?: string;
-  /** Resolve a project ID to a Slack channel for project-report destinations.
-   *  Injected from the composition root (app.ts) to avoid platform→store dependency. */
-  resolveProjectChannel?: (projectId: string) => Promise<string | null>;
 }
 
 export class SlackAdapter implements PlatformAdapter {
@@ -647,16 +644,13 @@ export class SlackAdapter implements PlatformAdapter {
       case 'interactive-reply':
         return { channel: dest.conduit, kind: 'interactive-reply' };
       case 'project-report': {
-        if (!this.config.resolveProjectChannel) {
-          log.warn(`No resolveProjectChannel configured for project "${dest.projectId}"; dropping project-report`);
+        const conduits = await this.getProjectConduits();
+        const channel = conduits[dest.projectId];
+        if (!channel) {
+          log.warn(`No conduit registered for project "${dest.projectId}"; dropping project-report`);
           return { channel: null, kind: 'project-report-noop' };
         }
-        const resolved = await this.config.resolveProjectChannel(dest.projectId);
-        if (!resolved) {
-          log.warn(`No channel registered for project "${dest.projectId}"; dropping project-report`);
-          return { channel: null, kind: 'project-report-noop' };
-        }
-        return { channel: resolved, kind: 'project-report' };
+        return { channel, kind: 'project-report' };
       }
       case 'system-notice':
         if (!this.config.adminChannel) {

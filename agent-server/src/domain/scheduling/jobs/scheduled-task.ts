@@ -24,7 +24,6 @@ import { finalizeThreadSuccess, buildProgressUpdater } from './_shared.js';
 import { planScheduledDispatch, type DispatchPlan } from './target-dispatch.js';
 import type { PlatformAdapter, MessageRef, Destination } from '@platform/index.js';
 import type { ScheduleTarget, ScheduleTask } from '@store/schedule-repo.js';
-import { channelRepo } from '@store/channel-repo.js';
 import { getOutboundQueue, durableUpdate, durablePost } from '@store/outbound-queue.js';
 
 // Module-level state
@@ -86,30 +85,29 @@ export function runScheduledTask({ message, projectId, scheduleTaskId, profileNa
 
 // --- Plan resolution ---
 
-async function resolveDispatchPlan(projectId: string, target: ScheduleTarget | undefined, fallback: ScheduleTask['fallback']): Promise<{ plan: DispatchPlan; resolvedChannel: string }> {
-  const channel = await channelRepo.getProjectChannel(projectId) ?? projectId;
+async function resolveDispatchPlan(projectId: string, target: ScheduleTarget | undefined, fallback: ScheduleTask['fallback']): Promise<DispatchPlan> {
   const plan = await planScheduledDispatch({
     target,
     fallback,
-    fallbackChannel: channel,
+    fallbackChannel: projectId,
     lookups: {
       lookupSession: (name) => sessionStore.lookupSession(name),
       getThread: (id) => threadStore.get(id),
     },
   });
-  return { plan, resolvedChannel: channel };
+  return plan;
 }
 
 // --- Async implementation ---
 
 async function runScheduledTaskAsync({ normalizedMessage, message, projectId, scheduleTaskId, profileName, target, fallback }: RunScheduledTaskInput & { normalizedMessage: string }): Promise<void> {
   const startTime = Date.now();
-  const { plan, resolvedChannel } = await resolveDispatchPlan(projectId, target, fallback);
+  const plan = await resolveDispatchPlan(projectId, target, fallback);
 
   // Build the project-report destination for all outbound messages from this scheduled run.
   const projectReportDest: Destination = { type: 'project-report', projectId, trigger: 'scheduled', sessionId: '' };
 
-  const effectiveProfile = profileName || getActiveProfile(resolvedChannel) || 'default';
+  const effectiveProfile = profileName || getActiveProfile(projectId) || 'default';
   const sessionName = await sessionStore.generateSessionName();
   const adapter = ctx.adapter!;
 
@@ -128,7 +126,7 @@ async function runScheduledTaskAsync({ normalizedMessage, message, projectId, sc
   }
 
   try {
-    const threadResult = await dispatchByPlan({ plan, normalizedMessage, message, scheduleTaskId, effectiveProfile, statusMsg, startTime, sessionName, projectReportDest, resolvedChannel });
+    const threadResult = await dispatchByPlan({ plan, normalizedMessage, message, scheduleTaskId, effectiveProfile, statusMsg, startTime, sessionName, projectReportDest, projectId });
     const result = threadResult.lastAgentResult as any;
     await maybeNotifyCodexLowUsage({ adapter, result });
 
@@ -141,7 +139,7 @@ async function runScheduledTaskAsync({ normalizedMessage, message, projectId, sc
         else { await adapter.updateMessage(statusMsg, { text }); }
       }
     } else {
-      await finalizeThreadSuccess(adapter, resolvedChannel, statusMsg, {
+      await finalizeThreadSuccess(adapter, projectId, statusMsg, {
         startTime, sessionName, result, threadResult, project: projectId, trigger: 'scheduled',
         label: message?.substring(0, 60) || null, sessionKind: 'scheduled', statusPrefix: 'Done',
       });
@@ -173,15 +171,15 @@ interface DispatchExecuteInput {
   startTime: number;
   sessionName: string;
   projectReportDest: Destination;
-  resolvedChannel: string;
+  projectId: string;
 }
 
-function dispatchByPlan({ plan, normalizedMessage, message, scheduleTaskId, effectiveProfile, statusMsg, startTime, sessionName, projectReportDest, resolvedChannel }: DispatchExecuteInput) {
+function dispatchByPlan({ plan, normalizedMessage, message, scheduleTaskId, effectiveProfile, statusMsg, startTime, sessionName, projectReportDest, projectId }: DispatchExecuteInput) {
   const project = projectStore.resolveFromMessage(message)?.id ?? 'general';
-  const onProgress = statusMsg ? buildProgressUpdater(ctx.adapter!, resolvedChannel, statusMsg, startTime, effectiveProfile, sessionName) : undefined;
-  const icb = ctx.buildInteractiveCallbacks?.(resolvedChannel, null);
+  const onProgress = statusMsg ? buildProgressUpdater(ctx.adapter!, statusMsg, startTime, effectiveProfile, sessionName) : undefined;
+  const icb = ctx.buildInteractiveCallbacks?.(projectId, null);
   const baseRunOpts = {
-    adapter: ctx.adapter!, channel: resolvedChannel, threadTs: statusMsg?.messageId || null, statusMsg, startTime, onProgress,
+    adapter: ctx.adapter!, channel: projectId, threadTs: statusMsg?.messageId || null, statusMsg, startTime, onProgress,
     destination: projectReportDest,
     onToolUse: icb?.onToolUse ?? null, onPlanWritten: icb?.onPlanWritten ?? null, onAskUserQuestion: icb?.onAskUserQuestion ?? null,
   };

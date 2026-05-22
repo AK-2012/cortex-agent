@@ -12,7 +12,7 @@ import { getActiveBackend, getActiveProfile } from '../../agents/index.js';
 
 const log = createLogger('scheduler');
 
-export function buildProgressUpdater(adapter: PlatformAdapter, channel: string, statusMsg: MessageRef, startTime: number, effectiveProfile: string, sessionName: string): (progress: Record<string, any> | null) => void {
+export function buildProgressUpdater(adapter: PlatformAdapter, statusMsg: MessageRef, startTime: number, effectiveProfile: string, sessionName: string): (progress: Record<string, any> | null) => void {
   return (progress) => {
     adapter.updateMessage(statusMsg, {
       text: buildUserProcessingMessage({
