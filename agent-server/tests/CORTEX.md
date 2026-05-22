@@ -38,6 +38,7 @@ Reference implementation: the `freshModuleWithCleanup(t)` helper in `tests/rate-
 | `command-handlers.test.ts` | Test | !cancel/!cost/!status/!schedule/!nvtop |
 | `cortex-run-cli-dispatch.test.ts` | Test | cortex-run.ts CLI dispatch (sendCommand pathway) |
 | `daemon.test.ts` | Test | Import has no side effects |
+| `project-store.test.ts` | Test | ProjectStore list/get/exists/getDefault/resolveFromMessage + scaffolding + cache refresh |
 | `dispatch-utils.test.ts` | Test | Task dispatch commands and env injection |
 | `execution-lock-release.test.ts` | Test | Auto lock-release on terminal execution transitions (complete/fail/cancel/stale) |
 | `task-dispatcher.test.ts` | Test | Pre-filter + schedule guard + dispatch gate |
