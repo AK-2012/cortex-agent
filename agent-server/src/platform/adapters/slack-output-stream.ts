@@ -1,6 +1,6 @@
 // input:  SlackAdapter + output-stream interfaces
 // output: SlackOutputStream (port of VirtualMessage logic)
-// pos:    Slack-specific OutputStream — coalesces segments, uses pendingEdits/pendingEdits
+// pos:    Slack-specific OutputStream — coalesces segments, uses pendingEdits
 //         for chat.update coalescing and rate-limiter sharing.
 // >>> If I am updated, update my header comment and the parent folder's CORTEX.md <<<
 

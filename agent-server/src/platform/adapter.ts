@@ -1,5 +1,5 @@
 // input:  ./types.js platform-agnostic message types
-// output: PlatformAdapter interface (17 methods)
+// output: PlatformAdapter interface (21 methods: 17 core + openOutputStream + 3 conduit methods)
 // pos:    Single abstraction boundary between core modules and messaging platform
 // >>> If I am updated, update my header comment and the parent folder's CORTEX.md <<<
 
