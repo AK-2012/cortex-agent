@@ -52,7 +52,7 @@ function withTempSchedules(testFn) {
           type: 'interval',
           intervalMs: 3600000,
           message: 'interval task',
-          channel: 'C1',
+          projectId: 'project-one',
           profile: null,
           lastRun: 100,
           nextRun: 200,
@@ -63,7 +63,7 @@ function withTempSchedules(testFn) {
           type: 'daily',
           time: '09:00',
           message: 'daily task',
-          channel: 'C2',
+          projectId: 'project-two',
           profile: null,
           lastRun: 100,
           nextRun: 300,
@@ -88,13 +88,13 @@ test('scheduler add persists default profile when profile is null or omitted', w
   const nullProfileTask = await scheduler.add('interval', {
     intervalMs: 60000,
     message: 'null profile task',
-    channel: 'C3',
+    projectId: 'project-three',
     profile: null,
   });
   const omittedProfileTask = await scheduler.add('interval', {
     intervalMs: 60000,
     message: 'omitted profile task',
-    channel: 'C4',
+    projectId: 'project-four',
   });
 
   assert.equal(nullProfileTask.profile, defaultProfile);
@@ -107,7 +107,7 @@ test('scheduler add preserves explicit profile', withTempSchedules(async ({ sche
   const task = await scheduler.add('interval', {
     intervalMs: 60000,
     message: 'explicit profile task',
-    channel: 'C3',
+    projectId: 'project-three',
     profile: 'qa',
   });
 
@@ -124,7 +124,7 @@ test('scheduler run resolves legacy null profile tasks to default profile', with
     type: 'interval',
     intervalMs: 60000,
     message: 'legacy null profile',
-    channel: 'C1',
+    projectId: 'legacy-one',
     profile: null,
   });
 
@@ -176,7 +176,7 @@ test('scheduler pause accepts explicit pausedBy parameter', withTempSchedules(as
 }));
 
 test('scheduler pause rejects once tasks', withTempSchedules(async ({ scheduler }) => {
-  await scheduler.add('once', { delay: 60000, message: 'one shot', channel: 'C3', profile: null });
+  await scheduler.add('once', { delay: 60000, message: 'one shot', projectId: 'project-three', profile: null });
   const onceTask = (await scheduler.list()).find(task => task.type === 'once');
 
   await assert.rejects(scheduler.pause(onceTask.id), /cannot pause once schedule/i);
@@ -378,8 +378,8 @@ test('scheduler _hotReload picks up external removal from schedules.json', async
   const schedulesFile = path.join(tempDir, 'schedules.json');
   fs.writeFileSync(schedulesFile, JSON.stringify({
     tasks: [
-      { id: 'keep', type: 'interval', intervalMs: 60_000, message: 'keep', channel: 'C1', profile: 'plan', createdAt: 1, nextRun: Date.now() + 60_000 },
-      { id: 'remove-me', type: 'interval', intervalMs: 60_000, message: 'removeme', channel: 'C1', profile: 'plan', createdAt: 1, nextRun: Date.now() + 60_000 },
+      { id: 'keep', type: 'interval', intervalMs: 60_000, message: 'keep', projectId: 'project-one', profile: 'plan', createdAt: 1, nextRun: Date.now() + 60_000 },
+      { id: 'remove-me', type: 'interval', intervalMs: 60_000, message: 'removeme', projectId: 'project-one', profile: 'plan', createdAt: 1, nextRun: Date.now() + 60_000 },
     ],
   }, null, 2));
   const scheduler = new Scheduler(async () => {}, null, {}, { schedulesFile, watchFile: false });
@@ -391,7 +391,7 @@ test('scheduler _hotReload picks up external removal from schedules.json', async
     // External writer (e.g. schedule-cli remove) modifies the file directly, bypassing the repo.
     fs.writeFileSync(schedulesFile, JSON.stringify({
       tasks: [
-        { id: 'keep', type: 'interval', intervalMs: 60_000, message: 'keep', channel: 'C1', profile: 'plan', createdAt: 1, nextRun: Date.now() + 60_000 },
+        { id: 'keep', type: 'interval', intervalMs: 60_000, message: 'keep', projectId: 'project-one', profile: 'plan', createdAt: 1, nextRun: Date.now() + 60_000 },
       ],
     }, null, 2));
 
@@ -423,7 +423,7 @@ test('scheduler _hotReload picks up external additions from schedules.json', asy
 
     fs.writeFileSync(schedulesFile, JSON.stringify({
       tasks: [
-        { id: 'new', type: 'interval', intervalMs: 60_000, message: 'new', channel: 'C1', profile: 'plan', createdAt: 1, nextRun: Date.now() + 60_000 },
+        { id: 'new', type: 'interval', intervalMs: 60_000, message: 'new', projectId: 'project-one', profile: 'plan', createdAt: 1, nextRun: Date.now() + 60_000 },
       ],
     }, null, 2));
 

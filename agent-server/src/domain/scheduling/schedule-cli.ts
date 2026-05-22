@@ -21,13 +21,14 @@ interface CliOptions {
   scheduler?: Scheduler;
   schedulesFile?: string;
   channel?: string;
+  projectId?: string;
   now?: number;
 }
 
 interface TaskPatch {
   message?: string;
   profile?: string;
-  channel?: string;
+  projectId?: string;
   dispatchType?: string;
   time?: string;
   dayOfWeek?: number;
@@ -61,7 +62,7 @@ function parseUpdateArgs(args: string[]): TaskPatch {
     }
     if (flag === '--message') patch.message = value;
     else if (flag === '--profile') patch.profile = value;
-    else if (flag === '--channel') patch.channel = value;
+    else if (flag === '--project-id') patch.projectId = value;
     else if (flag === '--dispatch-type') patch.dispatchType = value;
     else if (flag === '--time') patch.time = value;
     else if (flag === '--day') patch.dayOfWeek = Number.isInteger(Number(value)) ? Number(value) : DAY_MAP[value.toLowerCase()];
@@ -91,7 +92,7 @@ function getScheduleHelp(): string {
     options: [
       { flag: '--message <text>', description: 'Schedule message (for edit)' },
       { flag: '--profile <name>', description: 'Agent profile (for edit)' },
-      { flag: '--channel <id>', description: 'Slack channel (for edit)' },
+      { flag: '--project-id <id>', description: 'Project id (for edit)' },
       { flag: '--dispatch-type <type>', description: 'Dispatch type (for edit)' },
       { flag: '--time <HH:MM>', description: 'Time of day (for edit daily/weekly)' },
       { flag: '--day <day>', description: 'Day of week: sun-sat or 0-6 (for edit weekly)' },
@@ -174,7 +175,7 @@ async function runScheduleCli(args: string[], options: CliOptions = {}): Promise
       // Detect flag mode vs legacy positional mode
       if (rest[0]?.startsWith('--')) {
         // Flag mode: add --type interval --interval 30m --message "msg"
-        const addArgs: Record<string, string | null> = { type: null, interval: null, time: null, day: null, delay: null, message: null, channel: options.channel || 'cli', profile: null };
+        const addArgs: Record<string, string | null> = { type: null, interval: null, time: null, day: null, delay: null, message: null, projectId: options.projectId || 'general', profile: null };
         for (let i = 0; i < rest.length; i += 2) {
           const flag = rest[i], value = rest[i + 1];
           if (!flag?.startsWith('--') || value == null) throw new Error(`invalid add arguments near: ${flag || '<end>'}`);
@@ -184,7 +185,7 @@ async function runScheduleCli(args: string[], options: CliOptions = {}): Promise
           else if (flag === '--day') addArgs.day = value;
           else if (flag === '--delay') addArgs.delay = value;
           else if (flag === '--message') addArgs.message = value;
-          else if (flag === '--channel') addArgs.channel = value;
+          else if (flag === '--project-id') addArgs.projectId = value;
           else if (flag === '--profile') addArgs.profile = value;
           else throw new Error(`unknown add flag: ${flag}`);
         }
@@ -194,21 +195,21 @@ async function runScheduleCli(args: string[], options: CliOptions = {}): Promise
         if (msgErr) return fail(msgErr);
         if (addArgs.type === 'interval') {
           if (!addArgs.interval) return fail('--interval is required for add --type interval');
-          return ok({ task: await scheduler.add('interval', { intervalMs: parseMaybeDuration(addArgs.interval), message: addArgs.message, channel: addArgs.channel!, profile: addArgs.profile }) });
+          return ok({ task: await scheduler.add('interval', { intervalMs: parseMaybeDuration(addArgs.interval), message: addArgs.message, projectId: addArgs.projectId!, profile: addArgs.profile }) });
         }
         if (addArgs.type === 'daily') {
           if (!addArgs.time) return fail('--time is required for add --type daily');
-          return ok({ task: await scheduler.add('daily', { time: addArgs.time, message: addArgs.message, channel: addArgs.channel!, profile: addArgs.profile }) });
+          return ok({ task: await scheduler.add('daily', { time: addArgs.time, message: addArgs.message, projectId: addArgs.projectId!, profile: addArgs.profile }) });
         }
         if (addArgs.type === 'weekly') {
           if (!addArgs.day) return fail('--day is required for add --type weekly');
           if (!addArgs.time) return fail('--time is required for add --type weekly');
           const dayOfWeek = Number.isInteger(Number(addArgs.day)) ? Number(addArgs.day) : DAY_MAP[addArgs.day.toLowerCase()];
-          return ok({ task: await scheduler.add('weekly', { dayOfWeek, time: addArgs.time, message: addArgs.message, channel: addArgs.channel!, profile: addArgs.profile }) });
+          return ok({ task: await scheduler.add('weekly', { dayOfWeek, time: addArgs.time, message: addArgs.message, projectId: addArgs.projectId!, profile: addArgs.profile }) });
         }
         if (addArgs.type === 'once') {
           if (!addArgs.delay) return fail('--delay is required for add --type once');
-          return ok({ task: await scheduler.add('once', { delay: parseMaybeDuration(addArgs.delay), message: addArgs.message, channel: addArgs.channel!, profile: addArgs.profile }) });
+          return ok({ task: await scheduler.add('once', { delay: parseMaybeDuration(addArgs.delay), message: addArgs.message, projectId: addArgs.projectId!, profile: addArgs.profile }) });
         }
         return fail(`Unknown add type: '${addArgs.type}'. Valid types: interval, daily, weekly, once`);
       }
@@ -219,14 +220,14 @@ async function runScheduleCli(args: string[], options: CliOptions = {}): Promise
         const message = rest.slice(2).join(' ');
         const err = assertValidMessage(message);
         if (err) return fail(err);
-        return ok({ task: await scheduler.add('interval', { intervalMs, message, channel: options.channel || 'cli', profile: null }) });
+        return ok({ task: await scheduler.add('interval', { intervalMs, message, projectId: options.projectId || 'general', profile: null }) });
       }
       if (type === 'daily') {
         const time = rest[1];
         const message = rest.slice(2).join(' ');
         const err = assertValidMessage(message);
         if (err) return fail(err);
-        return ok({ task: await scheduler.add('daily', { time, message, channel: options.channel || 'cli', profile: null }) });
+        return ok({ task: await scheduler.add('daily', { time, message, projectId: options.projectId || 'general', profile: null }) });
       }
       if (type === 'weekly') {
         const dayValue = rest[1];
@@ -235,14 +236,14 @@ async function runScheduleCli(args: string[], options: CliOptions = {}): Promise
         const message = rest.slice(3).join(' ');
         const err = assertValidMessage(message);
         if (err) return fail(err);
-        return ok({ task: await scheduler.add('weekly', { dayOfWeek, time, message, channel: options.channel || 'cli', profile: null }) });
+        return ok({ task: await scheduler.add('weekly', { dayOfWeek, time, message, projectId: options.projectId || 'general', profile: null }) });
       }
       if (type === 'once') {
         const delay = parseMaybeDuration(rest[1]);
         const message = rest.slice(2).join(' ');
         const err = assertValidMessage(message);
         if (err) return fail(err);
-        return ok({ task: await scheduler.add('once', { delay, message, channel: options.channel || 'cli', profile: null }) });
+        return ok({ task: await scheduler.add('once', { delay, message, projectId: options.projectId || 'general', profile: null }) });
       }
       return fail(`Unknown add type: '${type}'. Valid types: interval, daily, weekly, once`);
     }

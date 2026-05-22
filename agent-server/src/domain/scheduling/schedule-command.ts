@@ -6,6 +6,7 @@
 import type { PlatformAdapter } from '@platform/adapter.js';
 import { formatDuration, formatTimeUntil, parseDuration } from './scheduler.js';
 import type { Scheduler, ScheduleTask } from './scheduler.js';
+import { channelToProjectId } from '@store/schedule-repo.js';
 import { listProfiles, resolveProfile, getDefaultProfileName } from '../agents/profile-manager.js';
 
 function scheduleHelp(): string {
@@ -167,7 +168,8 @@ async function handleAddInterval(parts: string[], channel: string, adapter: Plat
     await adapter.postMessage(channel, { text: 'Usage: `!schedule add interval <duration> [--profile <name>] <message>`' });
     return;
   }
-  const task = await scheduler.add('interval', { intervalMs: ms, message: msg, channel, profile: parsed.profileName });
+  const resolvedProjectId = channelToProjectId(channel) ?? 'general';
+  const task = await scheduler.add('interval', { intervalMs: ms, message: msg, projectId: resolvedProjectId, profile: parsed.profileName });
   const nextAt = task.nextRun ? ` | first run: ${fmtTime(task.nextRun)}` : '';
   await adapter.postMessage(channel, { text: buildScheduledConfirmation(`:white_check_mark: Scheduled every *${formatDuration(ms)}*: "${msg}"`, task, nextAt) });
 }
@@ -190,7 +192,8 @@ async function handleAddDaily(parts: string[], channel: string, adapter: Platfor
     await adapter.postMessage(channel, { text: 'Usage: `!schedule add daily <HH:MM> [--profile <name>] <message>`' });
     return;
   }
-  const task = await scheduler.add('daily', { time, message: msg, channel, profile: parsed.profileName });
+  const resolvedProjectId = channelToProjectId(channel) ?? 'general';
+  const task = await scheduler.add('daily', { time, message: msg, projectId: resolvedProjectId, profile: parsed.profileName });
   const nextAt = task.nextRun ? ` | first run: ${fmtTime(task.nextRun)}` : '';
   await adapter.postMessage(channel, { text: buildScheduledConfirmation(`:white_check_mark: Scheduled daily at *${time}*: "${msg}"`, task, nextAt) });
 }
@@ -220,7 +223,8 @@ async function handleAddWeekly(parts: string[], channel: string, adapter: Platfo
     return;
   }
   const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-  const task = await scheduler.add('weekly', { dayOfWeek, time, message: msg, channel, profile: parsed.profileName });
+  const resolvedProjectId = channelToProjectId(channel) ?? 'general';
+  const task = await scheduler.add('weekly', { dayOfWeek, time, message: msg, projectId: resolvedProjectId, profile: parsed.profileName });
   const nextAt = task.nextRun ? ` | first run: ${fmtTime(task.nextRun)}` : '';
   await adapter.postMessage(channel, { text: buildScheduledConfirmation(`:white_check_mark: Scheduled weekly *${dayNames[dayOfWeek]} ${time}*: "${msg}"`, task, nextAt) });
 }
@@ -244,7 +248,8 @@ async function handleAddOnce(parts: string[], channel: string, adapter: Platform
     await adapter.postMessage(channel, { text: 'Usage: `!schedule add once <duration> [--profile <name>] <message>`' });
     return;
   }
-  const task = await scheduler.add('once', { delay: ms, message: msg, channel, profile: parsed.profileName });
+  const resolvedProjectId = channelToProjectId(channel) ?? 'general';
+  const task = await scheduler.add('once', { delay: ms, message: msg, projectId: resolvedProjectId, profile: parsed.profileName });
   const runAt = task.runAt ? ` | runs at: ${fmtTime(task.runAt)}` : '';
   await adapter.postMessage(channel, { text: buildScheduledConfirmation(`:white_check_mark: Scheduled once in *${formatDuration(ms)}*: "${msg}"`, task, runAt) });
 }

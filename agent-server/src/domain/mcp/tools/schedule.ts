@@ -8,7 +8,7 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { Scheduler, parseDuration } from '../../scheduling/scheduler.js';
-import { scheduleRepo, type ScheduleTarget, type ScheduleTask } from '@store/schedule-repo.js';
+import { scheduleRepo, channelToProjectId, type ScheduleTarget, type ScheduleTask } from '@store/schedule-repo.js';
 import { resolveCortexContext, type ContextToolDeps } from './context.js';
 
 // --- Target shorthand resolver (extracted for unit tests) ---
@@ -143,6 +143,7 @@ const addInputShape = {
   profile: z.string().optional().describe('Agent profile name (defaults to active profile)'),
   preCheck: z.string().optional().describe('Optional shell command; non-zero exit → skip this fire. 15s timeout. Receives PRECHECK_LAST_RUN env var.'),
   channel: z.string().optional().describe('Override the channel used for fresh-fallback. Defaults to current-context channel.'),
+  projectId: z.string().optional().describe('Project id for the schedule. If omitted, resolved from channel via channel-registry.'),
 };
 
 async function runScheduleAdd(input: z.infer<z.ZodObject<typeof addInputShape>>, deps: ContextToolDeps): Promise<unknown> {
@@ -155,6 +156,9 @@ async function runScheduleAdd(input: z.infer<z.ZodObject<typeof addInputShape>>,
   if (!channel) channel = ctxSnapshot.channel;
   if (!channel) throw new Error('No channel: pass --channel or run inside a context with SLACK_CHANNEL set.');
 
+  // Resolve projectId: explicit > channel-to-project reverse lookup > 'general'.
+  const projectId = input.projectId ?? channelToProjectId(channel) ?? 'general';
+
   const scheduler = makeWriteOnlyScheduler();
   let task: ScheduleTask;
   try {
@@ -162,23 +166,23 @@ async function runScheduleAdd(input: z.infer<z.ZodObject<typeof addInputShape>>,
       if (input.interval === undefined) throw new Error('interval is required for type=interval');
       task = await scheduler.add('interval', {
         intervalMs: parseIntervalSpec(input.interval),
-        message: input.message, channel, profile: input.profile ?? null, preCheck: input.preCheck,
+        message: input.message, projectId, profile: input.profile ?? null, preCheck: input.preCheck,
       });
     } else if (input.type === 'daily') {
       if (!input.time) throw new Error('time is required for type=daily');
-      task = await scheduler.add('daily', { time: input.time, message: input.message, channel, profile: input.profile ?? null, preCheck: input.preCheck });
+      task = await scheduler.add('daily', { time: input.time, message: input.message, projectId, profile: input.profile ?? null, preCheck: input.preCheck });
     } else if (input.type === 'weekly') {
       if (input.dayOfWeek === undefined) throw new Error('dayOfWeek is required for type=weekly');
       if (!input.time) throw new Error('time is required for type=weekly');
       task = await scheduler.add('weekly', {
         dayOfWeek: parseDayOfWeek(input.dayOfWeek),
-        time: input.time, message: input.message, channel, profile: input.profile ?? null, preCheck: input.preCheck,
+        time: input.time, message: input.message, projectId, profile: input.profile ?? null, preCheck: input.preCheck,
       });
     } else {  // once
       if (input.delay === undefined) throw new Error('delay is required for type=once');
       task = await scheduler.add('once', {
         delay: parseDelaySpec(input.delay),
-        message: input.message, channel, profile: input.profile ?? null, preCheck: input.preCheck,
+        message: input.message, projectId, profile: input.profile ?? null, preCheck: input.preCheck,
       });
     }
     // Backfill target + fallback fields after add() so timing math (which doesn't know about them) ran first.

@@ -4,12 +4,13 @@
 // >>> If I am updated, update my header comment and the parent folder's CORTEX.md <<<
 
 import { watch, FSWatcher } from 'fs';
+import { readFileSync } from 'fs';
 import { execSync } from 'child_process';
 import { randomBytes } from 'crypto';
 import { DATA_DIR } from '@core/utils.js';
 import { createLogger } from '@core/log.js';
 import { getDefaultProfileName } from '../agents/profile-manager.js';
-import { ScheduleRepo, scheduleRepo, SCHEDULES_FILE, type ScheduleTask } from '@store/schedule-repo.js';
+import { ScheduleRepo, scheduleRepo, SCHEDULES_FILE, CHANNEL_REGISTRY_FILE, type ScheduleTask } from '@store/schedule-repo.js';
 
 const log = createLogger('scheduler');
 
@@ -74,7 +75,7 @@ function taskConfigHash(task: ScheduleTask): string {
   const keys: Record<string, string> = { interval: 'intervalMs', daily: 'time', once: 'runAt', weekly: 'dayOfWeek' };
   const key = keys[task.type] as keyof ScheduleTask;
   const extra = task.type === 'weekly' ? `${task.dayOfWeek}:${task.time}` : (String(task[key] || ''));
-  return `${task.type}:${extra}:${task.message}:${task.channel}:${task.profile || ''}:${task.dispatchType || ''}:${task.preCheck || ''}`;
+  return `${task.type}:${extra}:${task.message}:${task.projectId}:${task.profile || ''}:${task.dispatchType || ''}:${task.preCheck || ''}`;
 }
 
 function validateTime(time: string): void {
@@ -104,7 +105,7 @@ function computeTaskTiming(type: string, task: ScheduleTask): { nextRun?: number
 }
 
 function validateTaskPatch(task: ScheduleTask, patch: Record<string, any>): void {
-  const commonFields = new Set(['message', 'channel', 'profile', 'dispatchType', 'preCheck']);
+  const commonFields = new Set(['message', 'projectId', 'profile', 'dispatchType', 'preCheck']);
   const typeFields: Record<string, Set<string>> = {
     interval: new Set(['intervalMs']),
     daily: new Set(['time']),
@@ -130,31 +131,43 @@ function resolveTaskProfile(profile: string | null | undefined): string {
   return profile || getDefaultProfileName();
 }
 
+/** Resolve a projectId → Slack channel via channel-registry.json.
+ *  Returns null if the registry file is missing or the project isn't registered. */
+function resolveProjectChannel(projectId: string): string | null {
+  try {
+    const raw = readFileSync(CHANNEL_REGISTRY_FILE, 'utf8');
+    const registry = JSON.parse(raw) as Record<string, string>;
+    return registry[projectId] ?? null;
+  } catch {
+    return null;
+  }
+}
+
 function buildTask(type: string, id: string, now: number, options: Record<string, any>): ScheduleTask {
-  const { message, channel, profile = null, preCheck = null } = options;
+  const { message, projectId, profile = null, preCheck = null } = options;
   const resolvedProfile = resolveTaskProfile(profile);
   const base: { preCheck?: string } = { preCheck: preCheck || undefined };
 
   if (type === 'interval') {
     const { intervalMs } = options;
     if (!intervalMs) throw new Error('intervalMs required');
-    return { id, type: 'interval', intervalMs, message, channel, profile: resolvedProfile, ...base, lastRun: null, nextRun: now + intervalMs, createdAt: now };
+    return { id, type: 'interval', intervalMs, message, projectId, profile: resolvedProfile, ...base, lastRun: null, nextRun: now + intervalMs, createdAt: now };
   }
   if (type === 'daily') {
     const { time } = options;
     if (!time) throw new Error('time required (HH:MM)');
-    return { id, type: 'daily', time, message, channel, profile: resolvedProfile, ...base, lastRun: null, nextRun: now + nextDailyMs(time), createdAt: now };
+    return { id, type: 'daily', time, message, projectId, profile: resolvedProfile, ...base, lastRun: null, nextRun: now + nextDailyMs(time), createdAt: now };
   }
   if (type === 'weekly') {
     const { dayOfWeek, time } = options;
     if (dayOfWeek == null || dayOfWeek < 0 || dayOfWeek > 6) throw new Error('dayOfWeek required (0=Sun..6=Sat)');
     if (!time) throw new Error('time required (HH:MM)');
-    return { id, type: 'weekly', dayOfWeek, time, message, channel, profile: resolvedProfile, ...base, lastRun: null, nextRun: now + nextWeeklyMs(dayOfWeek, time), createdAt: now };
+    return { id, type: 'weekly', dayOfWeek, time, message, projectId, profile: resolvedProfile, ...base, lastRun: null, nextRun: now + nextWeeklyMs(dayOfWeek, time), createdAt: now };
   }
   if (type === 'once') {
     const { delay } = options;
     if (!delay) throw new Error('delay required');
-    return { id, type: 'once', runAt: now + delay, message, channel, profile: resolvedProfile, ...base, createdAt: now };
+    return { id, type: 'once', runAt: now + delay, message, projectId, profile: resolvedProfile, ...base, createdAt: now };
   }
   throw new Error(`Unknown type: ${type}. Use: interval, daily, weekly, once`);
 }
@@ -548,23 +561,24 @@ class Scheduler {
   // Internal: invoke the runner for a task
   async _runTask(task: ScheduleTask): Promise<void> {
     const profileName = resolveTaskProfile(task.profile);
-    log.info(`Firing task ${task.id} (${task.type}, dispatch=${task.dispatchType || 'llm'}, profile=${profileName}): "${task.message}"`);
+    const resolvedChannel = resolveProjectChannel(task.projectId) ?? task.projectId;
+    log.info(`Firing task ${task.id} (${task.type}, dispatch=${task.dispatchType || 'llm'}, profile=${profileName}, channel=${resolvedChannel}): "${task.message}"`);
     try {
       if (task.dispatchType === 'task-dispatch' && this.taskDispatchRunner) {
         await this.taskDispatchRunner({
-          channel: task.channel,
+          channel: resolvedChannel,
           scheduleTaskId: task.id,
           profileName,
         });
       } else if (task.dispatchType && this.programmaticHandlers[task.dispatchType]) {
         await this.programmaticHandlers[task.dispatchType]({
-          channel: task.channel,
+          channel: resolvedChannel,
           scheduleTaskId: task.id,
         });
       } else {
         await this.runner({
           message: `[Scheduled Task] ${task.message}`,
-          channel: task.channel,
+          channel: resolvedChannel,
           scheduleTaskId: task.id,
           profileName,
           target: task.target,

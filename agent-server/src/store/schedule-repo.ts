@@ -1,13 +1,16 @@
-// input:  schedules.json + JsonRepository
-// output: ScheduleRepo (read / addTask / removeTask / updateTask / rateLimitThrottle)
+// input:  schedules.json + channel-registry.json + JsonRepository
+// output: ScheduleRepo (read / addTask / removeTask / updateTask / rateLimitThrottle) + migration helpers
 // pos:    Schedule persistence layer. Based on JsonRepository abstraction (Pattern A), AsyncMutex serializes reads/writes of schedules.json.
+//         Migration from channel→projectId reads channel-registry.json synchronously for reverse lookup.
 // >>> If I am updated, update my header comment and the parent folder's CORTEX.md <<<
 
 import * as path from 'path';
+import * as fs from 'fs';
 import { JsonRepository } from './json-repository.js';
 import { STORE_DIR } from '@core/paths.js';
 
 export const SCHEDULES_FILE = path.join(STORE_DIR, 'schedules.json');
+export const CHANNEL_REGISTRY_FILE = path.join(STORE_DIR, 'channel-registry.json');
 
 /** Where a fired scheduled-task should land. Resolved by the cortex_schedule_add MCP tool
  *  (or schedule-cli) at create time — `__current__` placeholders are concretized then, so
@@ -26,7 +29,7 @@ export interface ScheduleTask {
   id: string;
   type: 'interval' | 'daily' | 'weekly' | 'once';
   message: string;
-  channel: string;
+  projectId: string;
   profile: string | null;
   intervalMs?: number;
   time?: string;
@@ -61,27 +64,70 @@ function defaultData(): SchedulesData {
   return { tasks: [] };
 }
 
-function migrate(raw: unknown): SchedulesData {
-  if (typeof raw !== 'object' || raw === null || !('tasks' in raw)) {
-    return defaultData();
+/**
+ * Read a channel-registry.json synchronously and build a reverse map: channel → projectId.
+ * Returns {} on ENOENT or parse error (graceful degradation — migration falls back to 'general').
+ */
+function syncReadChannelToProject(registryPath?: string): Record<string, string> {
+  try {
+    const raw = fs.readFileSync(registryPath ?? CHANNEL_REGISTRY_FILE, 'utf8');
+    const registry = JSON.parse(raw) as Record<string, string>;
+    const reverse: Record<string, string> = {};
+    for (const [project, ch] of Object.entries(registry)) {
+      reverse[ch] = project;
+    }
+    return reverse;
+  } catch {
+    return {};
   }
-  const data = raw as SchedulesData;
-  // Backfill target=fresh on records persisted before the multi-target dispatch landed,
-  // so the scheduler can dispatch them through the unified branch table without null-checks.
-  for (const task of data.tasks) {
-    if (!task.target) task.target = { kind: 'fresh' };
-  }
-  return data;
+}
+
+/** Convenience: reverse-lookup projectId from a Slack channel via channel-registry.json. */
+export function channelToProjectId(channel: string): string | null {
+  return syncReadChannelToProject()[channel] ?? null;
+}
+
+function makeMigrate(channelRegistryPath?: string): (raw: unknown) => SchedulesData {
+  return function migrate(raw: unknown): SchedulesData {
+    if (typeof raw !== 'object' || raw === null || !('tasks' in raw)) {
+      return defaultData();
+    }
+    const data = raw as SchedulesData;
+
+    // M4: Migrate channel→projectId. Reads channel-registry.json for reverse lookup.
+    // Idempotent: records already carrying projectId pass through unchanged.
+    const channelToProject = syncReadChannelToProject(channelRegistryPath);
+    for (const task of data.tasks) {
+      const t = task as unknown as Record<string, unknown>;
+      if ('channel' in t && !('projectId' in t)) {
+        // Legacy record — reverse-lookup projectId from channel
+        t.projectId = channelToProject[String(t.channel)] ?? 'general';
+        delete t.channel;
+      } else if ('projectId' in t) {
+        // New format (idempotent) — remove stale channel if somehow present
+        if ('channel' in t) delete t.channel;
+      }
+    }
+
+    // Backfill target=fresh on records persisted before the multi-target dispatch landed,
+    // so the scheduler can dispatch them through the unified branch table without null-checks.
+    for (const task of data.tasks) {
+      if (!task.target) task.target = { kind: 'fresh' };
+    }
+    return data;
+  };
 }
 
 export class ScheduleRepo {
   private _repo: JsonRepository<SchedulesData>;
+  private _channelRegistryPath: string | undefined;
 
-  constructor(filePath: string = SCHEDULES_FILE) {
+  constructor(filePath: string = SCHEDULES_FILE, channelRegistryPath?: string) {
+    this._channelRegistryPath = channelRegistryPath;
     this._repo = new JsonRepository<SchedulesData>({
       filePath,
       defaultValue: defaultData,
-      migrate,
+      migrate: makeMigrate(channelRegistryPath),
     });
   }
 
