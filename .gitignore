@@ -40,6 +40,7 @@ site/
 client/dist/
 client/cortex-client-*.tgz
 agent-server/cortex-agent-server-*.tgz
+client/cortex-agent-client-*.tgz
 
 # Machine-specific (generated per host)
 CORTEX.local.md
