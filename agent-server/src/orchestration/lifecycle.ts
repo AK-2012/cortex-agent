@@ -28,7 +28,7 @@ import { maybeNotifyCodexLowUsage } from '@domain/costs/codex-usage-monitor.js';
 import { normalizeSkillCommandPrefix } from '@domain/memory/skill-scanner.js';
 import { getOutboundQueue } from '@store/outbound-queue.js';
 import { buildDurableHooks, durablePost } from './durable-helpers.js';
-import { VirtualMessage } from '@platform/virtual-message.js';
+import type { OutputStream } from '@platform/index.js';
 
 const log = createLogger('lifecycle');
 
@@ -44,8 +44,8 @@ export async function handleAgentSuccess({ result, channel, adapter, statusMsg, 
   finalizeLocalExecution({ executionId, status: 'completed', result, durationS: elapsedS });
   const metrics = formatMetricsSuffix({ costUsd: result?.total_cost_usd ?? null, numTurns: result?.num_turns ?? null });
   const sessionTag = buildSessionTag(sessionName, result?.sessionId);
-  const vm = (onAssistantMessage as any)?.vm ?? null;
-  const askCount = await askUserQuestion.sendMessages(result, channel, adapter, statusMsg.messageId, threadTs, vm);
+  const stream = (onAssistantMessage as any)?.stream ?? null;
+  const askCount = await askUserQuestion.sendMessages(result, channel, adapter, statusMsg.messageId, threadTs, stream);
   const statusText = askCount > 0
     ? `:speech_balloon: ${sessionTag}Waiting for user input (${elapsedStr}${metrics})`
     : `:white_check_mark: Done | ${sessionTag}(${elapsedStr}${metrics})`;
@@ -60,12 +60,12 @@ export async function handleAgentSuccess({ result, channel, adapter, statusMsg, 
   // Re-sending here would duplicate the plan message (and historically could
   // desync when the hook's mtime-based lookup picked a stale file).
 
-  // onMessageEnd hook: extends the assistant turn's VirtualMessage so hook lines
+  // onMessageEnd hook: extends the assistant turn's OutputStream so hook lines
   // (status/preview/error) and any injected agent turn share one continuous Slack
-  // thread with the reply we just finished — no top-level leak, no detached vm.
+  // thread with the reply we just finished — no top-level leak, no detached stream.
   if (isOnMessageEndHookConfigured() && result?.sessionId) {
-    const hookVm = (onAssistantMessage as any)?.vm as VirtualMessage | undefined;
-    if (hookVm) {
+    const hookStream = (onAssistantMessage as any)?.stream as OutputStream | undefined;
+    if (hookStream) {
       try {
         const conv = await conversationLedger.getConversation(channel);
         const profileName = conv?.profileName ?? null;
@@ -75,13 +75,13 @@ export async function handleAgentSuccess({ result, channel, adapter, statusMsg, 
           sessionName: sessionName ?? '',
           executionId: executionId ?? '',
           profile: profileName,
-          vm: hookVm,
+          stream: hookStream,
         });
       } catch (err) {
         log.error('onMessageEnd hook failed:', (err as any)?.message || err);
       }
     } else {
-      log.warn('onMessageEnd hook skipped: assistant vm unavailable on onAssistantMessage');
+      log.warn('onMessageEnd hook skipped: assistant stream unavailable on onAssistantMessage');
     }
   }
 }

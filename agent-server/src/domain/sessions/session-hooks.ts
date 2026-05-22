@@ -1,4 +1,4 @@
-// input:  agent-server/session-hooks.json (lazy-read), spawn() subprocess, VirtualMessage
+// input:  agent-server/session-hooks.json (lazy-read), spawn() subprocess, OutputStream
 // output: runSessionHook() unified pipeline + fireAndForgetPreCloseHook (onNew) + onMessageEnd helpers
 // pos:    session-level hook subsystem — config loading, subprocess spawn, unified Slack-display pipeline
 //         (parallel to thread-hook system, scoped to channel/session rather than thread)
@@ -9,12 +9,11 @@ import { readFileSync } from 'fs';
 import * as path from 'path';
 import { DATA_DIR, CONFIG_DIR } from '@core/paths.js';
 import { createLogger } from '@core/log.js';
-import type { PlatformAdapter } from '@platform/index.js';
+import type { PlatformAdapter, OutputStream } from '@platform/index.js';
 import { runAgent, resolveBackendForChannel } from '@domain/agents/index.js';
 import { getSessionAsync } from '@domain/sessions/session.js';
 import { sessionStore } from '@store/session-registry-repo.js';
 import { conversationLedger } from '@store/conversation-ledger-repo.js';
-import { VirtualMessage } from '@platform/virtual-message.js';
 
 const log = createLogger('session-hook');
 
@@ -151,7 +150,7 @@ export interface SessionHookContext {
 }
 
 /** Caller-supplied formatters — keep wording per-hook so existing UX text doesn't change.
- *  All formatters return short single-line strings; runSessionHook appends them via VirtualMessage,
+ *  All formatters return short single-line strings; runSessionHook appends them via OutputStream,
  *  so they share the same Slack thread/group as surrounding agent output. */
 export interface SessionHookFormat {
   /** Status line shown immediately when the hook starts. */
@@ -165,7 +164,7 @@ export interface SessionHookFormat {
 }
 
 /** When set, the hook stdout is injected as a fresh agent turn against `targetSessionId`.
- *  All assistant output is appended into the same VirtualMessage so it visually
+ *  All assistant output is appended into the same OutputStream so it visually
  *  continues the hook's status/preview lines. */
 export interface SessionHookInject {
   targetSessionId: string;
@@ -207,23 +206,23 @@ function buildHookStdin(name: HookName, ctx: SessionHookContext): string {
 
 /** Unified pipeline: post status line → spawn subprocess → post preview/error line →
  *  optionally inject stdout as a fresh agent turn. Every Slack write goes through
- *  `vm` so hook output and the follow-up agent turn share one continuous thread.
+ *  `stream` so hook output and the follow-up agent turn share one continuous thread.
  *
- *  Caller controls the `vm`:
- *    - onMessageEnd: pass the assistant turn's vm so hook lines extend the same
+ *  Caller controls the `stream`:
+ *    - onMessageEnd: pass the assistant turn's stream so hook lines extend the same
  *      reply chain (no top-level leak).
- *    - onNew: pass a fresh vm anchored at the last assistant message's thread parent
+ *    - onNew: pass a fresh stream anchored at the last assistant message's thread parent
  *      (resolved via resolveSessionThreadTs). */
 export async function runSessionHook(
   spec: SessionHookSpec,
-  vm: VirtualMessage,
+  stream: OutputStream,
 ): Promise<void> {
   const cfg = loadHookConfig(spec.name);
   if (!cfg) return;
 
   const label = (cfg.args && cfg.args.length) ? `${cfg.command} ${cfg.args.join(' ')}` : cfg.command;
 
-  vm.append(spec.format.statusLine());
+  stream.emitText(spec.format.statusLine());
 
   const result = await spawnHookProcess({
     cfg,
@@ -233,22 +232,22 @@ export async function runSessionHook(
   });
 
   if (result.error) {
-    vm.append(spec.format.errorLine(result.error));
-    await vm.flush().catch((e: any) => log.warn(`vm.flush after error failed (${label}): ${e?.message || e}`));
+    stream.emitText(spec.format.errorLine(result.error));
+    await stream.flush().catch((e: any) => log.warn(`stream.flush after error failed (${label}): ${e?.message || e}`));
     return;
   }
 
   if (!result.stdout) {
     const empty = spec.format.emptyLine?.();
-    if (empty) vm.append(empty);
-    await vm.flush().catch((e: any) => log.warn(`vm.flush on empty failed (${label}): ${e?.message || e}`));
+    if (empty) stream.emitText(empty);
+    await stream.flush().catch((e: any) => log.warn(`stream.flush on empty failed (${label}): ${e?.message || e}`));
     return;
   }
 
-  vm.append(spec.format.previewLine(result.stdout));
+  stream.emitText(spec.format.previewLine(result.stdout));
 
   if (!spec.inject) {
-    await vm.flush().catch((e: any) => log.warn(`vm.flush no-inject failed (${label}): ${e?.message || e}`));
+    await stream.flush().catch((e: any) => log.warn(`stream.flush no-inject failed (${label}): ${e?.message || e}`));
     return;
   }
 
@@ -260,15 +259,15 @@ export async function runSessionHook(
       isUserInitiated: false,
       profileName: spec.inject.profileName,
       trigger: spec.inject.trigger ?? `hook:${spec.name}`,
-      onAssistantMessage: (text: string) => vm.append(text),
+      onAssistantMessage: (text: string) => stream.emitText(text),
     });
     await handle.promise;
   } catch (err: any) {
     const msg = err?.message || String(err);
     log.error(`hook ${spec.name} injected agent failed: ${msg}`);
-    vm.append(`:warning: ${spec.name} hook follow-up failed: ${msg}`);
+    stream.emitText(`:warning: ${spec.name} hook follow-up failed: ${msg}`);
   } finally {
-    await vm.flush().catch((e: any) => log.warn(`vm.flush after inject failed (${label}): ${e?.message || e}`));
+    await stream.flush().catch((e: any) => log.warn(`stream.flush after inject failed (${label}): ${e?.message || e}`));
   }
 }
 
@@ -355,13 +354,13 @@ async function defaultLookupLedgerProfile(channel: string): Promise<string | nul
   return conv?.profileName ?? null;
 }
 
-/** Build the onNew SessionHookSpec + a fresh vm. Returns null when the hook isn't
+/** Build the onNew SessionHookSpec + a fresh stream. Returns null when the hook isn't
  *  configured or there's no live session to capture context from. */
 async function prepareOnNewRun(
   channel: string,
   adapter: PlatformAdapter,
   threadTs?: string | null,
-): Promise<{ spec: SessionHookSpec; vm: VirtualMessage } | null> {
+): Promise<{ spec: SessionHookSpec; stream: OutputStream } | null> {
   if (!isOnNewHookConfigured()) return null;
 
   const backend = resolveBackendForChannel(channel);
@@ -380,7 +379,7 @@ async function prepareOnNewRun(
   });
 
   const anchor = await resolveOnNewThreadAnchor(channel, threadTs);
-  const vm = new VirtualMessage(adapter, { type: 'interactive-reply', conduit: channel, sessionId: '' }, { threadId: anchor });
+  const stream = adapter.openOutputStream({ type: 'interactive-reply', conduit: channel, sessionId: '' }, { threadId: anchor });
 
   const spec: SessionHookSpec = {
     name: 'onNew',
@@ -389,7 +388,7 @@ async function prepareOnNewRun(
     inject: { targetSessionId: sessionId, profileName, trigger: 'hook:onNew' },
   };
 
-  return { spec, vm };
+  return { spec, stream };
 }
 
 /** Fire-and-forget onNew hook used by the !new command and the "New" status button.
@@ -403,7 +402,7 @@ export async function fireAndForgetPreCloseHook(
 ): Promise<void> {
   const prepared = await prepareOnNewRun(channel, adapter, threadTs);
   if (!prepared) return;
-  void runSessionHook(prepared.spec, prepared.vm).catch((err) => {
+  void runSessionHook(prepared.spec, prepared.stream).catch((err) => {
     log.error('onNew hook async completion failed:', err?.message || err);
   });
 }
@@ -418,7 +417,7 @@ export async function runPreCloseHook(
 ): Promise<void> {
   const prepared = await prepareOnNewRun(channel, adapter, threadTs);
   if (!prepared) return;
-  await runSessionHook(prepared.spec, prepared.vm);
+  await runSessionHook(prepared.spec, prepared.stream);
 }
 
 // ── onMessageEnd entry point ─────────────────────────────────────────────────
@@ -429,9 +428,9 @@ export interface OnMessageEndArgs {
   sessionName: string;
   executionId: string;
   profile?: string | null;
-  /** VirtualMessage to extend — pass the assistant turn's vm so the hook lines
+  /** OutputStream to extend — pass the assistant turn's stream so the hook lines
    *  thread under the just-finished reply rather than leaking to top-level. */
-  vm: VirtualMessage;
+  stream: OutputStream;
 }
 
 /** Run the onMessageEnd hook against the just-finished assistant turn's vm.
@@ -454,5 +453,5 @@ export async function runMessageEndSessionHook(args: OnMessageEndArgs): Promise<
       trigger: 'hook:onMessageEnd',
     },
   };
-  await runSessionHook(spec, args.vm);
+  await runSessionHook(spec, args.stream);
 }

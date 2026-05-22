@@ -25,7 +25,7 @@ import { closeSessionsByPrefix } from '../agents/index.js';
 import * as executionRegistry from '../executions/registry.js';
 import { sessionStore } from '@store/session-registry-repo.js';
 import { formatDurationCompact } from '@core/utils.js';
-import { VirtualMessage } from '@platform/index.js';
+import type { OutputStream } from '@platform/index.js';
 import { runningExecutions } from '../../core/running-executions.js';
 import type { RunningExecution } from '../../core/running-executions.js';
 import { executeLifecycleHook } from './hook-runner.js';
@@ -64,7 +64,7 @@ interface ThreadContext {
   isDefault: boolean;
   template: ThreadTemplate | null;
   meta: ThreadRecord['metadata'];
-  vm: VirtualMessage | null;
+  stream: OutputStream | null;
   lastAgentResult: any;
   totalNumTurns: number;
 }
@@ -102,17 +102,17 @@ function formatAgentStageLabel(agentSlotId: AgentSlotId, stage: string | null): 
   return stage ? `${agentSlotId}:${stage}` : agentSlotId;
 }
 
-/** Validate thread, load template/metadata, init the aggregating VirtualMessage. */
+/** Validate thread, load template/metadata, init the aggregating OutputStream. */
 function initThreadContext(threadId: string, opts: RunThreadOptions): ThreadContext {
   const thread = threadStore.get(threadId);
   if (!thread) throw new Error(`Thread not found: ${threadId}`);
   const isDefault = isDefaultThread(threadId);
   const template = thread.templateName ? (getTemplate(thread.templateName) || null) : null;
-  // For all non-default threads, aggregate output into a VirtualMessage.
+  // For all non-default threads, aggregate output into an OutputStream.
   // Default template passes through opts.onAssistantMessage from app.ts (backward compat).
   // The caller supplies the Destination (interactive-reply or project-report).
-  const vm = !isDefault ? new VirtualMessage(opts.adapter, opts.destination, { threadId: opts.threadTs }) : null;
-  return { thread, isDefault, template, meta: thread.metadata, vm, lastAgentResult: null, totalNumTurns: 0 };
+  const stream = !isDefault ? opts.adapter.openOutputStream(opts.destination, { threadId: opts.threadTs }) : null;
+  return { thread, isDefault, template, meta: thread.metadata, stream, lastAgentResult: null, totalNumTurns: 0 };
 }
 
 /** Resolve next step, post boundary notifications, update the status message.
@@ -138,15 +138,15 @@ async function resolveAndNotifyStep(
   const multiAgent = Object.keys(threadRecord.agents).length > 1;
   const label = formatAgentStageLabel(agentSlotId, stage);
 
-  // Post step boundary notification for multi-agent threads via VirtualMessage
-  if (ctx.vm && multiAgent && !isFirstStep) {
+  // Post step boundary notification for multi-agent threads via OutputStream
+  if (ctx.stream && multiAgent && !isFirstStep) {
     const prevStep = threadRecord.steps[threadRecord.steps.length - 1];
     const prevLabel = prevStep ? formatAgentStageLabel(prevStep.agentSlotId, prevStep.stage) : '?';
-    ctx.vm.append(`:arrow_right: Step ${threadRecord.currentStepIndex + 1}: *${label}* starting (prev: ${prevLabel})`);
+    ctx.stream.emitText(`:arrow_right: Step ${threadRecord.currentStepIndex + 1}: *${label}* starting (prev: ${prevLabel})`);
   }
 
   // Update status message (multi-agent thread format; skip if caller provides onProgress)
-  if (ctx.vm && multiAgent && !opts.onProgress) {
+  if (ctx.stream && multiAgent && !opts.onProgress) {
     const elapsed = (Date.now() - opts.startTime) / 1000;
     const statusText = `:hourglass_flowing_sand: Thread ${threadRecord.id.substring(0, 12)} | Step ${threadRecord.currentStepIndex + 1}: *${label}* | :stopwatch: ${formatDurationCompact(elapsed)}`;
     try {
@@ -234,21 +234,21 @@ function setupStepCallbacks(
   const { agentSlotId, multiAgent, stage } = stepCtx;
   const threadRecord = threadStore.get(threadId)!;
   const slot = threadRecord.agents[agentSlotId];
-  const vm = ctx.vm;
+  const stream = ctx.stream;
   const label = formatAgentStageLabel(agentSlotId, stage);
 
   // Determine callbacks:
-  // - default: pass through from opts (app.ts VirtualMessage)
-  // - non-default: aggregate into thread-runner's VM; prefix only for multi-agent
+  // - default: pass through from opts (app.ts OutputStream)
+  // - non-default: aggregate into thread-runner's stream; prefix only for multi-agent
   const slotPrefix = multiAgent ? `*[${label}]*` : null;
-  const baseAssistantMessage = vm
-    ? (text: string) => { vm.append(slotPrefix ? `${slotPrefix} ${text}` : text); }
+  const baseAssistantMessage = stream
+    ? (text: string) => { stream.emitText(slotPrefix ? `${slotPrefix} ${text}` : text); }
     : opts.onAssistantMessage;
 
   // Tool trace (env-gated): caller-supplied onToolUse takes precedence (default-thread path —
-  // agent-runner owns the VM). Otherwise build one bound to the runner's own VM.
+  // agent-runner owns the stream). Otherwise build one bound to the runner's own stream.
   const callerOnToolUse = opts.onToolUse ?? null;
-  const toolTrace = callerOnToolUse ? null : createToolTrace(vm, { slotPrefix });
+  const toolTrace = callerOnToolUse ? null : createToolTrace(stream, { slotPrefix });
   const onAssistantMessage = toolTrace && baseAssistantMessage
     ? (text: string) => { toolTrace.flush(); baseAssistantMessage(text); }
     : baseAssistantMessage;
@@ -258,7 +258,7 @@ function setupStepCallbacks(
   // onProgress: caller override (e.g. scheduler's buildUserProcessingMessage) takes precedence;
   // fallback to thread-specific status format for multi-agent pipelines
   const onProgress = opts.onProgress
-    || (vm && multiAgent
+    || (stream && multiAgent
       ? (progress: any) => {
           const elapsed = (Date.now() - opts.startTime) / 1000;
           if (opts.statusMsg) {
@@ -453,9 +453,9 @@ async function finalizeThread(threadId: string, ctx: ThreadContext): Promise<Thr
   const artifactContent = readArtifact(threadId);
   const finalOutput = artifactContent || ctx.lastAgentResult?.finalOutput || null;
 
-  if (ctx.vm && finalOutput) {
-    ctx.vm.append(finalOutput);
-    await ctx.vm.flush();
+  if (ctx.stream && finalOutput) {
+    ctx.stream.emitText(finalOutput);
+    await ctx.stream.flush();
   }
 
   return {
@@ -494,10 +494,10 @@ async function runThread(threadId: string, opts: RunThreadOptions): Promise<Thre
       const abortCheck = detectAbortMarker(threadId);
       if (abortCheck.aborted) {
         await abortThread(threadId, abortCheck.reason);
-        if (ctx.vm) {
+        if (ctx.stream) {
           const reasonStr = abortCheck.reason ? `: ${abortCheck.reason}` : '';
           const abortLabel = formatAgentStageLabel(stepCtx.agentSlotId, stepCtx.stage);
-          ctx.vm.append(`:octagonal_sign: Thread aborted by *${abortLabel}*${reasonStr}`);
+          ctx.stream.emitText(`:octagonal_sign: Thread aborted by *${abortLabel}*${reasonStr}`);
         }
         break;
       }

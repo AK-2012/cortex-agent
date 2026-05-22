@@ -185,7 +185,7 @@ test('initThreadContext on ad-hoc thread (no template) returns isDefault=false, 
   const ctx = initThreadContext(id, makeRunOpts('C-init-1'));
   assert.equal(ctx.isDefault, false);
   assert.equal(ctx.template, null);
-  assert.ok(ctx.vm, 'non-default threads should get a VirtualMessage aggregator');
+  assert.ok(ctx.stream, 'non-default threads should get an OutputStream aggregator');
   assert.equal(ctx.lastAgentResult, null);
   assert.equal(ctx.totalNumTurns, 0);
   assert.equal(ctx.thread.id, id);
@@ -197,7 +197,7 @@ test('initThreadContext on default template returns isDefault=true and vm=null (
   // Shortest path: use an auto-record shape (no workspace) with templateName=null and a specific channel pattern.
   // isDefaultThread is not observable here without importing the helper; just assert the non-default path above.
   // For coverage of the default branch, we construct a template thread and then spot-check that vm behavior
-  // flips based on isDefault by inspecting the VirtualMessage presence only.
+  // flips based on isDefault by inspecting the stream presence only.
   registerTestThread(makeThreadRecord({ id, channel: 'C-init-2', templateName: null }));
   const ctx = initThreadContext(id, makeRunOpts('C-init-2'));
   // We cannot force isDefault=true without loadConfig; guard that the branch is at least reachable:
@@ -213,7 +213,7 @@ test('initThreadContext throws when thread does not exist', () => {
 test('evaluateAndTransition returns false for default (single-agent) thread', async () => {
   const id = uniqueThreadId('eval-default');
   registerTestThread(makeThreadRecord({ id, channel: 'C-eval-1', templateName: null }));
-  const ctx: ThreadContext = { thread: threadStore.get(id)!, isDefault: true, template: null, meta: null, vm: null, lastAgentResult: null, totalNumTurns: 0 };
+  const ctx: ThreadContext = { thread: threadStore.get(id)!, isDefault: true, template: null, meta: null, stream: null, lastAgentResult: null, totalNumTurns: 0 };
   const stepCtx = { agentSlotId: 'main', agentConfig: { slotId: 'main', profile: '__active__', persistSession: false }, isFirstStep: true, multiAgent: false } as any;
   const result = await evaluateAndTransition(id, stepCtx, ctx, makeRunOpts('C-eval-1'));
   assert.equal(result, false);
@@ -260,7 +260,7 @@ test('finalizeThread reads artifact file when present and prefers it over lastAg
   fs.rmSync(tmp, { recursive: true, force: true });
 });
 
-test('finalizeThread flushes VirtualMessage with final output when vm is present', async () => {
+test('finalizeThread flushes OutputStream with final output when stream is present', async () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'thread-runner-vm-'));
   const artifactPath = path.join(tmp, 'artifact.md');
   fs.writeFileSync(artifactPath, 'final text');
@@ -269,12 +269,12 @@ test('finalizeThread flushes VirtualMessage with final output when vm is present
   registerTestThread(makeThreadRecord({ id, channel: 'C-fin-3', templateName: null, artifactPath }));
   const appended: string[] = [];
   let flushCount = 0;
-  const fakeVm = {
-    append: (t: string) => { appended.push(t); },
+  const fakeStream = {
+    emitText: (t: string) => { appended.push(t); },
     flush: async () => { flushCount++; },
   };
   const ctx: ThreadContext = {
-    thread: threadStore.get(id)!, isDefault: false, template: null, meta: null, vm: fakeVm as any,
+    thread: threadStore.get(id)!, isDefault: false, template: null, meta: null, stream: fakeStream as any,
     lastAgentResult: null, totalNumTurns: 0,
   };
   await finalizeThread(id, ctx);
@@ -283,13 +283,13 @@ test('finalizeThread flushes VirtualMessage with final output when vm is present
   fs.rmSync(tmp, { recursive: true, force: true });
 });
 
-test('finalizeThread does not flush vm when finalOutput is null', async () => {
+test('finalizeThread does not flush stream when finalOutput is null', async () => {
   const id = uniqueThreadId('final-null');
   registerTestThread(makeThreadRecord({ id, channel: 'C-fin-4', templateName: null, artifactPath: '/nonexistent' }));
   let flushed = false;
-  const fakeVm = { append: () => {}, flush: async () => { flushed = true; } };
+  const fakeStream = { emitText: () => {}, flush: async () => { flushed = true; } };
   const ctx: ThreadContext = {
-    thread: threadStore.get(id)!, isDefault: false, template: null, meta: null, vm: fakeVm as any,
+    thread: threadStore.get(id)!, isDefault: false, template: null, meta: null, stream: fakeStream as any,
     lastAgentResult: null, totalNumTurns: 0,
   };
   const result = await finalizeThread(id, ctx);

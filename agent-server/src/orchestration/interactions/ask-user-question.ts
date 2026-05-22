@@ -3,8 +3,7 @@
 // pos:    AskUserQuestion state management and interaction construction
 // >>> If I am updated, update my header comment and the parent folder's CORTEX.md <<<
 
-import type { Destination, PlatformAdapter } from '@platform/index.js';
-import type { VirtualMessage } from '@platform/index.js';
+import type { Destination, PlatformAdapter, OutputStream } from '@platform/index.js';
 import { createLogger } from '@core/log.js';
 import { buildQuestionGroupBlocks, buildQuestionModalDefinition } from '@platform/index.js';
 import { runningExecutions } from '../../core/running-executions.js';
@@ -153,7 +152,7 @@ function tryResolveHook(group) {
 
 // --- Send questions via adapter ---
 
-async function sendMessages(result, channel, adapter: PlatformAdapter, messageTs, threadTs = null, vm: VirtualMessage | null = null) {
+async function sendMessages(result, channel, adapter: PlatformAdapter, messageTs, threadTs = null, stream: OutputStream | null = null) {
   let sentCount = 0;
   for (const payload of result.askUserQuestions || []) {
     if (!payload.questions?.length) continue;
@@ -178,8 +177,8 @@ async function sendMessages(result, channel, adapter: PlatformAdapter, messageTs
     };
     const text = `Questions (${group.questions.length})`;
     const richBlocks = buildQuestionGroupBlocks(group);
-    if (vm) {
-      const ref = await vm.postStandalone(text, { richBlocks });
+    if (stream) {
+      const ref = await stream.postInteractive(text, { richBlocks });
       group.responseMessageTs = ref?.messageId || null;
     } else {
       const askMsgDest: Destination = { type: 'interactive-reply', conduit: channel, sessionId: '' };

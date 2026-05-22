@@ -4,7 +4,7 @@
 // >>> If I am updated, update my header comment and the parent folder's CORTEX.md <<<
 
 import * as path from 'path';
-import type { Destination, PlatformAdapter, MessageRef, DownloadedFile, IncomingMessage, PlatformFileRef, VirtualMessage } from '@platform/index.js';
+import type { Destination, PlatformAdapter, MessageRef, DownloadedFile, IncomingMessage, PlatformFileRef, OutputStream } from '@platform/index.js';
 import { resolveDestinationConduit } from '@platform/types.js';
 import type { AgentResult } from '@core/types/agent-types.js';
 import type { ThreadRunResult } from '@domain/threads/runner.js';
@@ -50,7 +50,7 @@ interface AgentConfig {
 
 interface AgentCallbacks {
   onFallback: (...args: any[]) => Promise<void>;
-  onAssistantMsg: ((text: string) => void) & { vm?: VirtualMessage };
+  onAssistantMsg: ((text: string) => void) & { stream?: OutputStream };
   onProgress: (progress: any) => void;
   onToolUse: ((name: string, input: any) => void) | null;
 }
@@ -236,9 +236,9 @@ function buildAgentCallbacks(adapter: PlatformAdapter, destination: Destination,
 
   // Tool trace: when CORTEX_SHOW_TOOL_CALLS is enabled, emit a compact per-tool Slack line
   // that merges consecutive same-tool calls and splits on different tool / assistant text.
-  const toolTrace = createToolTrace(baseAssistantMsg.vm);
+  const toolTrace = createToolTrace(baseAssistantMsg.stream);
   const onAssistantMsg: AgentCallbacks['onAssistantMsg'] = toolTrace
-    ? Object.assign((text: string) => { toolTrace.flush(); baseAssistantMsg(text); }, { vm: baseAssistantMsg.vm })
+    ? Object.assign((text: string) => { toolTrace.flush(); baseAssistantMsg(text); }, { stream: baseAssistantMsg.stream })
     : baseAssistantMsg;
   const onToolUse = toolTrace ? (name: string, input: any) => toolTrace.onToolUse(name, input) : null;
 

@@ -292,7 +292,7 @@ import type { PlatformAdapter, MessageRef, Destination } from '@platform/index.j
 export interface RunThreadOptions {
   adapter: PlatformAdapter;
   channel: string;
-  /** Destination for the thread's VirtualMessage. Caller must supply — never inferred. */
+  /** Destination for the thread's OutputStream. Caller must supply — never inferred. */
   destination: Destination;
   threadTs: string | null;
   statusMsg: MessageRef | null;

@@ -1,9 +1,9 @@
-// input:  platform/VirtualMessage, CORTEX_SHOW_TOOL_CALLS env
+// input:  platform/OutputStream, CORTEX_SHOW_TOOL_CALLS env
 // output: ToolTrace class + createToolTrace factory + isToolTraceEnabled
-// pos:    Compact tool_use trace merged into the main VM message mutable tail
+// pos:    Compact tool_use trace rendered via OutputStream openMutable/update
 // >>> If I am updated, update my header comment and the parent folder's CORTEX.md <<<
 
-import type { VirtualMessage } from '@platform/index.js';
+import type { OutputStream, MutableRegion } from '@platform/index.js';
 
 const MAX_LINE_LEN = 120;
 const ELLIPSIS = '…';
@@ -132,7 +132,8 @@ export interface ToolTraceOptions {
 }
 
 export class ToolTrace {
-  private vm: VirtualMessage;
+  private stream: OutputStream;
+  private region: MutableRegion | null = null;
   private prefix: string | null;
 
   /** Name of the currently-open group (null if no open group). */
@@ -140,8 +141,8 @@ export class ToolTrace {
   /** Accumulated summaries for the open group; rendered on every update. */
   private groupSummaries: string[] = [];
 
-  constructor(vm: VirtualMessage, opts?: ToolTraceOptions) {
-    this.vm = vm;
+  constructor(stream: OutputStream, opts?: ToolTraceOptions) {
+    this.stream = stream;
     this.prefix = opts?.slotPrefix || null;
   }
 
@@ -150,38 +151,39 @@ export class ToolTrace {
     const summary = summarizeToolInput(name, input || {});
 
     if (this.groupName === name) {
-      // Same group — append summary and edit the tail in place.
+      // Same group — append summary and update the mutable region in place.
       this.groupSummaries.push(summary);
       const text = renderToolLine(name, this.groupSummaries, { prefix: this.prefix });
-      this.vm.editMutableTail(text);
+      this.region!.update(text);
       return;
     }
 
-    // New group — open a fresh mutable tail. VM seals the previous tail (if any)
-    // into committed content as part of appendMutableTail().
+    // New group — open a fresh mutable region. Previous region (if any) is
+    // automatically sealed by openMutable.
     this.groupName = name;
     this.groupSummaries = [summary];
     const text = renderToolLine(name, this.groupSummaries, { prefix: this.prefix });
-    this.vm.appendMutableTail(text);
+    this.region = this.stream.openMutable(text);
   }
 
-  /** Seal the current group on the tool-trace side. VM's tail is not touched
-   *  here — the next `vm.append(text)` or `vm.appendMutableTail(...)` will
-   *  seal it naturally. */
+  /** Seal the current group on the tool-trace side. The stream's mutable region
+   *  is not touched here — the next `stream.emitText(text)` or
+   *  `stream.openMutable(...)` will seal it naturally. */
   flush(): void {
     this.groupName = null;
     this.groupSummaries = [];
+    this.region = null;
   }
 }
 
-/** Factory: returns a ToolTrace wired to the given VM, or null if the feature is disabled or VM is missing. */
+/** Factory: returns a ToolTrace wired to the given OutputStream, or null if the feature is disabled or stream is missing. */
 export function createToolTrace(
-  vm: VirtualMessage | null | undefined,
+  stream: OutputStream | null | undefined,
   opts?: ToolTraceOptions,
 ): ToolTrace | null {
   if (!isToolTraceEnabled()) return null;
-  if (!vm) return null;
-  return new ToolTrace(vm, opts);
+  if (!stream) return null;
+  return new ToolTrace(stream, opts);
 }
 
 export const _test = { summarizeToolInput, renderToolLine };

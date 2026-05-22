@@ -31,7 +31,6 @@ export type {
   ButtonElement,
   Destination,
 } from './types.js';
-export { VirtualMessage } from './virtual-message.js';
 export type { OutputStream, MutableRegion, OpenOutputStreamOpts } from './output-stream.js';
 export { postOnce } from './output-stream-helpers.js';
 export { ToolTrace, createToolTrace, isToolTraceEnabled } from './tool-trace.js';

@@ -1,17 +1,18 @@
-// input:  node:test, MockAdapter, VirtualMessage
-// output: VirtualMessage append/flush/standalone/tail behavior tests
-// pos:    Platform-agnostic VirtualMessage regression test
+// input:  node:test, MockAdapter, SlackOutputStream
+// output: SlackOutputStream emitText/flush/postInteractive/tail behavior tests
+// pos:    Slack-specific OutputStream regression test (ported from VirtualMessage)
 // >>> If I am updated, update my header comment and the parent folder's CORTEX.md <<<
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  VirtualMessage,
+  SlackOutputStream,
   _testSetRetryDelays,
   _testResetRetryDelays,
-} from '../src/platform/virtual-message.js';
+} from '../src/platform/adapters/slack-output-stream.js';
 import { MockAdapter } from '../src/platform/testing.js';
 import type { Destination } from '../src/platform/types.js';
+import { postOnce } from '../src/platform/output-stream-helpers.js';
 
 function testDest(channel: string): Destination {
   return { type: 'interactive-reply', conduit: channel, sessionId: '' };
@@ -21,8 +22,8 @@ function postedConduit(p: { destination: Destination }): string {
   return p.destination.type === 'interactive-reply' ? p.destination.conduit : '';
 }
 
-async function flush(vm: VirtualMessage) {
-  await vm.flush();
+async function flush(stream: SlackOutputStream) {
+  await stream.flush();
 }
 
 // Retry delays are real setTimeout in production. For the whole test file we
@@ -32,14 +33,14 @@ async function flush(vm: VirtualMessage) {
 test.beforeEach(() => { _testSetRetryDelays([0, 0, 0, 0]); });
 test.afterEach(() => { _testResetRetryDelays(); });
 
-test('VirtualMessage: retry path runs without real wall-clock delay when delays are zeroed', async () => {
+test('SlackOutputStream: retry path runs without real wall-clock delay when delays are zeroed', async () => {
   _testSetRetryDelays([0, 0, 0, 0]);
   const adapter = new MockAdapter();
   adapter.failPostMessageCount = 3; // forces 2 retries (rich + plain + retry)
-  const vm = new VirtualMessage(adapter, testDest('C-delay'));
+  const stream = new SlackOutputStream(adapter, testDest('C-delay'));
   const t0 = Date.now();
-  vm.append('zero-delay retry');
-  await flush(vm);
+  stream.emitText('zero-delay retry');
+  await flush(stream);
   const elapsed = Date.now() - t0;
   assert.ok(elapsed < 200, `zero-delay retry must complete <200ms, got ${elapsed}ms`);
   assert.equal(adapter.posted.length, 1, 'message still reaches Slack after retries');
@@ -47,11 +48,11 @@ test('VirtualMessage: retry path runs without real wall-clock delay when delays 
 
 // --- Basic aggregation ---
 
-test('VirtualMessage: single append creates one top-level message', async () => {
+test('SlackOutputStream: single emitText creates one top-level message', async () => {
   const adapter = new MockAdapter();
-  const vm = new VirtualMessage(adapter, testDest('C123'));
-  vm.append('hello');
-  await flush(vm);
+  const stream = new SlackOutputStream(adapter, testDest('C123'));
+  stream.emitText('hello');
+  await flush(stream);
 
   assert.equal(adapter.posted.length, 1);
   assert.equal(adapter.posted[0].content.text, 'hello');
@@ -60,25 +61,25 @@ test('VirtualMessage: single append creates one top-level message', async () => 
   assert.equal(adapter.updated.length, 0);
 });
 
-test('VirtualMessage: two short messages — second uses update', async () => {
+test('SlackOutputStream: two short messages — second uses update', async () => {
   const adapter = new MockAdapter();
-  const vm = new VirtualMessage(adapter, testDest('C123'));
-  vm.append('first');
-  vm.append('second');
-  await flush(vm);
+  const stream = new SlackOutputStream(adapter, testDest('C123'));
+  stream.emitText('first');
+  stream.emitText('second');
+  await flush(stream);
 
   assert.equal(adapter.posted.length, 1);
   assert.equal(adapter.updated.length, 1);
   assert.equal(adapter.updated[0].content.text, 'first\nsecond');
 });
 
-test('VirtualMessage: three short messages all aggregate', async () => {
+test('SlackOutputStream: three short messages all aggregate', async () => {
   const adapter = new MockAdapter();
-  const vm = new VirtualMessage(adapter, testDest('C123'));
-  vm.append('one');
-  vm.append('two');
-  vm.append('three');
-  await flush(vm);
+  const stream = new SlackOutputStream(adapter, testDest('C123'));
+  stream.emitText('one');
+  stream.emitText('two');
+  stream.emitText('three');
+  await flush(stream);
 
   assert.equal(adapter.posted.length, 1);
   assert.equal(adapter.updated.length, 2);
@@ -90,79 +91,79 @@ test('VirtualMessage: three short messages all aggregate', async () => {
 
 // --- Splitting ---
 
-test('VirtualMessage: exceeding maxMessageLength forces new message', async () => {
+test('SlackOutputStream: exceeding maxMessageLength forces new message', async () => {
   const adapter = new MockAdapter();
-  const vm = new VirtualMessage(adapter, testDest('C123'));
-  vm.append('x'.repeat(2000));
-  vm.append('y'.repeat(1500));
-  await flush(vm);
+  const stream = new SlackOutputStream(adapter, testDest('C123'));
+  stream.emitText('x'.repeat(2000));
+  stream.emitText('y'.repeat(1500));
+  await flush(stream);
 
   assert.equal(adapter.posted.length, 2);
   assert.equal(adapter.updated.length, 0);
 });
 
-test('VirtualMessage: second table forces new message', async () => {
+test('SlackOutputStream: second table forces new message', async () => {
   const adapter = new MockAdapter();
-  const vm = new VirtualMessage(adapter, testDest('C123'));
-  vm.append('intro\n| a | b |\n| 1 | 2 |');
-  vm.append('more\n| c | d |\n| 3 | 4 |');
-  await flush(vm);
+  const stream = new SlackOutputStream(adapter, testDest('C123'));
+  stream.emitText('intro\n| a | b |\n| 1 | 2 |');
+  stream.emitText('more\n| c | d |\n| 3 | 4 |');
+  await flush(stream);
 
   assert.equal(adapter.posted.length, 2);
 });
 
-test('VirtualMessage: 3rd HR forces new message', async () => {
+test('SlackOutputStream: 3rd HR forces new message', async () => {
   const adapter = new MockAdapter();
-  const vm = new VirtualMessage(adapter, testDest('C123'));
-  vm.append('a\n---\nb');
-  vm.append('c\n---\nd');
-  vm.append('e\n---\nf');
-  await flush(vm);
+  const stream = new SlackOutputStream(adapter, testDest('C123'));
+  stream.emitText('a\n---\nb');
+  stream.emitText('c\n---\nd');
+  stream.emitText('e\n---\nf');
+  await flush(stream);
 
   assert.equal(adapter.posted.length, 2);
 });
 
 // --- Thread parent behavior (no external threadId) ---
 
-test('VirtualMessage: no threadId — first top-level, overflow to thread', async () => {
+test('SlackOutputStream: no threadId — first top-level, overflow to thread', async () => {
   const adapter = new MockAdapter();
-  const vm = new VirtualMessage(adapter, testDest('C123'));
-  vm.append('x'.repeat(2000));
-  vm.append('y'.repeat(1500));
-  await flush(vm);
+  const stream = new SlackOutputStream(adapter, testDest('C123'));
+  stream.emitText('x'.repeat(2000));
+  stream.emitText('y'.repeat(1500));
+  await flush(stream);
 
   assert.equal(adapter.posted.length, 2);
   assert.equal(adapter.posted[0].threadId, undefined, 'first is top-level');
   assert.equal(adapter.posted[1].threadId, '1000', 'overflow threads under first');
 });
 
-test('VirtualMessage: getParentTs returns first message id', async () => {
+test('SlackOutputStream: getParentRef returns first message id', async () => {
   const adapter = new MockAdapter();
-  const vm = new VirtualMessage(adapter, testDest('C123'));
-  assert.equal(vm.getParentTs(), null);
-  vm.append('hello');
-  await flush(vm);
-  assert.equal(vm.getParentTs(), '1000');
+  const stream = new SlackOutputStream(adapter, testDest('C123'));
+  assert.equal(stream.getParentRef(), null);
+  stream.emitText('hello');
+  await flush(stream);
+  assert.equal(stream.getParentRef()?.messageId, '1000');
 });
 
-test('VirtualMessage: getParentRef returns full MessageRef', async () => {
+test('SlackOutputStream: getParentRef returns full MessageRef', async () => {
   const adapter = new MockAdapter();
-  const vm = new VirtualMessage(adapter, testDest('C123'));
-  vm.append('hello');
-  await flush(vm);
-  const ref = vm.getParentRef();
+  const stream = new SlackOutputStream(adapter, testDest('C123'));
+  stream.emitText('hello');
+  await flush(stream);
+  const ref = stream.getParentRef();
   assert.ok(ref);
   assert.equal(ref!.channel, 'C123');
   assert.equal(ref!.messageId, '1000');
 });
 
-test('VirtualMessage: multiple splits all go to thread under first', async () => {
+test('SlackOutputStream: multiple splits all go to thread under first', async () => {
   const adapter = new MockAdapter();
-  const vm = new VirtualMessage(adapter, testDest('C123'));
-  vm.append('x'.repeat(2000));
-  vm.append('y'.repeat(1500));
-  vm.append('z'.repeat(1500));
-  await flush(vm);
+  const stream = new SlackOutputStream(adapter, testDest('C123'));
+  stream.emitText('x'.repeat(2000));
+  stream.emitText('y'.repeat(1500));
+  stream.emitText('z'.repeat(1500));
+  await flush(stream);
 
   assert.equal(adapter.posted.length, 3);
   assert.equal(adapter.posted[0].threadId, undefined);
@@ -172,77 +173,77 @@ test('VirtualMessage: multiple splits all go to thread under first', async () =>
 
 // --- External threadId behavior ---
 
-test('VirtualMessage: with threadId — all messages use it', async () => {
+test('SlackOutputStream: with threadId — all messages use it', async () => {
   const adapter = new MockAdapter();
-  const vm = new VirtualMessage(adapter, testDest('C123'), { threadId: '999.000' });
-  vm.append('x'.repeat(2000));
-  vm.append('y'.repeat(1500));
-  await flush(vm);
+  const stream = new SlackOutputStream(adapter, testDest('C123'), { threadId: '999.000' });
+  stream.emitText('x'.repeat(2000));
+  stream.emitText('y'.repeat(1500));
+  await flush(stream);
 
   assert.equal(adapter.posted.length, 2);
   assert.equal(adapter.posted[0].threadId, '999.000');
   assert.equal(adapter.posted[1].threadId, '999.000');
 });
 
-test('VirtualMessage: with threadId — no parentRef set', async () => {
+test('SlackOutputStream: with threadId — no parentRef set', async () => {
   const adapter = new MockAdapter();
-  const vm = new VirtualMessage(adapter, testDest('C123'), { threadId: '999.000' });
-  vm.append('hello');
-  await flush(vm);
-  assert.equal(vm.getParentTs(), null);
+  const stream = new SlackOutputStream(adapter, testDest('C123'), { threadId: '999.000' });
+  stream.emitText('hello');
+  await flush(stream);
+  assert.equal(stream.getParentRef(), null);
 });
 
 // --- Callbacks ---
 
-test('VirtualMessage: onMessagePosted called on post, not update', async () => {
+test('SlackOutputStream: onMessagePosted called on post, not update', async () => {
   const adapter = new MockAdapter();
   const refs: any[] = [];
-  const vm = new VirtualMessage(adapter, testDest('C123'), {
+  const stream = new SlackOutputStream(adapter, testDest('C123'), {
     onMessagePosted: (ref) => refs.push(ref),
   });
-  vm.append('first');
-  vm.append('second');
-  await flush(vm);
+  stream.emitText('first');
+  stream.emitText('second');
+  await flush(stream);
 
   assert.equal(refs.length, 1);
   assert.equal(refs[0].messageId, '1000');
 });
 
-test('VirtualMessage: onMessagePosted called for each new post', async () => {
+test('SlackOutputStream: onMessagePosted called for each new post', async () => {
   const adapter = new MockAdapter();
   const refs: any[] = [];
-  const vm = new VirtualMessage(adapter, testDest('C123'), {
+  const stream = new SlackOutputStream(adapter, testDest('C123'), {
     onMessagePosted: (ref) => refs.push(ref),
   });
-  vm.append('x'.repeat(2000));
-  vm.append('y'.repeat(1500));
-  await flush(vm);
+  stream.emitText('x'.repeat(2000));
+  stream.emitText('y'.repeat(1500));
+  await flush(stream);
 
   assert.equal(refs.length, 2);
   assert.equal(refs[0].messageId, '1000');
   assert.equal(refs[1].messageId, '1001');
 });
 
-test('VirtualMessage: empty/whitespace text ignored', async () => {
+test('SlackOutputStream: empty/whitespace text ignored', async () => {
   const adapter = new MockAdapter();
-  const vm = new VirtualMessage(adapter, testDest('C123'));
-  vm.append('');
-  vm.append('   ');
-  vm.append('\n');
-  await flush(vm);
+  const stream = new SlackOutputStream(adapter, testDest('C123'));
+  stream.emitText('');
+  stream.emitText('   ');
+  stream.emitText('\n');
+  await flush(stream);
 
   assert.equal(adapter.posted.length, 0);
   assert.equal(adapter.updated.length, 0);
 });
 
-test('VirtualMessage: getRefs returns all message refs', async () => {
+test('SlackOutputStream: getRefs returns all message refs', async () => {
   const adapter = new MockAdapter();
-  const vm = new VirtualMessage(adapter, testDest('C123'));
-  vm.append('x'.repeat(2000));
-  vm.append('y'.repeat(1500));
-  await flush(vm);
+  const stream = new SlackOutputStream(adapter, testDest('C123'));
+  stream.emitText('x'.repeat(2000));
+  stream.emitText('y'.repeat(1500));
+  await flush(stream);
 
-  const refs = vm.getRefs();
+  const refs = stream.getRefs();
   assert.equal(refs.length, 2);
   assert.equal(refs[0].messageId, '1000');
   assert.equal(refs[1].messageId, '1001');
@@ -250,15 +251,15 @@ test('VirtualMessage: getRefs returns all message refs', async () => {
 
 // --- Serialization ---
 
-test('VirtualMessage: rapid appends processed in order', async () => {
+test('SlackOutputStream: rapid emitText calls processed in order', async () => {
   const adapter = new MockAdapter();
-  const vm = new VirtualMessage(adapter, testDest('C123'));
-  vm.append('msg1');
-  vm.append('msg2');
-  vm.append('msg3');
-  vm.append('msg4');
-  vm.append('msg5');
-  await flush(vm);
+  const stream = new SlackOutputStream(adapter, testDest('C123'));
+  stream.emitText('msg1');
+  stream.emitText('msg2');
+  stream.emitText('msg3');
+  stream.emitText('msg4');
+  stream.emitText('msg5');
+  await flush(stream);
 
   assert.equal(adapter.posted.length, 1);
   assert.equal(adapter.updated.length, 4);
@@ -267,13 +268,13 @@ test('VirtualMessage: rapid appends processed in order', async () => {
   assert.ok(finalText.includes('msg5'));
 });
 
-test('VirtualMessage: char limit split with correct threading', async () => {
+test('SlackOutputStream: char limit split with correct threading', async () => {
   const adapter = new MockAdapter();
-  const vm = new VirtualMessage(adapter, testDest('C123'));
-  vm.append('x'.repeat(2000));
-  vm.append('y'.repeat(1500));
-  vm.append('z'.repeat(500));
-  await flush(vm);
+  const stream = new SlackOutputStream(adapter, testDest('C123'));
+  stream.emitText('x'.repeat(2000));
+  stream.emitText('y'.repeat(1500));
+  stream.emitText('z'.repeat(500));
+  await flush(stream);
 
   assert.equal(adapter.posted.length, 2);
   assert.equal(adapter.posted[0].threadId, undefined);
@@ -281,12 +282,12 @@ test('VirtualMessage: char limit split with correct threading', async () => {
   assert.equal(adapter.updated.length, 1);
 });
 
-test('VirtualMessage: richBlocks included in post and update', async () => {
+test('SlackOutputStream: richBlocks included in post and update', async () => {
   const adapter = new MockAdapter();
-  const vm = new VirtualMessage(adapter, testDest('C123'));
-  vm.append('hello');
-  vm.append('world');
-  await flush(vm);
+  const stream = new SlackOutputStream(adapter, testDest('C123'));
+  stream.emitText('hello');
+  stream.emitText('world');
+  await flush(stream);
 
   assert.ok(adapter.posted[0].content.richBlocks);
   assert.equal(adapter.posted[0].content.richBlocks![0].type, 'markdown');
@@ -294,42 +295,42 @@ test('VirtualMessage: richBlocks included in post and update', async () => {
   assert.equal(adapter.updated[0].content.richBlocks![0].type, 'markdown');
 });
 
-// --- postStandalone ---
+// --- postInteractive ---
 
-test('VirtualMessage: postStandalone creates independent message', async () => {
+test('SlackOutputStream: postInteractive creates independent message', async () => {
   const adapter = new MockAdapter();
-  const vm = new VirtualMessage(adapter, testDest('C123'));
-  vm.append('content');
-  const ref = await vm.postStandalone('standalone text');
-  await flush(vm);
+  const stream = new SlackOutputStream(adapter, testDest('C123'));
+  stream.emitText('content');
+  const ref = await stream.postInteractive('standalone text');
+  await flush(stream);
 
   assert.equal(adapter.posted.length, 2);
   assert.ok(ref);
   assert.equal(ref!.messageId, '1001');
 });
 
-test('VirtualMessage: postStandalone resets current, next append creates new', async () => {
+test('SlackOutputStream: postInteractive resets current, next emitText creates new', async () => {
   const adapter = new MockAdapter();
-  const vm = new VirtualMessage(adapter, testDest('C123'));
-  vm.append('before');
-  await vm.postStandalone('standalone');
-  vm.append('after');
-  await flush(vm);
+  const stream = new SlackOutputStream(adapter, testDest('C123'));
+  stream.emitText('before');
+  await stream.postInteractive('standalone');
+  stream.emitText('after');
+  await flush(stream);
 
   assert.equal(adapter.posted.length, 3);
 });
 
-test('VirtualMessage: postStandalone with actions routes to postInteractive and still splits', async () => {
+test('SlackOutputStream: postInteractive with actions routes to postInteractive and still splits', async () => {
   const adapter = new MockAdapter();
-  const vm = new VirtualMessage(adapter, testDest('C123'));
-  vm.append('A');
-  vm.append('B');
-  const ref = await vm.postStandalone('Form', {
+  const stream = new SlackOutputStream(adapter, testDest('C123'));
+  stream.emitText('A');
+  stream.emitText('B');
+  const ref = await stream.postInteractive('Form', {
     richBlocks: [{ type: 'section', text: 'Approve?' }],
     actions: [{ type: 'button', text: 'Approve', actionId: 'approve', value: 'yes' }],
   });
-  vm.append('C');
-  await flush(vm);
+  stream.emitText('C');
+  await flush(stream);
 
   // 3 posts: A+B aggregated → form → C; plus updateMessage for B aggregation
   assert.equal(adapter.posted.length, 3);
@@ -343,7 +344,7 @@ test('VirtualMessage: postStandalone with actions routes to postInteractive and 
   assert.equal(formPost.actions!.length, 1);
   assert.equal(formPost.actions![0].actionId, 'approve');
 
-  // Post-form append must create a new message, NOT merge back into A+B
+  // Post-form emitText must create a new message, NOT merge back into A+B
   assert.equal(adapter.posted[2].content.text, 'C');
   // updateMessage was only used for the pre-form aggregation, never for C
   assert.equal(adapter.updated.length, 1);
@@ -351,11 +352,11 @@ test('VirtualMessage: postStandalone with actions routes to postInteractive and 
   assert.ok(ref);
 });
 
-// --- postOnce static ---
+// --- postOnce ---
 
-test('VirtualMessage.postOnce: creates single message and returns ref', async () => {
+test('postOnce: creates single message and returns ref', async () => {
   const adapter = new MockAdapter();
-  const ref = await VirtualMessage.postOnce(adapter, testDest('C123'), 'one-shot');
+  const ref = await postOnce(adapter, testDest('C123'), 'one-shot');
 
   assert.ok(ref);
   assert.equal(ref!.messageId, '1000');
@@ -365,12 +366,12 @@ test('VirtualMessage.postOnce: creates single message and returns ref', async ()
 
 // --- Platform capability: custom maxMessageLength ---
 
-test('VirtualMessage: respects adapter maxMessageLength', async () => {
+test('SlackOutputStream: respects adapter maxMessageLength', async () => {
   const adapter = new MockAdapter({ maxMessageLength: 100 });
-  const vm = new VirtualMessage(adapter, testDest('C123'));
-  vm.append('x'.repeat(80));
-  vm.append('y'.repeat(80));
-  await flush(vm);
+  const stream = new SlackOutputStream(adapter, testDest('C123'));
+  stream.emitText('x'.repeat(80));
+  stream.emitText('y'.repeat(80));
+  await flush(stream);
 
   assert.equal(adapter.posted.length, 2, 'split at 100 char limit, not 3000');
 });
@@ -410,42 +411,38 @@ test('MockAdapter: reset clears all recorded state', async () => {
 // --- Regression: silent message drops on transient adapter failures ---
 // These tests guard against the bug where a single Slack API failure
 // (rate limit, network blip) silently drops a message because errors
-// were swallowed without retry or fallback in VirtualMessage.
+// were swallowed without retry or fallback in SlackOutputStream.
 
-test('VirtualMessage: sustained postMessage failure is retried (rich+plain+retries), message reaches Slack', async () => {
+test('SlackOutputStream: sustained postMessage failure is retried (rich+plain+retries), message reaches Slack', async () => {
   const adapter = new MockAdapter();
   // Simulate a sustained transient failure: 3 failures across rich attempt,
   // plain attempt, and the first retry. The retry path must eventually succeed.
   adapter.failPostMessageCount = 3;
-  const vm = new VirtualMessage(adapter, testDest('C123'));
-  vm.append('important content that must not be dropped');
-  await flush(vm);
+  const stream = new SlackOutputStream(adapter, testDest('C123'));
+  stream.emitText('important content that must not be dropped');
+  await flush(stream);
 
   assert.equal(adapter.posted.length, 1, 'message must reach Slack after retries');
   assert.equal(adapter.posted[0].content.text, 'important content that must not be dropped');
 });
 
-test('VirtualMessage: sustained updateMessage failure does not silently drop appended text', async () => {
+test('SlackOutputStream: sustained updateMessage failure does not silently drop emitted text', async () => {
   const adapter = new MockAdapter();
-  const vm = new VirtualMessage(adapter, testDest('C123'));
-  vm.append('first');
-  await flush(vm);
+  const stream = new SlackOutputStream(adapter, testDest('C123'));
+  stream.emitText('first');
+  await flush(stream);
   assert.equal(adapter.posted.length, 1);
 
   // Simulate a sustained Slack rate-limit covering BOTH the rich attempt and the
-  // plain-text fallback. Pre-fix: this silently drops 'second' because:
-  //   1. _processAppend mutates currentContent='first\n\nsecond' BEFORE _updateCurrent
-  //   2. _updateCurrent fails silently (both attempts)
-  //   3. The next append triggers needsSplit and calls _postNew(text) with ONLY
-  //      the new text — 'second' is permanently lost from anywhere.
+  // plain-text fallback.
   adapter.failUpdateMessageCount = 99; // enough to fail every attempt
-  vm.append('second');
-  await flush(vm);
+  stream.emitText('second');
+  await flush(stream);
   adapter.failUpdateMessageCount = 0;
 
-  // Now append a third message large enough to trigger needsSplit → _postNew.
-  vm.append('z'.repeat(3500));
-  await flush(vm);
+  // Now emitText a third message large enough to trigger needsSplit → _postNew.
+  stream.emitText('z'.repeat(3500));
+  await flush(stream);
 
   const visible = reconstructVisibleText(adapter);
   assert.ok(
@@ -458,14 +455,14 @@ test('VirtualMessage: sustained updateMessage failure does not silently drop app
   );
 });
 
-test('VirtualMessage: chunk[0] sustained failure does not orphan chunk[1] as top-level message', async () => {
+test('SlackOutputStream: chunk[0] sustained failure does not orphan chunk[1] as top-level message', async () => {
   const adapter = new MockAdapter();
   // Sustained failure on chunk[0] only: rich + plain both fail, but retries succeed.
   adapter.failPostMessageCount = 2;
-  const vm = new VirtualMessage(adapter, testDest('C123'));
+  const stream = new SlackOutputStream(adapter, testDest('C123'));
   // Force chunking into 2 chunks.
-  vm.append('a'.repeat(2500) + '\n' + 'b'.repeat(2500));
-  await flush(vm);
+  stream.emitText('a'.repeat(2500) + '\n' + 'b'.repeat(2500));
+  await flush(stream);
 
   // After fix: parentRef is established (chunk[0] succeeded via retry),
   // both chunks visible, second chunk is in thread.
@@ -478,36 +475,36 @@ test('VirtualMessage: chunk[0] sustained failure does not orphan chunk[1] as top
   );
 });
 
-test('VirtualMessage: persistent failure surfaces error to flush() instead of silently passing', async () => {
+test('SlackOutputStream: persistent failure surfaces error to flush() instead of silently passing', async () => {
   const adapter = new MockAdapter();
   // Force every attempt (including all retries) to fail.
   adapter.failPostMessageCount = 999;
-  const vm = new VirtualMessage(adapter, testDest('C123'));
-  vm.append('this should fail loudly, not silently');
+  const stream = new SlackOutputStream(adapter, testDest('C123'));
+  stream.emitText('this should fail loudly, not silently');
 
   // flush() must reject so callers know the message did not reach Slack.
   await assert.rejects(
-    () => vm.flush(),
+    () => stream.flush(),
     /post|message|fail/i,
     'flush() must reject when a message permanently fails to send'
   );
 });
 
-test('VirtualMessage.postStandalone: persistent failure rejects the returned promise', async () => {
+test('SlackOutputStream.postInteractive: persistent failure rejects the returned promise', async () => {
   const adapter = new MockAdapter();
   adapter.failPostMessageCount = 999;
-  const vm = new VirtualMessage(adapter, testDest('C123'));
+  const stream = new SlackOutputStream(adapter, testDest('C123'));
 
   await assert.rejects(
-    () => vm.postStandalone('critical message'),
+    () => stream.postInteractive('critical message'),
     /post|standalone|fail/i,
-    'postStandalone must reject on persistent failure, not resolve null'
+    'postInteractive must reject on persistent failure, not resolve null'
   );
 });
 
 // --- DurableHooks integration ---
 
-test('VirtualMessage: durable hooks called on post and update', async () => {
+test('SlackOutputStream: durable hooks called on post and update', async () => {
   const adapter = new MockAdapter();
   const walOps: { op: string; channel?: string; text?: string; walId?: string; messageId?: string }[] = [];
   let walCounter = 0;
@@ -527,10 +524,10 @@ test('VirtualMessage: durable hooks called on post and update', async () => {
     },
   };
 
-  const vm = new VirtualMessage(adapter, testDest('C-durable'), { durable });
-  vm.append('first');
-  vm.append('second');
-  await flush(vm);
+  const stream = new SlackOutputStream(adapter, testDest('C-durable'), { durable });
+  stream.emitText('first');
+  stream.emitText('second');
+  await flush(stream);
 
   // first → beforePost → adapter.postMessage → afterSent
   // second → beforeUpdate → adapter.updateMessage → afterSent
@@ -546,7 +543,7 @@ test('VirtualMessage: durable hooks called on post and update', async () => {
   assert.equal(walOps[3].walId, 'wal-2');
 });
 
-test('VirtualMessage: durable hooks called on postStandalone', async () => {
+test('SlackOutputStream: durable hooks called on postInteractive', async () => {
   const adapter = new MockAdapter();
   const walOps: string[] = [];
   const durable = {
@@ -555,18 +552,18 @@ test('VirtualMessage: durable hooks called on postStandalone', async () => {
     async afterSent() { walOps.push('afterSent'); },
   };
 
-  const vm = new VirtualMessage(adapter, testDest('C-standalone'), { durable });
-  await vm.postStandalone('standalone text');
-  await flush(vm);
+  const stream = new SlackOutputStream(adapter, testDest('C-standalone'), { durable });
+  await stream.postInteractive('standalone text');
+  await flush(stream);
 
   assert.deepEqual(walOps, ['beforePost', 'afterSent']);
 });
 
-test('VirtualMessage: no durable hooks — works without hooks (backward compat)', async () => {
+test('SlackOutputStream: no durable hooks — works without hooks (backward compat)', async () => {
   const adapter = new MockAdapter();
-  const vm = new VirtualMessage(adapter, testDest('C-nodurable'));
-  vm.append('hello');
-  await flush(vm);
+  const stream = new SlackOutputStream(adapter, testDest('C-nodurable'));
+  stream.emitText('hello');
+  await flush(stream);
 
   assert.equal(adapter.posted.length, 1);
   assert.equal(adapter.posted[0].content.text, 'hello');
