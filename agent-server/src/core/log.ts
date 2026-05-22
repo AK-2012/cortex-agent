@@ -17,6 +17,8 @@ process.stdout.on('error', () => {});
 
 // ── Config ──────────────────────────────────────────────
 const RETENTION_DAYS = 14;
+const MAX_FILE_SIZE = 100 * 1024 * 1024; // 100 MB — rotate when exceeded
+const MAX_ROTATED_FILES = 2;            // keep up to .1.log, .2.log
 
 type Level = 'INFO' | 'WARN' | 'ERROR' | 'DEBUG';
 
@@ -57,7 +59,36 @@ function getStream(): fs.WriteStream {
       cleanOldLogs();
     }
   }
+
+  // Size-based rotation: if current file exceeds MAX_FILE_SIZE,
+  // rotate it and open a fresh one (same date tag).
+  if (stream.bytesWritten >= MAX_FILE_SIZE) {
+    stream.end();
+    stream = rotateLogFile(tag);
+  }
+
   return stream;
+}
+
+/** Rotate the current day's log file: server-YYYYMMDD.log → .1.log → .2.log.
+ *  Opens a fresh server-YYYYMMDD.log and returns the new stream. */
+function rotateLogFile(tag: string): fs.WriteStream {
+  const base = path.join(LOGS_DIR, `server-${tag}`);
+  // Shift existing rotations: .1.log → .2.log (drop older if any)
+  for (let i = MAX_ROTATED_FILES; i >= 1; i--) {
+    const oldPath = `${base}.${i}.log`;
+    const newPath = `${base}.${i + 1}.log`;
+    try {
+      if (i === MAX_ROTATED_FILES) {
+        try { fs.unlinkSync(newPath); } catch { /* doesn't exist */ }
+      }
+      fs.renameSync(oldPath, newPath);
+    } catch { /* file may not exist */ }
+  }
+  // Rotate current to .1.log
+  try { fs.renameSync(`${base}.log`, `${base}.1.log`); } catch { /* ignore */ }
+  // Open fresh log
+  return fs.createWriteStream(`${base}.log`, { flags: 'a' });
 }
 
 function cleanOldLogs(): void {

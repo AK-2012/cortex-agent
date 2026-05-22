@@ -244,6 +244,19 @@ function main(): void {
   const cmd = args[0];
   const rest = args.slice(1);
 
+  // Handle --help / -h for subcommands
+  if (rest.includes('--help') || rest.includes('-h')) {
+    if (cmd === 'daemon') {
+      console.log(getCliHelp());
+      process.exit(0);
+    }
+    if (cmd === 'start') {
+      console.log(getCliHelp());
+      process.exit(0);
+    }
+    // Other subcommands (init, task, config, setup-gateway) handle --help internally via runCli()
+  }
+
   // ── Subcommands that replace the process (fork + wait) ──
   if (cmd === 'start') {
     if (!existsSync(APP_JS)) {
@@ -266,13 +279,16 @@ function main(): void {
       log.error('Run `npm run build` first.');
       process.exit(1);
     }
-    const child = fork(DAEMON_JS, [], {
+    // Detach the daemon so it survives parent shell exit (Bug 1: EPIPE cascade).
+    // detached: true → new process group leader; stdio: 'ignore' → no pipe to parent.
+    // The daemon's own logger writes to files — console output is redundant.
+    fork(DAEMON_JS, [], {
       cwd: DATA_DIR,
-      stdio: 'inherit',
+      detached: true,
+      stdio: 'ignore',
       env: { ...process.env },
     });
-    child.on('exit', (code) => process.exit(code ?? 0));
-    return; // let the event loop keep the process alive
+    process.exit(0);
   }
 
   // ── Subcommands that return results ──
