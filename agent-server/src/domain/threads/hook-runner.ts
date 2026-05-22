@@ -127,7 +127,8 @@ async function runHookAgent(
 ): Promise<void> {
   if (!hookResult.prompt) return;
 
-  const thread = threadStore.get(threadId)!;
+  const thread = threadStore.get(threadId);
+  if (!thread) { log.error(`Thread not found: ${threadId}, skipping hook agent`); return; }
   const isTargetMode = !!hookResult.targetAgent;
 
   // Determine slotId, sessionKey, sessionId, profile based on mode

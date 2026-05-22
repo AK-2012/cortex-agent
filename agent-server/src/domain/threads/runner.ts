@@ -200,11 +200,10 @@ async function buildStepConfig(
     : 'local';
   const executionTrigger = ctx.meta?.trigger || (ctx.isDefault ? 'user' : 'thread-step');
   const label = formatAgentStageLabel(agentSlotId, stage);
-  const threadRecord = threadStore.get(threadId)!;
   const execution = executionRegistry.startLocalExecution({
     kind: executionKind,
     channel: opts.channel,
-    project: threadRecord.projectId,
+    project: threadStore.get(threadId)?.projectId ?? 'general',
     trigger: executionTrigger,
     backend: getActiveBackend(),
     billingMode: getClaudeMode(),

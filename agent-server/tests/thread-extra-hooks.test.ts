@@ -137,6 +137,7 @@ test('RunThreadOptions.extraHooks compiles with per-phase ThreadHookConfig entri
   const opts: RunThreadOptions = {
     adapter: new MockAdapter() as any,
     channel: 'C-type-check',
+    destination: { type: 'interactive-reply', conduit: 'C-type-check', sessionId: '' },
     threadTs: null,
     statusMsg: null,
     startTime: 0,
@@ -157,6 +158,7 @@ test('RunThreadOptions.extraHooks is optional (omitting it still type-checks)', 
   const opts: RunThreadOptions = {
     adapter: new MockAdapter() as any,
     channel: 'C-type-check-2',
+    destination: { type: 'interactive-reply', conduit: 'C-type-check-2', sessionId: '' },
     threadTs: null,
     statusMsg: null,
     startTime: 0,
