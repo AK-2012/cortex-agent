@@ -27,6 +27,9 @@ import type {
 } from '../types.js';
 import { TokenBucketRateLimiter } from '../utils/rate-limiter.js';
 import { createLogger } from '@core/log.js';
+import type { OutputStream, OpenOutputStreamOpts } from '../output-stream.js';
+import { SlackOutputStream } from './slack-output-stream.js';
+import { SlackProjectConduitsStore } from './slack-project-conduits.js';
 import * as fs from 'fs';
 import * as path from 'path';
 import { writeFile, readFile, mkdir } from 'fs/promises';
@@ -603,6 +606,35 @@ export class SlackAdapter implements PlatformAdapter {
   /** Expose the rate limiter for sharing with MCP tools and testing. */
   getRateLimiter(): TokenBucketRateLimiter {
     return this.rateLimiter;
+  }
+
+  // --- Output stream ---
+
+  openOutputStream(destination: Destination, opts?: OpenOutputStreamOpts): OutputStream {
+    return new SlackOutputStream(this, destination, opts);
+  }
+
+  // --- Project conduit mapping ---
+
+  async bindProjectConduit(projectId: string, conduitHint: string): Promise<void> {
+    await this._getConduitsStore().set(projectId, conduitHint);
+  }
+
+  async unbindProjectConduit(projectId: string): Promise<void> {
+    await this._getConduitsStore().remove(projectId);
+  }
+
+  async getProjectConduits(): Promise<Record<string, string>> {
+    return this._getConduitsStore().getAll();
+  }
+
+  private _conduitsStore: SlackProjectConduitsStore | null = null;
+
+  private _getConduitsStore(): SlackProjectConduitsStore {
+    if (!this._conduitsStore) {
+      this._conduitsStore = new SlackProjectConduitsStore();
+    }
+    return this._conduitsStore;
   }
 
   /**

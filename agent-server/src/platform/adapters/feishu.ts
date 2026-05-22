@@ -27,6 +27,8 @@ import type {
 import * as fs from 'fs';
 import * as path from 'path';
 import { createLogger } from '@core/log.js';
+import type { OutputStream, OpenOutputStreamOpts } from '../output-stream.js';
+import { FeishuOutputStream } from './feishu-output-stream.js';
 
 const log = createLogger('feishu');
 
@@ -326,6 +328,28 @@ export class FeishuAdapter implements PlatformAdapter {
 
   async postEphemeral(_channel: string, _userId: string, _text: string): Promise<void> {
     // Feishu does not support ephemeral messages — no-op.
+  }
+
+  // --- Output stream ---
+
+  openOutputStream(destination: Destination, opts?: OpenOutputStreamOpts): OutputStream {
+    return new FeishuOutputStream(this, destination, opts);
+  }
+
+  // --- Project conduit mapping (file-backed, separate file from Slack) ---
+
+  private _feishuConduits: Record<string, string> = {};
+
+  async bindProjectConduit(projectId: string, conduitHint: string): Promise<void> {
+    this._feishuConduits[projectId] = conduitHint;
+  }
+
+  async unbindProjectConduit(projectId: string): Promise<void> {
+    delete this._feishuConduits[projectId];
+  }
+
+  async getProjectConduits(): Promise<Record<string, string>> {
+    return { ...this._feishuConduits };
   }
 
   /**

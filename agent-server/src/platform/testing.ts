@@ -22,6 +22,7 @@ import type {
   ActionElement,
 } from './types.js';
 import { resolveDestinationConduit } from './types.js';
+import type { OutputStream, MutableRegion, OpenOutputStreamOpts } from './output-stream.js';
 
 export interface PostedMessage {
   destination: Destination;
@@ -59,6 +60,91 @@ export interface EphemeralMessage {
   channel: string;
   userId: string;
   text: string;
+}
+
+// --- MockOutputStream types ---
+
+export interface MockSegmentRecord {
+  kind: 'text' | 'mutable-open' | 'mutable-update' | 'interactive';
+  text: string;
+  actions?: ActionElement[];
+}
+
+/** Mock OutputStream that records a typed segment trail.
+ *  Routes real posts through MockAdapter.postMessage/postInteractive
+ *  so existing posted[] assertions keep working. Does no coalescing,
+ *  mirroring TUI behavior. */
+export class MockOutputStream implements OutputStream {
+  private adapter: MockAdapter;
+  private destination: Destination;
+  private _parentRef: MessageRef | null = null;
+  readonly segments: MockSegmentRecord[] = [];
+  readonly refs: MessageRef[] = [];
+
+  constructor(adapter: MockAdapter, destination: Destination, _opts?: OpenOutputStreamOpts) {
+    this.adapter = adapter;
+    this.destination = destination;
+  }
+
+  emitText(text: string): void {
+    if (!text?.trim()) return;
+    this.segments.push({ kind: 'text', text });
+    this.adapter.postMessage(this.destination, { text }).then(ref => {
+      this.refs.push(ref);
+      if (!this._parentRef) this._parentRef = ref;
+    });
+  }
+
+  openMutable(text: string): MutableRegion {
+    if (!text?.trim()) return { update: () => {} };
+    const generation = this._nextGen();
+    this.segments.push({ kind: 'mutable-open', text });
+    this.adapter.postMessage(this.destination, { text }).then(ref => {
+      this.refs.push(ref);
+      if (!this._parentRef) this._parentRef = ref;
+    });
+    return { update: (t: string) => this._mutableUpdate(t, generation) };
+  }
+
+  postInteractive(text: string, opts?: {
+    richBlocks?: RichBlock[];
+    actions?: ActionElement[];
+  }): Promise<MessageRef | null> {
+    const actions = opts?.actions;
+    this.segments.push({ kind: 'interactive', text, actions });
+    const method = actions && actions.length > 0
+      ? this.adapter.postInteractive(this.destination, { text, richBlocks: opts?.richBlocks, actions })
+      : this.adapter.postMessage(this.destination, { text, richBlocks: opts?.richBlocks });
+    return method.then(ref => {
+      this.refs.push(ref);
+      if (!this._parentRef) this._parentRef = ref;
+      return ref;
+    });
+  }
+
+  async flush(): Promise<void> {
+    // All operations are synchronous behind MockAdapter;
+    // nothing to await.
+  }
+
+  getRefs(): MessageRef[] {
+    return [...this.refs];
+  }
+
+  getParentRef(): MessageRef | null {
+    return this._parentRef;
+  }
+
+  private _genCounter = 0;
+
+  private _nextGen(): number {
+    return ++this._genCounter;
+  }
+
+  private _mutableUpdate(text: string, _generation: number): void {
+    if (!text?.trim()) return;
+    this.segments.push({ kind: 'mutable-update', text });
+  }
 }
 
 export class MockAdapter implements PlatformAdapter {
@@ -184,6 +270,28 @@ export class MockAdapter implements PlatformAdapter {
     return null;
   }
 
+  // --- Output stream ---
+
+  openOutputStream(destination: Destination, opts?: OpenOutputStreamOpts): OutputStream {
+    return new MockOutputStream(this, destination, opts);
+  }
+
+  // --- Project conduit mapping ---
+
+  private _projectConduits = new Map<string, string>();
+
+  async bindProjectConduit(projectId: string, conduitHint: string): Promise<void> {
+    this._projectConduits.set(projectId, conduitHint);
+  }
+
+  async unbindProjectConduit(projectId: string): Promise<void> {
+    this._projectConduits.delete(projectId);
+  }
+
+  async getProjectConduits(): Promise<Record<string, string>> {
+    return Object.fromEntries(this._projectConduits);
+  }
+
   // --- Test helpers ---
 
   /** Simulate an inbound message for testing event handlers. */
@@ -268,5 +376,6 @@ export class MockAdapter implements PlatformAdapter {
     this.failPostMessageCount = 0;
     this.failUpdateMessageCount = 0;
     this.failPostInteractiveCount = 0;
+    this._projectConduits.clear();
   }
 }
