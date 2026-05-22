@@ -17,12 +17,14 @@ import type {
   PlatformCapabilities,
   PlatformFileRef,
   DownloadedFile,
+  Destination,
   PostMessageOpts,
   FileUploadOpts,
   RichBlock,
   ActionElement,
   ModalField,
 } from '../types.js';
+import { resolveDestinationConduit } from '../types.js';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -131,7 +133,8 @@ export class FeishuAdapter implements PlatformAdapter {
 
   // --- Outbound messaging ---
 
-  async postMessage(channel: string, content: MessageContent, opts?: PostMessageOpts): Promise<MessageRef> {
+  async postMessage(destination: Destination, content: MessageContent, opts?: PostMessageOpts): Promise<MessageRef> {
+    const channel = this._resolveChannel(destination);
     const threadId = opts?.threadId;
 
     // If replying in a thread, use the reply API
@@ -171,10 +174,11 @@ export class FeishuAdapter implements PlatformAdapter {
   // --- Interactive messages ---
 
   async postInteractive(
-    channel: string,
+    destination: Destination,
     content: MessageContent & { actions: ActionElement[] },
     opts?: PostMessageOpts,
   ): Promise<MessageRef> {
+    const channel = this._resolveChannel(destination);
     const elements = content.richBlocks
       ? this.richBlocksToFeishuElements(content.richBlocks)
       : [];
@@ -254,7 +258,8 @@ export class FeishuAdapter implements PlatformAdapter {
 
   // --- Files ---
 
-  async uploadFile(channel: string, filePath: string, opts?: FileUploadOpts): Promise<void> {
+  async uploadFile(destination: Destination, filePath: string, opts?: FileUploadOpts): Promise<void> {
+    const channel = this._resolveChannel(destination);
     const { resolved, size } = this.resolveFilePath(filePath);
     const fileName = opts?.filename || path.basename(resolved);
 
@@ -314,8 +319,9 @@ export class FeishuAdapter implements PlatformAdapter {
     // Feishu does not support ephemeral messages — no-op.
   }
 
-  getAdminChannel(): string | null {
-    return this.config.adminChannel || null;
+  /** Resolve a Destination to a Feishu chat_id. */
+  private _resolveChannel(dest: Destination): string {
+    return resolveDestinationConduit(dest, this.config.adminChannel);
   }
 
   getRawClient(): lark.Client {
@@ -375,7 +381,7 @@ export class FeishuAdapter implements PlatformAdapter {
     await this.messageHandler({
       message: incoming,
       async reply(content, replyOpts) {
-        return adapter.postMessage(ref.channel, content, {
+        return adapter.postMessage({ type: 'interactive-reply', conduit: ref.channel, sessionId: '' }, content, {
           threadId: replyOpts?.threadId || ref.threadId,
         });
       },

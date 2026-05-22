@@ -14,6 +14,7 @@ import type {
   PlatformCapabilities,
   PlatformFileRef,
   DownloadedFile,
+  Destination,
   PostMessageOpts,
   FileUploadOpts,
   RichBlock,
@@ -35,12 +36,12 @@ export interface PlatformAdapter {
   onModalSubmit(callbackId: string, handler: (ctx: ModalSubmitContext) => Promise<void>): void;
 
   // --- Outbound messaging ---
-  postMessage(channel: string, content: MessageContent, opts?: PostMessageOpts): Promise<MessageRef>;
+  postMessage(destination: Destination, content: MessageContent, opts?: PostMessageOpts): Promise<MessageRef>;
   updateMessage(ref: MessageRef, content: MessageContent): Promise<void>;
   deleteMessage(ref: MessageRef): Promise<void>;
 
   // --- Interactive messages (buttons, actions) ---
-  postInteractive(channel: string, content: MessageContent & {
+  postInteractive(destination: Destination, content: MessageContent & {
     actions: ActionElement[];
   }, opts?: PostMessageOpts): Promise<MessageRef>;
 
@@ -51,15 +52,12 @@ export interface PlatformAdapter {
   addReaction(ref: MessageRef, emoji: string): Promise<void>;
 
   // --- Files ---
-  uploadFile(channel: string, filePath: string, opts?: FileUploadOpts): Promise<void>;
+  uploadFile(destination: Destination, filePath: string, opts?: FileUploadOpts): Promise<void>;
   downloadFile(fileRef: PlatformFileRef, destDir: string): Promise<DownloadedFile>;
 
   // --- Misc ---
   getPermalink(ref: MessageRef): Promise<string | null>;
   postEphemeral(channel: string, userId: string, text: string): Promise<void>;
-
-  /** Platform-configured admin/notification channel (replaces hardcoded Slack DM ID). */
-  getAdminChannel(): string | null;
 
   /** Access to the underlying platform client for edge cases during migration.
    *  New code should avoid this — it exists to support incremental Phase 2 adoption. */

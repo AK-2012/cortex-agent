@@ -180,6 +180,36 @@ export interface PlatformCapabilities {
   maxThreadDepth: number;
 }
 
+// --- Destination (outbound addressing) ---
+
+/** Declared intent for where and why a message is sent.
+ *  Replaces raw `channel: string` in outbound adapter methods.
+ *  - interactive-reply: reply in an ongoing conversation (conduit = channel)
+ *  - project-report:   push a report to a project's channel
+ *  - system-notice:    send to the platform-configured admin channel */
+export type Destination =
+  | { type: 'interactive-reply'; conduit: string; sessionId: string }
+  | { type: 'project-report'; projectId: string; trigger: string; sessionId: string }
+  | { type: 'system-notice' };
+
+/** Resolve a Destination to a concrete channel string for the adapter.
+ *  `adminChannel` is required for `system-notice` and ignored for other types. */
+export function resolveDestinationConduit(dest: Destination, adminChannel?: string): string {
+  switch (dest.type) {
+    case 'interactive-reply':
+      return dest.conduit;
+    case 'project-report':
+      // FIXME: resolve projectId → channel via project store when the routing
+      // layer is added in the M3/M4 outbound refactoring.
+      return dest.projectId;
+    case 'system-notice':
+      if (!adminChannel) {
+        throw new Error('system-notice destination requires a configured admin channel');
+      }
+      return adminChannel;
+  }
+}
+
 // --- Post Options ---
 
 export interface PostMessageOpts {

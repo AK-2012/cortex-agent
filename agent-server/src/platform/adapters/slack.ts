@@ -18,12 +18,14 @@ import type {
   PlatformCapabilities,
   PlatformFileRef,
   DownloadedFile,
+  Destination,
   PostMessageOpts,
   FileUploadOpts,
   RichBlock,
   ActionElement,
   ModalField,
 } from '../types.js';
+import { resolveDestinationConduit } from '../types.js';
 import { TokenBucketRateLimiter } from '../utils/rate-limiter.js';
 import { createLogger } from '@core/log.js';
 import * as fs from 'fs';
@@ -170,7 +172,7 @@ export class SlackAdapter implements PlatformAdapter {
         // Persist to .env and notify (fire-and-forget, non-blocking)
         this._persistAdminChannel(msg.channel).catch(e =>
           log.warn(`Failed to persist CORTEX_ADMIN_CHANNEL to .env: ${e.message}`));
-        this.postMessage(msg.channel, {
+        this.postMessage({ type: 'system-notice' }, {
           text: `:wave: This DM channel has been auto-registered as the Cortex admin channel. \`CORTEX_ADMIN_CHANNEL=${msg.channel}\` has been written to \`.env\`. System notifications (startup, rate-limit, disk alerts) will be sent here.`,
         }).catch(e => log.warn(`Failed to send admin auto-detect notification: ${e.message}`));
       }
@@ -209,7 +211,7 @@ export class SlackAdapter implements PlatformAdapter {
       await handler({
         message: incoming,
         async reply(content, opts) {
-          return adapter.postMessage(ref.channel, content, {
+          return adapter.postMessage({ type: 'interactive-reply', conduit: ref.channel, sessionId: '' }, content, {
             threadId: opts?.threadId || ref.threadId,
           });
         },
@@ -285,7 +287,8 @@ export class SlackAdapter implements PlatformAdapter {
     }
   }
 
-  async postMessage(channel: string, content: MessageContent, opts?: PostMessageOpts): Promise<MessageRef> {
+  async postMessage(destination: Destination, content: MessageContent, opts?: PostMessageOpts): Promise<MessageRef> {
+    const channel = this._resolveChannel(destination);
     const blocks = content.richBlocks ? this.richBlocksToSlack(content.richBlocks) : undefined;
     const payload: any = {
       channel,
@@ -418,7 +421,8 @@ export class SlackAdapter implements PlatformAdapter {
 
   // --- Interactive messages ---
 
-  async postInteractive(channel: string, content: MessageContent & { actions: ActionElement[] }, opts?: PostMessageOpts): Promise<MessageRef> {
+  async postInteractive(destination: Destination, content: MessageContent & { actions: ActionElement[] }, opts?: PostMessageOpts): Promise<MessageRef> {
+    const channel = this._resolveChannel(destination);
     const blocks = [
       ...(content.richBlocks ? this.richBlocksToSlack(content.richBlocks) : []),
       {
@@ -466,7 +470,8 @@ export class SlackAdapter implements PlatformAdapter {
 
   // --- Files ---
 
-  async uploadFile(channel: string, filePath: string, opts?: FileUploadOpts): Promise<void> {
+  async uploadFile(destination: Destination, filePath: string, opts?: FileUploadOpts): Promise<void> {
+    const channel = this._resolveChannel(destination);
     const { resolved, size } = this.resolveFilePath(filePath);
     const body = fs.readFileSync(resolved);
     const uploadName = opts?.filename || path.basename(resolved);
@@ -558,10 +563,6 @@ export class SlackAdapter implements PlatformAdapter {
     );
   }
 
-  getAdminChannel(): string | null {
-    return this.config.adminChannel || null;
-  }
-
   /** Write CORTEX_ADMIN_CHANNEL to the .env file for persistence across restarts. */
   private async _persistAdminChannel(channel: string): Promise<void> {
     const envPath = path.join(CONFIG_DIR, '.env');
@@ -591,6 +592,11 @@ export class SlackAdapter implements PlatformAdapter {
   /** Expose the rate limiter for sharing with MCP tools and testing. */
   getRateLimiter(): TokenBucketRateLimiter {
     return this.rateLimiter;
+  }
+
+  /** Resolve a Destination to a Slack channel ID. */
+  private _resolveChannel(dest: Destination): string {
+    return resolveDestinationConduit(dest, this.config.adminChannel);
   }
 
   getRawClient(): WebClient {

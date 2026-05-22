@@ -210,7 +210,7 @@ test('SlackAdapter: 429 on rateLimitedCall propagates to rate limiter', async ()
   });
 
   await assert.rejects(
-    adapter.postMessage('C1', { text: 'hello' })
+    adapter.postMessage({ type: 'interactive-reply', conduit: 'C1', sessionId: '' }, { text: 'hello' })
   );
 
   assert.equal(reportedMethod, 'chat.postMessage');

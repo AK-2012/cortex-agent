@@ -11,6 +11,11 @@ import {
   _testResetRetryDelays,
 } from '../src/platform/virtual-message.js';
 import { MockAdapter } from '../src/platform/testing.js';
+import type { Destination } from '../src/platform/types.js';
+
+function postedConduit(p: { destination: Destination }): string {
+  return p.destination.type === 'interactive-reply' ? p.destination.conduit : '';
+}
 
 async function flush(vm: VirtualMessage) {
   await vm.flush();
@@ -46,7 +51,7 @@ test('VirtualMessage: single append creates one top-level message', async () => 
 
   assert.equal(adapter.posted.length, 1);
   assert.equal(adapter.posted[0].content.text, 'hello');
-  assert.equal(adapter.posted[0].channel, 'C123');
+  assert.equal(postedConduit(adapter.posted[0]), 'C123');
   assert.equal(adapter.posted[0].threadId, undefined, 'first message is top-level');
   assert.equal(adapter.updated.length, 0);
 });
@@ -570,7 +575,7 @@ test('VirtualMessage: no durable hooks — works without hooks (backward compat)
 function reconstructVisibleText(adapter: MockAdapter): string {
   const lastByRef = new Map<string, string>();
   for (const p of adapter.posted) {
-    lastByRef.set(`${p.channel}:${(p as any).messageId ?? ''}`, p.content.text || '');
+    lastByRef.set(`${postedConduit(p)}:${(p as any).messageId ?? ''}`, p.content.text || '');
   }
   // Posted captures the initial text; updates overwrite. Track by index since
   // MockAdapter doesn't store messageId on PostedMessage — use posted order.

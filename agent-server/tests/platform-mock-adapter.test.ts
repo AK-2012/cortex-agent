@@ -11,6 +11,7 @@ import type {
   MessageContext,
   MessageEditContext,
   ModalSubmitContext,
+  Destination,
 } from '../src/platform/types.js';
 
 test('MockAdapter exposes platform name and default capability flags', () => {
@@ -32,15 +33,15 @@ test('MockAdapter capability overrides merge with defaults', () => {
   assert.equal(adapter.capabilities.modals, true);
 });
 
-test('MockAdapter admin channel is null by default and configurable via opts', () => {
-  assert.equal(new MockAdapter().getAdminChannel(), null);
-  assert.equal(new MockAdapter({ adminChannel: 'D-admin' }).getAdminChannel(), 'D-admin');
+test('MockAdapter supports capability config via constructor', () => {
+  const adapter = new MockAdapter({ capabilities: { threads: false } });
+  assert.equal(adapter.capabilities.threads, false);
+  assert.equal(adapter.capabilities.modals, true);
 });
 
 test('MockAdapter supports legacy partial-capability constructor arg (no wrapper object)', () => {
   const adapter = new MockAdapter({ threads: false });
   assert.equal(adapter.capabilities.threads, false);
-  assert.equal(adapter.getAdminChannel(), 'mock-admin');
 });
 
 test('MockAdapter start/stop resolve without side effects', async () => {
@@ -49,14 +50,16 @@ test('MockAdapter start/stop resolve without side effects', async () => {
   await assert.doesNotReject(adapter.stop());
 });
 
-test('postMessage records channel/content/threadId and returns unique ascending messageIds', async () => {
+test('postMessage records destination/content/threadId and returns unique ascending messageIds', async () => {
   const adapter = new MockAdapter();
-  const ref1 = await adapter.postMessage('C1', { text: 'hello' });
-  const ref2 = await adapter.postMessage('C1', { text: 'world' }, { threadId: 'T1' });
+  const dest1: Destination = { type: 'interactive-reply', conduit: 'C1', sessionId: 's1' };
+  const dest2: Destination = { type: 'project-report', projectId: 'p1', trigger: 'manual', sessionId: 's1' };
+  const ref1 = await adapter.postMessage(dest1, { text: 'hello' });
+  const ref2 = await adapter.postMessage(dest2, { text: 'world' }, { threadId: 'T1' });
 
   assert.equal(adapter.posted.length, 2);
-  assert.deepEqual(adapter.posted[0], { channel: 'C1', content: { text: 'hello' }, threadId: undefined });
-  assert.deepEqual(adapter.posted[1], { channel: 'C1', content: { text: 'world' }, threadId: 'T1' });
+  assert.deepEqual(adapter.posted[0], { destination: dest1, content: { text: 'hello' }, threadId: undefined });
+  assert.deepEqual(adapter.posted[1], { destination: dest2, content: { text: 'world' }, threadId: 'T1' });
   assert.equal(ref1.channel, 'C1');
   assert.ok(ref1.messageId);
   assert.ok(ref2.messageId);
@@ -78,12 +81,14 @@ test('updateMessage and deleteMessage record the affected ref', async () => {
 
 test('postInteractive records actions alongside content', async () => {
   const adapter = new MockAdapter();
+  const dest: Destination = { type: 'interactive-reply', conduit: 'C1', sessionId: 's1' };
   const actions = [{ type: 'button' as const, actionId: 'approve', value: 'go', text: 'Go' }];
-  const ref = await adapter.postInteractive('C1', { text: 'pick one', actions }, { threadId: 'T1' });
+  const ref = await adapter.postInteractive(dest, { text: 'pick one', actions }, { threadId: 'T1' });
 
   assert.equal(adapter.posted.length, 1);
   assert.equal(adapter.posted[0].actions, actions);
   assert.equal(adapter.posted[0].threadId, 'T1');
+  assert.equal(adapter.posted[0].destination, dest);
   assert.equal(ref.channel, 'C1');
 });
 
@@ -108,9 +113,11 @@ test('addReaction and postEphemeral record their inputs', async () => {
 
 test('uploadFile records filePath + opts and downloadFile synthesises localPath', async () => {
   const adapter = new MockAdapter();
-  await adapter.uploadFile('C1', '/tmp/a.png', { filename: 'a.png', comment: 'attached' });
+  const dest: Destination = { type: 'system-notice' };
+  await adapter.uploadFile(dest, '/tmp/a.png', { filename: 'a.png', comment: 'attached' });
   assert.equal(adapter.uploads.length, 1);
   assert.equal(adapter.uploads[0].filePath, '/tmp/a.png');
+  assert.equal(adapter.uploads[0].destination, dest);
   assert.equal(adapter.uploads[0].opts?.filename, 'a.png');
   assert.equal(adapter.uploads[0].opts?.comment, 'attached');
 
@@ -215,11 +222,12 @@ test('simulateAction / simulateModalSubmit are no-ops when no handler registered
 
 test('reset() clears every recorded interaction list', async () => {
   const adapter = new MockAdapter();
-  const ref = await adapter.postMessage('C1', { text: 'x' });
+  const dest: Destination = { type: 'interactive-reply', conduit: 'C1', sessionId: 's1' };
+  const ref = await adapter.postMessage(dest, { text: 'x' });
   await adapter.updateMessage(ref, { text: 'y' });
   await adapter.deleteMessage(ref);
   await adapter.addReaction(ref, 'ok');
-  await adapter.uploadFile('C1', '/tmp/a');
+  await adapter.uploadFile(dest, '/tmp/a');
   await adapter.openModal('t', { callbackId: 'cb', title: 'T', fields: [] });
   await adapter.postEphemeral('C1', 'U1', 'x');
 

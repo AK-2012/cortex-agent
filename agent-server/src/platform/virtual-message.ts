@@ -5,7 +5,7 @@
 
 import { createLogger } from '@core/log.js';
 import type { PlatformAdapter } from './adapter.js';
-import type { MessageRef, MessageContent, RichBlock, ActionElement, DurableHooks } from './types.js';
+import type { MessageRef, MessageContent, RichBlock, ActionElement, Destination, DurableHooks } from './types.js';
 
 const log = createLogger('virtual-message');
 
@@ -179,12 +179,12 @@ export class VirtualMessage {
             : null;
           const ref = await withRetries(async () => {
             return actions && actions.length > 0
-              ? await this.adapter.postInteractive(this.channel, {
+              ? await this.adapter.postInteractive(this._makeDestination(), {
                   text,
                   richBlocks,
                   actions,
                 }, { threadId: effectiveThreadId })
-              : await this.adapter.postMessage(this.channel, {
+              : await this.adapter.postMessage(this._makeDestination(), {
                   text,
                   richBlocks,
                 }, { threadId: effectiveThreadId });
@@ -248,6 +248,11 @@ export class VirtualMessage {
   /** Compatibility: return parentRef's messageId (maps to Slack's ts). */
   getParentTs(): string | null {
     return this.parentRef?.messageId ?? null;
+  }
+
+  /** Wrap the internal channel string as an interactive-reply Destination. */
+  private _makeDestination(): Destination {
+    return { type: 'interactive-reply', conduit: this.channel, sessionId: '' };
   }
 
   private async _processAppend(text: string): Promise<void> {
@@ -435,9 +440,9 @@ export class VirtualMessage {
     try {
       const ref = await withRetries(async () => {
         try {
-          return await this.adapter.postMessage(this.channel, richContent, { threadId });
+          return await this.adapter.postMessage(this._makeDestination(), richContent, { threadId });
         } catch {
-          return await this.adapter.postMessage(this.channel, { text: chunk }, { threadId });
+          return await this.adapter.postMessage(this._makeDestination(), { text: chunk }, { threadId });
         }
       }, `postMessage(channel=${this.channel}, len=${chunk.length})`);
       if (walId && this.durable) {

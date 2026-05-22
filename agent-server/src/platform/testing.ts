@@ -16,13 +16,15 @@ import type {
   PlatformCapabilities,
   PlatformFileRef,
   DownloadedFile,
+  Destination,
   PostMessageOpts,
   FileUploadOpts,
   ActionElement,
 } from './types.js';
+import { resolveDestinationConduit } from './types.js';
 
 export interface PostedMessage {
-  channel: string;
+  destination: Destination;
   content: MessageContent;
   threadId?: string;
   actions?: ActionElement[];
@@ -43,7 +45,7 @@ export interface AddedReaction {
 }
 
 export interface UploadedFile {
-  channel: string;
+  destination: Destination;
   filePath: string;
   opts?: FileUploadOpts;
 }
@@ -120,13 +122,14 @@ export class MockAdapter implements PlatformAdapter {
     this.modalHandlers.set(callbackId, handler);
   }
 
-  async postMessage(channel: string, content: MessageContent, opts?: PostMessageOpts): Promise<MessageRef> {
+  async postMessage(destination: Destination, content: MessageContent, opts?: PostMessageOpts): Promise<MessageRef> {
     if (this.failPostMessageCount > 0) {
       this.failPostMessageCount--;
       throw new Error('mock: postMessage transient failure');
     }
+    const channel = resolveDestinationConduit(destination, this._adminChannel);
     const messageId = String(this.nextId++);
-    this.posted.push({ channel, content, threadId: opts?.threadId });
+    this.posted.push({ destination, content, threadId: opts?.threadId });
     return { channel, messageId, threadId: opts?.threadId };
   }
 
@@ -142,13 +145,14 @@ export class MockAdapter implements PlatformAdapter {
     this.deleted.push({ ref });
   }
 
-  async postInteractive(channel: string, content: MessageContent & { actions: ActionElement[] }, opts?: PostMessageOpts): Promise<MessageRef> {
+  async postInteractive(destination: Destination, content: MessageContent & { actions: ActionElement[] }, opts?: PostMessageOpts): Promise<MessageRef> {
     if (this.failPostInteractiveCount > 0) {
       this.failPostInteractiveCount--;
       throw new Error('mock: postInteractive transient failure');
     }
+    const channel = resolveDestinationConduit(destination, this._adminChannel);
     const messageId = String(this.nextId++);
-    this.posted.push({ channel, content, threadId: opts?.threadId, actions: content.actions });
+    this.posted.push({ destination, content, threadId: opts?.threadId, actions: content.actions });
     return { channel, messageId, threadId: opts?.threadId };
   }
 
@@ -160,8 +164,8 @@ export class MockAdapter implements PlatformAdapter {
     this.reactions.push({ ref, emoji });
   }
 
-  async uploadFile(channel: string, filePath: string, opts?: FileUploadOpts): Promise<void> {
-    this.uploads.push({ channel, filePath, opts });
+  async uploadFile(destination: Destination, filePath: string, opts?: FileUploadOpts): Promise<void> {
+    this.uploads.push({ destination, filePath, opts });
   }
 
   async downloadFile(fileRef: PlatformFileRef, destDir: string): Promise<DownloadedFile> {
@@ -174,10 +178,6 @@ export class MockAdapter implements PlatformAdapter {
 
   async postEphemeral(channel: string, userId: string, text: string): Promise<void> {
     this.ephemeralMessages.push({ channel, userId, text });
-  }
-
-  getAdminChannel(): string | null {
-    return this._adminChannel;
   }
 
   getRawClient(): null {
@@ -203,7 +203,7 @@ export class MockAdapter implements PlatformAdapter {
         raw: {},
       },
       async reply(content, replyOpts) {
-        return adapter.postMessage(channel, content, {
+        return adapter.postMessage({ type: 'interactive-reply', conduit: channel, sessionId: '' }, content, {
           threadId: replyOpts?.threadId || ref.threadId,
         });
       },
