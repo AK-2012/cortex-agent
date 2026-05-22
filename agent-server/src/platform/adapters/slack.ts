@@ -25,7 +25,6 @@ import type {
   ActionElement,
   ModalField,
 } from '../types.js';
-import { resolveDestinationConduit } from '../types.js';
 import { TokenBucketRateLimiter } from '../utils/rate-limiter.js';
 import { createLogger } from '@core/log.js';
 import * as fs from 'fs';
@@ -67,6 +66,9 @@ export interface SlackAdapterConfig {
   signingSecret: string;
   appToken: string;
   adminChannel?: string;
+  /** Resolve a project ID to a Slack channel for project-report destinations.
+   *  Injected from the composition root (app.ts) to avoid platform→store dependency. */
+  resolveProjectChannel?: (projectId: string) => Promise<string | null>;
 }
 
 export class SlackAdapter implements PlatformAdapter {
@@ -288,19 +290,22 @@ export class SlackAdapter implements PlatformAdapter {
   }
 
   async postMessage(destination: Destination, content: MessageContent, opts?: PostMessageOpts): Promise<MessageRef> {
-    const channel = this._resolveChannel(destination);
+    const resolved = await this.resolveDestination(destination);
+    if (!resolved.channel) {
+      return { channel: '', messageId: '' };
+    }
     const blocks = content.richBlocks ? this.richBlocksToSlack(content.richBlocks) : undefined;
     const payload: any = {
-      channel,
+      channel: resolved.channel,
       text: content.text,
       ...(blocks && { blocks }),
       ...(opts?.threadId && { thread_ts: opts.threadId }),
     };
-    const result = await this.rateLimitedCall('chat.postMessage', channel, () =>
+    const result = await this.rateLimitedCall('chat.postMessage', resolved.channel, () =>
       this.client.chat.postMessage(payload)
     );
     return {
-      channel,
+      channel: resolved.channel,
       messageId: result.ts!,
       threadId: opts?.threadId,
     };
@@ -422,7 +427,10 @@ export class SlackAdapter implements PlatformAdapter {
   // --- Interactive messages ---
 
   async postInteractive(destination: Destination, content: MessageContent & { actions: ActionElement[] }, opts?: PostMessageOpts): Promise<MessageRef> {
-    const channel = this._resolveChannel(destination);
+    const resolved = await this.resolveDestination(destination);
+    if (!resolved.channel) {
+      return { channel: '', messageId: '' };
+    }
     const blocks = [
       ...(content.richBlocks ? this.richBlocksToSlack(content.richBlocks) : []),
       {
@@ -430,16 +438,16 @@ export class SlackAdapter implements PlatformAdapter {
         elements: content.actions.map(a => this.actionElementToSlack(a)),
       },
     ];
-    const result = await this.rateLimitedCall('chat.postMessage', channel, () =>
+    const result = await this.rateLimitedCall('chat.postMessage', resolved.channel, () =>
       this.client.chat.postMessage({
-        channel,
+        channel: resolved.channel,
         text: content.text,
         blocks,
         ...(opts?.threadId && { thread_ts: opts.threadId }),
       })
     );
     return {
-      channel,
+      channel: resolved.channel,
       messageId: result.ts!,
       threadId: opts?.threadId,
     };
@@ -471,12 +479,15 @@ export class SlackAdapter implements PlatformAdapter {
   // --- Files ---
 
   async uploadFile(destination: Destination, filePath: string, opts?: FileUploadOpts): Promise<void> {
-    const channel = this._resolveChannel(destination);
-    const { resolved, size } = this.resolveFilePath(filePath);
-    const body = fs.readFileSync(resolved);
-    const uploadName = opts?.filename || path.basename(resolved);
+    const resolved = await this.resolveDestination(destination);
+    if (!resolved.channel) {
+      return;
+    }
+    const { resolved: fileResolved, size } = this.resolveFilePath(filePath);
+    const body = fs.readFileSync(fileResolved);
+    const uploadName = opts?.filename || path.basename(fileResolved);
 
-    const uploadInit = await this.rateLimitedCall('files.getUploadURLExternal', channel, () =>
+    const uploadInit = await this.rateLimitedCall('files.getUploadURLExternal', resolved.channel, () =>
       this.client.files.getUploadURLExternal({
         filename: uploadName,
         length: size,
@@ -495,10 +506,10 @@ export class SlackAdapter implements PlatformAdapter {
       throw new Error(`Slack file upload failed (${uploadRes.status})`);
     }
 
-    await this.rateLimitedCall('files.completeUploadExternal', channel, () =>
+    await this.rateLimitedCall('files.completeUploadExternal', resolved.channel, () =>
       this.client.files.completeUploadExternal({
         files: [{ id: uploadInit.file_id, title: uploadName }],
-        channel_id: channel,
+        channel_id: resolved.channel,
       })
     );
   }
@@ -594,9 +605,37 @@ export class SlackAdapter implements PlatformAdapter {
     return this.rateLimiter;
   }
 
-  /** Resolve a Destination to a Slack channel ID. */
-  private _resolveChannel(dest: Destination): string {
-    return resolveDestinationConduit(dest, this.config.adminChannel);
+  /**
+   * Resolve a Destination to a concrete Slack channel + kind label.
+   * Returns channel=null for destinations that should be silently dropped
+   * (unregistered project, unconfigured admin channel).
+   */
+  private async resolveDestination(dest: Destination): Promise<{ channel: string | null; kind: string }> {
+    switch (dest.type) {
+      case 'interactive-reply':
+        return { channel: dest.conduit, kind: 'interactive-reply' };
+      case 'project-report': {
+        if (!this.config.resolveProjectChannel) {
+          log.warn(`No resolveProjectChannel configured for project "${dest.projectId}"; dropping project-report`);
+          return { channel: null, kind: 'project-report-noop' };
+        }
+        const resolved = await this.config.resolveProjectChannel(dest.projectId);
+        if (!resolved) {
+          log.warn(`No channel registered for project "${dest.projectId}"; dropping project-report`);
+          return { channel: null, kind: 'project-report-noop' };
+        }
+        return { channel: resolved, kind: 'project-report' };
+      }
+      case 'system-notice':
+        if (!this.config.adminChannel) {
+          log.warn('No admin channel configured; dropping system-notice');
+          return { channel: null, kind: 'system-notice-noop' };
+        }
+        return { channel: this.config.adminChannel, kind: 'system-notice' };
+      default:
+        // Pre-existing: callers passing raw strings (strict:false compat)
+        return { channel: null, kind: 'unknown' };
+    }
   }
 
   getRawClient(): WebClient {

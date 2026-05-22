@@ -240,7 +240,7 @@ test('SlackAdapter: deleteMessage clears pending edits', async () => {
 
 test('SlackAdapter: postMessage is rate limited', async () => {
   const { adapter, calls } = makeAdapter();
-  const result = await adapter.postMessage('C1', { text: 'hello' });
+  const result = await adapter.postMessage({ type: 'interactive-reply', conduit: 'C1', sessionId: '' }, { text: 'hello' });
   assert.equal(calls.length, 1);
   assert.equal(calls[0].method, 'chat.postMessage');
   assert.ok(result.messageId);

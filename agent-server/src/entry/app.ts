@@ -83,7 +83,9 @@ loadMachinesFromFile();
 startMachineRegistryWatcher();
 
 // --- Create platform adapter (replaces direct Slack App instantiation) ---
-const adapter: PlatformAdapter = createAdapterFromEnv();
+const adapter: PlatformAdapter = createAdapterFromEnv({
+  resolveProjectChannel: (projectId) => channelRepo.getProjectChannel(projectId),
+});
 
 // --- Wire hot-reload admin notifiers ---
 const notifyAdmin = (text: string) => {
