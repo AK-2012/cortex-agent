@@ -136,6 +136,8 @@ async function recordCost({ project, trigger, cost_usd, num_turns, duration_s, b
 /**
  * Detect project from a message string.
  *
+ * @deprecated Use projectStore.resolveFromMessage() instead.
+ *
  * Priority:
  *   1. [project:xxx] explicit tag — always wins
  *   2. Case-insensitive substring match against context/projects/ directory names

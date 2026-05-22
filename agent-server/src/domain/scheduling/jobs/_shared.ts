@@ -9,7 +9,6 @@ import { createLogger } from '@core/log.js';
 import { sessionStore } from '@store/session-registry-repo.js';
 import { getOutboundQueue, durableUpdate } from '@store/outbound-queue.js';
 import { getActiveBackend, getActiveProfile } from '../../agents/index.js';
-import { detectProject } from '../../costs/cost-tracker.js';
 
 const log = createLogger('scheduler');
 

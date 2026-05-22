@@ -10,7 +10,7 @@ import type { ExecutionRecord } from '@domain/executions/registry.js';
 import * as executionRegistry from '@domain/executions/registry.js';
 import { runAgent } from '@domain/agents/index.js';
 import { shouldAutoRunCompound, combineFinalOutputs } from '@domain/threads/auto-thread.js';
-import { detectProject } from '@domain/costs/cost-tracker.js';
+import { projectStore } from '@domain/projects/index.js';
 import { getOutboundQueue } from '@store/outbound-queue.js';
 import { durableUpdate } from './durable-helpers.js';
 // Pure formatters live in core/ so the domain layer can consume them without an orch dep.
@@ -19,7 +19,7 @@ export { computeElapsed, formatMetricsSuffix, buildSessionTag, buildUserProcessi
 const log = createLogger('status-helpers');
 
 export function resolveExecutionProject({ execution, fallbackMessage }: { execution: ExecutionRecord | null; fallbackMessage: string }): string {
-  return execution?.project || detectProject(fallbackMessage || '');
+  return execution?.project || (projectStore.resolveFromMessage(fallbackMessage || '')?.id ?? 'general');
 }
 
 export function buildExecutionStatusReport(): string {

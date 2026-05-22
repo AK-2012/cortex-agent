@@ -20,7 +20,6 @@ import { isOnMessageEndHookConfigured, runMessageEndSessionHook } from '@domain/
 import * as executionRegistry from '@domain/executions/registry.js';
 import * as askUserQuestion from './interactions/ask-user-question.js';
 import { runAgent, getClaudeMode, getActiveProfile, resolveBackendForChannel } from '@domain/agents/index.js';
-import { detectProject } from '@domain/costs/cost-tracker.js';
 import { projectStore } from '@domain/projects/index.js';
 import { projectDirRepo } from '@store/project-dir-repo.js';
 
@@ -173,7 +172,7 @@ export async function resumeAskUserQuestionGroup({ adapter, group, responseText 
     const askBackend = resolveBackendForChannel(group.channel);
     const execution = executionRegistry.startLocalExecution({
       kind: 'local', channel: group.channel,
-      project: detectProject(responseText),
+      project: projectStore.resolveFromMessage(responseText)?.id ?? 'general',
       trigger: 'ask-user-question',
       backend: askBackend, billingMode: getClaudeMode(),
       sessionId: group.sessionId, label: responseText,
@@ -182,7 +181,7 @@ export async function resumeAskUserQuestionGroup({ adapter, group, responseText 
     const askQueue = getOutboundQueue();
     const askDurable = askQueue ? buildDurableHooks(askQueue) : null;
     const onAssistantMsg = makeStreamingMessageCallback(adapter, group.channel, null, null, askDurable);
-    handle = runAgent(responseText, { channel: group.channel, sessionId: group.sessionId, files: [], project: detectProject(responseText), trigger: 'ask-user-question', onAssistantMessage: onAssistantMsg });
+    handle = runAgent(responseText, { channel: group.channel, sessionId: group.sessionId, files: [], project: projectStore.resolveFromMessage(responseText)?.id ?? 'general', trigger: 'ask-user-question', onAssistantMessage: onAssistantMsg });
     runningExecutions.register(group.channel, { threadId: group.threadId ?? null, channel: group.channel, agentSlotId: null, executionId, kill: () => handle.kill(), backend: askBackend });
     const result = await handle.promise;
     runningExecutions.complete(group.channel, result?.total_cost_usd ?? 0);
@@ -236,7 +235,7 @@ async function runRetryAgent({ channel, text, adapter, statusMsg, startTime, ses
   try {
     const retryBackend = resolveBackendForChannel(channel);
     executionId = executionRegistry.startLocalExecution({
-      kind: 'local', channel, project: detectProject(text || ''),
+      kind: 'local', channel, project: projectStore.resolveFromMessage(text || '')?.id ?? 'general',
       trigger: 'edit-retry', backend: retryBackend, billingMode: getClaudeMode(), sessionId, label: agentMessage,
     }).id;
     const retryQueue = getOutboundQueue();
@@ -245,7 +244,7 @@ async function runRetryAgent({ channel, text, adapter, statusMsg, startTime, ses
     setStreamingCallback(channel, onAssistantMsg);
     handle = runAgent(agentMessage, {
       channel, sessionId, files: [], profileName: getActiveProfile(channel),
-      project: detectProject(text || ''), trigger: 'edit-retry',
+      project: projectStore.resolveFromMessage(text || '')?.id ?? 'general', trigger: 'edit-retry',
       onFallback: makeFallbackNotifier(channel, statusMsg, adapter),
       isUserInitiated: true, onAssistantMessage: onAssistantMsg,
       onProgress: buildRetryProgressUpdater(adapter, channel, statusMsg, retryPrefix, startTime, sessionName, sessionId),

@@ -63,7 +63,17 @@ export class JsonRepository<T> {
     try {
       const raw = await fs.readFile(this.opts.filePath, 'utf8');
       const parsed = JSON.parse(raw) as unknown;
-      this.cache = this.opts.migrate ? this.opts.migrate(parsed) : (parsed as T);
+      if (this.opts.migrate) {
+        const migrated = this.opts.migrate(parsed);
+        // Persist migrated data back to disk so the new shape survives
+        // across restarts even when no mutate() follows.
+        if (JSON.stringify(parsed) !== JSON.stringify(migrated)) {
+          await atomicWrite(this.opts.filePath, JSON.stringify(migrated, null, 2));
+        }
+        this.cache = migrated;
+      } else {
+        this.cache = parsed as T;
+      }
     } catch (err: any) {
       if (err.code === 'ENOENT') {
         this.cache = this.opts.defaultValue();
