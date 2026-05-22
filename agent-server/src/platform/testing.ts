@@ -20,6 +20,7 @@ import type {
   PostMessageOpts,
   FileUploadOpts,
   ActionElement,
+  RichBlock,
 } from './types.js';
 import { resolveDestinationConduit } from './types.js';
 import type { OutputStream, MutableRegion, OpenOutputStreamOpts } from './output-stream.js';

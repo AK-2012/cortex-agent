@@ -510,11 +510,32 @@ function releaseSingletonLock() {
 }
 
 function main() {
+  // Recursion guard: if log.error() itself throws (e.g. EPIPE on a broken stderr),
+  // the uncaughtException handler would be re-entered, causing an infinite loop that
+  // fills the log file and the disk. This flag breaks that cycle.
+  let inExceptionHandler = false;
+
   process.on('uncaughtException', (err) => {
-    log.error(`uncaughtException: ${err?.stack ?? err}`);
+    if (inExceptionHandler) return; // already handling an exception — avoid re-entrant loop
+    inExceptionHandler = true;
+    try {
+      log.error(`uncaughtException: ${err?.stack ?? err}`);
+    } catch {
+      // log.error() itself threw (shouldn't happen after log.ts EPIPE fix, but guard anyway)
+    } finally {
+      inExceptionHandler = false;
+    }
   });
   process.on('unhandledRejection', (reason) => {
-    log.error(`unhandledRejection: ${reason instanceof Error ? reason.stack : String(reason)}`);
+    if (inExceptionHandler) return;
+    inExceptionHandler = true;
+    try {
+      log.error(`unhandledRejection: ${reason instanceof Error ? reason.stack : String(reason)}`);
+    } catch {
+      // log.error() itself threw
+    } finally {
+      inExceptionHandler = false;
+    }
   });
   acquireSingletonLock();
   process.on('exit', releaseSingletonLock);

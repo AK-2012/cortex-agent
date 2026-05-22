@@ -188,8 +188,8 @@ export interface PlatformCapabilities {
  *  - project-report:   push a report to a project's channel
  *  - system-notice:    send to the platform-configured admin channel */
 export type Destination =
-  | { type: 'interactive-reply'; conduit: string; sessionId: string }
-  | { type: 'project-report'; projectId: string; trigger: string; sessionId: string }
+  | { type: 'interactive-reply'; conduit: string; sessionId?: string }
+  | { type: 'project-report'; projectId: string; trigger: string; sessionId?: string }
   | { type: 'system-notice' };
 
 /** Resolve a Destination to a concrete channel string for the adapter.

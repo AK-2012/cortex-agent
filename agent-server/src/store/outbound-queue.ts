@@ -191,7 +191,7 @@ export class OutboundQueue {
             );
             await this.markSent(entry.id);
           } catch {
-            await this.adapter.postMessage(entry.channel, {
+            await this.adapter.postMessage({ type: 'interactive-reply', conduit: entry.channel }, {
               text: entry.text,
               ...(entry.richBlocks && { richBlocks: entry.richBlocks }),
             });

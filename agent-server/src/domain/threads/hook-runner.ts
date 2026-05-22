@@ -173,7 +173,7 @@ async function runHookAgent(
   // Notify Slack
   const slackLabel = isTargetMode ? `→ ${slotId}` : `hook:${phase}`;
   try {
-    await opts.adapter.postMessage(opts.channel, {
+    await opts.adapter.postMessage(opts.destination, {
       text: `:hook: Hook agent (*${slackLabel}*) starting...`,
     }, opts.threadTs ? { threadId: opts.threadTs } : undefined);
   } catch {}
@@ -210,7 +210,7 @@ async function runHookAgent(
     onFallback: null,
     isUserInitiated: false,
     onAssistantMessage: (text: string) => {
-      opts.adapter.postMessage(opts.channel, { text }, opts.threadTs ? { threadId: opts.threadTs } : undefined).catch(() => {});
+      opts.adapter.postMessage(opts.destination, { text }, opts.threadTs ? { threadId: opts.threadTs } : undefined).catch(() => {});
     },
     onProgress: null,
   });

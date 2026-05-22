@@ -10,8 +10,8 @@ register('memory-index-regen', async (payload: unknown) => {
   const { channel } = payload as { channel: string; scheduleTaskId: string };
   try {
     const projects = runMemoryIndexRegen();
-    await ctx.adapter!.postMessage(channel, { text: `:brain: Memory index regen: ${projects.length} projects updated` });
+    await ctx.adapter!.postMessage({ type: 'interactive-reply', conduit: channel }, { text: `:brain: Memory index regen: ${projects.length} projects updated` });
   } catch (err) {
-    await ctx.adapter!.postMessage(channel, { text: `:warning: Memory index regen error: ${err}` });
+    await ctx.adapter!.postMessage({ type: 'interactive-reply', conduit: channel }, { text: `:warning: Memory index regen error: ${err}` });
   }
 });

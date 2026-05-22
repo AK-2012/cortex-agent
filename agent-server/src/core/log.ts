@@ -7,6 +7,14 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { LOGS_DIR } from './paths.js';
 
+// Prevent EPIPE/SIGPIPE from killing the process when stderr/stdout is a broken
+// pipe (e.g. terminal closed, journald restart, parent process exited).
+// Without these listeners, Node throws EPIPE on write → if that write happens
+// inside an uncaughtException handler, it causes a re-entrant crash loop that
+// fills the log file and the disk.
+process.stderr.on('error', () => {});
+process.stdout.on('error', () => {});
+
 // ── Config ──────────────────────────────────────────────
 const RETENTION_DAYS = 14;
 
@@ -82,12 +90,18 @@ function write(level: Level, mod: string, args: unknown[]): void {
   const ts = new Date().toLocaleTimeString('en-GB', { hour12: false });
   const prefix = `[${mod} ${ts}]`;
 
-  // Console output
-  switch (level) {
-    case 'ERROR': console.error(prefix, ...args); break;
-    case 'WARN':  console.warn(prefix, ...args);  break;
-    case 'DEBUG': console.debug(prefix, ...args);  break;
-    default:      console.log(prefix, ...args);
+  // Console output — wrapped so a broken pipe (EPIPE) on stderr/stdout doesn't
+  // crash the process. See also the stderr/stdout error listeners at the top of
+  // this file.
+  try {
+    switch (level) {
+      case 'ERROR': console.error(prefix, ...args); break;
+      case 'WARN':  console.warn(prefix, ...args);  break;
+      case 'DEBUG': console.debug(prefix, ...args);  break;
+      default:      console.log(prefix, ...args);
+    }
+  } catch {
+    // stderr/stdout may be a broken pipe — ignore; file sink below still works
   }
 
   // File output

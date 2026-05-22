@@ -4,10 +4,16 @@
 // >>> If I am updated, update my header comment and the parent folder's CORTEX.md <<<
 
 import type { PlatformAdapter } from '@platform/adapter.js';
+import type { Destination } from '@platform/types.js';
 import { formatDuration, formatTimeUntil, parseDuration } from './scheduler.js';
 import type { Scheduler, ScheduleTask } from './scheduler.js';
 import { channelToProjectId } from '@store/schedule-repo.js';
 import { listProfiles, resolveProfile, getDefaultProfileName } from '../agents/profile-manager.js';
+
+/** Convert a raw channel string to a Destination for postMessage calls. */
+function toDest(channel: string): Destination {
+  return { type: 'interactive-reply', conduit: channel };
+}
 
 function scheduleHelp(): string {
   const profileNames = listProfiles().map(p => `\`${p.name}\``).join(', ');
@@ -33,12 +39,12 @@ const fmtTime = (ts: number): string => new Date(ts).toLocaleString('en-US', FMT
 async function handleList(parts: string[], channel: string, adapter: PlatformAdapter, scheduler: Scheduler): Promise<void> {
   const tasks = await scheduler.list();
   if (tasks.length === 0) {
-    await adapter.postMessage(channel, { text: 'No scheduled tasks.' });
+    await adapter.postMessage(toDest(channel), { text: 'No scheduled tasks.' });
     return;
   }
   const now = Date.now();
   const lines = tasks.map((t) => formatTaskLine(t, now));
-  await adapter.postMessage(channel, { text: `*Scheduled tasks (${tasks.length}):*\n${lines.join('\n')}` });
+  await adapter.postMessage(toDest(channel), { text: `*Scheduled tasks (${tasks.length}):*\n${lines.join('\n')}` });
 }
 
 function formatTaskLine(t: ScheduleTask, now: number): string {
@@ -79,11 +85,11 @@ async function handleRemove(parts: string[], channel: string, adapter: PlatformA
   const rawId = parts[2];
   const id = normalizeTaskId(rawId);
   if (!id) {
-    await adapter.postMessage(channel, { text: 'Usage: `!schedule remove <id>`' });
+    await adapter.postMessage(toDest(channel), { text: 'Usage: `!schedule remove <id>`' });
     return;
   }
   const removed = await scheduler.remove(id);
-  await adapter.postMessage(channel, {
+  await adapter.postMessage(toDest(channel), {
     text: removed ? `:white_check_mark: Removed task \`${id}\`.` : `:x: Task not found: \`${id}\``,
   });
 }
@@ -92,18 +98,18 @@ async function handlePause(parts: string[], channel: string, adapter: PlatformAd
   const rawId = parts[2];
   const id = normalizeTaskId(rawId);
   if (!id) {
-    await adapter.postMessage(channel, { text: 'Usage: `!schedule pause <id>`' });
+    await adapter.postMessage(toDest(channel), { text: 'Usage: `!schedule pause <id>`' });
     return;
   }
   try {
     const task = await scheduler.pause(id);
     if (!task) {
-      await adapter.postMessage(channel, { text: `:x: Task not found: \`${id}\`` });
+      await adapter.postMessage(toDest(channel), { text: `:x: Task not found: \`${id}\`` });
       return;
     }
-    await adapter.postMessage(channel, { text: `:double_vertical_bar: Paused task \`${id}\`.` });
+    await adapter.postMessage(toDest(channel), { text: `:double_vertical_bar: Paused task \`${id}\`.` });
   } catch (error) {
-    await adapter.postMessage(channel, { text: `:x: ${(error as Error).message}` });
+    await adapter.postMessage(toDest(channel), { text: `:x: ${(error as Error).message}` });
   }
 }
 
@@ -111,19 +117,19 @@ async function handleResume(parts: string[], channel: string, adapter: PlatformA
   const rawId = parts[2];
   const id = normalizeTaskId(rawId);
   if (!id) {
-    await adapter.postMessage(channel, { text: 'Usage: `!schedule resume <id>`' });
+    await adapter.postMessage(toDest(channel), { text: 'Usage: `!schedule resume <id>`' });
     return;
   }
   try {
     const task = await scheduler.resume(id);
     if (!task) {
-      await adapter.postMessage(channel, { text: `:x: Task not found: \`${id}\`` });
+      await adapter.postMessage(toDest(channel), { text: `:x: Task not found: \`${id}\`` });
       return;
     }
     const nextAt = task.nextRun ? ` Next run: ${fmtTime(task.nextRun)}.` : '';
-    await adapter.postMessage(channel, { text: `:arrow_forward: Resumed task \`${id}\`.${nextAt}` });
+    await adapter.postMessage(toDest(channel), { text: `:arrow_forward: Resumed task \`${id}\`.${nextAt}` });
   } catch (error) {
-    await adapter.postMessage(channel, { text: `:x: ${(error as Error).message}` });
+    await adapter.postMessage(toDest(channel), { text: `:x: ${(error as Error).message}` });
   }
 }
 
@@ -155,23 +161,23 @@ async function handleAddInterval(parts: string[], channel: string, adapter: Plat
   try {
     parsed = parseProfileArgs(parts.slice(4), '`!schedule add interval <duration> [--profile <name>] <message>`');
   } catch (error) {
-    await adapter.postMessage(channel, { text: `:x: ${(error as Error).message}` });
+    await adapter.postMessage(toDest(channel), { text: `:x: ${(error as Error).message}` });
     return;
   }
   const msg = parsed.rest.join(' ');
   const ms = parseDuration(durationStr);
   if (!ms) {
-    await adapter.postMessage(channel, { text: `Invalid duration: \`${durationStr}\`. Use e.g. \`30s\`, \`5m\`, \`2h\`, \`1d\`` });
+    await adapter.postMessage(toDest(channel), { text: `Invalid duration: \`${durationStr}\`. Use e.g. \`30s\`, \`5m\`, \`2h\`, \`1d\`` });
     return;
   }
   if (!msg) {
-    await adapter.postMessage(channel, { text: 'Usage: `!schedule add interval <duration> [--profile <name>] <message>`' });
+    await adapter.postMessage(toDest(channel), { text: 'Usage: `!schedule add interval <duration> [--profile <name>] <message>`' });
     return;
   }
   const resolvedProjectId = channelToProjectId(channel) ?? 'general';
   const task = await scheduler.add('interval', { intervalMs: ms, message: msg, projectId: resolvedProjectId, profile: parsed.profileName });
   const nextAt = task.nextRun ? ` | first run: ${fmtTime(task.nextRun)}` : '';
-  await adapter.postMessage(channel, { text: buildScheduledConfirmation(`:white_check_mark: Scheduled every *${formatDuration(ms)}*: "${msg}"`, task, nextAt) });
+  await adapter.postMessage(toDest(channel), { text: buildScheduledConfirmation(`:white_check_mark: Scheduled every *${formatDuration(ms)}*: "${msg}"`, task, nextAt) });
 }
 
 async function handleAddDaily(parts: string[], channel: string, adapter: PlatformAdapter, scheduler: Scheduler): Promise<void> {
@@ -180,22 +186,22 @@ async function handleAddDaily(parts: string[], channel: string, adapter: Platfor
   try {
     parsed = parseProfileArgs(parts.slice(4), '`!schedule add daily <HH:MM> [--profile <name>] <message>`');
   } catch (error) {
-    await adapter.postMessage(channel, { text: `:x: ${(error as Error).message}` });
+    await adapter.postMessage(toDest(channel), { text: `:x: ${(error as Error).message}` });
     return;
   }
   const msg = parsed.rest.join(' ');
   if (!/^\d{2}:\d{2}$/.test(time)) {
-    await adapter.postMessage(channel, { text: `Invalid time: \`${time}\`. Use 24-hour HH:MM, e.g. \`09:00\`` });
+    await adapter.postMessage(toDest(channel), { text: `Invalid time: \`${time}\`. Use 24-hour HH:MM, e.g. \`09:00\`` });
     return;
   }
   if (!msg) {
-    await adapter.postMessage(channel, { text: 'Usage: `!schedule add daily <HH:MM> [--profile <name>] <message>`' });
+    await adapter.postMessage(toDest(channel), { text: 'Usage: `!schedule add daily <HH:MM> [--profile <name>] <message>`' });
     return;
   }
   const resolvedProjectId = channelToProjectId(channel) ?? 'general';
   const task = await scheduler.add('daily', { time, message: msg, projectId: resolvedProjectId, profile: parsed.profileName });
   const nextAt = task.nextRun ? ` | first run: ${fmtTime(task.nextRun)}` : '';
-  await adapter.postMessage(channel, { text: buildScheduledConfirmation(`:white_check_mark: Scheduled daily at *${time}*: "${msg}"`, task, nextAt) });
+  await adapter.postMessage(toDest(channel), { text: buildScheduledConfirmation(`:white_check_mark: Scheduled daily at *${time}*: "${msg}"`, task, nextAt) });
 }
 
 async function handleAddWeekly(parts: string[], channel: string, adapter: PlatformAdapter, scheduler: Scheduler): Promise<void> {
@@ -205,28 +211,28 @@ async function handleAddWeekly(parts: string[], channel: string, adapter: Platfo
   try {
     parsed = parseProfileArgs(parts.slice(5), '`!schedule add weekly <day> <HH:MM> [--profile <name>] <message>`');
   } catch (error) {
-    await adapter.postMessage(channel, { text: `:x: ${(error as Error).message}` });
+    await adapter.postMessage(toDest(channel), { text: `:x: ${(error as Error).message}` });
     return;
   }
   const msg = parsed.rest.join(' ');
   const dayOfWeek = DAY_MAP[dayStr];
   if (dayOfWeek == null) {
-    await adapter.postMessage(channel, { text: `Invalid day: \`${parts[3]}\`. Use: mon, tue, wed, thu, fri, sat, sun` });
+    await adapter.postMessage(toDest(channel), { text: `Invalid day: \`${parts[3]}\`. Use: mon, tue, wed, thu, fri, sat, sun` });
     return;
   }
   if (!/^\d{2}:\d{2}$/.test(time)) {
-    await adapter.postMessage(channel, { text: `Invalid time: \`${time}\`. Use 24-hour HH:MM, e.g. \`21:00\`` });
+    await adapter.postMessage(toDest(channel), { text: `Invalid time: \`${time}\`. Use 24-hour HH:MM, e.g. \`21:00\`` });
     return;
   }
   if (!msg) {
-    await adapter.postMessage(channel, { text: 'Usage: `!schedule add weekly <day> <HH:MM> [--profile <name>] <message>`' });
+    await adapter.postMessage(toDest(channel), { text: 'Usage: `!schedule add weekly <day> <HH:MM> [--profile <name>] <message>`' });
     return;
   }
   const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
   const resolvedProjectId = channelToProjectId(channel) ?? 'general';
   const task = await scheduler.add('weekly', { dayOfWeek, time, message: msg, projectId: resolvedProjectId, profile: parsed.profileName });
   const nextAt = task.nextRun ? ` | first run: ${fmtTime(task.nextRun)}` : '';
-  await adapter.postMessage(channel, { text: buildScheduledConfirmation(`:white_check_mark: Scheduled weekly *${dayNames[dayOfWeek]} ${time}*: "${msg}"`, task, nextAt) });
+  await adapter.postMessage(toDest(channel), { text: buildScheduledConfirmation(`:white_check_mark: Scheduled weekly *${dayNames[dayOfWeek]} ${time}*: "${msg}"`, task, nextAt) });
 }
 
 async function handleAddOnce(parts: string[], channel: string, adapter: PlatformAdapter, scheduler: Scheduler): Promise<void> {
@@ -235,23 +241,23 @@ async function handleAddOnce(parts: string[], channel: string, adapter: Platform
   try {
     parsed = parseProfileArgs(parts.slice(4), '`!schedule add once <duration> [--profile <name>] <message>`');
   } catch (error) {
-    await adapter.postMessage(channel, { text: `:x: ${(error as Error).message}` });
+    await adapter.postMessage(toDest(channel), { text: `:x: ${(error as Error).message}` });
     return;
   }
   const msg = parsed.rest.join(' ');
   const ms = parseDuration(durationStr);
   if (!ms) {
-    await adapter.postMessage(channel, { text: `Invalid duration: \`${durationStr}\`. Use e.g. \`30s\`, \`5m\`, \`2h\`, \`1d\`` });
+    await adapter.postMessage(toDest(channel), { text: `Invalid duration: \`${durationStr}\`. Use e.g. \`30s\`, \`5m\`, \`2h\`, \`1d\`` });
     return;
   }
   if (!msg) {
-    await adapter.postMessage(channel, { text: 'Usage: `!schedule add once <duration> [--profile <name>] <message>`' });
+    await adapter.postMessage(toDest(channel), { text: 'Usage: `!schedule add once <duration> [--profile <name>] <message>`' });
     return;
   }
   const resolvedProjectId = channelToProjectId(channel) ?? 'general';
   const task = await scheduler.add('once', { delay: ms, message: msg, projectId: resolvedProjectId, profile: parsed.profileName });
   const runAt = task.runAt ? ` | runs at: ${fmtTime(task.runAt)}` : '';
-  await adapter.postMessage(channel, { text: buildScheduledConfirmation(`:white_check_mark: Scheduled once in *${formatDuration(ms)}*: "${msg}"`, task, runAt) });
+  await adapter.postMessage(toDest(channel), { text: buildScheduledConfirmation(`:white_check_mark: Scheduled once in *${formatDuration(ms)}*: "${msg}"`, task, runAt) });
 }
 
 type SubHandler = (parts: string[], channel: string, adapter: PlatformAdapter, scheduler: Scheduler) => Promise<void>;
@@ -268,10 +274,10 @@ async function handleAdd(parts: string[], channel: string, adapter: PlatformAdap
   const handler = ADD_TYPE_HANDLERS[type];
   if (handler) return handler(parts, channel, adapter, scheduler);
   if (type) {
-    await adapter.postMessage(channel, { text: `Unknown type: \`${type}\`. Use \`interval\`, \`daily\`, \`weekly\`, or \`once\`` });
+    await adapter.postMessage(toDest(channel), { text: `Unknown type: \`${type}\`. Use \`interval\`, \`daily\`, \`weekly\`, or \`once\`` });
     return;
   }
-  await adapter.postMessage(channel, { text: scheduleHelp() });
+  await adapter.postMessage(toDest(channel), { text: scheduleHelp() });
 }
 
 const SUB_HANDLERS: Record<string, SubHandler> = {
@@ -287,7 +293,7 @@ async function handleScheduleCommand(text: string, channel: string, adapter: Pla
   const sub = parts[1];
   const handler = SUB_HANDLERS[sub];
   if (handler) return handler(parts, channel, adapter, scheduler);
-  await adapter.postMessage(channel, { text: scheduleHelp() });
+  await adapter.postMessage(toDest(channel), { text: scheduleHelp() });
 }
 
 export { handleScheduleCommand };

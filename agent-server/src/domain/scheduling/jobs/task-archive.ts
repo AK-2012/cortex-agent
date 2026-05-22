@@ -12,10 +12,10 @@ register('task-archive', async (payload: unknown) => {
   const adapter = ctx.adapter!;
   if (results.archived.length > 0) {
     const summary = results.archived.map((r: { project: string; ids: string[] }) => `*${r.project}*: archived ${r.ids.length} tasks`).join('\n');
-    await adapter.postMessage(channel, { text: `:file_folder: Task auto-archive:\n${summary}` });
+    await adapter.postMessage({ type: 'interactive-reply', conduit: channel }, { text: `:file_folder: Task auto-archive:\n${summary}` });
   }
   if (results.errors.length > 0) {
     const errSummary = results.errors.join('\n');
-    await adapter.postMessage(channel, { text: `:warning: Task archiver errors:\n${errSummary}` });
+    await adapter.postMessage({ type: 'interactive-reply', conduit: channel }, { text: `:warning: Task archiver errors:\n${errSummary}` });
   }
 });
