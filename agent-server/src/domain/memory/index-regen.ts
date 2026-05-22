@@ -368,13 +368,16 @@ function generateIndex(dir: string, title: string): void {
 // --- CLI: regenerate indexes for all or specific projects ---
 
 export function regenAll(): string[] {
-  const projects = fs.readdirSync(PROJECTS_DIR).filter(d => {
-    const dir = path.join(PROJECTS_DIR, d);
-    return fs.statSync(dir).isDirectory()
-      && (fs.existsSync(path.join(dir, 'experiments'))
+  // Use withFileTypes to avoid ENOENT on broken symlinks (e.g. AGENTS.md -> CLAUDE.md)
+  const projects = fs.readdirSync(PROJECTS_DIR, { withFileTypes: true })
+    .filter(d => d.isDirectory() && !d.name.startsWith('.'))
+    .map(d => d.name)
+    .filter(d => {
+      const dir = path.join(PROJECTS_DIR, d);
+      return fs.existsSync(path.join(dir, 'experiments'))
         || fs.existsSync(path.join(dir, 'knowledge'))
-        || fs.existsSync(path.join(dir, 'patterns')));
-  });
+        || fs.existsSync(path.join(dir, 'patterns'));
+    });
   for (const p of projects) {
     regenProject(p);
   }
