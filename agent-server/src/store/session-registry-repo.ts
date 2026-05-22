@@ -35,8 +35,6 @@ export class SessionRegistryRepo {
   private readonly _repo: JsonRepository<SessionRegistryData>;
   /** name → sessionId index keeping lookupSession O(1). */
   private _nameIndex = new Map<string, string>();
-  /** Optional callback invoked when a session is pruned. Receives the sessionId. */
-  private _onPruneSession: ((sessionId: string) => void) | null = null;
 
   constructor(filePath: string = REGISTRY_FILE) {
     this._repo = new JsonRepository<SessionRegistryData>({
@@ -224,7 +222,7 @@ export class SessionRegistryRepo {
   /**
    * Remove sessions whose lastUsedAt is older than maxAgeMs from now,
    * and are not referenced by any executionRepo or threadStore record.
-   * Cleans up session backup files. Returns the number of removed sessions.
+   * Returns the number of removed sessions.
    */
   async pruneStale(maxAgeMs: number): Promise<number> {
     const cutoff = Date.now() - maxAgeMs;
@@ -248,7 +246,6 @@ export class SessionRegistryRepo {
       for (const [sid, record] of Object.entries(registry)) {
         const usedAt = new Date(record.lastUsedAt).getTime();
         if (usedAt < cutoff && !referencedSessionIds.has(sid)) {
-          this._onPruneSession?.(sid);
           this._nameIndex.delete(record.name);
           delete registry[sid];
           removed++;
@@ -258,11 +255,6 @@ export class SessionRegistryRepo {
     });
 
     return count;
-  }
-
-  /** Set a callback to invoke when a session is pruned (e.g. cleanup backup files). */
-  setOnPruneSession(fn: ((sessionId: string) => void) | null): void {
-    this._onPruneSession = fn;
   }
 
   async getActiveSessionName(channel: string, backend: string): Promise<string | null> {

@@ -51,7 +51,6 @@ import { scheduleRepo } from '@store/schedule-repo.js';
 import { costRepo } from '@store/cost-repo.js';
 import { profileRepo, startProfileWatcher, setAdminNotifier as setProfileNotifier } from '@store/profile-repo.js';
 import { sessionStore } from '@store/session-registry-repo.js';
-import { cleanupAllBackups } from '@domain/sessions/session-backup.js';
 import { initDiskMonitor, stopDiskMonitor } from '@domain/monitor/disk-monitor.js';
 import { loadMachinesFromFile, startMachineRegistryWatcher, stopMachineRegistryWatcher, setAdminNotifier as setMachineNotifier } from '@domain/tasks/dispatch-utils.js';
 import { EventBus, createEventLogger } from '@events/index.js';
@@ -212,7 +211,6 @@ process.on('SIGTERM', async () => {
   await threadStore.cleanup();
 
   // GC: prune stale sessions (older than 7 days, unreferenced by running executions or active threads)
-  sessionStore.setOnPruneSession(cleanupAllBackups);
   try {
     const pruned = await sessionStore.pruneStale(7 * 24 * 60 * 60 * 1000);
     if (pruned > 0) log.info(`Startup GC: pruned ${pruned} stale session(s)`);
