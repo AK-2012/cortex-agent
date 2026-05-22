@@ -19,6 +19,7 @@ import { registerCommands } from '@orch/routing/commands/index.js';
 import { taskStore } from '@domain/tasks/store.js';
 import { channelRepo } from '@store/channel-repo.js';
 import { projectDirRepo } from '@store/project-dir-repo.js';
+import { projectStore } from '@domain/projects/index.js';
 import { sendStartupDmIfConfigured } from './startup-notify.js';
 import { startGateway, stopGateway } from '@domain/costs/gateway-manager.js';
 import { startClientManager, stopClientManager, startAllRemoteClients } from '@domain/remote/client-manager.js';
@@ -208,6 +209,10 @@ process.on('SIGTERM', async () => {
   threadStore.load();
   await threadStore.markRunningAsFailedOnStartup();
   await threadStore.cleanup();
+
+  // M1: Initialize project registry (scaffolds general/, scans PROJECTS_DIR, starts fs.watch watcher)
+  await projectStore.initialize();
+  channelRepo.setProjectLister(() => projectStore.list().map(p => p.id));
 
   startGateway();
   startClientManager(parseInt(process.env.CORTEX_CLIENT_PORT || '3002', 10));

@@ -16,11 +16,15 @@ export type ChannelRegistryData = Record<string, string>;
 interface ChannelRepoOptions {
   filePath?: string;
   projectsDir?: string;
+  /** Callback for listing project names. When set, listProjects() delegates here
+   *  instead of reading the filesystem. Wired from app.ts (composition root). */
+  projectLister?: () => string[];
 }
 
 export class ChannelRepo {
   private readonly _repo: JsonRepository<ChannelRegistryData>;
   private readonly _projectsDir: string;
+  private _projectLister: (() => string[]) | null = null;
 
   constructor(opts: ChannelRepoOptions = {}) {
     this._repo = new JsonRepository<ChannelRegistryData>({
@@ -29,6 +33,7 @@ export class ChannelRepo {
       migrate: (raw) => (typeof raw === 'object' && raw !== null ? (raw as ChannelRegistryData) : ({})),
     });
     this._projectsDir = opts.projectsDir ?? PROJECTS_DIR;
+    this._projectLister = opts.projectLister ?? null;
   }
 
   async getProjectChannel(project: string): Promise<string | null> {
@@ -55,6 +60,9 @@ export class ChannelRepo {
   }
 
   async listProjects(): Promise<string[]> {
+    if (this._projectLister) {
+      return this._projectLister();
+    }
     try {
       return fsSync.readdirSync(this._projectsDir).filter((name) => {
         return fsSync.statSync(path.join(this._projectsDir, name)).isDirectory() && !name.startsWith('.');
@@ -62,6 +70,11 @@ export class ChannelRepo {
     } catch {
       return [];
     }
+  }
+
+  /** Late injection of project lister callback (used by app.ts composition root). */
+  setProjectLister(lister: () => string[]): void {
+    this._projectLister = lister;
   }
 
   /** Wait for any in-flight mutate() to complete. For graceful SIGTERM drain. */

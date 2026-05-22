@@ -2,10 +2,8 @@
 // output: recordCost / checkBudget / formatCostReport / ...
 // pos:    budget check and cost record aggregation
 // >>> If I am updated, update my header comment and the parent folder's CORTEX.md <<<
-import * as fsSync from 'fs';
-import * as path from 'path';
-import { DATA_DIR, PROJECTS_DIR } from '@core/utils.js';
 import { costRepo } from '@store/cost-repo.js';
+import { projectStore } from '@domain/projects/index.js';
 export type { CostsData, BudgetConfig } from '@store/cost-repo.js';
 
 // ── Dynamic project name discovery (from context/projects/) ──
@@ -13,20 +11,7 @@ export type { CostsData, BudgetConfig } from '@store/cost-repo.js';
 let _projectNames: string[] | null = null;
 
 function loadProjectNames(): string[] {
-  try {
-    if (!fsSync.existsSync(PROJECTS_DIR)) return [];
-    return fsSync.readdirSync(PROJECTS_DIR)
-      .filter(name => {
-        try {
-          return fsSync.statSync(path.join(PROJECTS_DIR, name)).isDirectory()
-            && !name.startsWith('.');
-        } catch {
-          return false;
-        }
-      });
-  } catch {
-    return [];
-  }
+  return projectStore.list().map(p => p.id);
 }
 
 function getProjectNames(): string[] {
