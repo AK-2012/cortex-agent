@@ -2,6 +2,7 @@
 // output: 4-way target dispatch + fallback policy regression
 // pos:    locks the dispatch decision tree extracted from scheduled-task.ts so the
 //         orchestration around it (Slack / executions / progress) stays untouched.
+//         M4: channel target removed, project target added.
 // >>> If I am updated, update my header comment and the parent folder's CORTEX.md <<<
 
 import test from 'node:test';
@@ -11,8 +12,6 @@ import type { ScheduleTarget } from '../src/store/schedule-repo.js';
 
 function lookups(overrides: Partial<Parameters<typeof planScheduledDispatch>[0]['lookups']> = {}) {
   return {
-    findActiveThread: () => null,
-    getChannelSession: async () => undefined,
     lookupSession: async () => null,
     getThread: () => null,
     ...overrides,
@@ -41,41 +40,16 @@ test('plan: undefined target falls back to fresh', async () => {
   assert.deepEqual(plan, { kind: 'fresh', channel: 'C1' });
 });
 
-// --- target=channel ---
+// --- target=project ---
 
-test('plan: target=channel with active thread → continue that thread', async () => {
+test('plan: target=project always returns { kind: "fresh" } on fallbackChannel', async () => {
   const plan = await planScheduledDispatch({
-    target: { kind: 'channel', channel: 'CX' },
-    fallback: 'fresh',
-    fallbackChannel: 'C1',
-    lookups: lookups({
-      findActiveThread: (channel) => channel === 'CX' ? { id: 'thr_active', status: 'running' } as any : null,
-    }),
-  });
-  assert.deepEqual(plan, { kind: 'continue-thread', channel: 'CX', threadId: 'thr_active' });
-});
-
-test('plan: target=channel without active thread → channel-default with resolved sessionId', async () => {
-  const plan = await planScheduledDispatch({
-    target: { kind: 'channel', channel: 'CX' },
-    fallback: 'fresh',
-    fallbackChannel: 'C1',
-    lookups: lookups({
-      findActiveThread: () => null,
-      getChannelSession: async (channel) => channel === 'CX' ? 'sess-uuid-xyz' : undefined,
-    }),
-  });
-  assert.deepEqual(plan, { kind: 'default-thread', channel: 'CX', existingSessionId: 'sess-uuid-xyz' });
-});
-
-test('plan: target=channel with no active thread and no session → default with null sessionId (fresh-ish but in channel)', async () => {
-  const plan = await planScheduledDispatch({
-    target: { kind: 'channel', channel: 'CY' },
+    target: { kind: 'project', projectId: 'cortex-self' },
     fallback: 'fresh',
     fallbackChannel: 'C1',
     lookups: lookups(),
   });
-  assert.deepEqual(plan, { kind: 'default-thread', channel: 'CY', existingSessionId: null });
+  assert.deepEqual(plan, { kind: 'fresh', channel: 'C1' });
 });
 
 // --- target=session ---

@@ -207,17 +207,17 @@ test('ScheduleRepo - on-disk schema matches SchedulesData format', async () => {
 
 // ── target / fallback fields round-trip ───────────────────────
 
-test('ScheduleRepo - target field round-trips through addTask/findTask (channel kind)', async () => {
+test('ScheduleRepo - target field round-trips through addTask/findTask (project kind)', async () => {
   const repo = createRepo();
   const task = makeTask({
-    id: 'target-channel',
-    target: { kind: 'channel', channel: 'C999' },
+    id: 'target-project',
+    target: { kind: 'project', projectId: 'cortex-self' },
     fallback: 'fresh',
   } as Partial<ScheduleTask>);
   await repo.addTask(task);
-  const found = await repo.findTask('target-channel');
+  const found = await repo.findTask('target-project');
   assert.ok(found);
-  assert.deepEqual(found.target, { kind: 'channel', channel: 'C999' });
+  assert.deepEqual(found.target, { kind: 'project', projectId: 'cortex-self' });
   assert.equal(found.fallback, 'fresh');
 });
 

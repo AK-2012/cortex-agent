@@ -33,9 +33,9 @@ test('resolveTargetShorthand: "fresh" string → fresh', () => {
   assert.deepEqual(out, { kind: 'fresh' });
 });
 
-test('resolveTargetShorthand: "current-channel" → resolved channel', () => {
-  const out = resolveTargetShorthand('current-channel', FULL_CTX);
-  assert.deepEqual(out, { kind: 'channel', channel: 'C123' });
+test('resolveTargetShorthand: "current-project" → resolved project', () => {
+  const out = resolveTargetShorthand('current-project', FULL_CTX);
+  assert.deepEqual(out, { kind: 'project', projectId: 'cortex-self' });
 });
 
 test('resolveTargetShorthand: "current-session" → resolved session', () => {
@@ -50,10 +50,10 @@ test('resolveTargetShorthand: "current-thread" → resolved thread', () => {
 
 // --- shorthand error paths (context missing required fields) ---
 
-test('resolveTargetShorthand: "current-channel" without channel → throws', () => {
+test('resolveTargetShorthand: "current-project" without project → throws', () => {
   assert.throws(
-    () => resolveTargetShorthand('current-channel', { ...FULL_CTX, channel: null }),
-    /current-channel.*channel/i,
+    () => resolveTargetShorthand('current-project', { ...FULL_CTX, project: null }),
+    /current-project.*project/i,
   );
 });
 
@@ -73,9 +73,9 @@ test('resolveTargetShorthand: "current-thread" without threadId → throws (does
 
 // --- object form passthrough + validation ---
 
-test('resolveTargetShorthand: explicit { kind: "channel", channel } passes through', () => {
-  const out = resolveTargetShorthand({ kind: 'channel', channel: 'C-explicit' }, FULL_CTX);
-  assert.deepEqual(out, { kind: 'channel', channel: 'C-explicit' });
+test('resolveTargetShorthand: explicit { kind: "project", projectId } passes through', () => {
+  const out = resolveTargetShorthand({ kind: 'project', projectId: 'my-project' } as any, FULL_CTX);
+  assert.deepEqual(out, { kind: 'project', projectId: 'my-project' });
 });
 
 test('resolveTargetShorthand: explicit { kind: "session", ... } requires sessionName + sessionId + channel', () => {

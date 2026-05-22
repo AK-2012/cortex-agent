@@ -34,7 +34,7 @@ export interface CortexContextSnapshot {
 export type TargetSpec =
   | undefined
   | 'fresh'
-  | 'current-channel'
+  | 'current-project'
   | 'current-session'
   | 'current-thread'
   | ScheduleTarget;
@@ -42,9 +42,9 @@ export type TargetSpec =
 export function resolveTargetShorthand(spec: TargetSpec, ctx: CortexContextSnapshot): ScheduleTarget {
   if (spec === undefined || spec === 'fresh') return { kind: 'fresh' };
 
-  if (spec === 'current-channel') {
-    if (!ctx.channel) throw new Error('current-channel requested but no channel in current context');
-    return { kind: 'channel', channel: ctx.channel };
+  if (spec === 'current-project') {
+    if (!ctx.project) throw new Error('current-project requested but no project in current context');
+    return { kind: 'project', projectId: ctx.project };
   }
   if (spec === 'current-session') {
     if (!ctx.sessionName || !ctx.sessionId || !ctx.channel) {
@@ -62,9 +62,9 @@ export function resolveTargetShorthand(spec: TargetSpec, ctx: CortexContextSnaps
   // Object form — light validation per kind so we fail fast at create rather than at fire time.
   if (typeof spec === 'object' && spec !== null && 'kind' in spec) {
     if (spec.kind === 'fresh') return { kind: 'fresh' };
-    if (spec.kind === 'channel') {
-      if (!spec.channel) throw new Error('channel target requires { channel }');
-      return { kind: 'channel', channel: spec.channel };
+    if (spec.kind === 'project') {
+      if (!spec.projectId) throw new Error('project target requires { projectId }');
+      return { kind: 'project', projectId: spec.projectId };
     }
     if (spec.kind === 'session') {
       if (!spec.sessionName || !spec.sessionId || !spec.channel) {
@@ -120,11 +120,11 @@ function makeWriteOnlyScheduler(): Scheduler {
 
 const targetSchema = z.union([
   z.literal('fresh'),
-  z.literal('current-channel'),
+  z.literal('current-project'),
   z.literal('current-session'),
   z.literal('current-thread'),
   z.object({ kind: z.literal('fresh') }),
-  z.object({ kind: z.literal('channel'), channel: z.string() }),
+  z.object({ kind: z.literal('project'), projectId: z.string() }),
   z.object({ kind: z.literal('session'), sessionName: z.string(), sessionId: z.string(), channel: z.string() }),
   z.object({ kind: z.literal('thread'), threadId: z.string(), channel: z.string() }),
 ]).optional();
@@ -138,7 +138,7 @@ const addInputShape = {
   time: z.string().optional().describe('For type=daily/weekly: HH:MM 24-hour'),
   dayOfWeek: z.union([z.string(), z.number()]).optional().describe('For type=weekly: 0-6 (0=Sun) or sun/mon/tue/wed/thu/fri/sat'),
   delay: z.union([z.string(), z.number()]).optional().describe('For type=once: delay from now (duration string or ms)'),
-  target: targetSchema.describe('Where to land the fired task. Shorthand: "fresh" (default) | "current-channel" | "current-session" | "current-thread", or explicit { kind, ...ids }. __current__ shorthand is resolved to concrete IDs at create time.'),
+  target: targetSchema.describe('Where to land the fired task. Shorthand: "fresh" (default) | "current-project" | "current-session" | "current-thread", or explicit { kind, ...ids }. __current__ shorthand is resolved to concrete IDs at create time.'),
   fallback: fallbackSchema.describe('What to do if target session/thread is gone at fire time. fresh (default): silently fall back. skip: post one-line note, do not run. wait: not yet implemented (treated as fresh).'),
   profile: z.string().optional().describe('Agent profile name (defaults to active profile)'),
   preCheck: z.string().optional().describe('Optional shell command; non-zero exit → skip this fire. 15s timeout. Receives PRECHECK_LAST_RUN env var.'),
@@ -202,7 +202,7 @@ async function runScheduleAdd(input: z.infer<z.ZodObject<typeof addInputShape>>,
 export function registerScheduleTools(server: McpServer, deps: ContextToolDeps): void {
   server.tool(
     'cortex_schedule_add',
-    'Create a scheduled task. Supports interval/daily/weekly/once. target shorthand "current-channel" | "current-session" | "current-thread" | "fresh" auto-resolves to concrete IDs against the running agent context — no need to call cortex_context first unless you need an explicit ID.',
+    'Create a scheduled task. Supports interval/daily/weekly/once. target shorthand "current-project" | "current-session" | "current-thread" | "fresh" auto-resolves to concrete IDs against the running agent context — no need to call cortex_context first unless you need an explicit ID.',
     addInputShape,
     async (input) => {
       try {

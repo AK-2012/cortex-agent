@@ -1,7 +1,8 @@
-// input:  ScheduleTarget + lookup callbacks (channel/session/thread stores)
+// input:  ScheduleTarget + lookup callbacks (session/thread stores)
 // output: planScheduledDispatch — pure decision tree picking how to land a fired schedule
-// pos:    extracted from scheduled-task.ts so the 4-way target dispatch is unit-testable
+// pos:    extracted from scheduled-task.ts so the target dispatch is unit-testable
 //         without spinning up the platform adapter, execution registry, or thread runner.
+//         Removed channel variant in M4; project replaces it as the default target kind.
 // >>> If I am updated, update my header comment and the parent folder's CORTEX.md <<<
 
 import type { ScheduleTarget, ScheduleTask } from '@store/schedule-repo.js';
@@ -20,10 +21,6 @@ export type DispatchPlan =
   | { kind: 'skip'; reason: string };
 
 export interface DispatchLookups {
-  /** Active thread (status running|waiting) for the channel, or null. */
-  findActiveThread(channel: string): ThreadRecord | null;
-  /** Channel-default sessionId (the one a fresh user message would resume), or undefined. */
-  getChannelSession(channel: string): Promise<string | undefined>;
   /** Look up a cortex-XXXX session record. Null if it's been GC'd or never registered. */
   lookupSession(sessionName: string): Promise<Session | null>;
   /** Look up a thread record by id. Null if missing. */
@@ -33,7 +30,7 @@ export interface DispatchLookups {
 export interface DispatchPlanInput {
   target: ScheduleTarget | undefined;
   fallback: ScheduleTask['fallback'];
-  /** Channel to use when falling back to fresh — typically the schedule's own task.channel. */
+  /** Channel to use when falling back to fresh — typically the schedule's own resolved channel. */
   fallbackChannel: string;
   lookups: DispatchLookups;
 }
@@ -53,13 +50,10 @@ export async function planScheduledDispatch(input: DispatchPlanInput): Promise<D
     return { kind: 'fresh', channel: input.fallbackChannel };
   }
 
-  if (target.kind === 'channel') {
-    const active = input.lookups.findActiveThread(target.channel);
-    if (active) {
-      return { kind: 'continue-thread', channel: target.channel, threadId: active.id };
-    }
-    const sessionId = (await input.lookups.getChannelSession(target.channel)) ?? null;
-    return { kind: 'default-thread', channel: target.channel, existingSessionId: sessionId };
+  if (target.kind === 'project') {
+    // Always spawn a fresh session in the project channel.
+    // The scheduler resolves projectId → channel before calling runScheduledTask.
+    return { kind: 'fresh', channel: input.fallbackChannel };
   }
 
   if (target.kind === 'session') {

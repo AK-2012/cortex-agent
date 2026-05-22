@@ -10,9 +10,8 @@ import * as executionRegistry from '../../executions/registry.js';
 const log = createLogger('scheduled-task');
 import * as pendingTaskTracker from '../../tasks/pending-tracker.js';
 import { sessionStore } from '@store/session-registry-repo.js';
-import { sessionRepo } from '@store/session-repo.js';
 import { threadStore } from '@store/thread-repo.js';
-import { getActiveProfile, getActiveBackend, getDefaultAgent } from '../../agents/index.js';
+import { getActiveProfile, getDefaultAgent } from '../../agents/index.js';
 import { projectStore } from '@domain/projects/index.js';
 import { normalizeSkillCommandPrefix } from '../../memory/skill-scanner.js';
 import { isValidDispatchPrompt, hasRunningExecutionForSchedule } from '../../tasks/dispatcher.js';
@@ -87,14 +86,11 @@ export function runScheduledTask({ message, channel, scheduleTaskId, profileName
 // --- Plan resolution ---
 
 async function resolveDispatchPlan(channel: string, target: ScheduleTarget | undefined, fallback: ScheduleTask['fallback']): Promise<DispatchPlan> {
-  const backend = getActiveBackend();
   return planScheduledDispatch({
     target,
     fallback,
     fallbackChannel: channel,
     lookups: {
-      findActiveThread: (ch) => threadStore.findActive(ch),
-      getChannelSession: (ch) => sessionRepo.getSessionAsync(ch, backend),
       lookupSession: (name) => sessionStore.lookupSession(name),
       getThread: (id) => threadStore.get(id),
     },
