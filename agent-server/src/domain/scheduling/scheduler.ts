@@ -176,7 +176,7 @@ function buildTask(type: string, id: string, now: number, options: Record<string
 
 interface RunnerParams {
   message: string;
-  channel: string;
+  projectId: string;
   scheduleTaskId: string;
   profileName: string;
   /** Where the fired task should land — passed through so scheduled-task.ts can pick its dispatch branch. */
@@ -578,7 +578,7 @@ class Scheduler {
       } else {
         await this.runner({
           message: `[Scheduled Task] ${task.message}`,
-          channel: resolvedChannel,
+          projectId: task.projectId,
           scheduleTaskId: task.id,
           profileName,
           target: task.target,

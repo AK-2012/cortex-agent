@@ -63,6 +63,9 @@ test('scheduled success path creates thread and runs via thread system', async (
   rawSource = rawSource.replace(/ctx\.bus!/g, '_bus');
   rawSource = rawSource.replace(/\ballConfigsRateLimited\b/g, '_allConfigsRateLimited');
   rawSource = rawSource.replace(/\bgetOutboundQueue\b/g, '_getOutboundQueue');
+  // channelRepo is imported from @store/channel-repo.js (outside captured block);
+  // replace with a mock.
+  rawSource = rawSource.replace(/\bchannelRepo\b/g, '_channelRepo');
   // ctx.buildInteractiveCallbacks is imported from job-registry (outside extracted block);
   // replace with a mock fn that returns undefined (no interactive callbacks in test).
   rawSource = rawSource.replace(/ctx\.buildInteractiveCallbacks/g, '_buildInteractiveCallbacks');
@@ -76,7 +79,11 @@ test('scheduled success path creates thread and runs via thread system', async (
 
   const statusUpdates = [];
   const app = {
-    postMessage: async (channel, content, opts?) => ({ channel, messageId: 'status-ts', threadId: opts?.threadId }),
+    postMessage: async (dest, content, opts?) => {
+      // dest is a Destination object; extract channel for the MessageRef
+      const channel = typeof dest === 'string' ? dest : 'C123';
+      return { channel, messageId: 'status-ts', threadId: opts?.threadId };
+    },
     updateMessage: async (ref, content) => { statusUpdates.push({ channel: ref.channel, messageId: ref.messageId, text: content.text }); },
     getRawClient: () => ({ chat: { postMessage: async () => ({}) } }),
   };
@@ -140,6 +147,7 @@ test('scheduled success path creates thread and runs via thread system', async (
     'continueThread',
     '_allConfigsRateLimited',
     '_getOutboundQueue',
+    '_channelRepo',
     '_buildInteractiveCallbacks',
     `${functionSource}; return runScheduledTask;`
   )(
@@ -198,13 +206,15 @@ test('scheduled success path creates thread and runs via thread system', async (
     () => false,
     // getOutboundQueue \u2014 return null so durable paths fall through to adapter directly
     () => null,
+    // channelRepo stub \u2014 resolves projectId 'my-project' \u2192 channel 'C123'
+    { getProjectChannel: async (projectId: string) => projectId === 'my-project' ? 'C123' : null },
     // buildInteractiveCallbacks \u2014 no interactive callbacks in test
     () => undefined,
   );
 
   runScheduledTask({
     message: 'nightly check',
-    channel: 'C123',
+    projectId: 'my-project',
     scheduleTaskId: 'sched-1',
     profileName: 'default',
   });

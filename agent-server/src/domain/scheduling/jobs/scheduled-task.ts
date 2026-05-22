@@ -22,8 +22,9 @@ import { maybeNotifyCodexLowUsage } from '../../costs/codex-usage-monitor.js';
 import { buildUserProcessingMessage, computeElapsed, buildSessionTag } from '@core/status-format.js';
 import { finalizeThreadSuccess, buildProgressUpdater } from './_shared.js';
 import { planScheduledDispatch, type DispatchPlan } from './target-dispatch.js';
-import type { PlatformAdapter, MessageRef } from '@platform/index.js';
+import type { PlatformAdapter, MessageRef, Destination } from '@platform/index.js';
 import type { ScheduleTarget, ScheduleTask } from '@store/schedule-repo.js';
+import { channelRepo } from '@store/channel-repo.js';
 import { getOutboundQueue, durableUpdate, durablePost } from '@store/outbound-queue.js';
 
 // Module-level state
@@ -49,15 +50,15 @@ function passScheduledGuards(schedKey: string, scheduleTaskId: string): boolean 
 
 interface RunScheduledTaskInput {
   message: string;
-  channel: string;
+  projectId: string;
   scheduleTaskId: string;
   profileName: string;
   target?: ScheduleTarget;
   fallback?: ScheduleTask['fallback'];
 }
 
-export function runScheduledTask({ message, channel, scheduleTaskId, profileName, target, fallback }: RunScheduledTaskInput): void {
-  const schedKey = `sched:${scheduleTaskId || channel}`;
+export function runScheduledTask({ message, projectId, scheduleTaskId, profileName, target, fallback }: RunScheduledTaskInput): void {
+  const schedKey = `sched:${scheduleTaskId || projectId}`;
   if (!passScheduledGuards(schedKey, scheduleTaskId)) return;
 
   const normalizedMessage = normalizeSkillCommandPrefix(message);
@@ -66,7 +67,7 @@ export function runScheduledTask({ message, channel, scheduleTaskId, profileName
   }
 
   if (!isValidDispatchPrompt(normalizedMessage)) {
-    log.warn(`Guard dropped null/empty prompt for schedule ${scheduleTaskId} (channel=${channel}, profile=${profileName}): "${message?.substring(0, 60) || String(message)}"`);
+    log.warn(`Guard dropped null/empty prompt for schedule ${scheduleTaskId} (project=${projectId}, profile=${profileName}): "${message?.substring(0, 60) || String(message)}"`);
     return;
   }
 
@@ -77,7 +78,7 @@ export function runScheduledTask({ message, channel, scheduleTaskId, profileName
 
   scheduledTaskActive.set(schedKey, true);
   ctx.bus!.publish({ type: 'llm.active-count-delta', delta: 1 });
-  runScheduledTaskAsync({ normalizedMessage, message, channel, scheduleTaskId, profileName, target, fallback }).finally(() => {
+  runScheduledTaskAsync({ normalizedMessage, message, projectId, scheduleTaskId, profileName, target, fallback }).finally(() => {
     scheduledTaskActive.delete(schedKey);
     ctx.bus!.publish({ type: 'llm.active-count-delta', delta: -1 });
   });
@@ -85,8 +86,9 @@ export function runScheduledTask({ message, channel, scheduleTaskId, profileName
 
 // --- Plan resolution ---
 
-async function resolveDispatchPlan(channel: string, target: ScheduleTarget | undefined, fallback: ScheduleTask['fallback']): Promise<DispatchPlan> {
-  return planScheduledDispatch({
+async function resolveDispatchPlan(projectId: string, target: ScheduleTarget | undefined, fallback: ScheduleTask['fallback']): Promise<{ plan: DispatchPlan; resolvedChannel: string }> {
+  const channel = await channelRepo.getProjectChannel(projectId) ?? projectId;
+  const plan = await planScheduledDispatch({
     target,
     fallback,
     fallbackChannel: channel,
@@ -95,34 +97,38 @@ async function resolveDispatchPlan(channel: string, target: ScheduleTarget | und
       getThread: (id) => threadStore.get(id),
     },
   });
+  return { plan, resolvedChannel: channel };
 }
 
 // --- Async implementation ---
 
-async function runScheduledTaskAsync({ normalizedMessage, message, channel, scheduleTaskId, profileName, target, fallback }: RunScheduledTaskInput & { normalizedMessage: string }): Promise<void> {
+async function runScheduledTaskAsync({ normalizedMessage, message, projectId, scheduleTaskId, profileName, target, fallback }: RunScheduledTaskInput & { normalizedMessage: string }): Promise<void> {
   const startTime = Date.now();
-  const effectiveProfile = profileName || getActiveProfile(channel) || 'default';
+  const { plan, resolvedChannel } = await resolveDispatchPlan(projectId, target, fallback);
+
+  // Build the project-report destination for all outbound messages from this scheduled run.
+  const projectReportDest: Destination = { type: 'project-report', projectId, trigger: 'scheduled', sessionId: '' };
+
+  const effectiveProfile = profileName || getActiveProfile(resolvedChannel) || 'default';
   const sessionName = await sessionStore.generateSessionName();
   const adapter = ctx.adapter!;
-
-  const plan = await resolveDispatchPlan(channel, target, fallback);
 
   // Skip plans short-circuit before posting the processing status, so they don't pollute Slack.
   if (plan.kind === 'skip') {
     log.info(`Skipping schedule ${scheduleTaskId}: ${plan.reason}`);
-    try { await adapter.postMessage(channel, { text: `:fast_forward: Scheduled task skipped — ${plan.reason}` }); } catch {}
+    try { await adapter.postMessage(projectReportDest, { text: `:fast_forward: Scheduled task skipped — ${plan.reason}` }); } catch {}
     return;
   }
 
   let statusMsg: MessageRef | null = null;
   try {
-    statusMsg = await adapter.postMessage(plan.channel, { text: buildUserProcessingMessage({ startTime, profileName: effectiveProfile, sessionName }) });
+    statusMsg = await adapter.postMessage(projectReportDest, { text: buildUserProcessingMessage({ startTime, profileName: effectiveProfile, sessionName }) });
   } catch (e) {
     log.error('Failed to post status message:', (e as Error).message);
   }
 
   try {
-    const threadResult = await dispatchByPlan({ plan, normalizedMessage, message, scheduleTaskId, effectiveProfile, statusMsg, startTime, sessionName });
+    const threadResult = await dispatchByPlan({ plan, normalizedMessage, message, scheduleTaskId, effectiveProfile, statusMsg, startTime, sessionName, projectReportDest, resolvedChannel });
     const result = threadResult.lastAgentResult as any;
     await maybeNotifyCodexLowUsage({ adapter, result });
 
@@ -135,8 +141,8 @@ async function runScheduledTaskAsync({ normalizedMessage, message, channel, sche
         else { await adapter.updateMessage(statusMsg, { text }); }
       }
     } else {
-      await finalizeThreadSuccess(adapter, plan.channel, statusMsg, {
-        startTime, sessionName, result, threadResult, project: projectStore.resolveFromMessage(message)?.id ?? 'general', trigger: 'scheduled',
+      await finalizeThreadSuccess(adapter, resolvedChannel, statusMsg, {
+        startTime, sessionName, result, threadResult, project: projectId, trigger: 'scheduled',
         label: message?.substring(0, 60) || null, sessionKind: 'scheduled', statusPrefix: 'Done',
       });
     }
@@ -149,8 +155,8 @@ async function runScheduledTaskAsync({ normalizedMessage, message, channel, sche
       else { await adapter.updateMessage(statusMsg, { text }); }
     }
     try {
-      if (queue) { await durablePost(queue, adapter, plan.channel, { text: `Scheduled task error: ${(error as Error).message}` }); }
-      else { await adapter.postMessage(plan.channel, { text: `Scheduled task error: ${(error as Error).message}` }); }
+      if (queue) { await durablePost(queue, adapter, projectReportDest, { text: `Scheduled task error: ${(error as Error).message}` }); }
+      else { await adapter.postMessage(projectReportDest, { text: `Scheduled task error: ${(error as Error).message}` }); }
     } catch {}
   }
 }
@@ -166,14 +172,17 @@ interface DispatchExecuteInput {
   statusMsg: MessageRef | null;
   startTime: number;
   sessionName: string;
+  projectReportDest: Destination;
+  resolvedChannel: string;
 }
 
-function dispatchByPlan({ plan, normalizedMessage, message, scheduleTaskId, effectiveProfile, statusMsg, startTime, sessionName }: DispatchExecuteInput) {
+function dispatchByPlan({ plan, normalizedMessage, message, scheduleTaskId, effectiveProfile, statusMsg, startTime, sessionName, projectReportDest, resolvedChannel }: DispatchExecuteInput) {
   const project = projectStore.resolveFromMessage(message)?.id ?? 'general';
-  const onProgress = statusMsg ? buildProgressUpdater(ctx.adapter!, plan.channel, statusMsg, startTime, effectiveProfile, sessionName) : undefined;
-  const icb = ctx.buildInteractiveCallbacks?.(plan.channel, null);
+  const onProgress = statusMsg ? buildProgressUpdater(ctx.adapter!, resolvedChannel, statusMsg, startTime, effectiveProfile, sessionName) : undefined;
+  const icb = ctx.buildInteractiveCallbacks?.(resolvedChannel, null);
   const baseRunOpts = {
-    adapter: ctx.adapter!, channel: plan.channel, threadTs: statusMsg?.messageId || null, statusMsg, startTime, onProgress,
+    adapter: ctx.adapter!, channel: resolvedChannel, threadTs: statusMsg?.messageId || null, statusMsg, startTime, onProgress,
+    destination: projectReportDest,
     onToolUse: icb?.onToolUse ?? null, onPlanWritten: icb?.onPlanWritten ?? null, onAskUserQuestion: icb?.onAskUserQuestion ?? null,
   };
 

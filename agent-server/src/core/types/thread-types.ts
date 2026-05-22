@@ -287,11 +287,15 @@ export interface TransitionResult {
 // Imported here (rather than declared in thread-runner.ts) so thread-hook-runner.ts
 // can consume RunThreadOptions without creating a circular import.
 
-import type { PlatformAdapter, MessageRef } from '@platform/index.js';
+import type { PlatformAdapter, MessageRef, Destination } from '@platform/index.js';
 
 export interface RunThreadOptions {
   adapter: PlatformAdapter;
   channel: string;
+  /** Destination override for the thread's VirtualMessage. When set, the thread
+   *  runner uses this destination instead of deriving interactive-reply from channel.
+   *  Used by scheduled-task to emit project-report for autonomous runs. */
+  destination?: Destination;
   threadTs: string | null;
   statusMsg: MessageRef | null;
   startTime: number;

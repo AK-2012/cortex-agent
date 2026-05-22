@@ -29,6 +29,7 @@ export type {
   RichBlock,
   ActionElement,
   ButtonElement,
+  Destination,
 } from './types.js';
 export { VirtualMessage } from './virtual-message.js';
 export { ToolTrace, createToolTrace, isToolTraceEnabled } from './tool-trace.js';
