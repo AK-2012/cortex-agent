@@ -225,7 +225,7 @@ export interface FileUploadOpts {
 // --- Durable Message Hooks ---
 
 export interface DurableHooks {
-  beforePost(channel: string, text: string, opts?: { threadId?: string; richBlocks?: RichBlock[] }): Promise<string>;
+  beforePost(destination: Destination, text: string, opts?: { threadId?: string; richBlocks?: RichBlock[] }): Promise<string>;
   beforeUpdate(channel: string, messageId: string, text: string, opts?: { richBlocks?: RichBlock[] }): Promise<string>;
   afterSent(walId: string, slackTs?: string): Promise<void>;
   /** Release the in-flight claim when the inline send path fails permanently.

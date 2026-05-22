@@ -24,9 +24,11 @@ import type {
   ActionElement,
   ModalField,
 } from '../types.js';
-import { resolveDestinationConduit } from '../types.js';
 import * as fs from 'fs';
 import * as path from 'path';
+import { createLogger } from '@core/log.js';
+
+const log = createLogger('feishu');
 
 export interface FeishuAdapterConfig {
   appId: string;
@@ -134,7 +136,10 @@ export class FeishuAdapter implements PlatformAdapter {
   // --- Outbound messaging ---
 
   async postMessage(destination: Destination, content: MessageContent, opts?: PostMessageOpts): Promise<MessageRef> {
-    const channel = this._resolveChannel(destination);
+    const resolved = await this.resolveDestination(destination);
+    if (!resolved.channel) {
+      return { channel: '', messageId: '' };
+    }
     const threadId = opts?.threadId;
 
     // If replying in a thread, use the reply API
@@ -146,14 +151,14 @@ export class FeishuAdapter implements PlatformAdapter {
     const res = await this.client.im.v1.message.create({
       params: { receive_id_type: 'chat_id' },
       data: {
-        receive_id: channel,
+        receive_id: resolved.channel,
         msg_type: msgType,
         content: msgContent,
       },
     });
 
     const messageId = (res as any)?.data?.message_id || '';
-    return { channel, messageId };
+    return { channel: resolved.channel, messageId };
   }
 
   async updateMessage(ref: MessageRef, content: MessageContent): Promise<void> {
@@ -178,7 +183,10 @@ export class FeishuAdapter implements PlatformAdapter {
     content: MessageContent & { actions: ActionElement[] },
     opts?: PostMessageOpts,
   ): Promise<MessageRef> {
-    const channel = this._resolveChannel(destination);
+    const resolved = await this.resolveDestination(destination);
+    if (!resolved.channel) {
+      return { channel: '', messageId: '' };
+    }
     const elements = content.richBlocks
       ? this.richBlocksToFeishuElements(content.richBlocks)
       : [];
@@ -207,23 +215,21 @@ export class FeishuAdapter implements PlatformAdapter {
         },
       });
       const messageId = (res as any)?.data?.message_id || '';
-      return { channel, messageId, threadId };
+      return { channel: resolved.channel, messageId, threadId };
     }
 
     const res = await this.client.im.v1.message.create({
       params: { receive_id_type: 'chat_id' },
       data: {
-        receive_id: channel,
+        receive_id: resolved.channel,
         msg_type: 'interactive',
         content: JSON.stringify(cardJson),
       },
     });
 
     const messageId = (res as any)?.data?.message_id || '';
-    return { channel, messageId };
+    return { channel: resolved.channel, messageId };
   }
-
-  // --- Modals (degraded to card forms) ---
 
   async openModal(triggerId: string, modal: ModalDefinition): Promise<void> {
     // Feishu has no native modal. Degrade to posting a card with an embedded
@@ -259,16 +265,19 @@ export class FeishuAdapter implements PlatformAdapter {
   // --- Files ---
 
   async uploadFile(destination: Destination, filePath: string, opts?: FileUploadOpts): Promise<void> {
-    const channel = this._resolveChannel(destination);
-    const { resolved, size } = this.resolveFilePath(filePath);
-    const fileName = opts?.filename || path.basename(resolved);
+    const destResolved = await this.resolveDestination(destination);
+    if (!destResolved.channel) {
+      return;
+    }
+    const { resolved: fileResolved, size } = this.resolveFilePath(filePath);
+    const fileName = opts?.filename || path.basename(fileResolved);
 
     // Upload file to get file_key
     const uploadRes = await this.client.im.v1.file.create({
       data: {
         file_type: this.inferFeishuFileType(fileName),
         file_name: fileName,
-        file: fs.readFileSync(resolved),
+        file: fs.readFileSync(fileResolved),
       },
     });
 
@@ -288,7 +297,7 @@ export class FeishuAdapter implements PlatformAdapter {
       await this.client.im.v1.message.create({
         params: { receive_id_type: 'chat_id' },
         data: {
-          receive_id: channel,
+          receive_id: destResolved.channel,
           msg_type: 'file',
           content: msgContent,
         },
@@ -319,9 +328,28 @@ export class FeishuAdapter implements PlatformAdapter {
     // Feishu does not support ephemeral messages — no-op.
   }
 
-  /** Resolve a Destination to a Feishu chat_id. */
-  private _resolveChannel(dest: Destination): string {
-    return resolveDestinationConduit(dest, this.config.adminChannel);
+  /**
+   * Resolve a Destination to a concrete Feishu chat_id + kind label.
+   * Returns channel=null for destinations that should be silently dropped
+   * (unconfigured admin channel).
+   */
+  private async resolveDestination(dest: Destination): Promise<{ channel: string | null; kind: string }> {
+    switch (dest.type) {
+      case 'interactive-reply':
+        return { channel: dest.conduit, kind: 'interactive-reply' };
+      case 'project-report':
+        // FIXME: resolve projectId → Feishu chat_id when a project→chat mapping
+        // layer is added for Feishu. For now, projectId is used directly.
+        return { channel: dest.projectId, kind: 'project-report' };
+      case 'system-notice':
+        if (!this.config.adminChannel) {
+          log.warn('No admin channel configured; dropping system-notice');
+          return { channel: null, kind: 'system-notice-noop' };
+        }
+        return { channel: this.config.adminChannel, kind: 'system-notice' };
+      default:
+        return { channel: null, kind: 'unknown' };
+    }
   }
 
   getRawClient(): lark.Client {

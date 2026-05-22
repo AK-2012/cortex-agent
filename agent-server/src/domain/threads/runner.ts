@@ -110,7 +110,7 @@ function initThreadContext(threadId: string, opts: RunThreadOptions): ThreadCont
   const template = thread.templateName ? (getTemplate(thread.templateName) || null) : null;
   // For all non-default threads, aggregate output into a VirtualMessage.
   // Default template passes through opts.onAssistantMessage from app.ts (backward compat).
-  const vm = !isDefault ? new VirtualMessage(opts.adapter, opts.channel, { threadId: opts.threadTs }) : null;
+  const vm = !isDefault ? new VirtualMessage(opts.adapter, { type: 'interactive-reply', conduit: opts.channel, sessionId: '' }, { threadId: opts.threadTs }) : null;
   return { thread, isDefault, template, meta: thread.metadata, vm, lastAgentResult: null, totalNumTurns: 0 };
 }
 

@@ -1,6 +1,6 @@
 # Cortex — Autonomous Project Owner
 
-[中文文档](./docs/zh/)
+[中文文档](./docs/zh/) | [Docs](https://fangxm233.github.io/cortex-agent/)
 
 Cortex is an autonomous agent system for long-running projects. You give
 it a mission with a success criterion, and it plans the work, dispatches
@@ -81,6 +81,10 @@ cortex start
 
 Once running, message Cortex from Slack — it reads your project context,
 plans the work, and dispatches agents automatically.
+
+For a detailed step-by-step guide covering setup wizard prompts, what files
+are created, and how to send your first message, see
+[docs/quickstart.md](./docs/quickstart.md).
 
 ## How a project looks
 

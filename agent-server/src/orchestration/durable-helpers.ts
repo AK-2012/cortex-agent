@@ -3,17 +3,18 @@
 // pos:    orch layer bridge — connects store/outbound-queue and platform/types.DurableHooks
 // >>> If I am updated, update my header comment and the parent folder's CORTEX.md <<<
 
-import type { DurableHooks, RichBlock } from '@platform/types.js';
+import type { Destination, DurableHooks, RichBlock } from '@platform/types.js';
 import type { OutboundQueue } from '@store/outbound-queue.js';
 
 export { durablePost, durableUpdate } from '@store/outbound-queue.js';
 
 export function buildDurableHooks(queue: OutboundQueue): DurableHooks {
   return {
-    async beforePost(channel: string, text: string, opts?: { threadId?: string; richBlocks?: RichBlock[] }): Promise<string> {
+    async beforePost(destination: Destination, text: string, opts?: { threadId?: string; richBlocks?: RichBlock[] }): Promise<string> {
       const walId = await queue.enqueue({
         type: 'post',
-        channel,
+        channel: '',
+        destination,
         text,
         threadId: opts?.threadId,
         richBlocks: opts?.richBlocks,

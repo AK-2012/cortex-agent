@@ -7,7 +7,12 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { VirtualMessage } from '../src/platform/virtual-message.js';
 import { MockAdapter } from '../src/platform/testing.js';
+import type { Destination } from '../src/platform/types.js';
 import { ToolTrace, isToolTraceEnabled, createToolTrace, _test } from '../src/platform/tool-trace.js';
+
+function testDest(channel: string): Destination {
+  return { type: 'interactive-reply', conduit: channel, sessionId: '' };
+}
 
 async function settle(vm: VirtualMessage) {
   // Drain both the VM's queue and any chained tool-trace updates.
@@ -41,7 +46,7 @@ test('createToolTrace returns null when disabled or vm missing', () => {
   const prev = process.env.CORTEX_SHOW_TOOL_CALLS;
   try {
     const adapter = new MockAdapter();
-    const vm = new VirtualMessage(adapter, 'C1');
+    const vm = new VirtualMessage(adapter, testDest('C1'));
     delete process.env.CORTEX_SHOW_TOOL_CALLS;
     assert.equal(createToolTrace(vm), null);
     process.env.CORTEX_SHOW_TOOL_CALLS = '1';
@@ -56,7 +61,7 @@ test('createToolTrace returns null when disabled or vm missing', () => {
 
 test('ToolTrace: consecutive same tool — 1 post + N-1 updates on main VM msg', async () => {
   const adapter = new MockAdapter();
-  const vm = new VirtualMessage(adapter, 'C1');
+  const vm = new VirtualMessage(adapter, testDest('C1'));
   const trace = new ToolTrace(vm);
 
   trace.onToolUse('Read', { file_path: '/repo/src/a.ts' });
@@ -75,7 +80,7 @@ test('ToolTrace: consecutive same tool — 1 post + N-1 updates on main VM msg',
 
 test('ToolTrace: different tool → tail is sealed and new tail opens (still 1 Slack msg)', async () => {
   const adapter = new MockAdapter();
-  const vm = new VirtualMessage(adapter, 'C1');
+  const vm = new VirtualMessage(adapter, testDest('C1'));
   const trace = new ToolTrace(vm);
 
   trace.onToolUse('Read', { file_path: 'a.ts' });
@@ -93,7 +98,7 @@ test('ToolTrace: different tool → tail is sealed and new tail opens (still 1 S
 
 test('ToolTrace: flush() then same tool — tool-trace restarts group but VM tail auto-seals', async () => {
   const adapter = new MockAdapter();
-  const vm = new VirtualMessage(adapter, 'C1');
+  const vm = new VirtualMessage(adapter, testDest('C1'));
   const trace = new ToolTrace(vm);
 
   trace.onToolUse('Read', { file_path: 'a.ts' });
@@ -111,7 +116,7 @@ test('ToolTrace: flush() then same tool — tool-trace restarts group but VM tai
 
 test('ToolTrace: tool line is merged into main VM message via updates, not as a new post', async () => {
   const adapter = new MockAdapter();
-  const vm = new VirtualMessage(adapter, 'C1');
+  const vm = new VirtualMessage(adapter, testDest('C1'));
   const trace = new ToolTrace(vm);
 
   vm.append('hello');
@@ -128,7 +133,7 @@ test('ToolTrace: tool line is merged into main VM message via updates, not as a 
 
 test('ToolTrace: assistant text after tool seals the tail, subsequent tool appends new tail', async () => {
   const adapter = new MockAdapter();
-  const vm = new VirtualMessage(adapter, 'C1');
+  const vm = new VirtualMessage(adapter, testDest('C1'));
   const trace = new ToolTrace(vm);
 
   trace.onToolUse('Read', { file_path: 'a.ts' });
@@ -166,7 +171,7 @@ test('ToolTrace: tool_use before text in same tick preserves Slack order', async
   // content = [tool_use, text], the tool line must appear BEFORE the text
   // in the final Slack message content (model emitted the tool first).
   const adapter = new MockAdapter();
-  const vm = new VirtualMessage(adapter, 'C1');
+  const vm = new VirtualMessage(adapter, testDest('C1'));
   const trace = new ToolTrace(vm);
 
   // Simulate claude-bridge's sync block iteration for [tool_use Read a, text "hi"]:

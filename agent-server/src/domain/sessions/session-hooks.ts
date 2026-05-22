@@ -380,7 +380,7 @@ async function prepareOnNewRun(
   });
 
   const anchor = await resolveOnNewThreadAnchor(channel, threadTs);
-  const vm = new VirtualMessage(adapter, channel, { threadId: anchor });
+  const vm = new VirtualMessage(adapter, { type: 'interactive-reply', conduit: channel, sessionId: '' }, { threadId: anchor });
 
   const spec: SessionHookSpec = {
     name: 'onNew',

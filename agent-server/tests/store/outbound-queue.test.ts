@@ -10,7 +10,7 @@ import path from 'node:path';
 import os from 'node:os';
 import { OutboundQueue } from '../../src/store/outbound-queue.js';
 import type { PlatformAdapter } from '../../src/platform/adapter.js';
-import type { MessageRef, MessageContent, PlatformCapabilities, PostMessageOpts } from '../../src/platform/types.js';
+import type { Destination, MessageRef, MessageContent, PlatformCapabilities, PostMessageOpts } from '../../src/platform/types.js';
 
 // ── Shared tmp directory ───────────────────────────────────────
 
@@ -24,10 +24,16 @@ test.after(async () => {
   await fs.rm(tmpDir, { recursive: true, force: true });
 });
 
+// ── Helper: build test destination ────────────────────────────────
+
+function testDest(channel: string): Destination {
+  return { type: 'interactive-reply', conduit: channel, sessionId: '' };
+}
+
 // ── Mock adapter ───────────────────────────────────────────────
 
 function createMockAdapter(overrides: {
-  postMessage?: (channel: string, content: MessageContent, opts?: PostMessageOpts) => Promise<MessageRef>;
+  postMessage?: (destination: Destination, content: MessageContent, opts?: PostMessageOpts) => Promise<MessageRef>;
   updateMessage?: (ref: MessageRef, content: MessageContent) => Promise<void>;
 } = {}): PlatformAdapter {
   let postCount = 0;
@@ -40,13 +46,17 @@ function createMockAdapter(overrides: {
     onAction: () => {},
     onModalSubmit: () => {},
     onMessageEdit: () => {},
-    postMessage: overrides.postMessage ?? (async (channel: string, _content: MessageContent, opts?: PostMessageOpts): Promise<MessageRef> => {
+    postMessage: overrides.postMessage ?? (async (destination: Destination, _content: MessageContent, opts?: PostMessageOpts): Promise<MessageRef> => {
       postCount++;
+      const channel = destination.type === 'interactive-reply' ? destination.conduit : 'unknown';
       return { channel, messageId: `mock-ts-${postCount}`, threadId: opts?.threadId };
     }),
     updateMessage: overrides.updateMessage ?? (async () => {}),
     deleteMessage: async () => {},
-    postInteractive: async (channel: string) => ({ channel, messageId: 'mock-interactive' }),
+    postInteractive: async (destination: Destination) => {
+      const channel = destination.type === 'interactive-reply' ? destination.conduit : 'unknown';
+      return { channel, messageId: 'mock-interactive' };
+    },
     openModal: async () => {},
     addReaction: async () => {},
     uploadFile: async () => {},
@@ -80,6 +90,7 @@ test('OutboundQueue - enqueue writes entry to WAL file', async () => {
   const id = await queue.enqueue({
     type: 'post',
     channel: 'C123',
+    destination: testDest('C123'),
     text: 'hello world',
   });
 
@@ -99,8 +110,8 @@ test('OutboundQueue - enqueue writes entry to WAL file', async () => {
 test('OutboundQueue - multiple enqueue appends to WAL', async () => {
   const { queue, walPath } = createQueue();
 
-  await queue.enqueue({ type: 'post', channel: 'C1', text: 'msg1' });
-  await queue.enqueue({ type: 'post', channel: 'C2', text: 'msg2' });
+  await queue.enqueue({ type: 'post', channel: 'C1', destination: testDest('C1'), text: 'msg1' });
+  await queue.enqueue({ type: 'post', channel: 'C2', destination: testDest('C2'), text: 'msg2' });
   await queue.enqueue({ type: 'update', channel: 'C1', text: 'msg3', messageId: 'ts1' });
 
   const raw = await fs.readFile(walPath, 'utf8');
@@ -113,7 +124,7 @@ test('OutboundQueue - multiple enqueue appends to WAL', async () => {
 test('OutboundQueue - markSent appends sent op to WAL', async () => {
   const { queue, walPath } = createQueue();
 
-  const id = await queue.enqueue({ type: 'post', channel: 'C1', text: 'hello' });
+  const id = await queue.enqueue({ type: 'post', channel: 'C1', destination: testDest('C1'), text: 'hello' });
   await queue.markSent(id, 'slack-ts-123');
 
   const raw = await fs.readFile(walPath, 'utf8');
@@ -131,9 +142,9 @@ test('OutboundQueue - recover returns count of pending entries', async () => {
   const { queue, walPath } = createQueue();
 
   // Seed WAL: 3 enqueued, 1 sent
-  const id1 = await queue.enqueue({ type: 'post', channel: 'C1', text: 'msg1' });
-  await queue.enqueue({ type: 'post', channel: 'C2', text: 'msg2' });
-  await queue.enqueue({ type: 'post', channel: 'C3', text: 'msg3' });
+  const id1 = await queue.enqueue({ type: 'post', channel: 'C1', destination: testDest('C1'), text: 'msg1' });
+  await queue.enqueue({ type: 'post', channel: 'C2', destination: testDest('C2'), text: 'msg2' });
+  await queue.enqueue({ type: 'post', channel: 'C3', destination: testDest('C3'), text: 'msg3' });
   await queue.markSent(id1, 'ts1');
 
   // New queue instance reads from same WAL
@@ -164,15 +175,16 @@ test('OutboundQueue - recover with missing WAL file returns 0', async () => {
 test('OutboundQueue - drain sends pending post entries', async () => {
   const posted: { channel: string; text: string }[] = [];
   const adapter = createMockAdapter({
-    postMessage: async (channel, content) => {
+    postMessage: async (destination: Destination, content) => {
+      const channel = destination.type === 'interactive-reply' ? destination.conduit : 'unknown';
       posted.push({ channel, text: content.text });
       return { channel, messageId: `ts-${posted.length}` };
     },
   });
 
   const { queue, walPath } = createQueue(adapter);
-  await queue.enqueue({ type: 'post', channel: 'C1', text: 'hello' });
-  await queue.enqueue({ type: 'post', channel: 'C2', text: 'world', threadId: 'th1' });
+  await queue.enqueue({ type: 'post', channel: 'C1', destination: testDest('C1'), text: 'hello' });
+  await queue.enqueue({ type: 'post', channel: 'C2', destination: testDest('C2'), text: 'world', threadId: 'th1' });
 
   // Recover + drain (simulating restart)
   const queue2 = new OutboundQueue({ walPath, adapter });
@@ -210,7 +222,8 @@ test('OutboundQueue - drain falls back to post when update fails', async () => {
   const posted: { channel: string; text: string }[] = [];
   const adapter = createMockAdapter({
     updateMessage: async () => { throw new Error('message_not_found'); },
-    postMessage: async (channel, content) => {
+    postMessage: async (destination: Destination, content) => {
+      const channel = destination.type === 'interactive-reply' ? destination.conduit : 'unknown';
       posted.push({ channel, text: content.text });
       return { channel, messageId: 'fallback-ts' };
     },
@@ -230,14 +243,14 @@ test('OutboundQueue - drain falls back to post when update fails', async () => {
 test('OutboundQueue - drain marks sent entries and does not re-send', async () => {
   let postCount = 0;
   const adapter = createMockAdapter({
-    postMessage: async (channel) => {
+    postMessage: async (_destination: Destination) => {
       postCount++;
-      return { channel, messageId: `ts-${postCount}` };
+      return { channel: 'C1', messageId: `ts-${postCount}` };
     },
   });
 
   const { queue, walPath } = createQueue(adapter);
-  await queue.enqueue({ type: 'post', channel: 'C1', text: 'once' });
+  await queue.enqueue({ type: 'post', channel: 'C1', destination: testDest('C1'), text: 'once' });
 
   // First drain
   const queue2 = new OutboundQueue({ walPath, adapter });
@@ -278,9 +291,9 @@ test('OutboundQueue - drain coalesces multiple updates to same message', async (
 test('OutboundQueue - drain skips entries older than TTL', async () => {
   let postCount = 0;
   const adapter = createMockAdapter({
-    postMessage: async (channel) => {
+    postMessage: async (_destination: Destination) => {
       postCount++;
-      return { channel, messageId: `ts-${postCount}` };
+      return { channel: 'C1', messageId: `ts-${postCount}` };
     },
   });
 
@@ -290,7 +303,7 @@ test('OutboundQueue - drain skips entries older than TTL', async () => {
   const oldTs = new Date(Date.now() - 3600_000).toISOString();
   const entry = JSON.stringify({
     op: 'enqueue', id: 'old-1', ts: oldTs, type: 'post',
-    channel: 'C1', text: 'expired', status: 'pending',
+    channel: 'C1', destination: { type: 'interactive-reply', conduit: 'C1', sessionId: '' }, text: 'expired', status: 'pending',
   });
   await fs.writeFile(walPath, entry + '\n');
 
@@ -305,14 +318,14 @@ test('OutboundQueue - drain skips entries older than TTL', async () => {
 test('OutboundQueue - drain sends entries within TTL', async () => {
   let postCount = 0;
   const adapter = createMockAdapter({
-    postMessage: async (channel) => {
+    postMessage: async (_destination: Destination) => {
       postCount++;
-      return { channel, messageId: `ts-${postCount}` };
+      return { channel: 'C1', messageId: `ts-${postCount}` };
     },
   });
 
   const { queue } = createQueue(adapter, { ttlMs: 30 * 60 * 1000 });
-  await queue.enqueue({ type: 'post', channel: 'C1', text: 'fresh' });
+  await queue.enqueue({ type: 'post', channel: 'C1', destination: testDest('C1'), text: 'fresh' });
 
   // Simulate restart
   await queue.drain();
@@ -327,8 +340,8 @@ test('OutboundQueue - drain sends entries within TTL', async () => {
 test('OutboundQueue - compact removes sent entries from WAL file', async () => {
   const { queue, walPath } = createQueue();
 
-  const id1 = await queue.enqueue({ type: 'post', channel: 'C1', text: 'sent-msg' });
-  await queue.enqueue({ type: 'post', channel: 'C2', text: 'pending-msg' });
+  const id1 = await queue.enqueue({ type: 'post', channel: 'C1', destination: testDest('C1'), text: 'sent-msg' });
+  await queue.enqueue({ type: 'post', channel: 'C2', destination: testDest('C2'), text: 'pending-msg' });
   await queue.markSent(id1, 'ts1');
 
   await queue.compact();
@@ -342,7 +355,7 @@ test('OutboundQueue - compact removes sent entries from WAL file', async () => {
 
 test('OutboundQueue - compact on empty WAL creates empty file', async () => {
   const { queue, walPath } = createQueue();
-  const id = await queue.enqueue({ type: 'post', channel: 'C1', text: 'msg' });
+  const id = await queue.enqueue({ type: 'post', channel: 'C1', destination: testDest('C1'), text: 'msg' });
   await queue.markSent(id);
   await queue.compact();
 
@@ -357,7 +370,7 @@ test('OutboundQueue - 10 concurrent enqueue produce all 10 entries', async () =>
 
   await Promise.all(
     Array.from({ length: 10 }, (_, i) =>
-      queue.enqueue({ type: 'post', channel: `C${i}`, text: `msg-${i}` })
+      queue.enqueue({ type: 'post', channel: `C${i}`, destination: testDest(`C${i}`), text: `msg-${i}` })
     )
   );
 
@@ -375,7 +388,7 @@ test('OutboundQueue - flush resolves after all pending WAL writes', async () => 
 
   // Fire off several enqueues
   const promises = Array.from({ length: 5 }, (_, i) =>
-    queue.enqueue({ type: 'post', channel: 'C1', text: `msg-${i}` })
+    queue.enqueue({ type: 'post', channel: 'C1', destination: testDest('C1'), text: `msg-${i}` })
   );
 
   await queue.flush();
@@ -389,15 +402,15 @@ test('OutboundQueue - flush resolves after all pending WAL writes', async () => 
 test('OutboundQueue - drain retries on transient adapter failure', async () => {
   let attempt = 0;
   const adapter = createMockAdapter({
-    postMessage: async (channel) => {
+    postMessage: async (_destination: Destination) => {
       attempt++;
       if (attempt === 1) throw new Error('transient');
-      return { channel, messageId: 'ts-ok' };
+      return { channel: 'C1', messageId: 'ts-ok' };
     },
   });
 
   const { queue } = createQueue(adapter);
-  await queue.enqueue({ type: 'post', channel: 'C1', text: 'retry-me' });
+  await queue.enqueue({ type: 'post', channel: 'C1', destination: testDest('C1'), text: 'retry-me' });
 
   // First drain: fails, entry stays pending
   await queue.drain();
@@ -415,6 +428,7 @@ test('OutboundQueue - enqueue preserves richBlocks in WAL', async () => {
   await queue.enqueue({
     type: 'post',
     channel: 'C1',
+    destination: testDest('C1'),
     text: 'with blocks',
     richBlocks: [{ type: 'markdown', text: '**bold**' }],
   });
@@ -430,8 +444,8 @@ test('OutboundQueue - getPendingCount reflects enqueue and markSent', async () =
   const { queue } = createQueue();
 
   assert.equal(queue.getPendingCount(), 0);
-  const id1 = await queue.enqueue({ type: 'post', channel: 'C1', text: 'a' });
-  await queue.enqueue({ type: 'post', channel: 'C2', text: 'b' });
+  const id1 = await queue.enqueue({ type: 'post', channel: 'C1', destination: testDest('C1'), text: 'a' });
+  await queue.enqueue({ type: 'post', channel: 'C2', destination: testDest('C2'), text: 'b' });
   assert.equal(queue.getPendingCount(), 2);
   await queue.markSent(id1);
   assert.equal(queue.getPendingCount(), 1);

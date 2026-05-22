@@ -12,10 +12,10 @@ import { atomicWrite } from './atomic-write.js';
 
 const log = createLogger('outbound-queue');
 import { STORE_DIR } from '@core/paths.js';
-import type { RichBlock, MessageRef, MessageContent, PostMessageOpts } from '@platform/types.js';
+import type { Destination, RichBlock, MessageRef, MessageContent, PostMessageOpts } from '@platform/types.js';
 
 interface MessageSender {
-  postMessage(channel: string, content: MessageContent, opts?: PostMessageOpts): Promise<MessageRef>;
+  postMessage(destination: Destination, content: MessageContent, opts?: PostMessageOpts): Promise<MessageRef>;
   updateMessage(ref: MessageRef, content: MessageContent): Promise<void>;
 }
 
@@ -28,6 +28,7 @@ interface EnqueueOp {
   ts: string;
   type: 'post' | 'update';
   channel: string;
+  destination?: Destination;
   text: string;
   richBlocks?: RichBlock[];
   threadId?: string;
@@ -53,6 +54,7 @@ export interface OutboundQueueOpts {
 export interface EnqueueInput {
   type: 'post' | 'update';
   channel: string;
+  destination?: Destination;
   text: string;
   richBlocks?: RichBlock[];
   threadId?: string;
@@ -93,6 +95,7 @@ export class OutboundQueue {
       type: input.type,
       channel: input.channel,
       text: input.text,
+      ...(input.destination && { destination: input.destination }),
       ...(input.richBlocks && { richBlocks: input.richBlocks }),
       ...(input.threadId && { threadId: input.threadId }),
       ...(input.messageId && { messageId: input.messageId }),
@@ -174,7 +177,8 @@ export class OutboundQueue {
 
       try {
         if (entry.type === 'post') {
-          await this.adapter.postMessage(entry.channel, {
+          const dest = entry.destination ?? { type: 'interactive-reply' as const, conduit: entry.channel, sessionId: '' };
+          await this.adapter.postMessage(dest, {
             text: entry.text,
             ...(entry.richBlocks && { richBlocks: entry.richBlocks }),
           }, entry.threadId ? { threadId: entry.threadId } : undefined);
@@ -298,20 +302,21 @@ export function getOutboundQueue(): OutboundQueue | null {
 export async function durablePost(
   queue: OutboundQueue,
   sender: MessageSender,
-  channel: string,
+  destination: Destination,
   content: MessageContent,
   opts?: PostMessageOpts,
 ): Promise<MessageRef> {
   const walId = await queue.enqueue({
     type: 'post',
-    channel,
+    channel: '',
+    destination,
     text: content.text,
     richBlocks: content.richBlocks,
     threadId: opts?.threadId,
   });
   queue.claim(walId);
   try {
-    const ref = await sender.postMessage(channel, content, opts);
+    const ref = await sender.postMessage(destination, content, opts);
     await queue.markSent(walId, ref.messageId);
     return ref;
   } catch (e) {

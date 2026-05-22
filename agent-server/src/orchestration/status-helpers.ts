@@ -94,7 +94,7 @@ export async function runAutoCompoundForScheduledTask({ baseResult, channel, pro
 
 /** Build a streaming callback that aggregates assistant messages into fewer platform messages via VirtualMessage. */
 export function makeStreamingMessageCallback(adapter: PlatformAdapter, channel: string, threadTs: string | null = null, onMessagePosted: ((ref: MessageRef) => void) | null = null, durable?: import('@platform/types.js').DurableHooks | null): ((text: string) => void) & { vm: VirtualMessage } {
-  const vm = new VirtualMessage(adapter, channel, { threadId: threadTs, onMessagePosted, durable: durable ?? null });
+  const vm = new VirtualMessage(adapter, { type: 'interactive-reply', conduit: channel, sessionId: '' }, { threadId: threadTs, onMessagePosted, durable: durable ?? null });
   const callback = (text: string) => vm.append(text);
   (callback as ((text: string) => void) & { vm: VirtualMessage }).vm = vm;
   return callback as ((text: string) => void) & { vm: VirtualMessage };

@@ -14,13 +14,13 @@ async function sendPlanToSlack(
 ): Promise<void> {
   if (!planContent) {
     const label = machine ? `**[PLAN: ${machine}]**` : '**[PLAN]**';
-    await VirtualMessage.postOnce(adapter, channel, `:memo: ${label} Plan generated but no content found.`, { threadId: threadTs });
+    await VirtualMessage.postOnce(adapter, { type: 'interactive-reply', conduit: channel, sessionId: '' }, `:memo: ${label} Plan generated but no content found.`, { threadId: threadTs });
     return;
   }
 
   const label = '**[PLAN]**';
   const prompt = 'Generated plan — use the buttons below to approve or provide feedback:';
 
-  await VirtualMessage.postOnce(adapter, channel, `:memo: ${label} ${prompt}\n${planContent}`, { threadId: threadTs });
+  await VirtualMessage.postOnce(adapter, { type: 'interactive-reply', conduit: channel, sessionId: '' }, `:memo: ${label} ${prompt}\n${planContent}`, { threadId: threadTs });
 }
 export { sendPlanToSlack };

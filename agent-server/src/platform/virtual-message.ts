@@ -94,11 +94,18 @@ function chunkText(text: string, maxChunk: number): string[] {
 
 export class VirtualMessage {
   private adapter: PlatformAdapter;
-  private channel: string;
+  private destination: Destination;
   private threadId: string | null;
   private onMessagePosted: ((ref: MessageRef) => void) | null;
   private maxChunk: number;
   private durable: DurableHooks | null;
+
+  /** Readable label for log messages, extracted from the Destination kind. */
+  private get _logChannel(): string {
+    if (this.destination.type === 'interactive-reply') return this.destination.conduit;
+    if (this.destination.type === 'project-report') return this.destination.projectId;
+    return 'system-notice';
+  }
 
   private parentRef: MessageRef | null = null;
   private currentRef: MessageRef | null = null;
@@ -114,13 +121,13 @@ export class VirtualMessage {
   // callers can detect that some messages did not reach the platform.
   private lastError: Error | null = null;
 
-  constructor(adapter: PlatformAdapter, channel: string, opts?: {
+  constructor(adapter: PlatformAdapter, destination: Destination, opts?: {
     threadId?: string | null;
     onMessagePosted?: ((ref: MessageRef) => void) | null;
     durable?: DurableHooks | null;
   }) {
     this.adapter = adapter;
-    this.channel = channel;
+    this.destination = destination;
     this.threadId = opts?.threadId ?? null;
     this.onMessagePosted = opts?.onMessagePosted ?? null;
     this.durable = opts?.durable ?? null;
@@ -132,7 +139,7 @@ export class VirtualMessage {
     this.queue = this.queue.then(() => this._processAppend(text)).catch(e => {
       // Record the failure so flush() can surface it; swallow here so subsequent
       // appends still get a chance to run instead of a poisoned queue.
-      log.error(`Queue error in channel ${this.channel} (text len=${text.length}):`, (e as Error).message);
+      log.error(`Queue error in channel ${this._logChannel} (text len=${text.length}):`, (e as Error).message);
       this.lastError = e instanceof Error ? e : new Error(String(e));
     });
   }
@@ -144,7 +151,7 @@ export class VirtualMessage {
   appendMutableTail(text: string): void {
     if (!text?.trim()) return;
     this.queue = this.queue.then(() => this._processAppendMutableTail(text)).catch(e => {
-      log.error(`Queue error in appendMutableTail (channel ${this.channel}, len=${text.length}):`, (e as Error).message);
+      log.error(`Queue error in appendMutableTail (channel ${this._logChannel}, len=${text.length}):`, (e as Error).message);
       this.lastError = e instanceof Error ? e : new Error(String(e));
     });
   }
@@ -154,7 +161,7 @@ export class VirtualMessage {
   editMutableTail(text: string): void {
     if (!text?.trim()) return;
     this.queue = this.queue.then(() => this._processEditMutableTail(text)).catch(e => {
-      log.error(`Queue error in editMutableTail (channel ${this.channel}, len=${text.length}):`, (e as Error).message);
+      log.error(`Queue error in editMutableTail (channel ${this._logChannel}, len=${text.length}):`, (e as Error).message);
       this.lastError = e instanceof Error ? e : new Error(String(e));
     });
   }
@@ -175,16 +182,16 @@ export class VirtualMessage {
         let walId: string | null = null;
         try {
           walId = this.durable
-            ? await this.durable.beforePost(this.channel, text, { threadId: effectiveThreadId, richBlocks })
+            ? await this.durable.beforePost(this.destination, text, { threadId: effectiveThreadId, richBlocks })
             : null;
           const ref = await withRetries(async () => {
             return actions && actions.length > 0
-              ? await this.adapter.postInteractive(this._makeDestination(), {
+              ? await this.adapter.postInteractive(this.destination, {
                   text,
                   richBlocks,
                   actions,
                 }, { threadId: effectiveThreadId })
-              : await this.adapter.postMessage(this._makeDestination(), {
+              : await this.adapter.postMessage(this.destination, {
                   text,
                   richBlocks,
                 }, { threadId: effectiveThreadId });
@@ -204,7 +211,7 @@ export class VirtualMessage {
             this.durable.onSendFailed(walId);
           }
           const err = e instanceof Error ? e : new Error(String(e));
-          log.error(`Standalone post failed after retries in channel ${this.channel}:`, err.message);
+          log.error(`Standalone post failed after retries in channel ${this._logChannel}:`, err.message);
           this.lastError = err;
           reject(err);
           throw err; // also propagate so flush() sees it
@@ -227,11 +234,11 @@ export class VirtualMessage {
     }
   }
 
-  static async postOnce(adapter: PlatformAdapter, channel: string, text: string, opts?: {
+  static async postOnce(adapter: PlatformAdapter, destination: Destination, text: string, opts?: {
     threadId?: string | null;
     onMessagePosted?: ((ref: MessageRef) => void) | null;
   }): Promise<MessageRef | null> {
-    const vm = new VirtualMessage(adapter, channel, opts);
+    const vm = new VirtualMessage(adapter, destination, opts);
     vm.append(text);
     await vm.flush();
     return vm.getParentRef();
@@ -248,11 +255,6 @@ export class VirtualMessage {
   /** Compatibility: return parentRef's messageId (maps to Slack's ts). */
   getParentTs(): string | null {
     return this.parentRef?.messageId ?? null;
-  }
-
-  /** Wrap the internal channel string as an interactive-reply Destination. */
-  private _makeDestination(): Destination {
-    return { type: 'interactive-reply', conduit: this.channel, sessionId: '' };
   }
 
   private async _processAppend(text: string): Promise<void> {
@@ -283,7 +285,7 @@ export class VirtualMessage {
       // Update permanently failed (after retries). Don't lose `text` — fall
       // back to posting it as a new message so it remains visible to the user.
       // If THIS also fails, _postNew throws and the queue catch records lastError.
-      log.error(`Update permanently failed in channel ${this.channel}; falling back to new post`);
+      log.error(`Update permanently failed in channel ${this._logChannel}; falling back to new post`);
       await this._postNew(text);
       // After fallback post succeeds, mark the stale update's WAL entry as
       // delivered so the drain loop doesn't retry it against the old message
@@ -339,7 +341,7 @@ export class VirtualMessage {
     if (updateResult.delivered) {
       this.mutableTail = text;
     } else {
-      log.error(`Update failed in appendMutableTail (channel ${this.channel}); falling back to new post`);
+      log.error(`Update failed in appendMutableTail (channel ${this._logChannel}); falling back to new post`);
       await this._postNew(text);
       this.currentContent = '';
       this.mutableTail = text;
@@ -377,7 +379,7 @@ export class VirtualMessage {
     if (updateResult.delivered) {
       this.mutableTail = text;
     } else {
-      log.error(`Update failed in editMutableTail (channel ${this.channel}); falling back to new post`);
+      log.error(`Update failed in editMutableTail (channel ${this._logChannel}); falling back to new post`);
       this._sealMutableTailNow();
       await this._postNew(text);
       this.currentContent = '';
@@ -435,16 +437,16 @@ export class VirtualMessage {
     const richBlocks: RichBlock[] = [{ type: 'markdown', text: chunk }];
     const richContent: MessageContent = { text: chunk, richBlocks };
     const walId = this.durable
-      ? await this.durable.beforePost(this.channel, chunk, { threadId, richBlocks })
+      ? await this.durable.beforePost(this.destination, chunk, { threadId, richBlocks })
       : null;
     try {
       const ref = await withRetries(async () => {
         try {
-          return await this.adapter.postMessage(this._makeDestination(), richContent, { threadId });
+          return await this.adapter.postMessage(this.destination, richContent, { threadId });
         } catch {
-          return await this.adapter.postMessage(this._makeDestination(), { text: chunk }, { threadId });
+          return await this.adapter.postMessage(this.destination, { text: chunk }, { threadId });
         }
-      }, `postMessage(channel=${this.channel}, len=${chunk.length})`);
+      }, `postMessage(channel=${this._logChannel}, len=${chunk.length})`);
       if (walId && this.durable) {
         await this.durable.afterSent(walId, ref.messageId).catch(e => {
           log.warn(`afterSent failed for walId=${walId}:`, (e as Error).message);
@@ -467,7 +469,7 @@ export class VirtualMessage {
     const richBlocks: RichBlock[] = [{ type: 'markdown', text: content }];
     const richContent: MessageContent = { text: content, richBlocks };
     const walId = this.durable
-      ? await this.durable.beforeUpdate(this.channel, ref.messageId, content, { richBlocks })
+      ? await this.durable.beforeUpdate(this._logChannel, ref.messageId, content, { richBlocks })
       : null;
     try {
       await withRetries(async () => {
@@ -476,7 +478,7 @@ export class VirtualMessage {
         } catch {
           await this.adapter.updateMessage(ref, { text: content });
         }
-      }, `updateMessage(channel=${this.channel}, len=${content.length})`);
+      }, `updateMessage(channel=${this._logChannel}, len=${content.length})`);
       if (walId && this.durable) {
         await this.durable.afterSent(walId).catch(e => {
           log.warn(`afterSent failed for walId=${walId}:`, (e as Error).message);

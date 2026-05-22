@@ -13,6 +13,10 @@ import {
 import { MockAdapter } from '../src/platform/testing.js';
 import type { Destination } from '../src/platform/types.js';
 
+function testDest(channel: string): Destination {
+  return { type: 'interactive-reply', conduit: channel, sessionId: '' };
+}
+
 function postedConduit(p: { destination: Destination }): string {
   return p.destination.type === 'interactive-reply' ? p.destination.conduit : '';
 }
@@ -32,7 +36,7 @@ test('VirtualMessage: retry path runs without real wall-clock delay when delays 
   _testSetRetryDelays([0, 0, 0, 0]);
   const adapter = new MockAdapter();
   adapter.failPostMessageCount = 3; // forces 2 retries (rich + plain + retry)
-  const vm = new VirtualMessage(adapter, 'C-delay');
+  const vm = new VirtualMessage(adapter, testDest('C-delay'));
   const t0 = Date.now();
   vm.append('zero-delay retry');
   await flush(vm);
@@ -45,7 +49,7 @@ test('VirtualMessage: retry path runs without real wall-clock delay when delays 
 
 test('VirtualMessage: single append creates one top-level message', async () => {
   const adapter = new MockAdapter();
-  const vm = new VirtualMessage(adapter, 'C123');
+  const vm = new VirtualMessage(adapter, testDest('C123'));
   vm.append('hello');
   await flush(vm);
 
@@ -58,7 +62,7 @@ test('VirtualMessage: single append creates one top-level message', async () => 
 
 test('VirtualMessage: two short messages — second uses update', async () => {
   const adapter = new MockAdapter();
-  const vm = new VirtualMessage(adapter, 'C123');
+  const vm = new VirtualMessage(adapter, testDest('C123'));
   vm.append('first');
   vm.append('second');
   await flush(vm);
@@ -70,7 +74,7 @@ test('VirtualMessage: two short messages — second uses update', async () => {
 
 test('VirtualMessage: three short messages all aggregate', async () => {
   const adapter = new MockAdapter();
-  const vm = new VirtualMessage(adapter, 'C123');
+  const vm = new VirtualMessage(adapter, testDest('C123'));
   vm.append('one');
   vm.append('two');
   vm.append('three');
@@ -88,7 +92,7 @@ test('VirtualMessage: three short messages all aggregate', async () => {
 
 test('VirtualMessage: exceeding maxMessageLength forces new message', async () => {
   const adapter = new MockAdapter();
-  const vm = new VirtualMessage(adapter, 'C123');
+  const vm = new VirtualMessage(adapter, testDest('C123'));
   vm.append('x'.repeat(2000));
   vm.append('y'.repeat(1500));
   await flush(vm);
@@ -99,7 +103,7 @@ test('VirtualMessage: exceeding maxMessageLength forces new message', async () =
 
 test('VirtualMessage: second table forces new message', async () => {
   const adapter = new MockAdapter();
-  const vm = new VirtualMessage(adapter, 'C123');
+  const vm = new VirtualMessage(adapter, testDest('C123'));
   vm.append('intro\n| a | b |\n| 1 | 2 |');
   vm.append('more\n| c | d |\n| 3 | 4 |');
   await flush(vm);
@@ -109,7 +113,7 @@ test('VirtualMessage: second table forces new message', async () => {
 
 test('VirtualMessage: 3rd HR forces new message', async () => {
   const adapter = new MockAdapter();
-  const vm = new VirtualMessage(adapter, 'C123');
+  const vm = new VirtualMessage(adapter, testDest('C123'));
   vm.append('a\n---\nb');
   vm.append('c\n---\nd');
   vm.append('e\n---\nf');
@@ -122,7 +126,7 @@ test('VirtualMessage: 3rd HR forces new message', async () => {
 
 test('VirtualMessage: no threadId — first top-level, overflow to thread', async () => {
   const adapter = new MockAdapter();
-  const vm = new VirtualMessage(adapter, 'C123');
+  const vm = new VirtualMessage(adapter, testDest('C123'));
   vm.append('x'.repeat(2000));
   vm.append('y'.repeat(1500));
   await flush(vm);
@@ -134,7 +138,7 @@ test('VirtualMessage: no threadId — first top-level, overflow to thread', asyn
 
 test('VirtualMessage: getParentTs returns first message id', async () => {
   const adapter = new MockAdapter();
-  const vm = new VirtualMessage(adapter, 'C123');
+  const vm = new VirtualMessage(adapter, testDest('C123'));
   assert.equal(vm.getParentTs(), null);
   vm.append('hello');
   await flush(vm);
@@ -143,7 +147,7 @@ test('VirtualMessage: getParentTs returns first message id', async () => {
 
 test('VirtualMessage: getParentRef returns full MessageRef', async () => {
   const adapter = new MockAdapter();
-  const vm = new VirtualMessage(adapter, 'C123');
+  const vm = new VirtualMessage(adapter, testDest('C123'));
   vm.append('hello');
   await flush(vm);
   const ref = vm.getParentRef();
@@ -154,7 +158,7 @@ test('VirtualMessage: getParentRef returns full MessageRef', async () => {
 
 test('VirtualMessage: multiple splits all go to thread under first', async () => {
   const adapter = new MockAdapter();
-  const vm = new VirtualMessage(adapter, 'C123');
+  const vm = new VirtualMessage(adapter, testDest('C123'));
   vm.append('x'.repeat(2000));
   vm.append('y'.repeat(1500));
   vm.append('z'.repeat(1500));
@@ -170,7 +174,7 @@ test('VirtualMessage: multiple splits all go to thread under first', async () =>
 
 test('VirtualMessage: with threadId — all messages use it', async () => {
   const adapter = new MockAdapter();
-  const vm = new VirtualMessage(adapter, 'C123', { threadId: '999.000' });
+  const vm = new VirtualMessage(adapter, testDest('C123'), { threadId: '999.000' });
   vm.append('x'.repeat(2000));
   vm.append('y'.repeat(1500));
   await flush(vm);
@@ -182,7 +186,7 @@ test('VirtualMessage: with threadId — all messages use it', async () => {
 
 test('VirtualMessage: with threadId — no parentRef set', async () => {
   const adapter = new MockAdapter();
-  const vm = new VirtualMessage(adapter, 'C123', { threadId: '999.000' });
+  const vm = new VirtualMessage(adapter, testDest('C123'), { threadId: '999.000' });
   vm.append('hello');
   await flush(vm);
   assert.equal(vm.getParentTs(), null);
@@ -193,7 +197,7 @@ test('VirtualMessage: with threadId — no parentRef set', async () => {
 test('VirtualMessage: onMessagePosted called on post, not update', async () => {
   const adapter = new MockAdapter();
   const refs: any[] = [];
-  const vm = new VirtualMessage(adapter, 'C123', {
+  const vm = new VirtualMessage(adapter, testDest('C123'), {
     onMessagePosted: (ref) => refs.push(ref),
   });
   vm.append('first');
@@ -207,7 +211,7 @@ test('VirtualMessage: onMessagePosted called on post, not update', async () => {
 test('VirtualMessage: onMessagePosted called for each new post', async () => {
   const adapter = new MockAdapter();
   const refs: any[] = [];
-  const vm = new VirtualMessage(adapter, 'C123', {
+  const vm = new VirtualMessage(adapter, testDest('C123'), {
     onMessagePosted: (ref) => refs.push(ref),
   });
   vm.append('x'.repeat(2000));
@@ -221,7 +225,7 @@ test('VirtualMessage: onMessagePosted called for each new post', async () => {
 
 test('VirtualMessage: empty/whitespace text ignored', async () => {
   const adapter = new MockAdapter();
-  const vm = new VirtualMessage(adapter, 'C123');
+  const vm = new VirtualMessage(adapter, testDest('C123'));
   vm.append('');
   vm.append('   ');
   vm.append('\n');
@@ -233,7 +237,7 @@ test('VirtualMessage: empty/whitespace text ignored', async () => {
 
 test('VirtualMessage: getRefs returns all message refs', async () => {
   const adapter = new MockAdapter();
-  const vm = new VirtualMessage(adapter, 'C123');
+  const vm = new VirtualMessage(adapter, testDest('C123'));
   vm.append('x'.repeat(2000));
   vm.append('y'.repeat(1500));
   await flush(vm);
@@ -248,7 +252,7 @@ test('VirtualMessage: getRefs returns all message refs', async () => {
 
 test('VirtualMessage: rapid appends processed in order', async () => {
   const adapter = new MockAdapter();
-  const vm = new VirtualMessage(adapter, 'C123');
+  const vm = new VirtualMessage(adapter, testDest('C123'));
   vm.append('msg1');
   vm.append('msg2');
   vm.append('msg3');
@@ -265,7 +269,7 @@ test('VirtualMessage: rapid appends processed in order', async () => {
 
 test('VirtualMessage: char limit split with correct threading', async () => {
   const adapter = new MockAdapter();
-  const vm = new VirtualMessage(adapter, 'C123');
+  const vm = new VirtualMessage(adapter, testDest('C123'));
   vm.append('x'.repeat(2000));
   vm.append('y'.repeat(1500));
   vm.append('z'.repeat(500));
@@ -279,7 +283,7 @@ test('VirtualMessage: char limit split with correct threading', async () => {
 
 test('VirtualMessage: richBlocks included in post and update', async () => {
   const adapter = new MockAdapter();
-  const vm = new VirtualMessage(adapter, 'C123');
+  const vm = new VirtualMessage(adapter, testDest('C123'));
   vm.append('hello');
   vm.append('world');
   await flush(vm);
@@ -294,7 +298,7 @@ test('VirtualMessage: richBlocks included in post and update', async () => {
 
 test('VirtualMessage: postStandalone creates independent message', async () => {
   const adapter = new MockAdapter();
-  const vm = new VirtualMessage(adapter, 'C123');
+  const vm = new VirtualMessage(adapter, testDest('C123'));
   vm.append('content');
   const ref = await vm.postStandalone('standalone text');
   await flush(vm);
@@ -306,7 +310,7 @@ test('VirtualMessage: postStandalone creates independent message', async () => {
 
 test('VirtualMessage: postStandalone resets current, next append creates new', async () => {
   const adapter = new MockAdapter();
-  const vm = new VirtualMessage(adapter, 'C123');
+  const vm = new VirtualMessage(adapter, testDest('C123'));
   vm.append('before');
   await vm.postStandalone('standalone');
   vm.append('after');
@@ -317,7 +321,7 @@ test('VirtualMessage: postStandalone resets current, next append creates new', a
 
 test('VirtualMessage: postStandalone with actions routes to postInteractive and still splits', async () => {
   const adapter = new MockAdapter();
-  const vm = new VirtualMessage(adapter, 'C123');
+  const vm = new VirtualMessage(adapter, testDest('C123'));
   vm.append('A');
   vm.append('B');
   const ref = await vm.postStandalone('Form', {
@@ -351,7 +355,7 @@ test('VirtualMessage: postStandalone with actions routes to postInteractive and 
 
 test('VirtualMessage.postOnce: creates single message and returns ref', async () => {
   const adapter = new MockAdapter();
-  const ref = await VirtualMessage.postOnce(adapter, 'C123', 'one-shot');
+  const ref = await VirtualMessage.postOnce(adapter, testDest('C123'), 'one-shot');
 
   assert.ok(ref);
   assert.equal(ref!.messageId, '1000');
@@ -363,7 +367,7 @@ test('VirtualMessage.postOnce: creates single message and returns ref', async ()
 
 test('VirtualMessage: respects adapter maxMessageLength', async () => {
   const adapter = new MockAdapter({ maxMessageLength: 100 });
-  const vm = new VirtualMessage(adapter, 'C123');
+  const vm = new VirtualMessage(adapter, testDest('C123'));
   vm.append('x'.repeat(80));
   vm.append('y'.repeat(80));
   await flush(vm);
@@ -395,7 +399,7 @@ test('MockAdapter: simulateAction triggers registered handler', async () => {
 
 test('MockAdapter: reset clears all recorded state', async () => {
   const adapter = new MockAdapter();
-  await adapter.postMessage('C1', { text: 'hi' });
+  await adapter.postMessage(testDest('C1'), { text: 'hi' });
   await adapter.addReaction({ channel: 'C1', messageId: '1' }, 'thumbsup');
   adapter.reset();
 
@@ -413,7 +417,7 @@ test('VirtualMessage: sustained postMessage failure is retried (rich+plain+retri
   // Simulate a sustained transient failure: 3 failures across rich attempt,
   // plain attempt, and the first retry. The retry path must eventually succeed.
   adapter.failPostMessageCount = 3;
-  const vm = new VirtualMessage(adapter, 'C123');
+  const vm = new VirtualMessage(adapter, testDest('C123'));
   vm.append('important content that must not be dropped');
   await flush(vm);
 
@@ -423,7 +427,7 @@ test('VirtualMessage: sustained postMessage failure is retried (rich+plain+retri
 
 test('VirtualMessage: sustained updateMessage failure does not silently drop appended text', async () => {
   const adapter = new MockAdapter();
-  const vm = new VirtualMessage(adapter, 'C123');
+  const vm = new VirtualMessage(adapter, testDest('C123'));
   vm.append('first');
   await flush(vm);
   assert.equal(adapter.posted.length, 1);
@@ -458,7 +462,7 @@ test('VirtualMessage: chunk[0] sustained failure does not orphan chunk[1] as top
   const adapter = new MockAdapter();
   // Sustained failure on chunk[0] only: rich + plain both fail, but retries succeed.
   adapter.failPostMessageCount = 2;
-  const vm = new VirtualMessage(adapter, 'C123');
+  const vm = new VirtualMessage(adapter, testDest('C123'));
   // Force chunking into 2 chunks.
   vm.append('a'.repeat(2500) + '\n' + 'b'.repeat(2500));
   await flush(vm);
@@ -478,7 +482,7 @@ test('VirtualMessage: persistent failure surfaces error to flush() instead of si
   const adapter = new MockAdapter();
   // Force every attempt (including all retries) to fail.
   adapter.failPostMessageCount = 999;
-  const vm = new VirtualMessage(adapter, 'C123');
+  const vm = new VirtualMessage(adapter, testDest('C123'));
   vm.append('this should fail loudly, not silently');
 
   // flush() must reject so callers know the message did not reach Slack.
@@ -492,7 +496,7 @@ test('VirtualMessage: persistent failure surfaces error to flush() instead of si
 test('VirtualMessage.postStandalone: persistent failure rejects the returned promise', async () => {
   const adapter = new MockAdapter();
   adapter.failPostMessageCount = 999;
-  const vm = new VirtualMessage(adapter, 'C123');
+  const vm = new VirtualMessage(adapter, testDest('C123'));
 
   await assert.rejects(
     () => vm.postStandalone('critical message'),
@@ -508,9 +512,9 @@ test('VirtualMessage: durable hooks called on post and update', async () => {
   const walOps: { op: string; channel?: string; text?: string; walId?: string; messageId?: string }[] = [];
   let walCounter = 0;
   const durable = {
-    async beforePost(channel: string, text: string) {
+    async beforePost(_dest: unknown, text: string) {
       const id = `wal-${++walCounter}`;
-      walOps.push({ op: 'beforePost', channel, text, walId: id });
+      walOps.push({ op: 'beforePost', text, walId: id });
       return id;
     },
     async beforeUpdate(channel: string, messageId: string, text: string) {
@@ -523,7 +527,7 @@ test('VirtualMessage: durable hooks called on post and update', async () => {
     },
   };
 
-  const vm = new VirtualMessage(adapter, 'C-durable', { durable });
+  const vm = new VirtualMessage(adapter, testDest('C-durable'), { durable });
   vm.append('first');
   vm.append('second');
   await flush(vm);
@@ -551,7 +555,7 @@ test('VirtualMessage: durable hooks called on postStandalone', async () => {
     async afterSent() { walOps.push('afterSent'); },
   };
 
-  const vm = new VirtualMessage(adapter, 'C-standalone', { durable });
+  const vm = new VirtualMessage(adapter, testDest('C-standalone'), { durable });
   await vm.postStandalone('standalone text');
   await flush(vm);
 
@@ -560,7 +564,7 @@ test('VirtualMessage: durable hooks called on postStandalone', async () => {
 
 test('VirtualMessage: no durable hooks — works without hooks (backward compat)', async () => {
   const adapter = new MockAdapter();
-  const vm = new VirtualMessage(adapter, 'C-nodurable');
+  const vm = new VirtualMessage(adapter, testDest('C-nodurable'));
   vm.append('hello');
   await flush(vm);
 
