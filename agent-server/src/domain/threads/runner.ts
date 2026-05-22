@@ -379,7 +379,7 @@ async function recordStepOutcome(
       kind: 'local',
       label: `[${threadId}:${agentSlotId}]`,
       profileName: getActiveProfile(opts.channel),
-      projectId: 'general',
+      projectId: ctx.meta?.project ?? 'general',
     });
   }
 

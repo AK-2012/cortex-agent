@@ -21,6 +21,8 @@ import * as executionRegistry from '@domain/executions/registry.js';
 import * as askUserQuestion from './interactions/ask-user-question.js';
 import { runAgent, getClaudeMode, getActiveProfile, resolveBackendForChannel } from '@domain/agents/index.js';
 import { detectProject } from '@domain/costs/cost-tracker.js';
+import { projectStore } from '@domain/projects/index.js';
+import { projectDirRepo } from '@store/project-dir-repo.js';
 
 import { setStreamingCallback, clearStreamingCallback } from './routing/hook-bridge.js';
 import { maybeNotifyCodexLowUsage } from '@domain/costs/codex-usage-monitor.js';
@@ -36,7 +38,7 @@ const log = createLogger('lifecycle');
 export async function handleAgentSuccess({ result, channel, adapter, statusMsg, startTime, userMessage, executionId, trigger = 'user', sessionName = null, threadTs = null, userMessageTs = null, onAssistantMessage = null }: { result: AgentResult; channel: string; adapter: PlatformAdapter; statusMsg: MessageRef; startTime: number; userMessage: string; executionId: string | null; trigger?: string; sessionName?: string | null; threadTs?: string | null; userMessageTs?: string | null; onAssistantMessage?: ((text: string) => void) | null }): Promise<void> {
   if (result?.sessionId) await setSessionAsync(channel, result.sessionId, resolveBackendForChannel(channel));
 
-  await registerOrUpdateSession(result, sessionName, channel, trigger, detectProject(userMessage));
+  await registerOrUpdateSession(result, sessionName, channel, trigger, projectStore.resolveFromMessage(userMessage)?.id ?? 'general');
   await backfillLedgerSessionId(result, channel);
 
   const { elapsedStr, elapsedS } = computeElapsed(startTime);
@@ -156,7 +158,7 @@ async function persistErrorSession(resolvedSessionId: string | null, sessionName
   if (!sessionName) return;
   const existing = await sessionStore.lookupBySessionId(resolvedSessionId);
   if (!existing) {
-    await sessionStore.registerSession(sessionName, { sessionId: resolvedSessionId, channel, backend, kind: 'local', profileName: getActiveProfile(channel), projectId: 'general' });
+    await sessionStore.registerSession(sessionName, { sessionId: resolvedSessionId, channel, backend, kind: 'local', profileName: getActiveProfile(channel), projectId: (await projectDirRepo.getChannelProject(channel)) ?? 'general' });
   }
 }
 

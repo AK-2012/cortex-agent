@@ -13,7 +13,7 @@ import { sessionStore } from '@store/session-registry-repo.js';
 import { sessionRepo } from '@store/session-repo.js';
 import { threadStore } from '@store/thread-repo.js';
 import { getActiveProfile, getActiveBackend, getDefaultAgent } from '../../agents/index.js';
-import { detectProject } from '../../costs/cost-tracker.js';
+import { projectStore } from '@domain/projects/index.js';
 import { normalizeSkillCommandPrefix } from '../../memory/skill-scanner.js';
 import { isValidDispatchPrompt, hasRunningExecutionForSchedule } from '../../tasks/dispatcher.js';
 import { allConfigsRateLimited } from '../../agents/facade.js';
@@ -140,7 +140,7 @@ async function runScheduledTaskAsync({ normalizedMessage, message, channel, sche
       }
     } else {
       await finalizeThreadSuccess(adapter, plan.channel, statusMsg, {
-        startTime, sessionName, result, threadResult, project: detectProject(message), trigger: 'scheduled',
+        startTime, sessionName, result, threadResult, project: projectStore.resolveFromMessage(message)?.id ?? 'general', trigger: 'scheduled',
         label: message?.substring(0, 60) || null, sessionKind: 'scheduled', statusPrefix: 'Done',
       });
     }
@@ -173,7 +173,7 @@ interface DispatchExecuteInput {
 }
 
 function dispatchByPlan({ plan, normalizedMessage, message, scheduleTaskId, effectiveProfile, statusMsg, startTime, sessionName }: DispatchExecuteInput) {
-  const project = detectProject(message);
+  const project = projectStore.resolveFromMessage(message)?.id ?? 'general';
   const onProgress = statusMsg ? buildProgressUpdater(ctx.adapter!, plan.channel, statusMsg, startTime, effectiveProfile, sessionName) : undefined;
   const icb = ctx.buildInteractiveCallbacks?.(plan.channel, null);
   const baseRunOpts = {

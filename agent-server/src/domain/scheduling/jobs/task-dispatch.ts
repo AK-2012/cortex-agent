@@ -10,7 +10,6 @@ const log = createLogger('task-dispatch');
 import * as pendingTaskTracker from '../../tasks/pending-tracker.js';
 import { sessionStore } from '@store/session-registry-repo.js';
 import { getActiveProfile, getActiveBackend } from '../../agents/index.js';
-import { detectProject } from '../../costs/cost-tracker.js';
 import { allConfigsRateLimited } from '@domain/agents/facade.js';
 import { selectAndClaimTask, computeNextInterval, updateScheduleInterval } from '../../tasks/dispatcher.js';
 import { channelRepo } from '@store/channel-repo.js';

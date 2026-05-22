@@ -210,6 +210,14 @@ process.on('SIGTERM', async () => {
   await threadStore.markRunningAsFailedOnStartup();
   await threadStore.cleanup();
 
+  // GC: prune stale sessions (older than 7 days, unreferenced by running executions or active threads)
+  try {
+    const pruned = await sessionStore.pruneStale(7 * 24 * 60 * 60 * 1000);
+    if (pruned > 0) log.info(`Startup GC: pruned ${pruned} stale session(s)`);
+  } catch (e) {
+    log.warn(`Startup GC: pruneStale failed: ${(e as Error).message}`);
+  }
+
   // M1: Initialize project registry (scaffolds general/, scans PROJECTS_DIR, starts fs.watch watcher)
   await projectStore.initialize();
   channelRepo.setProjectLister(() => projectStore.list().map(p => p.id));
@@ -245,6 +253,17 @@ process.on('SIGTERM', async () => {
       await scheduler.resume(t.id);
     }
   }
+
+  // Periodic GC for stale sessions (every 6 hours)
+  const PRUNE_STALE_INTERVAL = 6 * 60 * 60 * 1000;
+  setInterval(async () => {
+    try {
+      const removed = await sessionStore.pruneStale(7 * 24 * 60 * 60 * 1000);
+      if (removed > 0) log.info(`Periodic GC: pruned ${removed} stale session(s)`);
+    } catch (e) {
+      log.error(`Periodic GC: pruneStale failed: ${(e as Error).message}`);
+    }
+  }, PRUNE_STALE_INTERVAL);
 
   startWebhookServer();
 

@@ -255,7 +255,7 @@ async function runHookAgent(
       kind: 'local',
       label: `[${threadId}:${slotId}]`,
       profileName: getActiveProfile(opts.channel),
-      projectId: 'general',
+      projectId: thread.metadata?.project ?? 'general',
     });
   }
 
