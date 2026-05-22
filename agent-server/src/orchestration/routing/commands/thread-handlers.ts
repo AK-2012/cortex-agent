@@ -4,7 +4,7 @@
 // >>> If I am updated, update my header comment and the parent folder's CORTEX.md <<<
 
 import { createLogger } from '@core/log.js';
-import type { PlatformAdapter } from '@platform/index.js';
+import type { Destination, PlatformAdapter } from '@platform/index.js';
 import { threadStore } from '@store/thread-repo.js';
 import { listTemplates, listAgents } from '@domain/threads/index.js';
 import { runningExecutions } from '../../../core/running-executions.js';
@@ -13,9 +13,10 @@ import { channelQueues } from '../../channel-queue.js';
 const log = createLogger('thread-handlers');
 
 async function handleThreadStatus(channel: string, adapter: PlatformAdapter) {
+  const dest: Destination = { type: 'interactive-reply', conduit: channel, sessionId: '' };
   const active = threadStore.findActive(channel);
   if (!active) {
-    await adapter.postMessage(channel, { text: 'No active thread in this channel.' });
+    await adapter.postMessage(dest, { text: 'No active thread in this channel.' });
     return;
   }
   const agents = Object.keys(active.agents).join(', ');
@@ -29,13 +30,14 @@ async function handleThreadStatus(channel: string, adapter: PlatformAdapter) {
   if (active.status === 'aborted' && active.abortReason) {
     lines.push(`Abort reason: ${active.abortReason}`);
   }
-  await adapter.postMessage(channel, { text: lines.join('\n') });
+  await adapter.postMessage(dest, { text: lines.join('\n') });
 }
 
 async function handleThreadTemplates(channel: string, adapter: PlatformAdapter) {
+  const dest: Destination = { type: 'interactive-reply', conduit: channel, sessionId: '' };
   const templates = listTemplates();
   if (templates.length === 0) {
-    await adapter.postMessage(channel, { text: 'No thread templates configured.' });
+    await adapter.postMessage(dest, { text: 'No thread templates configured.' });
     return;
   }
   const lines = ['*Available Thread Templates*'];
@@ -43,10 +45,11 @@ async function handleThreadTemplates(channel: string, adapter: PlatformAdapter) 
     const agentList = t.agents.map(a => typeof a === 'string' ? a : a.ref).join(', ');
     lines.push(`• \`${t.name}\` — ${t.description} [agents: ${agentList}]`);
   }
-  await adapter.postMessage(channel, { text: lines.join('\n') });
+  await adapter.postMessage(dest, { text: lines.join('\n') });
 }
 
 async function handleThreadAgents(channel: string, adapter: PlatformAdapter) {
+  const dest: Destination = { type: 'interactive-reply', conduit: channel, sessionId: '' };
   const agentDefs = listAgents();
   const lines: string[] = [];
   if (agentDefs.length > 0) {
@@ -67,24 +70,26 @@ async function handleThreadAgents(channel: string, adapter: PlatformAdapter) {
       lines.push(`  • *${slotId}* (${slot.profile}) — ${slot.status} | ${sessionStr}${isActiveAgent}`);
     }
   }
-  await adapter.postMessage(channel, { text: lines.join('\n') });
+  await adapter.postMessage(dest, { text: lines.join('\n') });
 }
 
 async function handleThreadCancelAlias(channel: string, adapter: PlatformAdapter) {
+  const dest: Destination = { type: 'interactive-reply', conduit: channel, sessionId: '' };
   // Alias for !cancel — delegate to the same killByKey behavior
   if (runningExecutions.killByKey(channel)) {
     log.info('Cancel requested for channel:', channel);
     channelQueues.delete(channel);
-    await adapter.postMessage(channel, { text: ':octagonal_sign: Cancelled. Session preserved — next message will resume.' });
+    await adapter.postMessage(dest, { text: ':octagonal_sign: Cancelled. Session preserved — next message will resume.' });
   } else {
-    await adapter.postMessage(channel, { text: 'Nothing running to cancel.' });
+    await adapter.postMessage(dest, { text: 'Nothing running to cancel.' });
   }
 }
 
 async function handleThreadList(channel: string, adapter: PlatformAdapter) {
+  const dest: Destination = { type: 'interactive-reply', conduit: channel, sessionId: '' };
   const threads = threadStore.findByChannel(channel).slice(0, 10);
   if (threads.length === 0) {
-    await adapter.postMessage(channel, { text: 'No threads found for this channel.' });
+    await adapter.postMessage(dest, { text: 'No threads found for this channel.' });
     return;
   }
   const lines = ['*Recent Threads*'];
@@ -92,13 +97,14 @@ async function handleThreadList(channel: string, adapter: PlatformAdapter) {
     const modeLabel = t.templateName || 'ad-hoc';
     lines.push(`• \`${t.id}\` ${modeLabel} — ${t.status} | ${t.steps.length} steps | $${t.totalCostUsd.toFixed(4)}`);
   }
-  await adapter.postMessage(channel, { text: lines.join('\n') });
+  await adapter.postMessage(dest, { text: lines.join('\n') });
 }
 
 async function handleThreadListRunning(channel: string, adapter: PlatformAdapter) {
+  const dest: Destination = { type: 'interactive-reply', conduit: channel, sessionId: '' };
   const executions = runningExecutions.getAll().filter(e => e.threadId);
   if (executions.length === 0) {
-    await adapter.postMessage(channel, { text: 'No running threads.' });
+    await adapter.postMessage(dest, { text: 'No running threads.' });
     return;
   }
   const lines = ['*Running Threads*'];
@@ -109,11 +115,12 @@ async function handleThreadListRunning(channel: string, adapter: PlatformAdapter
     const cost = thread?.totalCostUsd ?? 0;
     lines.push(`• \`${exec.threadId}\` — ${exec.channel || '?'} | ${modeLabel} | ${stepCount} step(s) | $${cost.toFixed(4)}`);
   }
-  await adapter.postMessage(channel, { text: lines.join('\n') });
+  await adapter.postMessage(dest, { text: lines.join('\n') });
 }
 
 async function sendThreadUsage(channel: string, adapter: PlatformAdapter) {
-  await adapter.postMessage(channel, {
+  const dest: Destination = { type: 'interactive-reply', conduit: channel, sessionId: '' };
+  await adapter.postMessage(dest, {
     text: [
       '*Thread Commands*',
       '`!thread` — show active thread status',

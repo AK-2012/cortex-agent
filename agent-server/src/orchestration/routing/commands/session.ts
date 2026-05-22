@@ -1,5 +1,5 @@
 import { createLogger } from '@core/log.js';
-import type { PlatformAdapter } from '@platform/index.js';
+import type { Destination, PlatformAdapter } from '@platform/index.js';
 import type { CommandResult } from './command-context.js';
 import type { CommandActionRouter } from '@orch/interactions/command-action-router.js';
 import { closeSession, getActiveBackend, getActiveProfile, setActiveProfile, resolveBackendForChannel } from '@domain/agents/index.js';
@@ -45,6 +45,7 @@ export async function handleNewCmd(
   opts: { skipHook?: boolean } = {},
   threadTs?: string | null,
 ): Promise<void> {
+  const dest: Destination = { type: 'interactive-reply', conduit: channel, sessionId: '' };
   if (!opts.skipHook) {
     const resolvedThreadTs = await resolveSessionThreadTs(channel, threadTs);
     void fireAndForgetPreCloseHook(channel, adapter, resolvedThreadTs);
@@ -67,7 +68,7 @@ export async function handleNewCmd(
   const cleared = planApprovals.clearByChannel(channel);
   if (cleared > 0) log.info('Cleared pending plan for channel:', channel);
   log.info('New conversation started in channel:', channel);
-  await adapter.postMessage(channel, { text: `--- new conversation --- (profile: ${profileName})` });
+  await adapter.postMessage(dest, { text: `--- new conversation --- (profile: ${profileName})` });
 }
 
 const MAX_RESUME_BUTTONS = 10;
@@ -108,26 +109,27 @@ export function createResumeHandler(router?: CommandActionRouter) {
   return async function handleResumeCmdInteractive(
     channel: string, adapter: PlatformAdapter, trimmedMessage: string,
   ): Promise<CommandResult | void> {
+    const dest: Destination = { type: 'interactive-reply', conduit: channel, sessionId: '' };
     const args = trimmedMessage.split(/\s+/).slice(1);
 
     if (args.length > 0) {
       const name = args[0];
       const record = await sessionStore.lookupSession(name);
       if (!record) {
-        await adapter.postMessage(channel, { text: `:x: Session \`${name}\` not found. Run \`!resume\` to list sessions.` });
+        await adapter.postMessage(dest, { text: `:x: Session \`${name}\` not found. Run \`!resume\` to list sessions.` });
         return;
       }
       if (record.profileName) setActiveProfile(record.profileName, channel);
       await setSessionAsync(channel, record.sessionId, record.backend);
       await conversationLedger.switchSession(channel, { sessionId: record.sessionId, sessionName: name, backend: record.backend, profileName: record.profileName });
       const profileNote = record.profileName ? ` (profile: ${record.profileName})` : '';
-      await adapter.postMessage(channel, { text: `:arrows_counterclockwise: Switched to session \`${name}\`${profileNote}` });
+      await adapter.postMessage(dest, { text: `:arrows_counterclockwise: Switched to session \`${name}\`${profileNote}` });
       return;
     }
 
     const sessions = await sessionStore.listRecentSessions(10);
     if (sessions.length === 0) {
-      await adapter.postMessage(channel, { text: 'No sessions recorded yet.' });
+      await adapter.postMessage(dest, { text: 'No sessions recorded yet.' });
       return;
     }
     const activeId = await sessionStore.getActiveSessionName(channel, getActiveBackend());
@@ -144,7 +146,7 @@ export function createResumeHandler(router?: CommandActionRouter) {
     const text = lines.join('\n');
 
     if (!router) {
-      await adapter.postMessage(channel, { text });
+      await adapter.postMessage(dest, { text });
       return;
     }
 

@@ -4,7 +4,7 @@
 // >>> If I am updated, update my header comment and the parent folder's CORTEX.md <<<
 
 import * as path from 'path';
-import type { PlatformAdapter, MessageRef, DownloadedFile, IncomingMessage, PlatformFileRef } from '@platform/index.js';
+import type { Destination, PlatformAdapter, MessageRef, DownloadedFile, IncomingMessage, PlatformFileRef } from '@platform/index.js';
 import { channelQueues, enqueue } from './channel-queue.js';
 import { trackPendingTask } from './busy-tracker.js';
 import { addAgentToThread, createThread, getTemplate, getAgent } from '@domain/threads/index.js';
@@ -73,6 +73,7 @@ export class ThreadExecutor {
 
   private async _executeReal(ctx: ThreadExecCtx): Promise<void> {
     const { channel, adapter } = ctx;
+    const interactiveDest: Destination = { type: 'interactive-reply', conduit: channel, sessionId: '' };
     const startTime = Date.now();
     let statusMsg: MessageRef | undefined;
     const downloadedFiles = await downloadFiles(ctx.message.files, ctx.hasFiles, ctx.adapter);
@@ -96,7 +97,7 @@ export class ThreadExecutor {
             richBlocks: buildSealedStatusActionBlocks(cancelText, errorBlocksTemplate),
           }).catch(() => {});
         } else {
-          await adapter.postMessage(channel, { text: ':octagonal_sign: Cancelled' }, ctx.threadTs ? { threadId: ctx.threadTs } : undefined).catch(() => {});
+          await adapter.postMessage(interactiveDest, { text: ':octagonal_sign: Cancelled' }, ctx.threadTs ? { threadId: ctx.threadTs } : undefined).catch(() => {});
         }
       } else {
         const errorMsg = (error as Error)?.message || 'Unknown error';
@@ -107,7 +108,7 @@ export class ThreadExecutor {
             richBlocks: buildSealedStatusActionBlocks(failText, errorBlocksTemplate),
           }).catch(() => {});
         } else {
-          await adapter.postMessage(channel, { text: `:x: Thread failed: ${errorMsg}` }, ctx.threadTs ? { threadId: ctx.threadTs } : undefined).catch(() => {});
+          await adapter.postMessage(interactiveDest, { text: `:x: Thread failed: ${errorMsg}` }, ctx.threadTs ? { threadId: ctx.threadTs } : undefined).catch(() => {});
         }
       }
     }
@@ -122,6 +123,7 @@ async function handleThreadAdd({ threadAddMatch, existingThread, channel, adapte
   threadAddMatch: RegExpMatchArray; existingThread: any; channel: string; adapter: PlatformAdapter;
   threadTs: string | null; startTime: number; downloadedFiles: DownloadedFile[];
 }): Promise<MessageRef | null> {
+  const interactiveDest: Destination = { type: 'interactive-reply', conduit: channel, sessionId: '' };
   const addAgentName = threadAddMatch[1];
   const addMessage = threadAddMatch[2]?.trim() || null;
   const targetThread = await validateThreadAddTarget(addAgentName, existingThread, channel, adapter, threadTs);
@@ -131,7 +133,7 @@ async function handleThreadAdd({ threadAddMatch, existingThread, channel, adapte
   const platformThreadId = targetThread.platformThreadId || threadTs;
   const threadBlocksTemplate = { channel, sessionName: null, isDm: false, threadId: targetThread.id };
   const addText = `:heavy_plus_sign: Adding *${addAgentName}* to thread ${targetThread.id.substring(0, 12)}...`;
-  const statusMsg = await adapter.postMessage(channel, {
+  const statusMsg = await adapter.postMessage(interactiveDest, {
     text: addText,
     richBlocks: buildStatusActionBlocks(addText, threadBlocksTemplate),
   }, platformThreadId ? { threadId: platformThreadId } : undefined);
@@ -151,17 +153,18 @@ async function handleThreadAdd({ threadAddMatch, existingThread, channel, adapte
 }
 
 async function validateThreadAddTarget(addAgentName: string, existingThread: any, channel: string, adapter: PlatformAdapter, threadTs: string | null): Promise<any> {
+  const interactiveDest: Destination = { type: 'interactive-reply', conduit: channel, sessionId: '' };
   if (!getAgent(addAgentName)) {
-    await adapter.postMessage(channel, { text: `:x: Unknown agent: \`${addAgentName}\`. Use \`!thread agents\` to see available agents.` }, threadTs ? { threadId: threadTs } : undefined);
+    await adapter.postMessage(interactiveDest, { text: `:x: Unknown agent: \`${addAgentName}\`. Use \`!thread agents\` to see available agents.` }, threadTs ? { threadId: threadTs } : undefined);
     return null;
   }
   const targetThread = existingThread || threadStore.findByChannel(channel).find((t: any) => t.status === 'completed' || t.status === 'waiting');
   if (!targetThread) {
-    await adapter.postMessage(channel, { text: `:x: No thread found. Start one first with \`!thread <agent> <message>\`.` }, threadTs ? { threadId: threadTs } : undefined);
+    await adapter.postMessage(interactiveDest, { text: `:x: No thread found. Start one first with \`!thread <agent> <message>\`.` }, threadTs ? { threadId: threadTs } : undefined);
     return null;
   }
   if (targetThread.status === 'running' && getActiveHandle(channel)) {
-    await adapter.postMessage(channel, { text: `:warning: Thread ${targetThread.id.substring(0, 12)} is currently running. Wait for it to finish.` }, threadTs ? { threadId: threadTs } : undefined);
+    await adapter.postMessage(interactiveDest, { text: `:warning: Thread ${targetThread.id.substring(0, 12)} is currently running. Wait for it to finish.` }, threadTs ? { threadId: threadTs } : undefined);
     return null;
   }
   return targetThread;
@@ -171,9 +174,10 @@ async function handleThreadContinue({ existingThread, agentMessage, channel, ada
   existingThread: any; agentMessage: string; channel: string; adapter: PlatformAdapter;
   threadTs: string | null; startTime: number; downloadedFiles: DownloadedFile[];
 }): Promise<MessageRef> {
+  const interactiveDest: Destination = { type: 'interactive-reply', conduit: channel, sessionId: '' };
   const continueBlocksTemplate = { channel, sessionName: null, isDm: false, threadId: existingThread.id };
   const continueText = `:hourglass_flowing_sand: Continuing thread ${existingThread.id.substring(0, 12)}...`;
-  const statusMsg = await adapter.postMessage(channel, {
+  const statusMsg = await adapter.postMessage(interactiveDest, {
     text: continueText,
     richBlocks: buildStatusActionBlocks(continueText, continueBlocksTemplate),
   }, threadTs ? { threadId: threadTs } : undefined);
@@ -197,17 +201,18 @@ async function handleThreadStart({ threadStartMatch, messageId, channel, adapter
   threadStartMatch: RegExpMatchArray; messageId: string; channel: string; adapter: PlatformAdapter;
   threadTs: string | null; startTime: number; downloadedFiles: DownloadedFile[];
 }): Promise<MessageRef | null> {
+  const interactiveDest: Destination = { type: 'interactive-reply', conduit: channel, sessionId: '' };
   const name = threadStartMatch[1];
   const template = getTemplate(name);
   const agent = getAgent(name);
   if (!template && !agent) {
-    await adapter.postMessage(channel, { text: `:x: Unknown template or agent: \`${name}\`. Use \`!thread templates\` or \`!thread agents\`.` });
+    await adapter.postMessage(interactiveDest, { text: `:x: Unknown template or agent: \`${name}\`. Use \`!thread templates\` or \`!thread agents\`.` });
     return null;
   }
 
   const startBlocksTemplate = { channel, sessionName: null, isDm: false };
   const startText = `:hourglass_flowing_sand: Starting thread (${template ? name : `agent:${name}`})...`;
-  const statusMsg = await adapter.postMessage(channel, {
+  const statusMsg = await adapter.postMessage(interactiveDest, {
     text: startText,
     // No Cancel button initially — threadId needed first
   }, threadTs ? { threadId: threadTs } : undefined);
@@ -245,6 +250,7 @@ async function handleThreadStart({ threadStartMatch, messageId, channel, adapter
  *  and we can't safely call continueThread + runThread concurrently. */
 async function bufferUserMessage(ctx: ThreadExecCtx): Promise<void> {
   const { adapter, channel, threadTs } = ctx;
+  const interactiveDest: Destination = { type: 'interactive-reply', conduit: channel, sessionId: '' };
   const thread = ctx.existingThread;
   const text = ctx.agentMessage || ctx.message.text || '';
 
@@ -267,7 +273,7 @@ async function bufferUserMessage(ctx: ThreadExecCtx): Promise<void> {
   // the next conventional mutate() call on this thread.
   threadStore.set(thread).catch(() => {});
 
-  await adapter.postMessage(channel, {
+  await adapter.postMessage(interactiveDest, {
     text: ':inbox_tray: Message buffered — will be included in the next step’s prompt',
   }, threadTs ? { threadId: threadTs } : undefined);
 }

@@ -1,4 +1,4 @@
-import type { PlatformAdapter } from '@platform/index.js';
+import type { Destination, PlatformAdapter } from '@platform/index.js';
 import { getMachineRegistry } from '@domain/tasks/dispatch-utils.js';
 import { statSync, existsSync, mkdirSync, unlinkSync } from 'fs';
 import { execFile } from 'child_process';
@@ -7,6 +7,7 @@ import * as path from 'path';
 import { WORKSPACE_DIR } from '@core/utils.js';
 
 async function sendLocalFile(channel: string, adapter: PlatformAdapter, reg: any, filePath: string, machine: string): Promise<void> {
+  const dest: Destination = { type: 'interactive-reply', conduit: channel, sessionId: '' };
   let resolved: string;
   if (filePath.startsWith('~/') || filePath === '~') {
     resolved = filePath.replace(/^~/, process.env.HOME || os.homedir());
@@ -16,19 +17,20 @@ async function sendLocalFile(channel: string, adapter: PlatformAdapter, reg: any
     resolved = path.resolve(reg.cortexPath, filePath);
   }
   if (!existsSync(resolved)) {
-    await adapter.postMessage(channel, { text: `:x: File not found: \`${resolved}\`` });
+    await adapter.postMessage(dest, { text: `:x: File not found: \`${resolved}\`` });
     return;
   }
   const stat = statSync(resolved);
   if (!stat.isFile()) {
-    await adapter.postMessage(channel, { text: `:x: Not a file: \`${resolved}\`` });
+    await adapter.postMessage(dest, { text: `:x: Not a file: \`${resolved}\`` });
     return;
   }
-  await adapter.uploadFile(channel, resolved, { filename: path.basename(resolved) });
-  await adapter.postMessage(channel, { text: `:white_check_mark: Sent \`${path.basename(resolved)}\` (${(stat.size / 1024).toFixed(1)} KB) from ${machine}` });
+  await adapter.uploadFile(dest, resolved, { filename: path.basename(resolved) });
+  await adapter.postMessage(dest, { text: `:white_check_mark: Sent \`${path.basename(resolved)}\` (${(stat.size / 1024).toFixed(1)} KB) from ${machine}` });
 }
 
 async function sendRemoteFile(channel: string, adapter: PlatformAdapter, reg: any, filePath: string, machine: string): Promise<void> {
+  const dest: Destination = { type: 'interactive-reply', conduit: channel, sessionId: '' };
   let remotePath: string;
   if (filePath.startsWith('~/') || filePath === '~') {
     remotePath = filePath;
@@ -54,29 +56,30 @@ async function sendRemoteFile(channel: string, adapter: PlatformAdapter, reg: an
       });
     });
   } catch (err) {
-    await adapter.postMessage(channel, { text: `:x: Failed to fetch from ${machine}: ${(err as Error).message}` });
+    await adapter.postMessage(dest, { text: `:x: Failed to fetch from ${machine}: ${(err as Error).message}` });
     return;
   }
   try {
     const tmpStat = statSync(localTmp);
-    await adapter.uploadFile(channel, localTmp, { filename: fileName });
-    await adapter.postMessage(channel, { text: `:white_check_mark: Sent \`${fileName}\` (${(tmpStat.size / 1024).toFixed(1)} KB) from ${machine}` });
+    await adapter.uploadFile(dest, localTmp, { filename: fileName });
+    await adapter.postMessage(dest, { text: `:white_check_mark: Sent \`${fileName}\` (${(tmpStat.size / 1024).toFixed(1)} KB) from ${machine}` });
   } finally {
     try { unlinkSync(localTmp); } catch {}
   }
 }
 
 export async function handleSendFileCmd(channel: string, adapter: PlatformAdapter, trimmedMessage: string): Promise<void> {
+  const dest: Destination = { type: 'interactive-reply', conduit: channel, sessionId: '' };
   const args = trimmedMessage.split(/\s+/).slice(1);
   if (args.length < 2) {
-    await adapter.postMessage(channel, { text: 'Usage: `!sendFile <machine> <path>`\nPath can be absolute, relative to Cortex root, or start with `~`' });
+    await adapter.postMessage(dest, { text: 'Usage: `!sendFile <machine> <path>`\nPath can be absolute, relative to Cortex root, or start with `~`' });
     return;
   }
   const machine = args[0];
   const filePath = args.slice(1).join(' ');
   const reg = getMachineRegistry()[machine];
   if (!reg) {
-    await adapter.postMessage(channel, { text: `:x: Unknown machine: \`${machine}\`. Known: ${Object.keys(getMachineRegistry()).join(', ')}` });
+    await adapter.postMessage(dest, { text: `:x: Unknown machine: \`${machine}\`. Known: ${Object.keys(getMachineRegistry()).join(', ')}` });
     return;
   }
   if (!reg.ssh) return sendLocalFile(channel, adapter, reg, filePath, machine);

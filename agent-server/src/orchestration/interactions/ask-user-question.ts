@@ -3,7 +3,7 @@
 // pos:    AskUserQuestion state management and interaction construction
 // >>> If I am updated, update my header comment and the parent folder's CORTEX.md <<<
 
-import type { PlatformAdapter } from '@platform/index.js';
+import type { Destination, PlatformAdapter } from '@platform/index.js';
 import type { VirtualMessage } from '@platform/index.js';
 import { createLogger } from '@core/log.js';
 import { buildQuestionGroupBlocks, buildQuestionModalDefinition } from '@platform/index.js';
@@ -182,7 +182,8 @@ async function sendMessages(result, channel, adapter: PlatformAdapter, messageTs
       const ref = await vm.postStandalone(text, { richBlocks });
       group.responseMessageTs = ref?.messageId || null;
     } else {
-      const ref = await adapter.postMessage(channel, { text, richBlocks }, threadTs ? { threadId: threadTs } : undefined);
+      const askMsgDest: Destination = { type: 'interactive-reply', conduit: channel, sessionId: '' };
+      const ref = await adapter.postMessage(askMsgDest, { text, richBlocks }, threadTs ? { threadId: threadTs } : undefined);
       group.responseMessageTs = ref.messageId;
     }
     for (const q of group.questions) {

@@ -1,4 +1,4 @@
-import type { PlatformAdapter } from '@platform/index.js';
+import type { Destination, PlatformAdapter } from '@platform/index.js';
 import type { CommandResult } from './command-context.js';
 import type { CommandActionRouter } from '@orch/interactions/command-action-router.js';
 import { handleScheduleCommand } from '@domain/scheduling/schedule-command.js';
@@ -108,13 +108,14 @@ export function createScheduleHandler(scheduler: any, router?: CommandActionRout
   return async function handleScheduleCmd(
     channel: string, adapter: PlatformAdapter, trimmedMessage: string,
   ): Promise<CommandResult | void> {
+    const dest: Destination = { type: 'interactive-reply', conduit: channel, sessionId: '' };
     const parts = trimmedMessage.split(/\s+/);
     const sub = parts[1];
 
     if (router && scheduler && (!sub || sub === 'list')) {
       const tasks: ScheduleTask[] = await scheduler.list();
       if (tasks.length === 0) {
-        await adapter.postMessage(channel, { text: 'No scheduled tasks.' });
+        await adapter.postMessage(dest, { text: 'No scheduled tasks.' });
         return;
       }
       const now = Date.now();

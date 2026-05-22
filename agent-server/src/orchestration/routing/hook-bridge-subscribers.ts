@@ -4,9 +4,8 @@
 // pos:    orch/routing/ — hook-bridge event subscribers (S13 composition-root extraction)
 // >>> If I am updated, update my header comment and the parent folder's CORTEX.md <<<
 
-import { createLogger } from '@core/log.js';
 import type { EventBus, CortexEvent } from '@events/index.js';
-import type { PlatformAdapter, VirtualMessage } from '@platform/index.js';
+import type { Destination, PlatformAdapter, VirtualMessage } from '@platform/index.js';
 import { buildPlanApprovalContent } from '@platform/index.js';
 import * as askUserQuestion from '@orch/interactions/ask-user-question.js';
 import { sendPlanToSlack } from '@orch/interactions/plan-handler.js';
@@ -34,11 +33,12 @@ export function registerHookBridgeSubscribers(
       // Route through vm when available so standalone post flushes pending appends
       // and resets vm state — without this, messages emitted after the form would
       // be merged back into the message that preceded it.
+      const askDest: Destination = { type: 'interactive-reply', conduit: ev.channel, sessionId: ev.sessionId ?? '' };
       if (vm) {
         const ref = await vm.postStandalone(text, { richBlocks });
         group.responseMessageTs = ref?.messageId || null;
       } else {
-        const ref = await adapter.postMessage(ev.channel, { text, richBlocks });
+        const ref = await adapter.postMessage(askDest, { text, richBlocks });
         group.responseMessageTs = ref.messageId;
       }
     } catch (e) {
@@ -53,6 +53,7 @@ export function registerHookBridgeSubscribers(
     try {
       const streamingCb = getStreamingCallback(ev.channel);
       const vm = (streamingCb as any)?.vm as VirtualMessage | undefined;
+      const planDest: Destination = { type: 'interactive-reply', conduit: ev.channel, sessionId: ev.sessionId ?? '' };
       if (streamingCb && ev.planContent) {
         streamingCb(ev.planContent);
       } else {
@@ -70,7 +71,7 @@ export function registerHookBridgeSubscribers(
           actions: planApproval.actions,
         });
       } else {
-        await adapter.postInteractive(ev.channel, {
+        await adapter.postInteractive(planDest, {
           text: 'Plan approval',
           ...planApproval,
         });

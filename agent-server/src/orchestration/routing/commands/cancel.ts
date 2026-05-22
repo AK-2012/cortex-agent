@@ -1,5 +1,5 @@
 import { createLogger } from '@core/log.js';
-import type { PlatformAdapter } from '@platform/index.js';
+import type { Destination, PlatformAdapter } from '@platform/index.js';
 import type { CommandResult } from './command-context.js';
 import type { CommandActionRouter } from '@orch/interactions/command-action-router.js';
 import { runningExecutions } from '../../../core/running-executions.js';
@@ -53,6 +53,7 @@ export function createCancelHandler(cancelDispatchedTask: ((opts: { taskId: stri
   }
 
   return async function handleCancelCmd(channel: string, adapter: PlatformAdapter, trimmedMessage: string): Promise<CommandResult | void> {
+    const dest: Destination = { type: 'interactive-reply', conduit: channel, sessionId: '' };
     const args = trimmedMessage.split(/\s+/).slice(1);
     if (args.length > 0) {
       const firstArg = args[0];
@@ -61,7 +62,7 @@ export function createCancelHandler(cancelDispatchedTask: ((opts: { taskId: stri
       if (firstArg === '--all') {
         const executions = runningExecutions.getAll().filter(e => e.channel === channel);
         if (executions.length === 0) {
-          await adapter.postMessage(channel, { text: 'Nothing running to cancel.' });
+          await adapter.postMessage(dest, { text: 'Nothing running to cancel.' });
           return;
         }
         for (const exec of executions) {
@@ -74,7 +75,7 @@ export function createCancelHandler(cancelDispatchedTask: ((opts: { taskId: stri
           runningExecutions.killByKey(exec.registryKey);
         }
         channelQueues.delete(channel);
-        await adapter.postMessage(channel, { text: `:octagonal_sign: Cancelled ${executions.length} execution(s).` });
+        await adapter.postMessage(dest, { text: `:octagonal_sign: Cancelled ${executions.length} execution(s).` });
         return;
       }
 
@@ -87,20 +88,20 @@ export function createCancelHandler(cancelDispatchedTask: ((opts: { taskId: stri
             await setSessionAsync(channel, exec.sessionId, getActiveBackend()).catch(() => {});
           }
           log.info('Cancel requested for thread:', firstArg);
-          await adapter.postMessage(channel, { text: `:octagonal_sign: Thread \`${firstArg}\` cancelled.` });
+          await adapter.postMessage(dest, { text: `:octagonal_sign: Thread \`${firstArg}\` cancelled.` });
         } else {
-          await adapter.postMessage(channel, { text: `No running thread \`${firstArg}\` found to cancel.` });
+          await adapter.postMessage(dest, { text: `No running thread \`${firstArg}\` found to cancel.` });
         }
         return;
       }
 
       // Fallback: dispatched-task cancellation
       if (!cancelDispatchedTask) {
-        await adapter.postMessage(channel, { text: 'Dispatched-task cancellation is not available in this process.' });
+        await adapter.postMessage(dest, { text: 'Dispatched-task cancellation is not available in this process.' });
         return;
       }
       const result = await cancelDispatchedTask({ taskId: firstArg, channel });
-      await adapter.postMessage(channel, { text: result.message });
+      await adapter.postMessage(dest, { text: result.message });
       return;
     }
 
@@ -109,7 +110,7 @@ export function createCancelHandler(cancelDispatchedTask: ((opts: { taskId: stri
 
     // 0 executions: nothing to cancel
     if (executions.length === 0) {
-      await adapter.postMessage(channel, { text: 'Nothing running to cancel.' });
+      await adapter.postMessage(dest, { text: 'Nothing running to cancel.' });
       return;
     }
 
@@ -124,7 +125,7 @@ export function createCancelHandler(cancelDispatchedTask: ((opts: { taskId: stri
         await setSessionAsync(channel, exec.sessionId, getActiveBackend()).catch(() => {});
       }
       channelQueues.delete(channel);
-      await adapter.postMessage(channel, { text: ':octagonal_sign: Cancelled. Session preserved — next message will resume.' });
+      await adapter.postMessage(dest, { text: ':octagonal_sign: Cancelled. Session preserved — next message will resume.' });
       return;
     }
 

@@ -1,4 +1,4 @@
-import type { PlatformAdapter } from '@platform/index.js';
+import type { PlatformAdapter, Destination } from '@platform/index.js';
 import type { CommandResult } from './command-context.js';
 import type { CommandActionRouter } from '@orch/interactions/command-action-router.js';
 import type { ModalDefinition } from '@platform/types.js';
@@ -7,9 +7,10 @@ import { projectDirRepo } from '@store/project-dir-repo.js';
 import { getMachineRegistry } from '@domain/tasks/dispatch-utils.js';
 
 export async function handleProjectsCmd(channel: string, adapter: PlatformAdapter): Promise<void> {
+  const dest: Destination = { type: 'interactive-reply', conduit: channel, sessionId: '' };
   const projects = await channelRepo.listProjects();
   if (projects.length === 0) {
-    await adapter.postMessage(channel, { text: 'No projects found.' });
+    await adapter.postMessage(dest, { text: 'No projects found.' });
     return;
   }
   const registrations = await channelRepo.getAllRegistrations();
@@ -18,7 +19,7 @@ export async function handleProjectsCmd(channel: string, adapter: PlatformAdapte
     const status = ch ? ` → <#${ch}>` : '';
     return `• \`${p}\`${status}`;
   });
-  await adapter.postMessage(channel, { text: `*Projects*\n${lines.join('\n')}` });
+  await adapter.postMessage(dest, { text: `*Projects*\n${lines.join('\n')}` });
 }
 
 const MAX_PROJECT_BUTTONS = 10;
@@ -49,17 +50,18 @@ export function createRegisterHandler(router?: CommandActionRouter) {
   return async function handleRegisterCmdInteractive(
     channel: string, adapter: PlatformAdapter, trimmedMessage: string,
   ): Promise<CommandResult | void> {
+    const dest: Destination = { type: 'interactive-reply', conduit: channel, sessionId: '' };
     const args = trimmedMessage.split(/\s+/).slice(1);
 
     if (args.length > 0) {
       const project = args[0];
       const projects = await channelRepo.listProjects();
       if (!projects.includes(project)) {
-        await adapter.postMessage(channel, { text: `:x: Unknown project: \`${project}\`\nAvailable: ${projects.map(p => `\`${p}\``).join(', ')}` });
+        await adapter.postMessage(dest, { text: `:x: Unknown project: \`${project}\`\nAvailable: ${projects.map(p => `\`${p}\``).join(', ')}` });
         return;
       }
       await channelRepo.setProjectChannel(project, channel);
-      await adapter.postMessage(channel, { text: `:white_check_mark: This channel is now registered for project \`${project}\` task notifications.` });
+      await adapter.postMessage(dest, { text: `:white_check_mark: This channel is now registered for project \`${project}\` task notifications.` });
       return;
     }
 
@@ -80,7 +82,7 @@ export function createRegisterHandler(router?: CommandActionRouter) {
     const text = lines.join('\n');
 
     if (!router || unbound.length === 0) {
-      await adapter.postMessage(channel, { text });
+      await adapter.postMessage(dest, { text });
       return;
     }
 
@@ -105,19 +107,20 @@ export async function handleRegisterCmd(channel: string, adapter: PlatformAdapte
 }
 
 export async function handleUnregisterCmd(channel: string, adapter: PlatformAdapter, trimmedMessage: string): Promise<void> {
+  const dest: Destination = { type: 'interactive-reply', conduit: channel, sessionId: '' };
   const args = trimmedMessage.split(/\s+/).slice(1);
   if (args.length === 0) {
-    await adapter.postMessage(channel, { text: 'Usage: `!unregister <project>`' });
+    await adapter.postMessage(dest, { text: 'Usage: `!unregister <project>`' });
     return;
   }
   const project = args[0];
   const current = await channelRepo.getProjectChannel(project);
   if (!current || current !== channel) {
-    await adapter.postMessage(channel, { text: `:x: This channel is not registered for project \`${project}\`.` });
+    await adapter.postMessage(dest, { text: `:x: This channel is not registered for project \`${project}\`.` });
     return;
   }
   await channelRepo.removeProjectChannel(project);
-  await adapter.postMessage(channel, { text: `:white_check_mark: Unregistered this channel from project \`${project}\`.` });
+  await adapter.postMessage(dest, { text: `:white_check_mark: Unregistered this channel from project \`${project}\`.` });
 }
 
 function buildProjectDirModal(channel: string): ModalDefinition {
@@ -156,12 +159,13 @@ export function createProjectDirHandler(router?: CommandActionRouter) {
           const adapter = router.getAdapter();
           if (!adapter) return;
           const { channel } = JSON.parse(ctx.privateMetadata);
+          const modalDest: Destination = { type: 'interactive-reply', conduit: channel, sessionId: '' };
           const project = ctx.values?.pd_project?.text?.value;
           const machine = ctx.values?.pd_machine?.selection?.selectedOption?.value;
           const dirPath = ctx.values?.pd_path?.text?.value;
           if (!project || !machine || !dirPath) return;
           await projectDirRepo.setProjectDir(project, machine, dirPath);
-          await adapter.postMessage(channel, {
+          await adapter.postMessage(modalDest, {
             text: `:white_check_mark: \`${project}\` on \`${machine}\` → \`${dirPath}\``,
           });
         },
@@ -172,36 +176,37 @@ export function createProjectDirHandler(router?: CommandActionRouter) {
   return async function handleProjectDirCmdInteractive(
     channel: string, adapter: PlatformAdapter, trimmedMessage: string,
   ): Promise<CommandResult | void> {
+    const dest: Destination = { type: 'interactive-reply', conduit: channel, sessionId: '' };
     const args = trimmedMessage.split(/\s+/).slice(1);
 
     if (args.length > 0) {
       if (args.length < 2) {
-        await adapter.postMessage(channel, { text: ':x: Usage: `!project-dir <project> <machine> <path>` or `!project-dir <project> <machine> --remove`' });
+        await adapter.postMessage(dest, { text: ':x: Usage: `!project-dir <project> <machine> <path>` or `!project-dir <project> <machine> --remove`' });
         return;
       }
       const [project, machine] = args;
       const validMachines = Object.keys(getMachineRegistry());
       if (!validMachines.includes(machine)) {
-        await adapter.postMessage(channel, { text: `:x: Unknown machine: \`${machine}\`\nValid: ${validMachines.map(m => `\`${m}\``).join(', ')}` });
+        await adapter.postMessage(dest, { text: `:x: Unknown machine: \`${machine}\`\nValid: ${validMachines.map(m => `\`${m}\``).join(', ')}` });
         return;
       }
       if (args.length === 2 || args[2] === '--remove') {
         if (args[2] === '--remove') {
           await projectDirRepo.removeProjectDir(project, machine);
-          await adapter.postMessage(channel, { text: `:white_check_mark: Removed \`${project}\` directory on \`${machine}\`.` });
+          await adapter.postMessage(dest, { text: `:white_check_mark: Removed \`${project}\` directory on \`${machine}\`.` });
         } else {
           const dir = await projectDirRepo.getProjectDir(project, machine);
           if (dir) {
-            await adapter.postMessage(channel, { text: `\`${project}\` on \`${machine}\` → \`${dir}\`` });
+            await adapter.postMessage(dest, { text: `\`${project}\` on \`${machine}\` → \`${dir}\`` });
           } else {
-            await adapter.postMessage(channel, { text: `No directory registered for \`${project}\` on \`${machine}\`.` });
+            await adapter.postMessage(dest, { text: `No directory registered for \`${project}\` on \`${machine}\`.` });
           }
         }
         return;
       }
       const dirPath = args.slice(2).join(' ');
       await projectDirRepo.setProjectDir(project, machine, dirPath);
-      await adapter.postMessage(channel, { text: `:white_check_mark: \`${project}\` on \`${machine}\` → \`${dirPath}\`` });
+      await adapter.postMessage(dest, { text: `:white_check_mark: \`${project}\` on \`${machine}\` → \`${dirPath}\`` });
       return;
     }
 
@@ -215,7 +220,7 @@ export function createProjectDirHandler(router?: CommandActionRouter) {
     const text = `*Project Directories*\n${lines.join('\n')}`;
 
     if (!router) {
-      await adapter.postMessage(channel, { text });
+      await adapter.postMessage(dest, { text });
       return;
     }
 

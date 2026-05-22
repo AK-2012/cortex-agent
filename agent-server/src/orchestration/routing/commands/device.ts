@@ -1,4 +1,4 @@
-import type { PlatformAdapter } from '@platform/index.js';
+import type { PlatformAdapter, Destination } from '@platform/index.js';
 import type { CommandResult } from './command-context.js';
 import type { CommandActionRouter } from '@orch/interactions/command-action-router.js';
 import { getOnlineDevices } from '@domain/remote/client-manager.js';
@@ -70,10 +70,11 @@ export function createDevicesHandler(router?: CommandActionRouter) {
   }
 
   return async function handleDevicesCmd(channel: string, adapter: PlatformAdapter): Promise<CommandResult | void> {
+    const dest: Destination = { type: 'interactive-reply', conduit: channel, sessionId: '' };
     const text = buildDevicesText();
 
     if (!router) {
-      await adapter.postMessage(channel, { text });
+      await adapter.postMessage(dest, { text });
       return;
     }
 

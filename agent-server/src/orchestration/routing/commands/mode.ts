@@ -1,4 +1,4 @@
-import type { PlatformAdapter } from '@platform/index.js';
+import type { Destination, PlatformAdapter } from '@platform/index.js';
 import type { CommandResult } from './command-context.js';
 import type { CommandActionRouter } from '@orch/interactions/command-action-router.js';
 import { switchMode, getActiveBackend, setActiveBackend, getClaudeModel, setClaudeModel, getActiveProfile, setActiveProfile, clearChannelProfile, getDefaultAgent, setDefaultAgent } from '@domain/agents/index.js';
@@ -25,31 +25,34 @@ function formatProfileList(channel?: string): string {
 
 export async function handleModeCmd(channel: string, adapter: PlatformAdapter): Promise<void> {
   const { newMode } = switchMode();
-  await adapter.postMessage(channel, { text: `:arrows_counterclockwise: Switched to *${newMode === 'api' ? 'API' : 'Plan'}* mode` });
+  const dest: Destination = { type: 'interactive-reply', conduit: channel, sessionId: '' };
+  await adapter.postMessage(dest, { text: `:arrows_counterclockwise: Switched to *${newMode === 'api' ? 'API' : 'Plan'}* mode` });
 }
 
 export async function handleBackendCmd(channel: string, adapter: PlatformAdapter, trimmedMessage: string): Promise<void> {
   const arg = trimmedMessage.split(/\s+/)[1];
   const newBackend = (arg === 'claude' || arg === 'codex') ? arg : (getActiveBackend() === 'claude' ? 'codex' : 'claude');
   setActiveBackend(newBackend);
-  await adapter.postMessage(channel, {
+  const dest: Destination = { type: 'interactive-reply', conduit: channel, sessionId: '' };
+  await adapter.postMessage(dest, {
     text: `:arrows_counterclockwise: Backend: *${newBackend === 'claude' ? 'Claude Code' : 'Codex'}*`,
   });
 }
 
 export async function handleModelCmd(channel: string, adapter: PlatformAdapter, trimmedMessage: string): Promise<void> {
   const args = trimmedMessage.split(/\s+/).slice(1);
+  const dest: Destination = { type: 'interactive-reply', conduit: channel, sessionId: '' };
   if (args.length === 0) {
-    await adapter.postMessage(channel, { text: `Current Claude model: *${getClaudeModel()}*` });
+    await adapter.postMessage(dest, { text: `Current Claude model: *${getClaudeModel()}*` });
     return;
   }
   const model = args.join(' ').trim();
   if (!model) {
-    await adapter.postMessage(channel, { text: ':x: Usage: `!model <model-name>`' });
+    await adapter.postMessage(dest, { text: ':x: Usage: `!model <model-name>`' });
     return;
   }
   setClaudeModel(model);
-  await adapter.postMessage(channel, { text: `:white_check_mark: Claude model set to *${getClaudeModel()}*` });
+  await adapter.postMessage(dest, { text: `:white_check_mark: Claude model set to *${getClaudeModel()}*` });
 }
 
 const MAX_PROFILE_BUTTONS = 10;
@@ -114,29 +117,30 @@ export function createProfileHandler(router?: CommandActionRouter) {
     channel: string, adapter: PlatformAdapter, trimmedMessage: string,
   ): Promise<CommandResult | void> {
     const args = trimmedMessage.split(/\s+/).slice(1);
+    const dest: Destination = { type: 'interactive-reply', conduit: channel, sessionId: '' };
 
     if (args.length > 0) {
       if (args[0] === 'reset') {
         clearChannelProfile(channel);
         const fallback = getActiveProfile() || getDefaultProfileName();
-        await adapter.postMessage(channel, { text: `:white_check_mark: Channel profile cleared, using global: *${fallback}*` });
+        await adapter.postMessage(dest, { text: `:white_check_mark: Channel profile cleared, using global: *${fallback}*` });
         await handleNewCmd(channel, adapter, { skipHook: true });
         return;
       }
 
       if (args[0] === 'global') {
         if (args.length < 2) {
-          await adapter.postMessage(channel, { text: ':x: Usage: `!profile global <name>`' });
+          await adapter.postMessage(dest, { text: ':x: Usage: `!profile global <name>`' });
           return;
         }
         const profileName = args[1];
         try {
           resolveProfile(profileName);
           setActiveProfile(profileName);
-          await adapter.postMessage(channel, { text: `:white_check_mark: Global profile set to *${profileName}*\n${formatProfileList(channel)}` });
+          await adapter.postMessage(dest, { text: `:white_check_mark: Global profile set to *${profileName}*\n${formatProfileList(channel)}` });
           await handleNewCmd(channel, adapter, { skipHook: true });
         } catch (error) {
-          await adapter.postMessage(channel, { text: `:x: ${(error as Error).message}` });
+          await adapter.postMessage(dest, { text: `:x: ${(error as Error).message}` });
         }
         return;
       }
@@ -145,10 +149,10 @@ export function createProfileHandler(router?: CommandActionRouter) {
       try {
         resolveProfile(profileName);
         setActiveProfile(profileName, channel);
-        await adapter.postMessage(channel, { text: `:white_check_mark: Channel profile set to *${profileName}*\n${formatProfileList(channel)}` });
+        await adapter.postMessage(dest, { text: `:white_check_mark: Channel profile set to *${profileName}*\n${formatProfileList(channel)}` });
         await handleNewCmd(channel, adapter, { skipHook: true });
       } catch (error) {
-        await adapter.postMessage(channel, { text: `:x: ${(error as Error).message}` });
+        await adapter.postMessage(dest, { text: `:x: ${(error as Error).message}` });
       }
       return;
     }
@@ -156,7 +160,7 @@ export function createProfileHandler(router?: CommandActionRouter) {
     const text = buildProfileText(channel);
 
     if (!router) {
-      await adapter.postMessage(channel, { text });
+      await adapter.postMessage(dest, { text });
       return;
     }
 
@@ -176,8 +180,9 @@ export async function handleProfileCmd(channel: string, adapter: PlatformAdapter
 
 export async function handleSkillsCmd(channel: string, adapter: PlatformAdapter): Promise<void> {
   const groups = getDisplaySkillGroups();
+  const dest: Destination = { type: 'interactive-reply', conduit: channel, sessionId: '' };
   if (groups.length === 0) {
-    await adapter.postMessage(channel, { text: 'No skills found.' });
+    await adapter.postMessage(dest, { text: 'No skills found.' });
     return;
   }
   const lines = ['*Available skills*'];
@@ -187,7 +192,7 @@ export async function handleSkillsCmd(channel: string, adapter: PlatformAdapter)
       lines.push(`• \`${skill}\``);
     }
   }
-  await adapter.postMessage(channel, { text: lines.join('\n') });
+  await adapter.postMessage(dest, { text: lines.join('\n') });
 }
 
 const MAX_AGENT_BUTTONS = 10;
@@ -272,30 +277,31 @@ export function createAgentHandler(router?: CommandActionRouter) {
     channel: string, adapter: PlatformAdapter, trimmedMessage: string,
   ): Promise<CommandResult | void> {
     const args = trimmedMessage.replace(/^!agent\s*/, '').trim();
+    const dest: Destination = { type: 'interactive-reply', conduit: channel, sessionId: '' };
 
     if (args) {
       const name = args.split(/\s+/)[0];
       if (name === 'off' || name === 'none' || name === 'disable') {
         setDefaultAgent(null);
-        await adapter.postMessage(channel, { text: ':white_check_mark: Default agent disabled.' });
+        await adapter.postMessage(dest, { text: ':white_check_mark: Default agent disabled.' });
         return;
       }
       const agentDef = getAgent(name);
       if (!agentDef) {
         const available = listAgents().map(a => `\`${a.name}\``).join(', ');
-        await adapter.postMessage(channel, { text: `:x: Unknown agent: \`${name}\`\nAvailable: ${available}` });
+        await adapter.postMessage(dest, { text: `:x: Unknown agent: \`${name}\`\nAvailable: ${available}` });
         return;
       }
       setDefaultAgent(name);
       const claudeAgentStr = agentDef.claudeAgent ? ` · agent:${agentDef.claudeAgent}` : '';
-      await adapter.postMessage(channel, { text: `:white_check_mark: Default agent set to *${name}* (${agentDef.profile}${claudeAgentStr})` });
+      await adapter.postMessage(dest, { text: `:white_check_mark: Default agent set to *${name}* (${agentDef.profile}${claudeAgentStr})` });
       return;
     }
 
     const text = buildAgentText();
 
     if (!router) {
-      await adapter.postMessage(channel, { text });
+      await adapter.postMessage(dest, { text });
       return;
     }
 

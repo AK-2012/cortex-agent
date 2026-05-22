@@ -3,7 +3,7 @@
 // pos:    Status message and execution helper functions collection
 // >>> If I am updated, update my header comment and the parent folder's CORTEX.md <<<
 import { createLogger } from '@core/log.js';
-import type { PlatformAdapter, MessageRef, IncomingAttachment, RichBlock, ActionElement } from '@platform/index.js';
+import type { Destination, PlatformAdapter, MessageRef, IncomingAttachment, RichBlock, ActionElement } from '@platform/index.js';
 import { VirtualMessage } from '@platform/index.js';
 import type { AgentResult } from '@core/types/agent-types.js';
 import type { ExecutionRecord } from '@domain/executions/registry.js';
@@ -93,8 +93,8 @@ export async function runAutoCompoundForScheduledTask({ baseResult, channel, pro
 }
 
 /** Build a streaming callback that aggregates assistant messages into fewer platform messages via VirtualMessage. */
-export function makeStreamingMessageCallback(adapter: PlatformAdapter, channel: string, threadTs: string | null = null, onMessagePosted: ((ref: MessageRef) => void) | null = null, durable?: import('@platform/types.js').DurableHooks | null): ((text: string) => void) & { vm: VirtualMessage } {
-  const vm = new VirtualMessage(adapter, { type: 'interactive-reply', conduit: channel, sessionId: '' }, { threadId: threadTs, onMessagePosted, durable: durable ?? null });
+export function makeStreamingMessageCallback(adapter: PlatformAdapter, destination: Destination, threadTs: string | null = null, onMessagePosted: ((ref: MessageRef) => void) | null = null, durable?: import('@platform/types.js').DurableHooks | null): ((text: string) => void) & { vm: VirtualMessage } {
+  const vm = new VirtualMessage(adapter, destination, { threadId: threadTs, onMessagePosted, durable: durable ?? null });
   const callback = (text: string) => vm.append(text);
   (callback as ((text: string) => void) & { vm: VirtualMessage }).vm = vm;
   return callback as ((text: string) => void) & { vm: VirtualMessage };

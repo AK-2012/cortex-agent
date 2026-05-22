@@ -1,5 +1,5 @@
 import { createLogger } from '@core/log.js';
-import type { PlatformAdapter } from '@platform/index.js';
+import type { Destination, PlatformAdapter } from '@platform/index.js';
 import type { CommandResult } from './command-context.js';
 import type { CommandActionRouter } from '@orch/interactions/command-action-router.js';
 
@@ -44,6 +44,7 @@ async function executeCommand(
   threadTs?: string | null,
 ): Promise<void> {
   const result = await handler(channel, adapter, trimmedMessage, threadTs);
+  const cmdDest: Destination = { type: 'interactive-reply', conduit: channel, sessionId: '' };
 
   if (result && typeof result === 'object' && 'text' in result) {
     if (result.actions && result.actions.length > 0) {
@@ -54,12 +55,12 @@ async function executeCommand(
         ...(result.richBlocks || []),
         { type: 'actions' as const, elements: result.actions },
       ];
-      await adapter.postMessage(channel, {
+      await adapter.postMessage(cmdDest, {
         text: result.text,
         richBlocks: blocks,
       });
     } else {
-      await adapter.postMessage(channel, {
+      await adapter.postMessage(cmdDest, {
         text: result.text,
         richBlocks: result.richBlocks,
       });
@@ -71,7 +72,8 @@ const catchHandlerError = (promise: Promise<unknown>, cmd: string, channel: stri
   Promise.resolve(promise).catch(err => {
     log.error(`Error in ${cmd}:`, err?.message || err);
     if (err?.data) log.error(`Slack error data:`, JSON.stringify(err.data));
-    adapter.postMessage(channel, { text: `:x: Command error: ${err?.message || 'unknown error'}` }).catch(() => {});
+    const cmdDest: Destination = { type: 'interactive-reply', conduit: channel, sessionId: '' };
+    adapter.postMessage(cmdDest, { text: `:x: Command error: ${err?.message || 'unknown error'}` }).catch(() => {});
   });
 };
 
@@ -147,7 +149,8 @@ export function registerCommands(deps: CommandDeps) {
 
     if (trimmedMessage.startsWith('!')) {
       const cmd = trimmedMessage.split(/\s+/)[0];
-      adapter.postMessage(channel, { text: `:x: Unknown command: \`${cmd}\`. Run \`!help\` for available commands.` });
+      const cmdDest: Destination = { type: 'interactive-reply', conduit: channel, sessionId: '' };
+      adapter.postMessage(cmdDest, { text: `:x: Unknown command: \`${cmd}\`. Run \`!help\` for available commands.` });
       return true;
     }
     return false;

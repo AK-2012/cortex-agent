@@ -1,16 +1,18 @@
-import type { PlatformAdapter } from '@platform/index.js';
+import type { Destination, PlatformAdapter } from '@platform/index.js';
 import { formatCostReport, checkBudget, setBudget } from '@domain/costs/cost-tracker.js';
 
 export async function handleCostCmd(channel: string, adapter: PlatformAdapter, trimmedMessage: string): Promise<void> {
+  const dest: Destination = { type: 'interactive-reply', conduit: channel, sessionId: '' };
   const project = trimmedMessage.split(/\s+/).slice(1).join(' ').trim() || null;
-  await adapter.postMessage(channel, { text: await formatCostReport(project) });
+  await adapter.postMessage(dest, { text: await formatCostReport(project) });
 }
 
 export async function handleBudgetCmd(channel: string, adapter: PlatformAdapter, trimmedMessage: string): Promise<void> {
+  const dest: Destination = { type: 'interactive-reply', conduit: channel, sessionId: '' };
   const args = trimmedMessage.split(/\s+/).slice(1);
   if (args.length === 0) {
     const b = await checkBudget();
-    await adapter.postMessage(channel, {
+    await adapter.postMessage(dest, {
       text: `*Budget*\n• Daily: $${b.dailyBudget} (spent: $${b.dailySpent.toFixed(2)}, remaining: $${b.dailyRemaining.toFixed(2)})\n• Monthly: $${b.monthlyBudget} (spent: $${b.monthlySpent.toFixed(2)}, remaining: $${b.monthlyRemaining.toFixed(2)})`,
     });
     return;
@@ -21,5 +23,5 @@ export async function handleBudgetCmd(channel: string, adapter: PlatformAdapter,
     daily_usd: daily ? parseFloat(daily) : undefined,
     monthly_usd: monthly ? parseFloat(monthly) : undefined,
   });
-  await adapter.postMessage(channel, { text: `:white_check_mark: Budget updated: $${result.daily_usd}/day, $${result.monthly_usd}/month` });
+  await adapter.postMessage(dest, { text: `:white_check_mark: Budget updated: $${result.daily_usd}/day, $${result.monthly_usd}/month` });
 }

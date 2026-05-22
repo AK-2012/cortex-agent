@@ -3,7 +3,7 @@
 // pos:    AskUserQuestion + ExitPlanMode interaction handler registration
 // >>> If I am updated, update my header comment and the parent folder's CORTEX.md <<<
 
-import type { PlatformAdapter, ActionContext, ModalSubmitContext, ModalFieldValue, QuestionGroup } from '@platform/index.js';
+import type { Destination, PlatformAdapter, ActionContext, ModalSubmitContext, ModalFieldValue, QuestionGroup } from '@platform/index.js';
 import { buildPlanFeedbackModal } from '@platform/index.js';
 
 import type { EventBus } from '@events/index.js';
@@ -191,10 +191,11 @@ function registerExitPlanModeHandlers(adapter: PlatformAdapter): void {
     }
     const feedbackText = `:pencil2: Plan feedback sent \u2014 Cortex will revise.\n> ${feedback}`;
     const streamingCb = getStreamingCallback(pending.channel);
+    const feedbackDest: Destination = { type: 'interactive-reply', conduit: pending.channel, sessionId: '' };
     if (streamingCb) {
       streamingCb(feedbackText);
     } else {
-      await adapter.postMessage(pending.channel, { text: feedbackText }).catch(() => {});
+      await adapter.postMessage(feedbackDest, { text: feedbackText }).catch(() => {});
     }
   });
 }
@@ -249,7 +250,8 @@ async function handleStatusResume(ctx: ActionContext): Promise<void> {
     sessionId: record.sessionId, sessionName, backend: record.backend, profileName: record.profileName,
   });
   const profileNote = record.profileName ? ` (profile: ${record.profileName})` : '';
-  await _adapter.postMessage(ctx.channelId, {
+  const resumeDest: Destination = { type: 'interactive-reply', conduit: ctx.channelId, sessionId: record.sessionId ?? '' };
+  await _adapter.postMessage(resumeDest, {
     text: `:arrows_counterclockwise: Session \`${sessionName}\` active — send your message below.${profileNote}`,
   }).catch(() => {});
 }
@@ -273,7 +275,8 @@ async function handleStatusNew(ctx: ActionContext): Promise<void> {
   }
   await deleteSessionAsync(channel, resolveBackendForChannel(channel));
   planApprovals.clearByChannel(channel);
-  await _adapter.postMessage(ctx.channelId, {
+  const newDest: Destination = { type: 'interactive-reply', conduit: ctx.channelId, sessionId: '' };
+  await _adapter.postMessage(newDest, {
     text: `--- new conversation --- (profile: ${profileName})`,
   }).catch(() => {});
 }

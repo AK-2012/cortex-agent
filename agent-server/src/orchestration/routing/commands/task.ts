@@ -1,4 +1,4 @@
-import type { PlatformAdapter } from '@platform/index.js';
+import type { Destination, PlatformAdapter } from '@platform/index.js';
 import type { CommandResult } from './command-context.js';
 import type { CommandActionRouter } from '@orch/interactions/command-action-router.js';
 import type { Task } from '@core/task-parser.js';
@@ -119,27 +119,28 @@ export function createTasksHandler(router?: CommandActionRouter) {
   return async function handleTasksCmdInteractive(
     channel: string, adapter: PlatformAdapter, trimmedMessage: string,
   ): Promise<CommandResult | void> {
+    const dest: Destination = { type: 'interactive-reply', conduit: channel, sessionId: '' };
     const args = trimmedMessage.split(/\s+/).slice(1);
     if (args.length === 0) {
-      await adapter.postMessage(channel, { text: ':x: Usage: `!tasks <project>`' });
+      await adapter.postMessage(dest, { text: ':x: Usage: `!tasks <project>`' });
       return;
     }
     const project = args[0];
     const projectDir = path.join(PROJECTS_DIR, project);
     if (!existsSync(projectDir)) {
-      await adapter.postMessage(channel, { text: `:x: Project not found: \`${project}\`` });
+      await adapter.postMessage(dest, { text: `:x: Project not found: \`${project}\`` });
       return;
     }
     const tasks = scanAllTasks(project);
     if (tasks.length === 0) {
-      await adapter.postMessage(channel, { text: `No tasks found for \`${project}\`.` });
+      await adapter.postMessage(dest, { text: `No tasks found for \`${project}\`.` });
       return;
     }
 
     const text = formatTaskList(tasks, 'all', project);
 
     if (!router) {
-      await adapter.postMessage(channel, { text });
+      await adapter.postMessage(dest, { text });
       return;
     }
 

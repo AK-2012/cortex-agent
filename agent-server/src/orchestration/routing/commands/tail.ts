@@ -1,4 +1,4 @@
-import type { PlatformAdapter } from '@platform/index.js';
+import type { Destination, PlatformAdapter } from '@platform/index.js';
 import { statSync, openSync, readSync, closeSync } from 'fs';
 import * as path from 'path';
 import { moduleDir } from '@core/utils.js';
@@ -14,17 +14,19 @@ interface TailState {
 const activeTails = new Map<string, TailState>();
 
 async function stopTail(channel: string, adapter: PlatformAdapter): Promise<void> {
+  const dest: Destination = { type: 'interactive-reply', conduit: channel, sessionId: '' };
   const active = activeTails.get(channel);
   if (!active) {
-    await adapter.postMessage(channel, { text: 'No active tail in this channel.' });
+    await adapter.postMessage(dest, { text: 'No active tail in this channel.' });
     return;
   }
   clearInterval(active.interval);
   activeTails.delete(channel);
-  await adapter.postMessage(channel, { text: ':octagonal_sign: Tail stopped.' });
+  await adapter.postMessage(dest, { text: ':octagonal_sign: Tail stopped.' });
 }
 
 async function sendInitialTailPreview(channel: string, adapter: PlatformAdapter): Promise<number | null> {
+  const previewDest: Destination = { type: 'interactive-reply', conduit: channel, sessionId: '' };
   try {
     const stat = statSync(DAEMON_LOG_PATH);
     const previewBytes = Math.min(4096, stat.size);
@@ -33,15 +35,16 @@ async function sendInitialTailPreview(channel: string, adapter: PlatformAdapter)
     readSync(fd, buf, 0, previewBytes, stat.size - previewBytes);
     closeSync(fd);
     const lines = buf.toString('utf-8').split('\n').filter(Boolean).slice(-30);
-    await adapter.postMessage(channel, { text: `:scroll: *Tailing daemon.log* (last ${lines.length} lines, refresh every 3s)\n\`\`\`\n${lines.join('\n')}\n\`\`\`\nUse \`!tail stop\` to stop.` });
+    await adapter.postMessage(previewDest, { text: `:scroll: *Tailing daemon.log* (last ${lines.length} lines, refresh every 3s)\n\`\`\`\n${lines.join('\n')}\n\`\`\`\nUse \`!tail stop\` to stop.` });
     return stat.size;
   } catch (err) {
-    await adapter.postMessage(channel, { text: `:x: Cannot read daemon.log: ${(err as Error).message}` });
+    await adapter.postMessage(previewDest, { text: `:x: Cannot read daemon.log: ${(err as Error).message}` });
     return null;
   }
 }
 
 function startTailInterval(channel: string, adapter: PlatformAdapter, offset: number): void {
+  const tailIntervalDest: Destination = { type: 'interactive-reply', conduit: channel, sessionId: '' };
   const interval = setInterval(async () => {
     try {
       const stat = statSync(DAEMON_LOG_PATH);
@@ -58,7 +61,7 @@ function startTailInterval(channel: string, adapter: PlatformAdapter, offset: nu
       closeSync(fd);
       active.offset += bytesToRead;
       const newContent = buf.toString('utf-8').trim();
-      if (newContent) await adapter.postMessage(channel, { text: `\`\`\`\n${newContent}\n\`\`\`` });
+      if (newContent) await adapter.postMessage(tailIntervalDest, { text: `\`\`\`\n${newContent}\n\`\`\`` });
     } catch {
       // File gone or unreadable — silently skip
     }
@@ -69,8 +72,9 @@ function startTailInterval(channel: string, adapter: PlatformAdapter, offset: nu
 export async function handleTailCmd(channel: string, adapter: PlatformAdapter, trimmedMessage: string): Promise<void> {
   const args = trimmedMessage.split(/\s+/).slice(1);
   if (args[0] === 'stop') return stopTail(channel, adapter);
+  const cmdDest: Destination = { type: 'interactive-reply', conduit: channel, sessionId: '' };
   if (activeTails.has(channel)) {
-    await adapter.postMessage(channel, { text: 'Already tailing. Use `!tail stop` to stop first.' });
+    await adapter.postMessage(cmdDest, { text: 'Already tailing. Use `!tail stop` to stop first.' });
     return;
   }
   const offset = await sendInitialTailPreview(channel, adapter);
