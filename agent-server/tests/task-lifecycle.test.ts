@@ -109,7 +109,7 @@ test('edit replaces fields and --depends-on replaces dependency list', () => {
     ]);
 
     assert.equal(result.success, true);
-    assert.deepEqual(result.updated_fields.sort(), ['depends_on', 'done_when', 'priority', 'text', 'why']);
+    assert.deepEqual(result['updated-fields'].sort(), ['depends-on', 'done-when', 'priority', 'text', 'why']);
 
     const alphaParsed = readYaml(repos[pA].tasksPath);
     const task = findTask(alphaParsed.tasks, id2);
@@ -187,7 +187,7 @@ test('add accepts --depends-on with space-separated values', () => {
 
     assert.equal(result.success, true);
     const parsed = readYaml(repos[proj].tasksPath);
-    const task = findTask(parsed.tasks, result.task_id);
+    const task = findTask(parsed.tasks, result['task-id']);
     assert.ok(task);
     assert.deepEqual(task['depends-on'], [id1, id2]);
     assert.equal(task.priority, 'high');
@@ -218,7 +218,7 @@ test('add accepts --depends-on as repeatable flag', () => {
 
     assert.equal(result.success, true);
     const parsed = readYaml(repos[proj].tasksPath);
-    const task = findTask(parsed.tasks, result.task_id);
+    const task = findTask(parsed.tasks, result['task-id']);
     assert.deepEqual(task['depends-on'], [id1, id2]);
   } finally {
     for (const r of Object.values(repos)) r.cleanup();
@@ -283,7 +283,7 @@ test('complete returns task_id in result', () => {
   try {
     const result = runTask(['complete', '--project', proj, '--task-id', tid, '--note', 'done']);
     assert.equal(result.success, true);
-    assert.equal(result.task_id, tid);
+    assert.equal(result['task-id'], tid);
   } finally {
     for (const r of Object.values(repos)) r.cleanup();
   }
@@ -298,9 +298,9 @@ test('claim returns task_id, agent, and claimed_at', () => {
   try {
     const result = runTask(['claim', '--project', proj, '--task-id', tid, '--agent', 'test-agent']);
     assert.equal(result.success, true);
-    assert.equal(result.task_id, tid);
+    assert.equal(result['task-id'], tid);
     assert.equal(result.agent, 'test-agent');
-    assert.ok(result.claimed_at);
+    assert.ok(result['claimed-at']);
   } finally {
     for (const r of Object.values(repos)) r.cleanup();
   }
@@ -344,9 +344,9 @@ test('lock-acquire acquires a project lock', () => {
     assert.equal(result.success, true);
     assert.equal(result.project, proj);
     assert.ok(result.owner);
-    assert.ok(result.acquired_at);
-    assert.ok(result.expires_at);
-    assert.equal(result.ttl_minutes, 20);
+    assert.ok(result['acquired-at']);
+    assert.ok(result['expires-at']);
+    assert.equal(result['ttl-minutes'], 20);
     assert.equal(result.force, false);
 
     // Lock persisted in YAML
@@ -432,8 +432,8 @@ test('lock-release reports lock owner/acquired_at/expires_at before release', ()
     const result = runTask(['lock-release', '--project', proj]);
     assert.equal(result.success, true);
     assert.ok(result.owner);
-    assert.ok(result.acquired_at);
-    assert.ok(result.expires_at);
+    assert.ok(result['acquired-at']);
+    assert.ok(result['expires-at']);
   } finally {
     for (const r of Object.values(repos)) r.cleanup();
   }
@@ -464,9 +464,9 @@ test('lock-status --json outputs structured JSON', () => {
     assert.equal(parsed.success, true);
     assert.equal(parsed.project, proj);
     assert.ok(parsed.owner);
-    assert.ok(parsed.acquired_at);
-    assert.ok(parsed.expires_at);
-    assert.equal(parsed.ttl_minutes, 20);
+    assert.ok(parsed['acquired-at']);
+    assert.ok(parsed['expires-at']);
+    assert.equal(parsed['ttl-minutes'], 20);
     assert.equal(parsed.force, false);
   } finally {
     for (const r of Object.values(repos)) r.cleanup();
@@ -618,8 +618,8 @@ test('lock-acquire --json outputs structured JSON', () => {
     const result = runTask(['lock-acquire', '--project', proj, '--json']);
     assert.equal(result.success, true);
     assert.ok(result.owner);
-    assert.ok(result.acquired_at);
-    assert.ok(result.expires_at);
+    assert.ok(result['acquired-at']);
+    assert.ok(result['expires-at']);
   } finally {
     for (const r of Object.values(repos)) r.cleanup();
   }
@@ -630,8 +630,8 @@ test('lock-acquire uses fixed 20min TTL', () => {
   const repos = makeRepo({ [proj]: 'tasks:\n' });
   try {
     const result = runTask(['lock-acquire', '--project', proj]);
-    const acquired = new Date(result.acquired_at).getTime();
-    const expires = new Date(result.expires_at).getTime();
+    const acquired = new Date(result['acquired-at']).getTime();
+    const expires = new Date(result['expires-at']).getTime();
     const diffSec = (expires - acquired) / 1000;
     // Fixed TTL = 1_200_000ms = 1200s (20min), allow 5s tolerance
     assert.ok(Math.abs(diffSec - 1200) < 5);

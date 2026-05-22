@@ -396,16 +396,24 @@ function formatTaskCompact(task: Task, tags: string[]): string {
   return `${status}${idText} [${task.project}] ${task.text} [P:${task.priority}]${compactTags}`;
 }
 
-function printTaskListToString(tasks: Task[], actionableHeader = false): string {
+function printTaskListToString(tasks: Task[], actionableHeader = false, showDeps = false): string {
   const out: string[] = [];
   if (actionableHeader) {
     out.push('Actionable Tasks (sorted by priority)');
     out.push('='.repeat(50));
   }
-  for (const [index, task] of tasks.entries()) {
+  for (const task of tasks) {
     const tags = taskDisplayTags(task);
-    if (actionableHeader) out.push(...formatTaskVerbose(task, index, tags));
-    else out.push(formatTaskCompact(task, tags));
+    let line: string;
+    if (actionableHeader) {
+      line = formatTaskVerbose(task, tasks.indexOf(task), tags).join('\n');
+    } else {
+      line = formatTaskCompact(task, tags);
+    }
+    if (showDeps && task.depends_on.length > 0) {
+      line += ` → [${task.depends_on.join(', ')}]`;
+    }
+    out.push(line);
   }
   return out.join('\n');
 }

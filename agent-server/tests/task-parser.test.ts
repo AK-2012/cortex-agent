@@ -234,9 +234,9 @@ test('show and deps report dependency relationships via depends_on', () => {
     assert.deepEqual(show.dependents, [b2]);
 
     const deps = JSON.parse(runRead(['deps', '--task-id', b2, '--json']));
-    assert.deepEqual(deps.task.depends_on, [a1]);
+    assert.deepEqual(deps.task['depends-on'], [a1]);
     assert.deepEqual(deps.dependents, []);
-    assert.deepEqual(deps.depends_on.map((t: any) => t.id), [a1]);
+    assert.deepEqual(deps['depends-on'].map((t: any) => t.id), [a1]);
   } finally {
     for (const r of Object.values(repos)) r.cleanup();
   }
@@ -248,8 +248,8 @@ test('lint reports duplicates, dangling dependencies, and health warnings', () =
     const lint = JSON.parse(runRead(['lint', '--json']));
 
     assert.equal(lint.ok, false);
-    assert.ok(lint.errors.some((e: any) => e.code === 'duplicate-id' && e.task_id === b4));
-    assert.ok(lint.errors.some((e: any) => e.code === 'missing-dependency' && e.task_id === b3));
+    assert.ok(lint.errors.some((e: any) => e.code === 'duplicate-id' && e['task-id'] === b4));
+    assert.ok(lint.errors.some((e: any) => e.code === 'missing-dependency' && e['task-id'] === b3));
     assert.ok(lint.warnings.some((e: any) => e.code === 'missing-why'));
     assert.ok(lint.warnings.some((e: any) => e.code === 'missing-template'));
     assert.ok(lint.warnings.some((e: any) => e.code === 'missing-id'));

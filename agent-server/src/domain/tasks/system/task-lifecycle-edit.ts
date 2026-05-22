@@ -194,19 +194,19 @@ function editTask(project: string, options: any = {}): TaskLineTransformResult {
 
   if (text != null) { task.text = text; updatedFields.push('text'); }
   if (why != null) { task.why = why; updatedFields.push('why'); }
-  if (doneWhen != null) { task.done_when = doneWhen; updatedFields.push('done_when'); }
+  if (doneWhen != null) { task.done_when = doneWhen; updatedFields.push('done-when'); }
   if (plan != null) { task.plan = plan.trim(); updatedFields.push('plan'); }
   if (priority != null) { task.priority = priority; updatedFields.push('priority'); }
 
   if (clearDependsOn || expandedSetDependsOn != null) {
     task.depends_on = expandedSetDependsOn ?? [];
-    updatedFields.push('depends_on');
+    updatedFields.push('depends-on');
   } else if (expandedAddDependsOn.length > 0 || expandedRemoveDependsOn.length > 0) {
     task.depends_on = task.depends_on.filter((id) => !expandedRemoveDependsOn.includes(id));
     for (const id of expandedAddDependsOn) {
       if (!task.depends_on.includes(id)) task.depends_on.push(id);
     }
-    updatedFields.push('depends_on');
+    updatedFields.push('depends-on');
   }
 
   writeTasks(project, tasks);

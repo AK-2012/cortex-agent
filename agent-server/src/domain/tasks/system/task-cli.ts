@@ -71,9 +71,11 @@ interface ParsedValues {
   skipVerify: boolean;
   skipVerifyReason: string | null;
   force: boolean;
+  showDeps: boolean;
+  autoLock: boolean;
 }
 
-const READ_COMMANDS = new Set(['list', 'all', 'query', 'show', 'deps', 'lint', 'stats']);
+const READ_COMMANDS = new Set(['list', 'all', 'query', 'show', 'deps', 'lint', 'stats', 'tree']);
 
 const WRITE_COMMANDS = new Set([
   'claim', 'unclaim', 'pause', 'resume', 'pending', 'complete', 'uncomplete',
@@ -105,11 +107,13 @@ const COMMANDS_NEEDING_PROJECT = new Set([
 const COMMON_FLAGS = new Set(['--base-dir', '--project', '--task-id']);
 
 const COMMAND_FLAG_ALLOWLIST: Record<string, Set<string>> = {
-  list: new Set([...COMMON_FLAGS, '--status', '--priority', '--text', '--has-deps', '--no-deps', '--all', '--json']),
-  all: new Set([...COMMON_FLAGS, '--status', '--priority', '--text', '--has-deps', '--no-deps', '--json']),
-  query: new Set([...COMMON_FLAGS, '--status', '--priority', '--text', '--has-deps', '--no-deps', '--json']),
-  show: new Set([...COMMON_FLAGS, '--json']),
-  deps: new Set([...COMMON_FLAGS, '--json']),
+  list: new Set([...COMMON_FLAGS, '--status', '--priority', '--text', '--has-deps', '--no-deps', '--all', '--json', '--show-deps']),
+  all: new Set([...COMMON_FLAGS, '--status', '--priority', '--text', '--has-deps', '--no-deps', '--json', '--show-deps']),
+  query: new Set([...COMMON_FLAGS, '--status', '--priority', '--text', '--has-deps', '--no-deps', '--json', '--show-deps']),
+  show: new Set([...COMMON_FLAGS, '--json', '--task-ids']),
+  deps: new Set([...COMMON_FLAGS, '--json', '--task-ids']),
+  tree: new Set([...COMMON_FLAGS]),
+  add: new Set([...COMMON_FLAGS, '--text', '--why', '--done-when', '--plan', '--priority', '--template', '--depends-on', '--auto-lock']),
   lint: new Set([...COMMON_FLAGS, '--json']),
   stats: new Set([...COMMON_FLAGS, '--json']),
   claim: new Set([...COMMON_FLAGS, '--task', '--agent']),
@@ -124,17 +128,16 @@ const COMMAND_FLAG_ALLOWLIST: Record<string, Set<string>> = {
   'clear-approval': new Set([...COMMON_FLAGS, '--task']),
   block: new Set([...COMMON_FLAGS, '--task', '--reason']),
   unblock: new Set([...COMMON_FLAGS, '--task']),
-  add: new Set([...COMMON_FLAGS, '--text', '--why', '--done-when', '--plan', '--priority', '--template', '--depends-on']),
   edit: new Set([
     ...COMMON_FLAGS, '--task', '--text', '--why', '--done-when', '--plan', '--priority',
-    '--depends-on', '--add-depends-on', '--remove-depends-on', '--clear-depends-on',
+    '--depends-on', '--add-depends-on', '--remove-depends-on', '--clear-depends-on', '--auto-lock',
   ]),
   'batch-edit': new Set([
     ...COMMON_FLAGS, '--task-ids', '--text', '--why', '--done-when', '--plan', '--priority',
-    '--depends-on', '--add-depends-on', '--remove-depends-on', '--clear-depends-on',
+    '--depends-on', '--add-depends-on', '--remove-depends-on', '--clear-depends-on', '--auto-lock',
   ]),
-  decompose: new Set([...COMMON_FLAGS, '--task', '--subtasks-file', '--dry-run']),
-  'assign-ids': new Set([...COMMON_FLAGS]),
+  decompose: new Set([...COMMON_FLAGS, '--task', '--subtasks-file', '--dry-run', '--auto-lock']),
+  'assign-ids': new Set([...COMMON_FLAGS, '--auto-lock']),
   validate: new Set([...COMMON_FLAGS]),
   stop: new Set([...COMMON_FLAGS, '--dry-run']),
   'lock-acquire': new Set([...COMMON_FLAGS, '--force', '--note', '--json']),
@@ -153,8 +156,9 @@ const HELP_CONFIG = {
       commands: [
         { name: 'list', description: 'Show actionable tasks (default). Use --all for all tasks' },
         { name: 'query', description: 'Filter by status, priority, text, task-id' },
-        { name: 'show', description: 'Show detailed info for one task (--task-id)' },
-        { name: 'deps', description: 'Show dependency graph for one task (--task-id)' },
+        { name: 'show', description: 'Show detailed info for task(s) (--task-id or --task-ids)' },
+        { name: 'deps', description: 'Show dependency graph for task(s) (--task-id or --task-ids)' },
+        { name: 'tree', description: 'Show dependency tree (--project; optionally --task-id for subtree)' },
         { name: 'lint', description: 'Lint task structure (missing-id, dangling deps, cycles)' },
         { name: 'stats', description: 'Task supply statistics per project' },
       ],
@@ -217,7 +221,7 @@ const HELP_CONFIG = {
     { flag: '--project <name>', description: 'Project name (required for most write commands; filters reads)' },
     { flag: '--task-id <id>', description: 'Task hash ID (4-char hex)' },
     { flag: '--task <text>', description: 'Lookup by task text (fuzzy alternative to --task-id; not for `add`)' },
-    { flag: '--task-ids <ids>', description: 'Comma-separated task IDs (for batch-edit)' },
+    { flag: '--task-ids <ids>', description: 'Comma-separated task IDs (batch-edit, show, deps)' },
     { flag: '--agent <name>', description: 'Agent identifier for claim', default: 'cortex-local' },
     { flag: '--note <text>', description: 'Completion note' },
     { flag: '--reason <text>', description: 'Block reason' },
@@ -235,10 +239,12 @@ const HELP_CONFIG = {
     { flag: '--status <status>', description: 'Filter by status (read commands)' },
     { flag: '--has-deps', description: 'Read-only: tasks with dependencies' },
     { flag: '--no-deps', description: 'Read-only: tasks without dependencies' },
+    { flag: '--show-deps', description: 'Read-only: show dependency IDs after each task line (list/all/query)' },
     { flag: '--all', description: 'Read-only: include completed tasks (with `list`)' },
     { flag: '--json', description: 'Output as JSON (read commands)' },
     { flag: '--base-dir <path>', description: 'Cortex root directory', default: '~/Cortex' },
     { flag: '--dry-run', description: 'Preview without executing (stop, decompose)' },
+    { flag: '--auto-lock', description: 'Auto-acquire project lock before write (does NOT auto-release)' },
     { flag: '--skip-verify', description: 'Skip completion evidence check for `complete` (escape hatch)' },
     { flag: '--skip-verify-reason <text>', description: 'Reason for skipping verification (logged in result)' },
     { flag: '--help', description: 'Show this help' },
@@ -321,6 +327,8 @@ function createDefaults(): ParsedValues {
     skipVerify: false,
     skipVerifyReason: null,
     force: false,
+    showDeps: false,
+    autoLock: false,
   };
 }
 
@@ -387,6 +395,12 @@ function parseOptions(args: string[], values: ParsedValues, seen: Set<string>): 
     } else if (token === '--force') {
       seen.add(token);
       values.force = true;
+    } else if (token === '--show-deps') {
+      seen.add(token);
+      values.showDeps = true;
+    } else if (token === '--auto-lock') {
+      seen.add(token);
+      values.autoLock = true;
     } else {
       throw cliError(`Unknown argument: ${token}`);
     }
@@ -408,8 +422,8 @@ function validateCommand(command: string, values: ParsedValues): void {
     throw cliError(`Unknown command: '${command}'. Available commands: ${[...ALL_COMMANDS].join(', ')}`);
   }
   if (READ_COMMANDS.has(command)) {
-    if ((command === 'show' || command === 'deps') && !values.taskId) {
-      throw cliError(`--task-id is required for ${command}`);
+    if ((command === 'show' || command === 'deps') && !values.taskId && values.taskIds.length === 0) {
+      throw cliError(`--task-id or --task-ids is required for ${command}`);
     }
     if (values.status && values.status !== '__all__' && !VALID_STATUSES.has(values.status)) {
       throw cliError(`invalid --status: '${values.status}'. Valid values: ${[...VALID_STATUSES].join(', ')}`);
@@ -466,8 +480,27 @@ function buildReadFilters(v: ParsedValues) {
   };
 }
 
+// ── JSON output helpers ──
+
+function deepKebabKeys(obj: any): any {
+  if (Array.isArray(obj)) return obj.map(deepKebabKeys);
+  if (obj !== null && typeof obj === 'object') {
+    const out: Record<string, any> = {};
+    for (const [k, v] of Object.entries(obj)) {
+      const key = k.replace(/_/g, '-');
+      out[key] = deepKebabKeys(v);
+    }
+    return out;
+  }
+  return obj;
+}
+
+function jsonOutput(payload: any): string {
+  return JSON.stringify(deepKebabKeys(payload), null, 2);
+}
+
 function jsonOrText(json: boolean, payload: any, fallback: string): string {
-  return json ? JSON.stringify(payload, null, 2) : fallback;
+  return json ? jsonOutput(payload) : fallback;
 }
 
 function handleList(v: ParsedValues): CliResult {
@@ -477,10 +510,10 @@ function handleList(v: ParsedValues): CliResult {
     const cHashes = completedHashSet(allTasks);
     const scoped = filters.project ? allTasks.filter((t) => t.project === filters.project) : allTasks;
     const tasks = filterTasks(scoped, filters, cHashes);
-    return { exitCode: 0, stdout: jsonOrText(v.json, tasks, printTaskListToString(tasks, false)), stderr: '' };
+    return { exitCode: 0, stdout: jsonOrText(v.json, tasks, printTaskListToString(tasks, false, v.showDeps)), stderr: '' };
   }
   const tasks = filterTasks(scanAvailableTasks(), filters);
-  return { exitCode: 0, stdout: jsonOrText(v.json, tasks, printTaskListToString(tasks, true)), stderr: '' };
+  return { exitCode: 0, stdout: jsonOrText(v.json, tasks, printTaskListToString(tasks, true, v.showDeps)), stderr: '' };
 }
 
 function handleQuery(v: ParsedValues): CliResult {
@@ -488,15 +521,30 @@ function handleQuery(v: ParsedValues): CliResult {
   const allTasks = scanAllTasks();
   const cHashes = completedHashSet(allTasks);
   const tasks = filterTasks(allTasks, filters, cHashes);
-  return { exitCode: 0, stdout: jsonOrText(v.json, tasks, tasks.map((t: any) => t.text).join('\n')), stderr: '' };
+  const textOutput = v.showDeps
+    ? printTaskListToString(tasks, false, true)
+    : tasks.map((t: any) => t.text).join('\n');
+  return { exitCode: 0, stdout: jsonOrText(v.json, tasks, textOutput), stderr: '' };
 }
 
 function handleShowOrDeps(command: 'show' | 'deps', v: ParsedValues): CliResult {
   const allTasks = scanAllTasks();
+  const buildPayload = (task: any) =>
+    command === 'show' ? showPayload(task, allTasks) : depsPayload(task, allTasks);
+
+  if (v.taskIds.length > 0) {
+    const results = v.taskIds.map((id) => {
+      const task = allTasks.find((t: any) => t.id === id);
+      if (!task) throw cliError(`task not found: ${id}`);
+      return buildPayload(task);
+    });
+    return { exitCode: 0, stdout: jsonOrText(v.json, results, JSON.stringify({ tasks: results }, null, 2)), stderr: '' };
+  }
+
   const task = allTasks.find((t: any) => t.id === v.taskId);
   if (!task) throw cliError(`task not found: ${v.taskId}`);
-  const payload = command === 'show' ? showPayload(task, allTasks) : depsPayload(task, allTasks);
-  return { exitCode: 0, stdout: jsonOrText(v.json, payload, JSON.stringify(payload)), stderr: '' };
+  const payload = buildPayload(task);
+  return { exitCode: 0, stdout: jsonOrText(v.json, payload, jsonOutput(payload)), stderr: '' };
 }
 
 function handleLint(v: ParsedValues): CliResult {
@@ -507,7 +555,95 @@ function handleLint(v: ParsedValues): CliResult {
   try { loadConfig(); } catch { /* suppress loadConfig output */ }
   const validTemplateNames = new Set(listTemplateNames());
   const payload = lintTasks(tasks, { validTemplateNames: validTemplateNames.size > 0 ? validTemplateNames : null });
-  return { exitCode: 0, stdout: jsonOrText(v.json, payload, JSON.stringify(payload)), stderr: '' };
+  return { exitCode: 0, stdout: jsonOrText(v.json, payload, jsonOutput(payload)), stderr: '' };
+}
+
+// ── Tree command ──
+
+interface TreeNode {
+  id: string;
+  text: string;
+  children: TreeNode[];
+}
+
+function buildTree(task: any, taskMap: Map<string, any>, visited: Set<string>): TreeNode | null {
+  if (visited.has(task.id)) return null;
+  visited.add(task.id);
+  const children: TreeNode[] = [];
+  for (const t of taskMap.values()) {
+    if (t.depends_on?.includes(task.id)) {
+      const child = buildTree(t, taskMap, visited);
+      if (child) children.push(child);
+    }
+  }
+  return { id: task.id, text: task.text, children };
+}
+
+function printTree(nodes: TreeNode[], prefix: string, shared: Set<string>, completedIds: Set<string>): string {
+  const lines: string[] = [];
+  for (let i = 0; i < nodes.length; i++) {
+    const node = nodes[i];
+    const isLast = i === nodes.length - 1;
+    const connector = isLast ? '└── ' : '├── ';
+    const childPrefix = isLast ? '    ' : '│   ';
+    const marks: string[] = [];
+    if (completedIds.has(node.id)) marks.push('done');
+    if (shared.has(node.id)) marks.push('shared');
+    const mark = marks.length > 0 ? ` (${marks.join(', ')})` : '';
+    lines.push(`${prefix}${connector}${node.id} ${node.text}${mark}`);
+
+    if (node.children.length > 0) {
+      const childShared = new Set(shared);
+      for (const n of nodes) {
+        if (n.id !== node.id) childShared.add(n.id);
+      }
+      lines.push(printTree(node.children, prefix + childPrefix, childShared, completedIds));
+    }
+  }
+  return lines.join('\n');
+}
+
+function handleTree(v: ParsedValues): CliResult {
+  const allTasks = scanAllTasks();
+  const scoped = v.project ? allTasks.filter((t) => t.project === v.project) : allTasks;
+  const entries: [string, any][] = [];
+  for (const t of scoped) {
+    if (t.id) entries.push([t.id, t]);
+  }
+  const taskMap = new Map<string, any>(entries);
+  const completedIds = new Set(completedHashSet(scoped));
+
+  if (v.taskId) {
+    // Subtree mode: root is the specified task
+    const task = taskMap.get(v.taskId);
+    if (!task) return { exitCode: 0, stdout: `No task found: ${v.taskId}`, stderr: '' };
+    const visited = new Set<string>();
+    const node = buildTree(task, taskMap, visited);
+    if (!node) return { exitCode: 0, stdout: `${v.taskId} ${task.text}`, stderr: '' };
+    return { exitCode: 0, stdout: `${node.id} ${node.text}\n${printTree([node], '', new Set(), completedIds)}`, stderr: '' };
+  }
+
+  // Full tree: tasks with no open deps are roots (including completed roots)
+  const roots: any[] = [];
+  for (const task of scoped) {
+    if (!task.id) continue;
+    const openDeps = task.depends_on.filter((d: string) => {
+      const dep = taskMap.get(d);
+      return dep && !completedIds.has(d);
+    });
+    if (openDeps.length === 0) roots.push(task);
+  }
+
+  if (roots.length === 0) {
+    return { exitCode: 0, stdout: v.taskId ? `No task found: ${v.taskId}` : 'No open tasks', stderr: '' };
+  }
+
+  const visited = new Set<string>();
+  const nodes = roots.map((r: any) => buildTree(r, taskMap, visited)).filter((n): n is TreeNode => n !== null);
+
+  const openCount = roots.filter((r) => !completedIds.has(r.id)).length;
+  const header = `Dependency tree for ${v.project || 'all projects'} (${roots.length} root(s), ${openCount} open)\n`;
+  return { exitCode: 0, stdout: header + printTree(nodes, '', new Set(), completedIds), stderr: '' };
 }
 
 function handleStats(v: ParsedValues): CliResult {
@@ -664,7 +800,7 @@ function runWrite(command: string, values: ParsedValues): CliResult {
   if (command === 'lock-status') {
     const result = handleLockStatus(values);
     if (values.json) {
-      return { exitCode: 0, stdout: JSON.stringify(result, null, 2), stderr: '' };
+      return { exitCode: 0, stdout: jsonOutput(result), stderr: '' };
     }
     if (result.projects) {
       const lines = result.projects.map((p: any) => {
@@ -682,29 +818,65 @@ function runWrite(command: string, values: ParsedValues): CliResult {
   const handler = WRITE_HANDLERS[command];
   if (!handler) throw cliError(`Unknown command: '${command}'`);
 
-  if (LOCK_GUARD_COMMANDS.has(command)) {
+  // ── Auto-lock ──
+  let autoLocked = false;
+  if (values.autoLock && (LOCK_GUARD_COMMANDS.has(command) || command === LOCK_GUARD_ASSIGN_IDS)) {
+    const owner = getOwnerIdentity();
+    const projectsToAutoLock = (command === LOCK_GUARD_ASSIGN_IDS && !values.project)
+      ? listProjectDirs()
+      : [values.project!];
+    for (const p of projectsToAutoLock) {
+      const current = readLock(p);
+      if (current) {
+        const err = assertLockHeld(p, owner);
+        if (err) {
+          const result = { success: false, message: `Cannot auto-lock project '${p}': ${err}` };
+          return { exitCode: 1, stdout: jsonOutput(result), stderr: '' };
+        }
+      } else {
+        const acq = acquireLock(p, { owner });
+        if (!acq.acquired) {
+          const result = { success: false, message: `Auto-lock failed for project '${p}': ${acq.message}` };
+          return { exitCode: 1, stdout: jsonOutput(result), stderr: '' };
+        }
+        autoLocked = true;
+      }
+    }
+  }
+
+  if (LOCK_GUARD_COMMANDS.has(command) && !values.autoLock) {
     const owner = getOwnerIdentity();
     const err = assertLockHeld(values.project!, owner);
     if (err) {
       const result = { success: false, message: `Lock required: ${err}\nRun: cortex-task lock-acquire --project ${values.project}` };
-      return { exitCode: 1, stdout: JSON.stringify(result, null, 2), stderr: '' };
+      return { exitCode: 1, stdout: jsonOutput(result), stderr: '' };
     }
   }
 
-  if (command === LOCK_GUARD_ASSIGN_IDS) {
+  if (command === LOCK_GUARD_ASSIGN_IDS && !values.autoLock) {
     const owner = getOwnerIdentity();
     const projectsToCheck = values.project ? [values.project] : listProjectDirs();
     for (const p of projectsToCheck) {
       const err = assertLockHeld(p, owner);
       if (err) {
         const result = { success: false, message: `Lock required for project '${p}': ${err}\nRun: cortex-task lock-acquire --project ${p}` };
-        return { exitCode: 1, stdout: JSON.stringify(result, null, 2), stderr: '' };
+        return { exitCode: 1, stdout: jsonOutput(result), stderr: '' };
       }
     }
   }
 
   const result = handler(values);
-  return { exitCode: result.success ? 0 : 1, stdout: JSON.stringify(result, null, 2), stderr: '' };
+
+  const stderrLines: string[] = [];
+  if (autoLocked && result.success !== false) {
+    stderrLines.push(`Lock acquired automatically. Release with: cortex-task lock-release --project ${values.project}`);
+  }
+
+  return {
+    exitCode: result.success ? 0 : 1,
+    stdout: jsonOutput(result),
+    stderr: stderrLines.join('\n'),
+  };
 }
 
 function runRead(command: string, values: ParsedValues): CliResult {
@@ -714,6 +886,7 @@ function runRead(command: string, values: ParsedValues): CliResult {
     case 'query': return handleQuery(values);
     case 'show': return handleShowOrDeps('show', values);
     case 'deps': return handleShowOrDeps('deps', values);
+    case 'tree': return handleTree(values);
     case 'lint': return handleLint(values);
     case 'stats': return handleStats(values);
     default: throw cliError(`Unknown read command: ${command}`);
