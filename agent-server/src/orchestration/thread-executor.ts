@@ -91,7 +91,7 @@ export class ThreadExecutor {
       const errorBlocksTemplate = { channel, sessionName: null, isDm: false };
       if (isCancelled) {
         if (statusMsg) {
-          const cancelText = `:octagonal_sign: Cancelled (${elapsedStr}s)`;
+          const cancelText = `:octagonal_sign: Cancelled (${elapsedStr})`;
           await adapter.updateMessage(statusMsg, {
             text: cancelText,
             richBlocks: buildSealedStatusActionBlocks(cancelText, errorBlocksTemplate),
@@ -102,7 +102,7 @@ export class ThreadExecutor {
       } else {
         const errorMsg = (error as Error)?.message || 'Unknown error';
         if (statusMsg) {
-          const failText = `:x: Thread failed (${elapsedStr}s): ${errorMsg}`;
+          const failText = `:x: Thread failed (${elapsedStr}): ${errorMsg}`;
           await adapter.updateMessage(statusMsg, {
             text: failText,
             richBlocks: buildSealedStatusActionBlocks(failText, errorBlocksTemplate),

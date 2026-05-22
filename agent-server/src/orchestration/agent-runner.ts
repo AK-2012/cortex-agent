@@ -5,6 +5,7 @@
 
 import * as path from 'path';
 import type { Destination, PlatformAdapter, MessageRef, DownloadedFile, IncomingMessage, PlatformFileRef, VirtualMessage } from '@platform/index.js';
+import { resolveDestinationConduit } from '@platform/types.js';
 import type { AgentResult } from '@core/types/agent-types.js';
 import type { ThreadRunResult } from '@domain/threads/runner.js';
 import { channelQueues, enqueue } from './channel-queue.js';
@@ -206,7 +207,7 @@ async function handleDefaultAgentResult({ result, channel, adapter, statusMsg, s
 }): Promise<void> {
   if (result?.rateLimited) {
     const { elapsedStr } = computeElapsed(startTime);
-    const fallbackText = `:warning: ${buildSessionTag(sessionName, sessionId)}Rate limited — all fallbacks exhausted (${elapsedStr}s)`;
+    const fallbackText = `:warning: ${buildSessionTag(sessionName, sessionId)}Rate limited — all fallbacks exhausted (${elapsedStr})`;
     await sealStatus(adapter, statusMsg, fallbackText, buildSealedStatusActionBlocks(fallbackText, { channel, sessionName, isDm: true }));
     return;
   }
@@ -227,7 +228,8 @@ async function resolveSessionName(sessionId: string | null, channel: string, use
 }
 
 function buildAgentCallbacks(adapter: PlatformAdapter, destination: Destination, statusMsg: MessageRef, threadTs: string | null, startTime: number, sessionName: string, sessionId: string | null, onMessagePosted: (ref: MessageRef) => void): AgentCallbacks {
-  const onFallback = makeFallbackNotifier(destination.conduit, statusMsg, adapter);
+  const channel = resolveDestinationConduit(destination);
+  const onFallback = makeFallbackNotifier(channel, statusMsg, adapter);
   const queue = getOutboundQueue();
   const durable = queue ? buildDurableHooks(queue) : null;
   const baseAssistantMsg = makeStreamingMessageCallback(adapter, destination, threadTs, onMessagePosted, durable);

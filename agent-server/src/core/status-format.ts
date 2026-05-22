@@ -7,7 +7,7 @@ import { formatDurationCompact } from './utils.js';
 
 export function computeElapsed(startTime: number): { elapsedStr: string; elapsedS: number } {
   const elapsedS = (Date.now() - startTime) / 1000;
-  return { elapsedStr: elapsedS.toFixed(1), elapsedS };
+  return { elapsedStr: formatDurationCompact(elapsedS), elapsedS };
 }
 
 export function formatMetricsSuffix({ costUsd, numTurns }: { costUsd: number | null; numTurns: number | null }): string {

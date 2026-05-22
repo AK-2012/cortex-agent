@@ -43,7 +43,7 @@ export async function finalizeThreadSuccess(adapter: PlatformAdapter, channel: s
   }
   const metrics = formatMetricsSuffix({ costUsd: threadResult.totalCostUsd, numTurns: threadResult.totalNumTurns });
   if (statusMsg) {
-    const text = `:white_check_mark: ${statusPrefix} | ${buildSessionTag(sessionName, result?.sessionId)}(${elapsedStr}s${metrics})`;
+    const text = `:white_check_mark: ${statusPrefix} | ${buildSessionTag(sessionName, result?.sessionId)}(${elapsedStr}${metrics})`;
     const queue = getOutboundQueue();
     if (queue) {
       await durableUpdate(queue, adapter, statusMsg, { text });

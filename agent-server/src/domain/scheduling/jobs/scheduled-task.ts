@@ -135,7 +135,7 @@ async function runScheduledTaskAsync({ normalizedMessage, message, projectId, sc
     if (result?.rateLimited) {
       const { elapsedStr } = computeElapsed(startTime);
       if (statusMsg) {
-        const text = `:warning: ${buildSessionTag(sessionName, result?.sessionId)}Rate limited — all fallbacks exhausted (${elapsedStr}s)`;
+        const text = `:warning: ${buildSessionTag(sessionName, result?.sessionId)}Rate limited — all fallbacks exhausted (${elapsedStr})`;
         const queue = getOutboundQueue();
         if (queue) { await durableUpdate(queue, adapter, statusMsg, { text }); }
         else { await adapter.updateMessage(statusMsg, { text }); }
@@ -150,7 +150,7 @@ async function runScheduledTaskAsync({ normalizedMessage, message, projectId, sc
     const { elapsedStr } = computeElapsed(startTime);
     const queue = getOutboundQueue();
     if (statusMsg) {
-      const text = `:x: ${buildSessionTag(sessionName, null)}Error (${elapsedStr}s)`;
+      const text = `:x: ${buildSessionTag(sessionName, null)}Error (${elapsedStr})`;
       if (queue) { await durableUpdate(queue, adapter, statusMsg, { text }); }
       else { await adapter.updateMessage(statusMsg, { text }); }
     }

@@ -47,8 +47,8 @@ export async function handleAgentSuccess({ result, channel, adapter, statusMsg, 
   const vm = (onAssistantMessage as any)?.vm ?? null;
   const askCount = await askUserQuestion.sendMessages(result, channel, adapter, statusMsg.messageId, threadTs, vm);
   const statusText = askCount > 0
-    ? `:speech_balloon: ${sessionTag}Waiting for user input (${elapsedStr}s${metrics})`
-    : `:white_check_mark: Done | ${sessionTag}(${elapsedStr}s${metrics})`;
+    ? `:speech_balloon: ${sessionTag}Waiting for user input (${elapsedStr}${metrics})`
+    : `:white_check_mark: Done | ${sessionTag}(${elapsedStr}${metrics})`;
   await sealStatus(adapter, statusMsg, statusText, buildSealedStatusActionBlocks(statusText, { channel, sessionName, isDm: true }));
 
   if (userMessageTs) {
@@ -122,7 +122,7 @@ export async function handleAgentError({ error, channel, adapter, statusMsg, sta
   if (error?.cancelled && supersededEdits.check(channel)) {
     supersededEdits.clear(channel);
     finalizeLocalExecution({ executionId, status: 'cancelled', error, durationS: elapsedS });
-    const supersededText = `:fast_forward: ${sessionTag}Superseded by edit (${elapsedStr}s)`;
+    const supersededText = `:fast_forward: ${sessionTag}Superseded by edit (${elapsedStr})`;
     await sealStatus(adapter, statusMsg, supersededText, buildSealedStatusActionBlocks(supersededText, { channel, sessionName, isDm: true }));
     return;
   }
@@ -132,14 +132,14 @@ export async function handleAgentError({ error, channel, adapter, statusMsg, sta
 
   if (error?.cancelled) {
     finalizeLocalExecution({ executionId, status: 'failed', error, durationS: elapsedS });
-    const cancelledText = `:octagonal_sign: ${sessionTag}Cancelled (${elapsedStr}s)`;
+    const cancelledText = `:octagonal_sign: ${sessionTag}Cancelled (${elapsedStr})`;
     await sealStatus(adapter, statusMsg, cancelledText, buildSealedStatusActionBlocks(cancelledText, { channel, sessionName, isDm: true }));
     return;
   }
 
   log.error('Agent error:', error.message);
   finalizeLocalExecution({ executionId, status: 'failed', error, durationS: elapsedS });
-  const errorText = `:x: ${sessionTag}Error (${elapsedStr}s)`;
+  const errorText = `:x: ${sessionTag}Error (${elapsedStr})`;
   await sealStatus(adapter, statusMsg, errorText, buildSealedStatusActionBlocks(errorText, { channel, sessionName, isDm: true }));
   const errorDest: Destination = { type: 'interactive-reply', conduit: channel, sessionId: resolvedSessionId ?? '' };
   const queue = getOutboundQueue();
@@ -260,7 +260,7 @@ async function runRetryAgent({ channel, text, adapter, statusMsg, startTime, ses
 
     if (result?.rateLimited) {
       const { elapsedStr } = computeElapsed(startTime);
-      const rateLimitText = `:warning: ${buildSessionTag(sessionName, sessionId)}Rate limited \u2014 all fallbacks exhausted (${elapsedStr}s)`;
+      const rateLimitText = `:warning: ${buildSessionTag(sessionName, sessionId)}Rate limited \u2014 all fallbacks exhausted (${elapsedStr})`;
       await sealStatus(adapter, statusMsg, rateLimitText, buildSealedStatusActionBlocks(rateLimitText, { channel, sessionName, isDm: true }));
     } else {
       await handleAgentSuccess({ result, channel, adapter, statusMsg, startTime, userMessage: text, executionId, trigger: 'edit-retry', sessionName, userMessageTs, onAssistantMessage: onAssistantMsg });
