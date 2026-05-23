@@ -65,7 +65,8 @@ function resolveBackend(endpoint: string, mode: string): string {
     return 'claude';
   }
   if (endpoint === 'openai') {
-    return 'codex';
+    // PI-discovered OpenAI models → use PI backend (not Codex)
+    return 'pi';
   }
   if (endpoint === 'anthropic') {
     // Non-standard Anthropic mode (e.g., deepseek-anthropic) — can use claude or pi
@@ -241,8 +242,8 @@ function generateCodexProfile(models: ModelEntry[]): Record<string, ProfileEntry
   return {
     codex: {
       model: best.model,
-      backend: 'codex',
-      mode: 'plan',
+      backend: 'pi',
+      mode: best.mode,
       fallback: fallbacks.length > 0 ? fallbacks : undefined,
     },
   };

@@ -116,10 +116,11 @@ test('generateProfiles: deepseek-flash does NOT have --thinking xhigh', () => {
 
 // ─── Codex profile preserved ─────────────────────────────────────
 
-test('generateProfiles: codex profile generated when OpenAI endpoint present', () => {
+test('generateProfiles: codex profile uses pi backend when OpenAI endpoint present', () => {
   const result = generateProfiles([ANTHROPIC_PLAN, OPENAI_GPT]);
   assert.ok(result.profiles.codex, 'codex profile should exist');
-  assert.equal(result.profiles.codex.backend, 'codex');
+  assert.equal(result.profiles.codex.backend, 'pi');
+  assert.equal(result.profiles.codex.mode, 'openai');
 });
 
 // ─── Explicit planChoice / executeChoice ────────────────────────
