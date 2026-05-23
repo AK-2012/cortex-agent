@@ -3,6 +3,7 @@
 // pos:    init-time gateway config auto-generation
 
 import { readFileSync, writeFileSync, copyFileSync, mkdirSync, existsSync } from 'fs';
+import { execSync } from 'child_process';
 import * as path from 'path';
 import * as os from 'os';
 import { createLogger } from './log.js';
@@ -94,15 +95,39 @@ interface ClaudeCreds {
   accessToken?: string;
 }
 
+/** Try to read Claude Code credentials from macOS Keychain.
+ *  On macOS, Claude Code stores OAuth tokens in Keychain (service "Claude Code-credentials"),
+ *  not in ~/.claude/.credentials.json. Falls back gracefully on timeout/error. */
+function readClaudeCredentialsDarwin(): object | null {
+  try {
+    const raw = execSync(
+      'security find-generic-password -s "Claude Code-credentials" -w',
+      { timeout: 5000, stdio: ['ignore', 'pipe', 'ignore'] },
+    ).toString().trim();
+    if (!raw) return null;
+    return JSON.parse(raw);
+  } catch {
+    return null; // Keychain locked, entry missing, or security not available
+  }
+}
+
 /** Read and parse Claude Code credentials. Returns null if not logged in. */
 function scanClaudeCode(): ClaudeCreds | null {
   try {
-    if (!existsSync(CLAUDE_CREDENTIALS)) {
-      log.info('Claude Code credentials not found — user may not be logged in');
-      return null;
+    // macOS: try Keychain first, fall back to JSON file
+    let raw: object | null = null;
+    if (process.platform === 'darwin') {
+      raw = readClaudeCredentialsDarwin();
     }
-    const raw = JSON.parse(readFileSync(CLAUDE_CREDENTIALS, 'utf-8'));
-    const oauth = raw?.claudeAiOauth;
+    if (!raw) {
+      if (!existsSync(CLAUDE_CREDENTIALS)) {
+        log.info('Claude Code credentials not found — user may not be logged in');
+        return null;
+      }
+      raw = JSON.parse(readFileSync(CLAUDE_CREDENTIALS, 'utf-8'));
+    }
+
+    const oauth = (raw as any)?.claudeAiOauth;
     if (!oauth?.accessToken) {
       log.info('Claude Code credentials exist but no OAuth token found');
       return null;
