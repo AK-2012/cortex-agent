@@ -6,6 +6,7 @@
       "profile": "__active__",
       "persistSession": true,
       "promptTemplate": "{{input}}\n\nWrite your final reply to {{artifactPath}}.",
+      "systemPrompt": "file:direct.md",
       "tools": "Agent,AskUserQuestion,Bash,Edit,EnterPlanMode,ExitPlanMode,Glob,Grep,Read,Skill,TaskStop,TodoWrite,WebFetch,WebSearch,Write",
       "pluginDirs": [
         "plugins/cortex-common",
@@ -20,6 +21,7 @@
       "profile": "__active__",
       "persistSession": true,
       "promptTemplate": "{{input}}",
+      "systemPrompt": "file:direct.md",
       "tools": "Agent,AskUserQuestion,Bash,Edit,EnterPlanMode,ExitPlanMode,Glob,Grep,Read,Skill,TaskStop,TodoWrite,WebFetch,WebSearch,Write",
       "pluginDirs": [
         "plugins/cortex-common",
@@ -50,6 +52,7 @@
       "persistSession": false,
       "directive": "",
       "promptTemplate": "{{input}}\n\n{{previousOutput}}",
+      "systemPrompt": "file:worker.md",
       "tools": "Agent,Bash,Edit,Glob,Grep,Read,Skill,TaskStop,TodoWrite,WebFetch,WebSearch,Write",
       "pluginDirs": [
         "plugins/cortex-common",
@@ -64,6 +67,7 @@
       "profile": "__active__",
       "persistSession": false,
       "promptTemplate": "{{input}}",
+      "systemPrompt": "file:worker.md",
       "tools": "Agent,Bash,Edit,Glob,Grep,Read,Skill,TaskStop,TodoWrite,WebFetch,WebSearch,Write",
       "pluginDirs": [
         "plugins/cortex-common",
@@ -78,6 +82,7 @@
       "profile": "plan",
       "persistSession": true,
       "promptTemplate": "Write your plan to {{artifactPath}}.\n\nUser request:\n{{input}}",
+      "systemPrompt": "file:worker.md",
       "tools": "Agent,Bash,Edit,Glob,Grep,Read,Skill,TaskStop,TodoWrite,WebFetch,WebSearch,Write",
       "pluginDirs": [
         "plugins/cortex-common",
@@ -91,6 +96,7 @@
       "persistSession": true,
       "directive": "You are a strict reviewer. Evaluate the plan for correctness, completeness, and feasibility.",
       "promptTemplate": "Read the content in {{artifactPath}} and perform a review. Append your review to the ## Review section at the end of the file. If the content passes, write [APPROVED] at the end of the review. Otherwise provide specific suggestions for improvement.",
+      "systemPrompt": "file:worker.md",
       "tools": "Agent,Bash,Edit,Glob,Grep,Read,Skill,TaskStop,TodoWrite,WebFetch,WebSearch,Write",
       "pluginDirs": [
         "plugins/cortex-common",
@@ -104,6 +110,7 @@
       "persistSession": false,
       "directive": "file:plan-reviewer.md",
       "promptTemplate": "Execute the plan-phase audit per the plan-reviewer directive.\n\nTask / context (must declare plan path, phase under review, and where the phase's artifacts live):\n{{input}}\n\n---\n\nWrite the review to {{artifactPath}}. Walk every acceptance criterion of the phase explicitly (met / partially met / not met with a citation). End the artifact with a single line in the exact form: `Verdict: Approve | Revise | Reject` (one word, no modifiers).",
+      "systemPrompt": "file:worker.md",
       "tools": "Agent,Bash,Edit,Glob,Grep,Read,Skill,TaskStop,TodoWrite,WebFetch,WebSearch,Write",
       "pluginDirs": [
         "plugins/cortex-common",
@@ -117,6 +124,7 @@
       "persistSession": false,
       "directive": "file:plan-executor.md",
       "promptTemplate": "Translate Plan Reviewer's verdict into operations per the plan-executor directive.\n\nPlan Reviewer's report (previous step):\n{{previousOutput}}\n\n---\n\nOriginal task / context:\n{{input}}\n\n---\n\nReviewer's full artifact is at {{artifactPath}} \u2014 read it end-to-end first, extract the `Verdict:` word, then run the matching branch (Approve / Revise / Reject). All new tasks MUST carry `template:plan-gate` and full metadata; gate tasks always start `PLAN-GATE: `. Do NOT modify the plan file's structure or acceptance criteria.",
+      "systemPrompt": "file:worker.md",
       "tools": "Agent,Bash,Edit,Glob,Grep,Read,Skill,TaskStop,TodoWrite,WebFetch,WebSearch,Write",
       "pluginDirs": [
         "plugins/cortex-stage-gate"
@@ -129,6 +137,7 @@
       "persistSession": false,
       "directive": "file:milestone-reviewer.md",
       "promptTemplate": "Execute the milestone adversarial audit per the milestone-reviewer directive.\n\nTask / context:\n{{input}}\n\n---\n\nWrite the review to {{artifactPath}}. Cover every dimension the milestone's success criteria can be judged on. Each issue must carry a citation and a Blocker / Nice-to-have label. Do NOT issue a Director-style verdict \u2014 that belongs to Director.",
+      "systemPrompt": "file:worker.md",
       "tools": "Agent,Bash,Edit,Glob,Grep,Read,Skill,TaskStop,TodoWrite,WebFetch,WebSearch,Write",
       "pluginDirs": [
         "plugins/cortex-common",
@@ -142,6 +151,7 @@
       "persistSession": false,
       "directive": "file:director.md",
       "promptTemplate": "Execute the milestone verdict per the director directive.\n\nMilestone Reviewer's report (previous step):\n{{previousOutput}}\n\n---\n\nOriginal task / context:\n{{input}}\n\n---\n\nReviewer's full artifact is at {{artifactPath}} \u2014 read it end-to-end first. Write your analysis and the final `Verdict:` line back to the same artifact. Artifact MUST agree on verdict word and top reasons.",
+      "systemPrompt": "file:worker.md",
       "tools": "Agent,Bash,Edit,Glob,Grep,Read,Skill,TaskStop,TodoWrite,WebFetch,WebSearch,Write",
       "pluginDirs": [
         "plugins/cortex-common",
@@ -155,6 +165,7 @@
       "persistSession": false,
       "directive": "file:milestone-executor.md",
       "promptTemplate": "Translate Director's verdict into operations per the milestone-executor directive.\n\nDirector's analysis (previous step):\n{{previousOutput}}\n\n---\n\nOriginal task / context:\n{{input}}\n\n---\n\nDirector's full artifact is at {{artifactPath}} \u2014 read it end-to-end first and extract the `Verdict:` word. Then execute the matching branch (Proceed / Iterate / Pivot / Abort) per directive.",
+      "systemPrompt": "file:worker.md",
       "tools": "Agent,Bash,Edit,Glob,Grep,Read,Skill,TaskStop,TodoWrite,WebFetch,WebSearch,Write",
       "pluginDirs": [
         "plugins/cortex-stage-gate"
@@ -166,6 +177,7 @@
       "profile": "plan",
       "persistSession": true,
       "directive": "file:doc-writer.md",
+      "systemPrompt": "file:worker.md",
       "entryStage": "write",
       "stages": {
         "write": {
@@ -190,6 +202,7 @@
       "profile": "execute",
       "persistSession": true,
       "directive": "file:doc-reviewer.md",
+      "systemPrompt": "file:worker.md",
       "promptTemplate": "Audit Doc Writer's project-file changes (changes by other agents in the same files may appear \u2014 ignore those):\n{{modifiedFiles}}\n\nOriginal task:\n{{input}}\n\nApply the doc-reviewer directive and append your review to {{artifactPath}} under `## Review (iteration N)`. End the section with `[APPROVED]` if no Blockers remain; otherwise list the Blockers so Doc Writer can revise.",
       "tools": "Agent,Bash,Edit,Glob,Grep,Read,Skill,TaskStop,TodoWrite,WebFetch,WebSearch,Write",
       "pluginDirs": [

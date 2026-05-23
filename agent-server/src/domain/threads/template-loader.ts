@@ -2,7 +2,7 @@
 // input:  DATA_DIR/thread-templates.json, prompts/ directory
 // output: loadConfig / startConfigWatcher / stopConfigWatcher / getTemplate / getAgent / listTemplates / listAgents / resolvePluginDir
 
-import { readFileSync, existsSync, watch, type FSWatcher } from 'fs';
+import { readFileSync, writeFileSync, existsSync, mkdirSync, watch, type FSWatcher } from 'fs';
 import * as path from 'path';
 import { CONFIG_DIR, DATA_DIR, PROMPTS_DIR } from '@core/utils.js';
 import { createLogger } from '@core/log.js';
@@ -66,6 +66,84 @@ function resolveAgentFileRefs(agent: AgentDefinition): void {
 export function resolvePluginDir(dir: string): string {
   if (path.isAbsolute(dir)) return dir;
   return path.join(DATA_DIR, dir);
+}
+
+// --- Config merging (init) ---
+
+/**
+ * Merge defaults thread-templates.json into the user's config.
+ * - Agents/templates not in user config → added from defaults.
+ * - Agents/templates already in user config → preserved as-is (never overwritten).
+ * - If user config doesn't exist → copy defaults in full.
+ * - Malformed user config → replace with defaults.
+ *
+ * @returns true if the user config file was written, false if no changes were needed.
+ */
+export function mergeThreadTemplates(defaultsPath: string, userConfigPath: string): boolean {
+  // 1. Read defaults
+  let defaults: ThreadConfigFile;
+  try {
+    const raw = readFileSync(defaultsPath, 'utf8');
+    defaults = JSON.parse(raw);
+  } catch (e: any) {
+    log.warn(`Cannot read default thread-templates.json from ${defaultsPath}: ${e.message}`);
+    return false;
+  }
+
+  const defaultAgents = defaults.agents || {};
+  const defaultTemplates = defaults.templates || {};
+
+  // 2. User config doesn't exist yet — copy defaults as-is
+  if (!existsSync(userConfigPath)) {
+    const dir = path.dirname(userConfigPath);
+    if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+    writeFileSync(userConfigPath, JSON.stringify(defaults, null, 2) + '\n', 'utf8');
+    log.info('thread-templates.json created from defaults');
+    return true;
+  }
+
+  // 3. Parse existing user config
+  let userConfig: ThreadConfigFile;
+  try {
+    const raw = readFileSync(userConfigPath, 'utf8');
+    userConfig = JSON.parse(raw);
+  } catch (e: any) {
+    log.warn(`Failed to parse existing thread-templates.json (${e.message}), falling back to defaults`);
+    writeFileSync(userConfigPath, JSON.stringify(defaults, null, 2) + '\n', 'utf8');
+    return true;
+  }
+
+  const userAgents: Record<string, any> = { ...(userConfig.agents || {}) };
+  const userTemplates: Record<string, any> = { ...(userConfig.templates || {}) };
+
+  let changed = false;
+
+  // 4. Add new agents from defaults that don't exist in user config
+  for (const [name, agent] of Object.entries(defaultAgents)) {
+    if (!userAgents[name]) {
+      userAgents[name] = agent;
+      log.info(`Added new agent to thread-templates.json: ${name}`);
+      changed = true;
+    }
+  }
+
+  // 5. Add new templates from defaults that don't exist in user config
+  for (const [name, template] of Object.entries(defaultTemplates)) {
+    if (!userTemplates[name]) {
+      userTemplates[name] = template;
+      log.info(`Added new template to thread-templates.json: ${name}`);
+      changed = true;
+    }
+  }
+
+  // 6. Only write if something changed
+  if (changed) {
+    const merged: ThreadConfigFile = { agents: userAgents, templates: userTemplates };
+    writeFileSync(userConfigPath, JSON.stringify(merged, null, 2) + '\n', 'utf8');
+    log.info('thread-templates.json merged with defaults');
+  }
+
+  return changed;
 }
 
 // --- Config loading ---

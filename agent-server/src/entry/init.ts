@@ -20,6 +20,7 @@ import * as yaml from 'yaml';
 import { buildFullConfig, buildCoreConfig, buildTuiConfig } from '@core/config-generator.js';
 import { discoverEndpoints, generateGatewayYaml, writeGatewayYaml, dryRunGatewayYaml } from '@core/gateway-generator.js';
 import { generateProfiles, mergeProfilesJson, writeProfilesJson, listChoices } from '@core/profile-generator.js';
+import { mergeThreadTemplates } from '@domain/threads/index.js';
 import type { ModelChoice } from '@core/profile-generator.js';
 import { createLogger } from '@core/log.js';
 import { INSTALL_ROOT, DEFAULTS_DIR } from '@core/utils.js';
@@ -1164,9 +1165,13 @@ function copyDefaults(paths: InitPaths, force: boolean): void {
   safeCopy(path.join(DEFAULTS_DIR, 'context', 'ideas', 'CORTEX.md'), path.join(paths.CONTEXT_DIR, 'ideas', 'CORTEX.md'), false, 'context/ideas/CORTEX.md');
   safeCopy(path.join(DEFAULTS_DIR, 'context', 'user', 'CORTEX.md'), path.join(paths.CONTEXT_DIR, 'user', 'CORTEX.md'), false, 'context/user/CORTEX.md');
 
-  // Config defaults — overwrite only with --force
+  // Config defaults — budget and session-hooks overwrite only with --force;
+  // thread-templates are merged (new agents/templates added, existing preserved)
   safeCopy(path.join(DEFAULTS_DIR, 'config', 'budget.json'), path.join(paths.CONFIG_DIR, 'budget.json'), force, 'budget.json');
-  safeCopy(path.join(DEFAULTS_DIR, 'config', 'thread-templates.json'), path.join(paths.CONFIG_DIR, 'thread-templates.json'), force, 'thread-templates.json');
+  mergeThreadTemplates(
+    path.join(DEFAULTS_DIR, 'config', 'thread-templates.json'),
+    path.join(paths.CONFIG_DIR, 'thread-templates.json'),
+  );
   safeCopy(path.join(DEFAULTS_DIR, 'config', 'session-hooks.json'), path.join(paths.CONFIG_DIR, 'session-hooks.json'), force, 'session-hooks.json');
 
   // Seed asset trees — per-file safeCopy semantics: new files always added, existing files
