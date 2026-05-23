@@ -25,7 +25,6 @@ const log = createLogger('agent-runner');
 import { createToolTrace } from '@platform/index.js';
 import { setStreamingCallback, clearStreamingCallback, publishPlanSubmitted, publishAskUserRequested } from './routing/hook-bridge.js';
 import { maybeNotifyCodexLowUsage } from '@domain/costs/codex-usage-monitor.js';
-import { projectDirRepo } from '@store/project-dir-repo.js';
 import { getAgent, createDefaultThread } from '@domain/threads/index.js';
 import { runThread } from '@domain/threads/runner.js';
 import { downloadFiles as downloadPlatformFiles } from './routing/file-handler.js';
@@ -98,7 +97,7 @@ export class AgentRunner {
     const downloadedFiles = await downloadFiles(message.files, hasFiles, adapter);
     const startTime = Date.now();
     const sessionId = await getSessionAsync(channel, resolveBackendForChannel(channel));
-    const sessionName = await resolveSessionName(sessionId, channel, userMessage);
+    const sessionName = await resolveSessionName(sessionId, channel, userMessage, adapter);
     const dest: Destination = { type: 'interactive-reply', conduit: channel, sessionId: sessionId ?? '' };
 
     // 1. Orchestration side effects (keep — ledger, status, hook-bridge)
@@ -215,12 +214,12 @@ async function handleDefaultAgentResult({ result, channel, adapter, statusMsg, s
   // NOTE: createAutoThread removed — thread was created pre-execution via createDefaultThread
 }
 
-async function resolveSessionName(sessionId: string | null, channel: string, userMessage: string): Promise<string> {
+async function resolveSessionName(sessionId: string | null, channel: string, userMessage: string, adapter: PlatformAdapter): Promise<string> {
   if (sessionId) {
     const existing = await sessionStore.lookupBySessionId(sessionId);
     if (existing) return existing;
     const name = await sessionStore.generateSessionName();
-    const channelProject = await projectDirRepo.getChannelProject(channel);
+    const channelProject = await adapter.resolveInboundProject(channel);
     await sessionStore.registerSession(name, { sessionId, channel, backend: resolveBackendForChannel(channel), kind: 'local', label: userMessage?.substring(0, 60), profileName: getActiveProfile(channel), projectId: channelProject ?? 'general' });
     return name;
   }

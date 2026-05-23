@@ -289,6 +289,13 @@ export class MockAdapter implements PlatformAdapter {
     return Object.fromEntries(this._projectConduits);
   }
 
+  async resolveInboundProject(conduit: string): Promise<string | null> {
+    for (const [project, ch] of this._projectConduits) {
+      if (ch === conduit) return project;
+    }
+    return null;
+  }
+
   // --- Test helpers ---
 
   /** Simulate an inbound message for testing event handlers. */

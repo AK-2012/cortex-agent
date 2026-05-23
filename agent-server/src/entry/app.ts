@@ -17,7 +17,6 @@ import * as executionRegistry from '@domain/executions/registry.js';
 import { initHookBridge } from '@orch/routing/hook-bridge.js';
 import { registerCommands } from '@orch/routing/commands/index.js';
 import { taskStore } from '@domain/tasks/store.js';
-import { channelRepo } from '@store/channel-repo.js';
 import { projectDirRepo } from '@store/project-dir-repo.js';
 import { projectStore } from '@domain/projects/index.js';
 import { sendStartupDmIfConfigured } from './startup-notify.js';
@@ -158,7 +157,7 @@ process.on('SIGTERM', async () => {
   // `writeFile(tmp)` and `rename(tmp, target)` in atomic-write.ts leaves orphan .tmp.* siblings.
   // Daemon gives 5s before SIGKILL — well over the time needed to flush a few MB of JSON.
   try {
-    await Promise.allSettled([bus.close(), oq.flush(), threadStore.flush(), sessionRepo.flush(), conversationLedger.flush(), taskStore.flush(), executionRepo.flush(), channelRepo.flush(), projectDirRepo.flush(), scheduleRepo.flush(), costRepo.flush(), profileRepo.flush(), sessionStore.flush()]);
+    await Promise.allSettled([bus.close(), oq.flush(), threadStore.flush(), sessionRepo.flush(), conversationLedger.flush(), taskStore.flush(), executionRepo.flush(), projectDirRepo.flush(), scheduleRepo.flush(), costRepo.flush(), profileRepo.flush(), sessionStore.flush()]);
   } catch {}
   await stopGateway(); process.exit(0);
 });

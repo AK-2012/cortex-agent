@@ -4,18 +4,19 @@ agent-server's TypeScript ESM runtime source, organized by six-layer structure (
 
 | Layer | Directory | Function |
 |---|---|---|
-| L0 | `core/` | Zero dependency: types, path constants, async-mutex, CLI utilities |
-| L1 | `store/` | Persistence: 12 JsonRepository implementations, atomic write + AsyncMutex |
+| L0 | `core/` | Zero dependency: types, path constants, async-mutex, json-repository, atomic-write, CLI utilities |
+| L1 | `store/` | Persistence: 11 JsonRepository implementations |
 | L2 | `events/` | Event bus: EventBus + daily rolling jsonl + debug replay CLI |
 | L3 | `domain/` | Domain services: agents/sessions/tasks/executions/costs/scheduling/memory/monitor/remote/mcp/threads |
 | L4 | `orchestration/` | Orchestration layer: orchestrator/agent-runner/thread-executor/busy-tracker + routing/ + interactions/ |
 | L5 | `entry/` | Entry points: app.ts / daemon.ts / startup-helpers / startup-notify |
 
 ### L0: core/
-`async-mutex.ts` `paths.ts` `version.ts` `cli-utils.ts` `utils.ts` `status-format.ts` `running-executions.ts` `task-parser.ts` `types/agent-types.ts` `types/thread-types.ts`
+`async-mutex.ts` `atomic-write.ts` `json-repository.ts` `paths.ts` `version.ts` `cli-utils.ts` `utils.ts` `status-format.ts` `running-executions.ts` `task-parser.ts` `types/agent-types.ts` `types/thread-types.ts`
 
 ### L1: store/
-`json-repository.ts` `in-memory-repository.ts` `atomic-write.ts` + 12 repos: `thread-repo` `session-repo` `conversation-ledger-repo` `session-registry-repo` `execution-repo` `channel-repo` `project-dir-repo` `schedule-repo` `cost-repo` `profile-repo` `task-repo`
+`in-memory-repository.ts` + 11 repos: `thread-repo` `session-repo` `conversation-ledger-repo` `session-registry-repo` `execution-repo` `project-dir-repo` `schedule-repo` `cost-repo` `profile-repo` `task-repo` + `outbound-queue` (WAL)
+Project→conduit mapping (formerly `channel-repo.ts`) has moved into `platform/adapters/slack-project-conduits.ts` — owned by the Slack adapter, since project-report rendering is adapter-specific.
 
 ### L2: events/
 `event-bus.ts` `event-types.ts` `event-logger.ts` `event-replay.ts` `index.ts`

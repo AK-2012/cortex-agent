@@ -1,5 +1,5 @@
 // input:  Node test runner, assert, tmp filesystem
-// output: regression tests for ProjectDirRepo (concurrent mutate, flush ordering, CRUD, cross-repo)
+// output: regression tests for ProjectDirRepo (concurrent mutate, flush ordering, CRUD)
 // pos:    verifies store/project-dir-repo.ts Pattern A guarantees
 // >>> If I am updated, update my header comment and the parent folder's CORTEX.md <<<
 
@@ -8,7 +8,6 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
-import { ChannelRepo } from '../../src/store/channel-repo.js';
 import { ProjectDirRepo } from '../../src/store/project-dir-repo.js';
 
 // ── Shared tmp directory ───────────────────────────────────────
@@ -23,27 +22,19 @@ test.after(async () => {
   await fs.rm(tmpDir, { recursive: true, force: true });
 });
 
-// ── Helper: fresh repos + files per test ──────────────────────
+// ── Helper: fresh repo per test ───────────────────────────────
 
 let _testIdx = 0;
-function createRepos(): { channelRepo: ChannelRepo; projectDirRepo: ProjectDirRepo } {
+function createRepo(): ProjectDirRepo {
   const idx = _testIdx++;
-  const channelFile = path.join(tmpDir, `channel-registry-${idx}.json`);
   const projectDirsFile = path.join(tmpDir, `project-dirs-${idx}.json`);
-
-  const channelRepoInstance = new ChannelRepo({ filePath: channelFile });
-  const projectDirRepoInstance = new ProjectDirRepo({
-    filePath: projectDirsFile,
-    channelRepoOverride: channelRepoInstance,
-  });
-
-  return { channelRepo: channelRepoInstance, projectDirRepo: projectDirRepoInstance };
+  return new ProjectDirRepo({ filePath: projectDirsFile });
 }
 
 // ── Concurrent mutate: no lost entries ─────────────────────────
 
 test('ProjectDirRepo - 10 concurrent setProjectDir produce all 10 entries', async () => {
-  const { projectDirRepo } = createRepos();
+  const projectDirRepo = createRepo();
 
   await Promise.all(
     Array.from({ length: 10 }, (_, i) =>
@@ -61,7 +52,7 @@ test('ProjectDirRepo - 10 concurrent setProjectDir produce all 10 entries', asyn
 // ── Flush: mid-mutate flush resolves after pending mutations ──
 
 test('ProjectDirRepo - flush() resolves only after all pending mutations (FIFO on mutex)', async () => {
-  const { projectDirRepo } = createRepos();
+  const projectDirRepo = createRepo();
 
   const resolutionOrder: string[] = [];
   const N = 10;
@@ -82,19 +73,19 @@ test('ProjectDirRepo - flush() resolves only after all pending mutations (FIFO o
 // ── CRUD: get / set / remove ──────────────────────────────────
 
 test('ProjectDirRepo - getProjectDir returns null for unknown project/machine', async () => {
-  const { projectDirRepo } = createRepos();
+  const projectDirRepo = createRepo();
   assert.equal(await projectDirRepo.getProjectDir('no-proj', 'no-machine'), null);
 });
 
 test('ProjectDirRepo - setProjectDir then getProjectDir returns the value', async () => {
-  const { projectDirRepo } = createRepos();
+  const projectDirRepo = createRepo();
   await projectDirRepo.setProjectDir('proj-a', 'testbox', '/home/user/proj');
   const dir = await projectDirRepo.getProjectDir('proj-a', 'testbox');
   assert.equal(dir, '/home/user/proj');
 });
 
 test('ProjectDirRepo - removeProjectDir deletes entry and cleans up empty project', async () => {
-  const { projectDirRepo } = createRepos();
+  const projectDirRepo = createRepo();
   await projectDirRepo.setProjectDir('proj-a', 'testbox', '/path/a');
 
   assert.equal(await projectDirRepo.getProjectDir('proj-a', 'testbox'), '/path/a');
@@ -107,7 +98,7 @@ test('ProjectDirRepo - removeProjectDir deletes entry and cleans up empty projec
 });
 
 test('ProjectDirRepo - removeProjectDir keeps project when other machines remain', async () => {
-  const { projectDirRepo } = createRepos();
+  const projectDirRepo = createRepo();
   await projectDirRepo.setProjectDir('proj-a', 'testbox', '/path/testbox');
   await projectDirRepo.setProjectDir('proj-a', 'lab', '/path/lab');
 
@@ -117,28 +108,10 @@ test('ProjectDirRepo - removeProjectDir keeps project when other machines remain
   assert.equal(await projectDirRepo.getProjectDir('proj-a', 'lab'), '/path/lab');
 });
 
-// ── getChannelProject: cross-repo reverse lookup ──────────────
-
-test('ProjectDirRepo - getChannelProject reverse-lookup via channelRepo', async () => {
-  const { channelRepo, projectDirRepo } = createRepos();
-
-  await channelRepo.setProjectChannel('proj-x', 'C999');
-  await channelRepo.setProjectChannel('proj-y', 'C888');
-
-  const foundX = await projectDirRepo.getChannelProject('C999');
-  assert.equal(foundX, 'proj-x');
-
-  const foundY = await projectDirRepo.getChannelProject('C888');
-  assert.equal(foundY, 'proj-y');
-
-  const notFound = await projectDirRepo.getChannelProject('C000');
-  assert.equal(notFound, null);
-});
-
 // ── getAllProjectDirs returns all entries ─────────────────────
 
 test('ProjectDirRepo - getAllProjectDirs returns nested structure', async () => {
-  const { projectDirRepo } = createRepos();
+  const projectDirRepo = createRepo();
   await projectDirRepo.setProjectDir('proj-a', 'testbox', '/a');
   await projectDirRepo.setProjectDir('proj-b', 'lab', '/b');
 
@@ -152,7 +125,7 @@ test('ProjectDirRepo - getAllProjectDirs returns nested structure', async () => 
 // ── removeProjectDir is a no-op for non-existent project or machine ──
 
 test('ProjectDirRepo - removeProjectDir on unknown project is a no-op', async () => {
-  const { projectDirRepo } = createRepos();
+  const projectDirRepo = createRepo();
   await projectDirRepo.setProjectDir('proj-a', 'testbox', '/a');
 
   // Remove something that doesn't exist — must not throw and must not corrupt state
@@ -163,7 +136,7 @@ test('ProjectDirRepo - removeProjectDir on unknown project is a no-op', async ()
 });
 
 test('ProjectDirRepo - removeProjectDir on unknown machine of existing project is a no-op', async () => {
-  const { projectDirRepo } = createRepos();
+  const projectDirRepo = createRepo();
   await projectDirRepo.setProjectDir('proj-a', 'testbox', '/a');
 
   await projectDirRepo.removeProjectDir('proj-a', 'lab-ksu');
@@ -175,7 +148,7 @@ test('ProjectDirRepo - removeProjectDir on unknown machine of existing project i
 // ── Concurrent merge: same project, different machines — inner object merges ──
 
 test('ProjectDirRepo - concurrent setProjectDir on same project merges different machines', async () => {
-  const { projectDirRepo } = createRepos();
+  const projectDirRepo = createRepo();
 
   // Fire 10 concurrent setProjectDir calls on the SAME project but different machines.
   // The mutex + JsonRepository.mutate read-modify-write semantics must merge all 10

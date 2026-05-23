@@ -352,6 +352,13 @@ export class FeishuAdapter implements PlatformAdapter {
     return { ...this._feishuConduits };
   }
 
+  async resolveInboundProject(conduit: string): Promise<string | null> {
+    for (const [project, ch] of Object.entries(this._feishuConduits)) {
+      if (ch === conduit) return project;
+    }
+    return null;
+  }
+
   /**
    * Resolve a Destination to a concrete Feishu chat_id + kind label.
    * Returns channel=null for destinations that should be silently dropped

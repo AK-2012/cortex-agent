@@ -625,6 +625,14 @@ export class SlackAdapter implements PlatformAdapter {
     return this._getConduitsStore().getAll();
   }
 
+  async resolveInboundProject(conduit: string): Promise<string | null> {
+    const conduits = await this._getConduitsStore().getAll();
+    for (const [project, ch] of Object.entries(conduits)) {
+      if (ch === conduit) return project;
+    }
+    return null;
+  }
+
   private _conduitsStore: SlackProjectConduitsStore | null = null;
 
   private _getConduitsStore(): SlackProjectConduitsStore {

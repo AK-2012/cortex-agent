@@ -1,5 +1,5 @@
 // input:  ./types.js platform-agnostic message types
-// output: PlatformAdapter interface (21 methods: 17 core + openOutputStream + 3 conduit methods)
+// output: PlatformAdapter interface (22 methods: 17 core + openOutputStream + 4 conduit methods)
 // pos:    Single abstraction boundary between core modules and messaging platform
 // >>> If I am updated, update my header comment and the parent folder's CORTEX.md <<<
 
@@ -75,4 +75,9 @@ export interface PlatformAdapter {
 
   /** Get all registered project→conduit mappings. */
   getProjectConduits(): Promise<Record<string, string>>;
+
+  /** Inverse lookup: given an inbound conduit (e.g., a Slack channel id), return
+   *  the project it is currently bound to, or null if unbound. Used by the
+   *  orchestration layer to attach inbound messages to their project. */
+  resolveInboundProject(conduit: string): Promise<string | null>;
 }

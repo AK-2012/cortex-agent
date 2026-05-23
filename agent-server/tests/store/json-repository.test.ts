@@ -8,8 +8,8 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
-import { JsonRepository } from '../../src/store/json-repository.js';
-import { atomicWrite } from '../../src/store/atomic-write.js';
+import { JsonRepository } from '../../src/core/json-repository.js';
+import { atomicWrite } from '../../src/core/atomic-write.js';
 
 // ── Shared tmp directory ───────────────────────────────────────
 

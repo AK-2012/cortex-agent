@@ -4,7 +4,7 @@
 // >>> If I am updated, update my header comment and the parent folder's CORTEX.md <<<
 
 import * as path from 'path';
-import { JsonRepository } from './json-repository.js';
+import { JsonRepository } from '@core/json-repository.js';
 import { STORE_DIR } from '@core/paths.js';
 
 const SESSIONS_FILE = path.join(STORE_DIR, 'sessions.json');

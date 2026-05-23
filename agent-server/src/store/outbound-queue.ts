@@ -8,7 +8,7 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { createLogger } from '@core/log.js';
 import { AsyncMutex } from '@core/async-mutex.js';
-import { atomicWrite } from './atomic-write.js';
+import { atomicWrite } from '@core/atomic-write.js';
 
 const log = createLogger('outbound-queue');
 import { STORE_DIR } from '@core/paths.js';

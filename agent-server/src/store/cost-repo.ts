@@ -6,8 +6,8 @@
 
 import * as path from 'path';
 import fs from 'node:fs/promises';
-import { JsonRepository } from './json-repository.js';
-import { atomicWrite } from './atomic-write.js';
+import { JsonRepository } from '@core/json-repository.js';
+import { atomicWrite } from '@core/atomic-write.js';
 import { AsyncMutex } from '@core/async-mutex.js';
 import { STORE_DIR, CONFIG_DIR } from '@core/paths.js';
 import type { CostEntry } from '@domain/costs/cost-tracker.js';

@@ -6,9 +6,14 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as crypto from 'crypto';
-import { JsonRepository } from './json-repository.js';
+import { JsonRepository } from '@core/json-repository.js';
 import { STORE_DIR } from '@core/paths.js';
-import { CHANNEL_REGISTRY_FILE } from './channel-repo.js';
+
+// Path of the Slack project→channel registry file. Defined here (rather than
+// imported from store/channel-repo.ts) because that file has been removed in
+// favour of platform/adapters/slack-project-conduits.ts. We still read the file
+// directly for the legacy session-registry name-keyed → sessionId-keyed migration.
+const CHANNEL_REGISTRY_FILE = path.join(STORE_DIR, 'channel-registry.json');
 import { sessionRepo } from './session-repo.js';
 import { executionRepo } from './execution-repo.js';
 import { threadStore } from './thread-repo.js';

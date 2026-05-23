@@ -6,7 +6,7 @@
 
 import * as path from 'path';
 import * as fs from 'fs';
-import { JsonRepository } from './json-repository.js';
+import { JsonRepository } from '@core/json-repository.js';
 import { STORE_DIR } from '@core/paths.js';
 
 export const SCHEDULES_FILE = path.join(STORE_DIR, 'schedules.json');

@@ -6,7 +6,7 @@
 
 import * as path from 'path';
 import { readFileSync } from 'fs';
-import { JsonRepository } from './json-repository.js';
+import { JsonRepository } from '@core/json-repository.js';
 import { createLogger } from '@core/log.js';
 import { AsyncMutex } from '@core/async-mutex.js';
 import { STORE_DIR } from '@core/paths.js';

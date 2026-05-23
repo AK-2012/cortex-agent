@@ -21,7 +21,6 @@ import * as executionRegistry from '@domain/executions/registry.js';
 import * as askUserQuestion from './interactions/ask-user-question.js';
 import { runAgent, getClaudeMode, getActiveProfile, resolveBackendForChannel } from '@domain/agents/index.js';
 import { projectStore } from '@domain/projects/index.js';
-import { projectDirRepo } from '@store/project-dir-repo.js';
 
 import { setStreamingCallback, clearStreamingCallback } from './routing/hook-bridge.js';
 import { maybeNotifyCodexLowUsage } from '@domain/costs/codex-usage-monitor.js';
@@ -127,7 +126,7 @@ export async function handleAgentError({ error, channel, adapter, statusMsg, sta
     return;
   }
 
-  await persistErrorSession(resolvedSessionId, sessionName, channel);
+  await persistErrorSession(resolvedSessionId, sessionName, channel, adapter);
   if (userMessageTs) await conversationLedger.completeTurn(channel, userMessageTs, { executionId });
 
   if (error?.cancelled) {
@@ -150,7 +149,7 @@ export async function handleAgentError({ error, channel, adapter, statusMsg, sta
   }
 }
 
-async function persistErrorSession(resolvedSessionId: string | null, sessionName: string | null, channel: string): Promise<void> {
+async function persistErrorSession(resolvedSessionId: string | null, sessionName: string | null, channel: string, adapter: PlatformAdapter): Promise<void> {
   if (!resolvedSessionId) return;
   const backend = resolveBackendForChannel(channel);
   await setSessionAsync(channel, resolvedSessionId, backend);
@@ -158,7 +157,7 @@ async function persistErrorSession(resolvedSessionId: string | null, sessionName
   if (!sessionName) return;
   const existing = await sessionStore.lookupBySessionId(resolvedSessionId);
   if (!existing) {
-    await sessionStore.registerSession(sessionName, { sessionId: resolvedSessionId, channel, backend, kind: 'local', profileName: getActiveProfile(channel), projectId: (await projectDirRepo.getChannelProject(channel)) ?? 'general' });
+    await sessionStore.registerSession(sessionName, { sessionId: resolvedSessionId, channel, backend, kind: 'local', profileName: getActiveProfile(channel), projectId: (await adapter.resolveInboundProject(channel)) ?? 'general' });
   }
 }
 

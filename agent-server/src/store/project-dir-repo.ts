@@ -1,12 +1,12 @@
-// input:  project-dirs.json (+ channel-registry.json for reverse lookup)
-// output: ProjectDirRepo (async getProjectDir / setProjectDir / removeProjectDir / getAllProjectDirs / getChannelProject)
+// input:  project-dirs.json
+// output: ProjectDirRepo (async getProjectDir / setProjectDir / removeProjectDir / getAllProjectDirs)
 // pos:    Project-device code directory mapping persistence layer. Based on JsonRepository abstraction, AsyncMutex serializes reads/writes of project-dirs.json.
+//         Channel→project reverse lookup used to live here (getChannelProject); it now lives on PlatformAdapter as resolveInboundProject.
 // >>> If I am updated, update my header comment and the parent folder's CORTEX.md <<<
 
 import * as path from 'path';
-import { JsonRepository } from './json-repository.js';
+import { JsonRepository } from '@core/json-repository.js';
 import { STORE_DIR } from '@core/paths.js';
-import { ChannelRepo, channelRepo } from './channel-repo.js';
 
 const PROJECT_DIRS_FILE = path.join(STORE_DIR, 'project-dirs.json');
 
@@ -15,12 +15,10 @@ export type ProjectDirsData = Record<string, Record<string, string>>;
 
 interface ProjectDirRepoOptions {
   filePath?: string;
-  channelRepoOverride?: ChannelRepo;
 }
 
 export class ProjectDirRepo {
   private readonly _repo: JsonRepository<ProjectDirsData>;
-  private readonly _channelRepo: ChannelRepo;
 
   constructor(opts: ProjectDirRepoOptions = {}) {
     this._repo = new JsonRepository<ProjectDirsData>({
@@ -28,7 +26,6 @@ export class ProjectDirRepo {
       defaultValue: () => ({}),
       migrate: (raw) => (typeof raw === 'object' && raw !== null ? (raw as ProjectDirsData) : ({})),
     });
-    this._channelRepo = opts.channelRepoOverride ?? channelRepo;
   }
 
   async getProjectDir(project: string, machine: string): Promise<string | null> {
@@ -56,15 +53,6 @@ export class ProjectDirRepo {
 
   async getAllProjectDirs(): Promise<Record<string, Record<string, string>>> {
     return { ...(await this._repo.read()) };
-  }
-
-  /** Reverse-lookup: channelId → project name (via channel-registry.json). */
-  async getChannelProject(channelId: string): Promise<string | null> {
-    const channelReg = await this._channelRepo.getAllRegistrations();
-    for (const [project, ch] of Object.entries(channelReg)) {
-      if (ch === channelId) return project;
-    }
-    return null;
   }
 
   /** Wait for any in-flight mutate() to complete. For graceful SIGTERM drain. */

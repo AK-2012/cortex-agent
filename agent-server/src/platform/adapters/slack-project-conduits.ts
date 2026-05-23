@@ -4,7 +4,7 @@
 //         for backward compatibility with existing bindings.
 
 import * as path from 'path';
-import { JsonRepository } from '@store/json-repository.js';
+import { JsonRepository } from '@core/json-repository.js';
 import { STORE_DIR } from '@core/paths.js';
 
 const CHANNEL_REGISTRY_FILE = path.join(STORE_DIR, 'channel-registry.json');

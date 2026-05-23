@@ -12,7 +12,7 @@
 
 import { readFileSync, watch, existsSync, type FSWatcher } from 'fs';
 import * as path from 'path';
-import { JsonRepository } from './json-repository.js';
+import { JsonRepository } from '@core/json-repository.js';
 import { CONFIG_DIR } from '@core/paths.js';
 import { createLogger } from '@core/log.js';
 import type { ProfilesFile } from '@domain/agents/profile-manager.js';
