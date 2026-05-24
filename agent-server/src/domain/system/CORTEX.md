@@ -7,3 +7,5 @@ orchestration/interactions/.
 | filename | role | function |
 |---|---|---|
 | `update-prompt.ts` | interface | UpdateChoice type + UpdatePrompt interface with ask(spec) method |
+| `update-state.ts` | I/O | loadUpdateState / saveUpdateState for update-state.json (skipped version persistence) |
+| `server-update-check.ts` | checker | compareCalVer, isUpdateDevMode, checkServerUpdate — core update-check flow |
