@@ -1278,14 +1278,22 @@ function detectExistingPlanOrExecute(configDir: string): boolean {
 }
 
 /**
- * Interactively pick plan / execute (mode, model) from discovered endpoints.
- * Pre-selects auto-inferred defaults. Returns undefined for either choice if the user
- * declined to overwrite an existing profile.
+ * Interactively pick plan / execute (mode, model) from discovered endpoints, plus optional
+ * fallback chains. Lists are sorted lexicographically; the first entry is pre-selected.
+ *
+ * Returns `overwrite: false` if the user declined to overwrite an existing profile — in that
+ * case all *Choice / *Fallback fields are undefined.
  */
 async function pickPlanExecuteInteractive(
   endpoints: ReturnType<typeof discoverEndpoints>,
   configDir: string,
-): Promise<{ planChoice?: ModelChoice; executeChoice?: ModelChoice; overwrite: boolean }> {
+): Promise<{
+  planChoice?: ModelChoice;
+  executeChoice?: ModelChoice;
+  planFallback?: ModelChoice[];
+  executeFallback?: ModelChoice[];
+  overwrite: boolean;
+}> {
   // If existing profiles.json has plan/execute, ask before overwriting
   if (detectExistingPlanOrExecute(configDir)) {
     const confirm = await clack.confirm({
@@ -1301,38 +1309,74 @@ async function pickPlanExecuteInteractive(
   const choices = listChoices(endpoints);
   if (choices.length === 0) return { overwrite: true };
 
-  const autoDefaults = generateProfiles(endpoints).profiles;
-  const planDefault = autoDefaults.plan
-    ? `${autoDefaults.plan.mode}:${autoDefaults.plan.model}`
-    : `${choices[0].mode}:${choices[0].model}`;
-  const executeDefault = autoDefaults.execute
-    ? `${autoDefaults.execute.mode}:${autoDefaults.execute.model}`
-    : planDefault;
+  const formatValue = (c: ModelChoice) => `${c.mode}:${c.model}`;
+  const parseValue = (v: string): ModelChoice => {
+    const colonIdx = v.indexOf(':');
+    return { mode: v.substring(0, colonIdx), model: v.substring(colonIdx + 1) };
+  };
 
   const options = choices.map(c => ({
-    value: `${c.mode}:${c.model}`,
+    value: formatValue(c),
     label: `${c.mode} / ${c.model}`,
   }));
+
+  // Default = first lexicographic entry (no tier inference).
+  const firstChoiceValue = formatValue(choices[0]);
 
   const planSel = await clack.select({
     message: 'Pick model for the `plan` profile (used by executor agents — planner, doc-writer, coder, etc.):',
     options,
-    initialValue: planDefault,
+    initialValue: firstChoiceValue,
   });
   handleCancel(planSel);
 
   const execSel = await clack.select({
     message: 'Pick model for the `execute` profile (used by reviewer agents — reviewer, doc-reviewer, coder-reviewer, etc.):',
     options,
-    initialValue: executeDefault,
+    initialValue: firstChoiceValue,
   });
   handleCancel(execSel);
 
-  const [planMode, planModel] = (planSel as string).split(':');
-  const [execMode, execModel] = (execSel as string).split(':');
+  const planChoice = parseValue(planSel as string);
+  const execChoice = parseValue(execSel as string);
+
+  // ── Fallback selection (multi-select, ordered) ──
+  // Build fallback options excluding the primary choice. If no candidates remain (e.g. only
+  // one discovered model), skip the prompt entirely.
+  const planFallbackOptions = options.filter(o => o.value !== planSel);
+  const execFallbackOptions = options.filter(o => o.value !== execSel);
+
+  let planFallback: ModelChoice[] | undefined;
+  if (planFallbackOptions.length > 0) {
+    const sel = await clack.multiselect({
+      message: 'Pick fallback models for `plan` (in order, space to toggle, enter to confirm, leave empty for no fallback):',
+      options: planFallbackOptions,
+      required: false,
+      initialValues: [],
+    });
+    handleCancel(sel);
+    const arr = sel as string[];
+    if (arr.length > 0) planFallback = arr.map(parseValue);
+  }
+
+  let executeFallback: ModelChoice[] | undefined;
+  if (execFallbackOptions.length > 0) {
+    const sel = await clack.multiselect({
+      message: 'Pick fallback models for `execute` (in order, space to toggle, enter to confirm, leave empty for no fallback):',
+      options: execFallbackOptions,
+      required: false,
+      initialValues: [],
+    });
+    handleCancel(sel);
+    const arr = sel as string[];
+    if (arr.length > 0) executeFallback = arr.map(parseValue);
+  }
+
   return {
-    planChoice: { mode: planMode, model: planModel },
-    executeChoice: { mode: execMode, model: execModel },
+    planChoice,
+    executeChoice: execChoice,
+    planFallback,
+    executeFallback,
     overwrite: true,
   };
 }
@@ -1364,9 +1408,11 @@ async function runGatewaySetup(
   const gatewayPath = writeGatewayYaml(yamlContent, gatewayConfigDir);
   clack.log.success(`Gateway config written to ${gatewayPath}`);
 
-  // Resolve plan/execute choices + overwrite intent.
+  // Resolve plan/execute choices + fallback chains + overwrite intent.
   let planChoice = answers?.planChoice;
   let executeChoice = answers?.executeChoice;
+  let planFallback: ModelChoice[] | undefined;
+  let executeFallback: ModelChoice[] | undefined;
   let overwrite: boolean;
 
   if (processStdin.isTTY) {
@@ -1374,10 +1420,13 @@ async function runGatewaySetup(
     const picked = await pickPlanExecuteInteractive(endpoints, paths.CONFIG_DIR);
     planChoice = picked.planChoice ?? planChoice;
     executeChoice = picked.executeChoice ?? executeChoice;
+    planFallback = picked.planFallback;
+    executeFallback = picked.executeFallback;
     overwrite = picked.overwrite;
   } else {
-    // Non-interactive: stdin already provided choices (or empty → auto-infer).
-    // Always overwrite — scripted (re)install assumes the operator knows the intent.
+    // Non-interactive: stdin already provided choices (or empty → lex-first default).
+    // Fallback chains are not configurable via stdin in this iteration — extend the stdin
+    // protocol if scripted installs need fallback.
     overwrite = true;
   }
 
@@ -1386,12 +1435,14 @@ async function runGatewaySetup(
     outputDir: paths.CONFIG_DIR,
     planChoice,
     executeChoice,
+    planFallback,
+    executeFallback,
     overwrite,
   });
   clack.log.success(`Profiles written to ${profilesPath}`);
 
   // Show profile summary (reflects what was actually generated, not what was merged)
-  const profiles = generateProfiles(endpoints, { planChoice, executeChoice });
+  const profiles = generateProfiles(endpoints, { planChoice, executeChoice, planFallback, executeFallback });
   const profileNames = Object.keys(profiles.profiles).join(', ');
   clack.log.info(`Generated profiles: ${profileNames} (default: ${profiles.defaultProfile})`);
 }

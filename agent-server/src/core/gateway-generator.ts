@@ -1,6 +1,8 @@
-// input:  fs, path, os, Claude credentials.json, PI models.json / auth.json
-// output: generateGatewayYaml() — scans Claude/PI local config, produces gateway.yaml content
-// pos:    init-time gateway config auto-generation
+// input:  fs, path, os, Claude credentials.json, `pi --list-models` output
+// output: discoverEndpoints / generateGatewayYaml / writeGatewayYaml / parsePiListModelsOutput
+//         — scans Claude OAuth + spawns pi --list-models, produces gateway.yaml content
+// pos:    init-time gateway config auto-generation. PI model metadata is owned by the PI agent
+//         (we shell out to `pi --list-models` rather than maintain provider/model whitelists).
 
 import { readFileSync, writeFileSync, copyFileSync, mkdirSync, existsSync } from 'fs';
 import { execSync } from 'child_process';
@@ -13,9 +15,9 @@ const log = createLogger('gateway-generator');
 // ─── Types ────────────────────────────────────────────────────────
 
 export interface DiscoveredEndpoint {
-  /** Mode key in gateway.yaml (e.g. "api", "plan", "deepseek-anthropic") */
+  /** Mode key in gateway.yaml + cortex profile (e.g. "plan", "deepseek", "openai-codex") */
   mode: string;
-  /** Endpoint name (e.g. "anthropic", "openai") */
+  /** Endpoint group name (e.g. "anthropic", "deepseek", "openai-codex") */
   endpoint: string;
   base_url: string;
   auth_style: string;
@@ -23,25 +25,16 @@ export interface DiscoveredEndpoint {
   passthrough: boolean;
   /** Model IDs known to be available for this endpoint */
   models: string[];
-  /** Tier-based model fallback chain for model_fallbacks */
-  modelFallbacks: Record<string, string[]>;
-}
-
-export interface GatewayGenInput {
-  /** Discovered endpoints from Claude Code and PI configs */
-  endpoints: DiscoveredEndpoint[];
-  /** Default active mode */
-  defaultMode?: string;
+  /** Whether gateway.yaml should render an endpoint section for this entry. PI providers without a
+   *  known upstream URL are surfaced as profiles but skipped in gateway.yaml. */
+  gatewayManaged: boolean;
 }
 
 // ─── Paths ─────────────────────────────────────────────────────────
 
 const CLAUDE_CREDENTIALS = path.join(os.homedir(), '.claude', '.credentials.json');
-const PI_MODELS = path.join(os.homedir(), '.pi', 'agent', 'models.json');
-const PI_AUTH = path.join(os.homedir(), '.pi', 'agent', 'auth.json');
-const PI_SETTINGS = path.join(os.homedir(), '.pi', 'agent', 'settings.json');
 
-// ─── Anthropic model tiers (by subscription type) ─────────────────
+// ─── Anthropic Claude Code tier table (only used for Claude OAuth path) ─────
 
 /** Model names used in gateway model_fallbacks (API-level model IDs). */
 const ANTHROPIC_MODEL_TIERS: Record<string, string[]> = {
@@ -50,45 +43,54 @@ const ANTHROPIC_MODEL_TIERS: Record<string, string[]> = {
   free: ['claude-haiku-4-5'],
 };
 
-/** Generate model_fallbacks: each model falls back to all lower-tier models. */
-function buildModelFallbacks(models: string[]): Record<string, string[]> {
-  const result: Record<string, string[]> = {};
-  for (let i = 0; i < models.length; i++) {
-    const fallbacks = models.slice(i + 1);
-    if (fallbacks.length > 0) {
-      result[models[i]] = fallbacks;
-    }
-  }
-  return result;
-}
+// ─── PI provider → upstream URL lookup (manually maintained) ────────────────
 
-// ─── Known provider defaults (used when PI auth.json has a key but no models.json) ──
+/**
+ * Map a PI built-in provider name to its real upstream URL. Used by `generateGatewayYaml` so PI
+ * traffic can be routed through the gateway. Entries are sourced from PI source / docs.
+ *
+ * Providers absent from this table are still surfaced as cortex profiles, but no gateway endpoint
+ * is generated for them (gatewayManaged=false). PI will then either fail (if the cortex spawn path
+ * forces gateway routing) or direct-call the upstream (if the spawn path leaves models.json
+ * untouched for that provider). See `/home/fangxin/.cortex/plan/generic-wibbling-pine.md` stage E
+ * for the eventual full plumbing.
+ */
+const PI_PROVIDER_UPSTREAM: Record<string, { url: string; auth_style: string }> = {
+  // Anthropic-protocol providers (PI's `api: anthropic-messages`)
+  anthropic: { url: 'https://api.anthropic.com', auth_style: 'bearer' },
+  fireworks: { url: 'https://api.fireworks.ai/inference', auth_style: 'bearer' },
+  'github-copilot': { url: 'https://api.individual.githubcopilot.com', auth_style: 'bearer' },
+  'kimi-coding': { url: 'https://api.kimi.com/coding', auth_style: 'bearer' },
+  minimax: { url: 'https://api.minimax.io/anthropic', auth_style: 'bearer' },
+  'minimax-cn': { url: 'https://api.minimaxi.com/anthropic', auth_style: 'bearer' },
+  opencode: { url: 'https://opencode.ai/zen', auth_style: 'bearer' },
+  'vercel-ai-gateway': { url: 'https://ai-gateway.vercel.sh', auth_style: 'bearer' },
 
-interface ProviderDefaults {
-  base_url: string;
-  auth_style: string;
-  models: string[];
-}
+  // OpenAI-completions / OpenAI-responses providers
+  cerebras: { url: 'https://api.cerebras.ai/v1', auth_style: 'bearer' },
+  deepseek: { url: 'https://api.deepseek.com', auth_style: 'bearer' },
+  groq: { url: 'https://api.groq.com/openai/v1', auth_style: 'bearer' },
+  huggingface: { url: 'https://router.huggingface.co/v1', auth_style: 'bearer' },
+  mistral: { url: 'https://api.mistral.ai', auth_style: 'bearer' },
+  openai: { url: 'https://api.openai.com/v1', auth_style: 'bearer' },
+  'opencode-go': { url: 'https://opencode.ai/zen/go/v1', auth_style: 'bearer' },
+  openrouter: { url: 'https://openrouter.ai/api/v1', auth_style: 'bearer' },
+  xai: { url: 'https://api.x.ai/v1', auth_style: 'bearer' },
+  zai: { url: 'https://api.z.ai/api/coding/paas/v4', auth_style: 'bearer' },
 
-const KNOWN_PROVIDERS: Record<string, ProviderDefaults> = {
-  deepseek: {
-    base_url: 'https://api.deepseek.com/anthropic',
-    auth_style: 'anthropic',
-    models: ['deepseek-v4-pro', 'deepseek-v4-flash'],
-  },
-  openai: {
-    base_url: 'https://api.openai.com',
-    auth_style: 'openai',
-    models: ['gpt-5.4', 'gpt-5.4-mini'],
-  },
-  google: {
-    base_url: 'https://generativelanguage.googleapis.com',
-    auth_style: 'google',
-    models: ['gemini-2.5-pro', 'gemini-2.5-flash'],
-  },
+  // OAuth subscription providers (PI manages OAuth refresh; gateway transparently passthrough)
+  'openai-codex': { url: 'https://chatgpt.com/backend-api', auth_style: 'bearer' },
+  'google-gemini-cli': { url: 'https://cloudcode-pa.googleapis.com', auth_style: 'bearer' },
+  'google-antigravity': { url: 'https://daily-cloudcode-pa.sandbox.googleapis.com', auth_style: 'bearer' },
+
+  // Other built-ins
+  google: { url: 'https://generativelanguage.googleapis.com/v1beta', auth_style: 'bearer' },
+  // amazon-bedrock / google-vertex / azure-openai-responses / cloudflare-workers-ai use
+  // env-driven URLs (region / account ID / resource name) — not safely templated here.
+  // Users wanting these through the gateway must edit gateway.yaml manually.
 };
 
-// ─── Scanning ──────────────────────────────────────────────────────
+// ─── Scanning: Claude Code ────────────────────────────────────────
 
 interface ClaudeCreds {
   subscriptionType?: string;
@@ -142,110 +144,77 @@ function scanClaudeCode(): ClaudeCreds | null {
   }
 }
 
-interface PiProvider {
-  name: string;
-  baseUrl: string;
-  apiKey: string;
-  api: string;       // e.g. "anthropic-messages", "openai"
-  models: string[];
+// ─── Scanning: PI via `pi --list-models` ──────────────────────────
+
+export interface PiDiscoveredModel {
+  provider: string;
+  model: string;
 }
 
-interface PiAuth {
-  name: string;
-  key: string;
+/**
+ * Parse the table output of `pi --list-models` into structured entries.
+ * Skips header row, blank lines, and the "No models available" fallback message.
+ *
+ * Example input:
+ *   provider   model                       context  max-out  thinking  images
+ *   anthropic  claude-3-5-haiku-20241022   200K     8.2K     no        yes
+ *   deepseek   deepseek-v4-pro             1M       384K     yes       no
+ */
+export function parsePiListModelsOutput(stdout: string): PiDiscoveredModel[] {
+  const lines = stdout.split('\n');
+  const result: PiDiscoveredModel[] = [];
+  for (const raw of lines) {
+    const line = raw.trim();
+    if (!line) continue;
+    if (line.startsWith('No models available')) return [];
+    // PI uses 2+ spaces between columns for alignment
+    const parts = line.split(/\s{2,}/);
+    if (parts.length < 2) continue;
+    const [provider, model] = parts;
+    if (provider === 'provider' && model === 'model') continue; // header row
+    result.push({ provider, model });
+  }
+  return result;
 }
 
-/** Read and parse PI models.json + auth.json. Returns discovered providers. */
-function scanPI(): PiProvider[] {
-  const providers: PiProvider[] = [];
-
-  // Parse models.json for configured providers
-  let modelsConfig: Record<string, any> = {};
+/**
+ * Discover PI providers and models by shelling out to `pi --list-models`.
+ * PI is the authoritative source of model metadata — cortex does not maintain a whitelist.
+ *
+ * Returns an empty array on any failure (PI not installed, timeout, parse error). The init flow
+ * should warn the user and tell them to `pi /login` first.
+ */
+function scanPIViaListModels(): PiDiscoveredModel[] {
   try {
-    if (existsSync(PI_MODELS)) {
-      modelsConfig = JSON.parse(readFileSync(PI_MODELS, 'utf-8'));
-    }
-  } catch (e) {
-    log.warn(`Failed to read PI models.json: ${(e as Error).message}`);
-  }
-
-  // Parse auth.json for API keys
-  let authConfig: Record<string, PiAuth> = {};
-  try {
-    if (existsSync(PI_AUTH)) {
-      const raw = JSON.parse(readFileSync(PI_AUTH, 'utf-8'));
-      for (const [name, entry] of Object.entries(raw)) {
-        const e = entry as any;
-        if (e?.key) {
-          authConfig[name] = { name, key: e.key };
-        }
-      }
-    }
-  } catch (e) {
-    log.warn(`Failed to read PI auth.json: ${(e as Error).message}`);
-  }
-
-  // Merge models.json providers
-  const modelsProviders = modelsConfig?.providers || {};
-  for (const [name, p] of Object.entries(modelsProviders)) {
-    const prov = p as any;
-    const models = (prov.models || []).map((m: any) => m.id || m);
-    providers.push({
-      name,
-      baseUrl: prov.baseUrl || '',
-      apiKey: prov.apiKey || authConfig[name]?.key || '',
-      api: prov.api || 'anthropic-messages',
-      models,
+    // PI writes the table to stderr (not stdout) — merge via `2>&1` so we can parse it.
+    // Intentionally do NOT set PI_CODING_AGENT_DIR: discovery reads the user's real ~/.pi/agent/.
+    const stdout = execSync('pi --list-models 2>&1', {
+      timeout: 10_000,
+      encoding: 'utf-8',
     });
-  }
-
-  // Add providers from auth.json that aren't in models.json yet
-  for (const [name, auth] of Object.entries(authConfig)) {
-    if (providers.some(p => p.name === name)) continue;
-    const known = KNOWN_PROVIDERS[name];
-    if (!known) {
-      log.info(`PI auth key found for unknown provider "${name}" — skipping`);
-      continue;
+    return parsePiListModelsOutput(stdout);
+  } catch (e) {
+    const err = e as { code?: string; status?: number; message?: string };
+    if (err.code === 'ENOENT') {
+      log.info('PI is not installed — skipping PI provider discovery');
+    } else {
+      log.info(`pi --list-models failed (code=${err.code ?? err.status}): ${err.message ?? 'unknown error'}`);
     }
-    providers.push({
-      name,
-      baseUrl: known.base_url,
-      apiKey: auth.key,
-      api: known.auth_style === 'anthropic' ? 'anthropic-messages' : known.auth_style,
-      models: known.models,
-    });
+    return [];
   }
-
-  return providers;
 }
 
 // ─── Discovery ─────────────────────────────────────────────────────
 
 /**
- * Determine the auth_style and api type from PI provider config.
- * PI's `api` field: "anthropic-messages" → auth_style "anthropic", "openai" → "openai"
- */
-function piApiToAuthStyle(api: string): { auth_style: string; endpoint: string } {
-  switch (api) {
-    case 'anthropic-messages': return { auth_style: 'anthropic', endpoint: 'anthropic' };
-    case 'openai': return { auth_style: 'openai', endpoint: 'openai' };
-    default: return { auth_style: 'bearer', endpoint: api };
-  }
-}
-
-/** Check if a URL is a gateway URL (localhost:9880 or 127.0.0.1:9880). */
-function isGatewayUrl(url: string): boolean {
-  return url.includes('127.0.0.1:9880') || url.includes('localhost:9880');
-}
-
-/**
  * Scan Claude Code and PI configurations and return discovered endpoints.
  *
- * Rules:
- * - Claude Code plan mode: always generated (OAuth bearer passthrough, no managed keys).
- * - Claude Code api mode: generated only if ANTHROPIC_API_KEY env var is set (referenced via $ANTHROPIC_API_KEY).
- * - PI providers from auth.json: use known provider defaults.
- * - PI providers from models.json: skip if base URL is already a gateway URL (already configured).
+ * - Claude Code plan mode: always generated if logged in (OAuth bearer passthrough).
+ * - Claude Code api mode: generated only if ANTHROPIC_API_KEY env var is set.
+ * - PI providers: discovered via `pi --list-models`. Each provider becomes one endpoint with
+ *   `mode = endpoint = provider name`. `gatewayManaged` is true only if the provider has a known
+ *   upstream URL in PI_PROVIDER_UPSTREAM (otherwise profile is generated but gateway.yaml entry
+ *   is skipped).
  */
 export function discoverEndpoints(): DiscoveredEndpoint[] {
   const endpoints: DiscoveredEndpoint[] = [];
@@ -255,7 +224,7 @@ export function discoverEndpoints(): DiscoveredEndpoint[] {
   if (claude) {
     const models = ANTHROPIC_MODEL_TIERS[claude.subscriptionType || 'free'] || ANTHROPIC_MODEL_TIERS.free;
 
-    // plan mode — OAuth bearer passthrough (no managed keys needed)
+    // plan mode — OAuth bearer passthrough
     endpoints.push({
       mode: 'plan',
       endpoint: 'anthropic',
@@ -264,10 +233,10 @@ export function discoverEndpoints(): DiscoveredEndpoint[] {
       keys: [],
       passthrough: true,
       models,
-      modelFallbacks: {},
+      gatewayManaged: true,
     });
 
-    // api mode — only if ANTHROPIC_API_KEY is set (referenced via env var, not raw token)
+    // api mode — only if ANTHROPIC_API_KEY is set
     if (process.env.ANTHROPIC_API_KEY) {
       endpoints.push({
         mode: 'api',
@@ -277,40 +246,35 @@ export function discoverEndpoints(): DiscoveredEndpoint[] {
         keys: ['$ANTHROPIC_API_KEY'],
         passthrough: true,
         models,
-        modelFallbacks: buildModelFallbacks(models),
+        gatewayManaged: true,
       });
     }
   }
 
-  // ── PI → per-provider endpoints ──
-  const piProviders = scanPI();
-  for (const prov of piProviders) {
-    // Skip providers whose base URL is already a gateway URL (already configured)
-    if (isGatewayUrl(prov.baseUrl)) {
-      log.info(`PI provider "${prov.name}" already routes through gateway — skipping`);
-      continue;
-    }
+  // ── PI → per-provider endpoints (one mode per provider) ──
+  const piModels = scanPIViaListModels();
+  // Group models by provider name
+  const byProvider = new Map<string, string[]>();
+  for (const { provider, model } of piModels) {
+    if (!byProvider.has(provider)) byProvider.set(provider, []);
+    byProvider.get(provider)!.push(model);
+  }
 
-    const { auth_style, endpoint } = piApiToAuthStyle(prov.api);
-    const modeName = prov.name.toLowerCase().replace(/[^a-z0-9_-]/g, '-');
-
-    // Use env var reference for keys when possible, fall back to raw key from PI auth
-    let keys: string[] = [];
-    if (prov.apiKey) {
-      // Check if this key matches a known env var to use reference
-      const envRef = findEnvVarRef(prov.name, prov.apiKey);
-      keys = envRef ? [envRef] : [prov.apiKey];
-    }
+  for (const [provider, models] of byProvider) {
+    const upstream = PI_PROVIDER_UPSTREAM[provider];
+    // anthropic is already covered by the Claude Code path above (with the user's OAuth subscription
+    // tier). If PI also reports anthropic, skip — Claude path is authoritative for plan mode.
+    if (provider === 'anthropic') continue;
 
     endpoints.push({
-      mode: modeName,
-      endpoint,
-      base_url: prov.baseUrl,
-      auth_style,
-      keys,
-      passthrough: false,
-      models: prov.models,
-      modelFallbacks: {},
+      mode: provider,
+      endpoint: provider,
+      base_url: upstream?.url ?? '',
+      auth_style: upstream?.auth_style ?? 'bearer',
+      keys: [],
+      passthrough: true,
+      models,
+      gatewayManaged: !!upstream,
     });
   }
 
@@ -321,40 +285,21 @@ function capitalize(s: string): string {
   return s.charAt(0).toUpperCase() + s.slice(1);
 }
 
-/** Try to match a raw API key to a known environment variable. */
-function findEnvVarRef(providerName: string, apiKey: string): string | null {
-  const envMap: Record<string, string> = {
-    deepseek: 'DEEPSEEK_API_KEY',
-    openai: 'OPENAI_API_KEY',
-    google: 'GEMINI_API_KEY',
-    openrouter: 'OPENROUTER_API_KEY',
-    anthropic: 'ANTHROPIC_API_KEY',
-  };
-
-  const envVar = envMap[providerName];
-  if (envVar && process.env[envVar] && process.env[envVar] === apiKey) {
-    return `$${envVar}`;
-  }
-  return null;
-}
-
 // ─── YAML Generation ───────────────────────────────────────────────
-
-interface GatewayYamlTop {
-  port: number;
-  mode: string;
-  status_check: boolean;
-  [key: string]: any;  // endpoint sections
-}
 
 /**
  * Generate gateway.yaml content from discovered endpoints.
  * Outputs a formatted YAML string with comments explaining each mode.
+ *
+ * Endpoints with gatewayManaged=false are skipped (their profile still exists in profiles.json,
+ * but gateway.yaml has no entry for them — PI traffic to those providers is currently direct).
  */
 export function generateGatewayYaml(endpoints: DiscoveredEndpoint[], defaultMode?: string): string {
-  // Group endpoints by endpoint name (e.g., "anthropic", "openai")
+  const renderable = endpoints.filter(e => e.gatewayManaged !== false);
+
+  // Group renderable endpoints by endpoint name (e.g., "anthropic", "deepseek")
   const byEndpoint: Record<string, DiscoveredEndpoint[]> = {};
-  for (const ep of endpoints) {
+  for (const ep of renderable) {
     (byEndpoint[ep.endpoint] ||= []).push(ep);
   }
 
@@ -369,13 +314,13 @@ export function generateGatewayYaml(endpoints: DiscoveredEndpoint[], defaultMode
   lines.push('# Docs: https://aistatus.cc/docs');
   lines.push('');
 
-  // Determine default mode
-  const activeMode = defaultMode || endpoints[0]?.mode || 'api';
+  // Determine default mode (first renderable endpoint, falling back to all endpoints)
+  const activeMode = defaultMode || renderable[0]?.mode || endpoints[0]?.mode || 'api';
 
-  // Collect all modes for the comment
-  const allModes = endpoints.map(e => e.mode).filter((v, i, a) => a.indexOf(v) === i);
+  // Collect all renderable modes for the comment
+  const allModes = renderable.map(e => e.mode).filter((v, i, a) => a.indexOf(v) === i);
   lines.push(`port: 9880`);
-  lines.push(`mode: ${activeMode}  # active billing mode: ${allModes.join(' | ')}`);
+  lines.push(`mode: ${activeMode}${allModes.length > 0 ? `  # active billing mode: ${allModes.join(' | ')}` : ''}`);
   lines.push(`status_check: true`);
 
   for (const [epName, eps] of Object.entries(byEndpoint)) {
@@ -385,7 +330,7 @@ export function generateGatewayYaml(endpoints: DiscoveredEndpoint[], defaultMode
       // Determine provider label for the comment
       const providerLabel = ep.mode === 'plan' ? 'Anthropic Claude (OAuth passthrough, billed via subscription)' :
         ep.mode === 'api' ? 'Anthropic Claude (API key, billed via API credits)' :
-        `${capitalize(ep.mode)} (${ep.endpoint}-compatible API)`;
+        `${capitalize(ep.mode)} (PI-managed auth, routed through gateway)`;
       lines.push(`  # ── ${providerLabel} ──`);
       lines.push(`  ${ep.mode}:`);
       lines.push(`    base_url: ${ep.base_url}`);
@@ -396,23 +341,24 @@ export function generateGatewayYaml(endpoints: DiscoveredEndpoint[], defaultMode
         for (const key of ep.keys) {
           lines.push(`      - ${key}`);
         }
-      }
-      if (ep.keys.length === 0) {
+      } else {
         lines.push(`    # No managed keys — ${ep.passthrough ? 'caller key passthrough' : 'waiting for key configuration'}`);
       }
       if (ep.passthrough && ep.keys.length > 0) {
         lines.push(`    passthrough: true`);
       }
-      if (Object.keys(ep.modelFallbacks).length > 0) {
-        lines.push(`    model_fallbacks:`);
-        for (const [model, fallbacks] of Object.entries(ep.modelFallbacks)) {
-          lines.push(`      ${model}:`);
-          for (const fb of fallbacks) {
-            lines.push(`        - ${fb}`);
-          }
-        }
-      }
     }
+  }
+
+  // Footer: list any PI providers we discovered but couldn't route (gatewayManaged=false)
+  const skipped = endpoints.filter(e => e.gatewayManaged === false);
+  if (skipped.length > 0) {
+    lines.push('');
+    lines.push('# Skipped (no known upstream URL in PI_PROVIDER_UPSTREAM):');
+    for (const s of skipped) {
+      lines.push(`#   ${s.mode} (${s.models.length} model${s.models.length === 1 ? '' : 's'})`);
+    }
+    lines.push('# These providers appear in profiles.json but are not routed through this gateway.');
   }
 
   lines.push('');
