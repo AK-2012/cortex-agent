@@ -153,6 +153,29 @@ test('buildSpawnArgs emits no --skill when pluginDirs is empty or undefined', ()
   assert.ok(!b.includes('--skill'));
 });
 
+// --- D1: --provider passed through from profile mode, not hardcoded ---
+
+test('buildSpawnArgs: explicit provider opt is passed as --provider', () => {
+  const args = buildSpawnArgs({ sessionDir: '/x', model: 'gpt-5.4-mini', provider: 'openai-codex' });
+  const idx = args.indexOf('--provider');
+  assert.ok(idx >= 0, '--provider must be present');
+  assert.equal(args[idx + 1], 'openai-codex');
+});
+
+test('buildSpawnArgs: provider opt is NOT defaulted to "anthropic" when only model given', () => {
+  // Old behavior: always pushed --provider anthropic when model was set. New behavior: omit --provider.
+  const args = buildSpawnArgs({ sessionDir: '/x', model: 'claude-opus-4-7' });
+  assert.ok(!args.includes('--provider'),
+    `--provider should not appear when not requested explicitly, got: ${JSON.stringify(args)}`);
+});
+
+test('buildSpawnArgs: provider is omitted when model is not set (no orphan flag)', () => {
+  const args = buildSpawnArgs({ sessionDir: '/x', provider: 'deepseek' });
+  // Without --model, --provider is meaningless; omit both
+  assert.ok(!args.includes('--provider'));
+  assert.ok(!args.includes('--model'));
+});
+
 // --- Group C: bootstrap id capture (done-when: first get_state synthesizes session_started) ---
 
 test('spawn writes bootstrap {id:"bootstrap",type:"get_state"} as ONLY first stdin frame', async () => {

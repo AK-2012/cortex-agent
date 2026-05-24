@@ -24,7 +24,7 @@ Unified NormalizedEvent event schema and AgentAdapter contract.
 | `claude/adapter-tui.ts` | adapter | ClaudeTuiSession — interactive Claude under tmux + jsonl tail (DR-0012 Phase 2) |
 | `codex/adapter.ts` | adapter | CodexAdapter + RouteRuntime pool |
 | `codex/event-parser.ts` | parser | codexEventToNormalized translation |
-| `pi/agent-dir.ts` | config | PI agent directory constants (data/pi/models.json + logs/sessions-pi/) + models.json auto-write |
+| `pi/agent-dir.ts` | config | PI agent directory constants (data/pi/models.json + logs/sessions-pi/) + multi-provider models.json writer (writeProvidersConfig) + auth.json symlink/copy mirror (ensureAuthVisible) |
 | `pi/adapter.ts` | adapter | PIAdapter + PISession + switch_session |
 | `pi/event-parser.ts` | parser | piRpcLineToNormalized translation |
 | `pi/framing.ts` | framing | LF-only NDJSON encoding and splitter |

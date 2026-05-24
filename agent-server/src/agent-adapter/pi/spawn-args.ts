@@ -13,6 +13,10 @@ export interface PISpawnOptions {
   sessionPath?: string | null;
   /** Model identifier (e.g. "deepseek-v4-flash[1m]"); context-window suffix is stripped. */
   model?: string | null;
+  /** PI provider name (e.g. "anthropic", "deepseek", "openai-codex"). When set together with model,
+   *  emits `--provider <name>`. When omitted, PI infers provider from model name prefix or its default.
+   *  Sourced from the cortex profile's `mode` field at adapter-spawn time. */
+  provider?: string | null;
   systemPrompt?: string | null;
   /** Single string or multi-value array; pi args.js:49-51 accepts repeated --append-system-prompt flags. */
   appendSystemPrompt?: string | string[] | null;
@@ -34,9 +38,12 @@ export function buildSpawnArgs(opts: PISpawnOptions): string[] {
   if (opts.model) {
     const cleaned = stripModelSuffix(opts.model);
     args.push('--model', cleaned);
-    // PI reads provider config from models.json (written by syncPIModelsJson);
-    // force --provider anthropic so the gateway baseUrl is used.
-    args.push('--provider', 'anthropic');
+    // Provider is decided by the active cortex profile (mode field). For non-Claude PI providers
+    // (deepseek / openai-codex / etc.) cortex writes a multi-provider models.json (writeProvidersConfig)
+    // that overrides each provider's baseUrl to the gateway, then PI selects the matching provider here.
+    if (opts.provider) {
+      args.push('--provider', opts.provider);
+    }
   }
 
   // --session accepts both a UUID (scanned from --session-dir) and a full file path.

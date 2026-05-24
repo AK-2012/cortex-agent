@@ -61,6 +61,15 @@ export interface AgentSpawnConfig {
   /** DR-0008 Phase 3 cleanup target. Per-request ANTHROPIC_BASE_URL override (gateway-routed mode URL). */
   anthropicBaseUrl?: string;
 
+  // --- PI-specific passthroughs; other backends ignore these ---
+  /** PI provider name (e.g. "anthropic", "deepseek", "openai-codex"). Sourced from the active
+   *  cortex profile's `mode` field. PI adapter passes it to the subprocess as `--provider <name>`. */
+  piProvider?: string;
+  /** Base URL of the cortex local gateway (e.g. "http://127.0.0.1:9880"). PI adapter writes a
+   *  multi-provider models.json overriding every discovered provider's baseUrl to land on this
+   *  gateway, so PI traffic is monitored / cost-tracked rather than going direct to upstreams. */
+  piGatewayBaseUrl?: string;
+
   /** DR-0012: Claude adapter mode. 'print' (default, -p stream-json) or 'tui' (interactive tmux + jsonl tail).
    *  Ignored for non-claude backends. Sourced from the active profile's claudeBackend field. */
   claudeBackend?: 'print' | 'tui';

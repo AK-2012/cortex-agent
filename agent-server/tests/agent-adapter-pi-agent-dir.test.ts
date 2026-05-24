@@ -1,0 +1,196 @@
+// input:  agent-dir module (PI subprocess config writers)
+// output: verify writeProvidersConfig multi-provider override + ensureAuthVisible symlink/copy semantics
+// pos:    Unit tests for PI agent dir helpers — no real PI spawn
+
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import * as fs from 'node:fs';
+import * as path from 'node:path';
+import * as os from 'node:os';
+
+import {
+  writeProvidersConfig,
+  ensureAuthVisible,
+} from '../src/agent-adapter/pi/agent-dir.js';
+
+// ─── writeProvidersConfig: multi-provider override ──────────────
+
+test('writeProvidersConfig: writes one provider entry per ProviderOverride', () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cortex-pi-models-'));
+  try {
+    const modelsPath = path.join(tmpDir, 'models.json');
+    writeProvidersConfig(
+      [
+        { name: 'anthropic' },
+        { name: 'deepseek' },
+        { name: 'openai-codex' },
+      ],
+      'http://127.0.0.1:9880',
+      { modelsPath },
+    );
+    const data = JSON.parse(fs.readFileSync(modelsPath, 'utf-8'));
+    assert.ok(data.providers.anthropic);
+    assert.ok(data.providers.deepseek);
+    assert.ok(data.providers['openai-codex']);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test('writeProvidersConfig: each provider baseUrl points to gateway/<provider-name>', () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cortex-pi-models-'));
+  try {
+    const modelsPath = path.join(tmpDir, 'models.json');
+    writeProvidersConfig(
+      [{ name: 'openai-codex' }, { name: 'deepseek' }],
+      'http://127.0.0.1:9880',
+      { modelsPath },
+    );
+    const data = JSON.parse(fs.readFileSync(modelsPath, 'utf-8'));
+    assert.equal(data.providers['openai-codex'].baseUrl, 'http://127.0.0.1:9880/openai-codex');
+    assert.equal(data.providers.deepseek.baseUrl, 'http://127.0.0.1:9880/deepseek');
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test('writeProvidersConfig: does NOT write apiKey field (let PI auth.json resolve)', () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cortex-pi-models-'));
+  try {
+    const modelsPath = path.join(tmpDir, 'models.json');
+    writeProvidersConfig(
+      [{ name: 'anthropic' }],
+      'http://127.0.0.1:9880',
+      { modelsPath },
+    );
+    const data = JSON.parse(fs.readFileSync(modelsPath, 'utf-8'));
+    assert.equal(data.providers.anthropic.apiKey, undefined,
+      'apiKey must NOT be set — PI resolves from auth.json or env');
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test('writeProvidersConfig: explicit basePath overrides default /<name>', () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cortex-pi-models-'));
+  try {
+    const modelsPath = path.join(tmpDir, 'models.json');
+    writeProvidersConfig(
+      [{ name: 'deepseek', basePath: '/deepseek/anthropic' }],
+      'http://127.0.0.1:9880',
+      { modelsPath },
+    );
+    const data = JSON.parse(fs.readFileSync(modelsPath, 'utf-8'));
+    assert.equal(data.providers.deepseek.baseUrl, 'http://127.0.0.1:9880/deepseek/anthropic');
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test('writeProvidersConfig: creates parent directory if missing', () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cortex-pi-models-'));
+  try {
+    const modelsPath = path.join(tmpDir, 'nested', 'dir', 'models.json');
+    writeProvidersConfig(
+      [{ name: 'anthropic' }],
+      'http://127.0.0.1:9880',
+      { modelsPath },
+    );
+    assert.ok(fs.existsSync(modelsPath));
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test('writeProvidersConfig: atomic — leaves no .tmp files on success', () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cortex-pi-models-'));
+  try {
+    const modelsPath = path.join(tmpDir, 'models.json');
+    writeProvidersConfig([{ name: 'anthropic' }], 'http://127.0.0.1:9880', { modelsPath });
+    const files = fs.readdirSync(tmpDir);
+    const tmpFiles = files.filter(f => f.includes('.tmp.'));
+    assert.equal(tmpFiles.length, 0, `unexpected tmp files: ${tmpFiles.join(',')}`);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+// ─── ensureAuthVisible: symlink user's PI auth.json into cortex-private dir ───
+
+test('ensureAuthVisible: no-op when user auth.json does not exist', () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cortex-pi-auth-'));
+  try {
+    const userAuth = path.join(tmpDir, 'user-pi', 'auth.json');
+    const agentDir = path.join(tmpDir, 'cortex-pi');
+    fs.mkdirSync(agentDir, { recursive: true });
+    ensureAuthVisible({ userAuthPath: userAuth, agentDir });
+    assert.ok(!fs.existsSync(path.join(agentDir, 'auth.json')),
+      'should not create cortex auth.json when source missing');
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test('ensureAuthVisible: creates symlink on Linux/macOS when user auth.json exists', { skip: process.platform === 'win32' }, () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cortex-pi-auth-'));
+  try {
+    const userAuth = path.join(tmpDir, 'user-pi', 'auth.json');
+    fs.mkdirSync(path.dirname(userAuth), { recursive: true });
+    fs.writeFileSync(userAuth, '{"deepseek": {"type":"api_key","key":"sk-test"}}');
+
+    const agentDir = path.join(tmpDir, 'cortex-pi');
+    ensureAuthVisible({ userAuthPath: userAuth, agentDir });
+
+    const cortexAuth = path.join(agentDir, 'auth.json');
+    assert.ok(fs.existsSync(cortexAuth));
+    const stat = fs.lstatSync(cortexAuth);
+    assert.ok(stat.isSymbolicLink(), 'should be symlink');
+    assert.equal(fs.readlinkSync(cortexAuth), userAuth);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test('ensureAuthVisible: idempotent — re-run preserves existing correct symlink', { skip: process.platform === 'win32' }, () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cortex-pi-auth-'));
+  try {
+    const userAuth = path.join(tmpDir, 'user-pi', 'auth.json');
+    fs.mkdirSync(path.dirname(userAuth), { recursive: true });
+    fs.writeFileSync(userAuth, '{}');
+    const agentDir = path.join(tmpDir, 'cortex-pi');
+
+    ensureAuthVisible({ userAuthPath: userAuth, agentDir });
+    const firstInode = fs.lstatSync(path.join(agentDir, 'auth.json')).ino;
+
+    ensureAuthVisible({ userAuthPath: userAuth, agentDir });
+    const secondInode = fs.lstatSync(path.join(agentDir, 'auth.json')).ino;
+
+    assert.equal(firstInode, secondInode, 'symlink should not be recreated when already correct');
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test('ensureAuthVisible: replaces stale regular file with symlink', { skip: process.platform === 'win32' }, () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cortex-pi-auth-'));
+  try {
+    const userAuth = path.join(tmpDir, 'user-pi', 'auth.json');
+    fs.mkdirSync(path.dirname(userAuth), { recursive: true });
+    fs.writeFileSync(userAuth, '{"deepseek":{"type":"api_key","key":"new"}}');
+
+    const agentDir = path.join(tmpDir, 'cortex-pi');
+    fs.mkdirSync(agentDir, { recursive: true });
+    // Pre-existing regular file (e.g. stale auth from a previous Windows-mode copy)
+    fs.writeFileSync(path.join(agentDir, 'auth.json'), '{"old":"data"}');
+
+    ensureAuthVisible({ userAuthPath: userAuth, agentDir });
+
+    const stat = fs.lstatSync(path.join(agentDir, 'auth.json'));
+    assert.ok(stat.isSymbolicLink(), 'pre-existing regular file should be replaced with symlink');
+    // Reading the file should now return the user-side content
+    const content = fs.readFileSync(path.join(agentDir, 'auth.json'), 'utf-8');
+    assert.match(content, /new/);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});

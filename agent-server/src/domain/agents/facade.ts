@@ -10,6 +10,7 @@ import type { AgentHandle, AgentResult } from '@core/types/agent-types.js';
 import { recordCost } from '../costs/cost-tracker.js';
 import { configureEnvForMode, isRetryableResult, isRetryableError } from './config.js';
 import { isModeRateLimited, isThrottled } from '../costs/rate-limit-throttle.js';
+import { GATEWAY_URL } from '../costs/gateway-manager.js';
 import { createLogger } from '@core/log.js';
 import { loadCortexRules } from '../memory/rules-loader.js';
 
@@ -99,6 +100,11 @@ function buildSpawnConfig(
     isUserInitiated: !!options.isUserInitiated,
     rawTools: typeof options.tools === 'string' ? options.tools : undefined,
     anthropicBaseUrl,
+    // PI-specific routing: provider name (= profile mode) + gateway base URL. PI adapter writes
+    // a multi-provider models.json (writeProvidersConfig) so every PI provider lands on the
+    // gateway. Claude / codex adapters ignore these fields.
+    piProvider: config.backend === 'pi' && config.mode ? config.mode : undefined,
+    piGatewayBaseUrl: config.backend === 'pi' ? GATEWAY_URL : undefined,
     cortexContext: hasContext ? ctx : undefined,
     appendSystemPrompt,
   };

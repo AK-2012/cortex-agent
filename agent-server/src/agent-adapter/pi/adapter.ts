@@ -3,7 +3,7 @@
 // pos:    PI CLI session pool and AgentAdapter implementation
 // >>> If I am updated, update my header comment and the parent folder's CORTEX.md <<<
 
-import { spawn as defaultSpawn, type ChildProcess, type SpawnOptions } from 'child_process';
+import { spawn as defaultSpawn, execSync, type ChildProcess, type SpawnOptions } from 'child_process';
 import { mkdirSync } from 'fs';
 import * as path from 'path';
 import { DATA_DIR, INSTALL_ROOT } from '@core/utils.js';
@@ -15,13 +15,44 @@ import type { NormalizedEvent } from '../normalize/event-types.js';
 import { buildSpawnArgs } from './spawn-args.js';
 import { createLineSplitter, encodeCommand } from './framing.js';
 import { piRpcLineToNormalized, createPIEventParserState, type PIEventParserState } from './event-parser.js';
-import { PI_AGENT_DIR, PI_SESSIONS_DIR, writeAnthropicBaseUrl } from './agent-dir.js';
+import { PI_AGENT_DIR, PI_SESSIONS_DIR, writeProvidersConfig, ensureAuthVisible } from './agent-dir.js';
+import { parsePiListModelsOutput } from '@core/gateway-generator.js';
 import { buildPrompt } from '../normalize/prompt-builder.js';
 
 const log = createLogger('pi-adapter');
 
 function buildPromptText(msg: UserMessage): string {
   return buildPrompt(msg.text, msg.attachments ?? []);
+}
+
+/**
+ * Discover unique PI provider names by shelling out to `pi --list-models`. Called at spawn time
+ * so the multi-provider models.json reflects whatever the user has currently authenticated to.
+ *
+ * PI writes the table to stderr — merge via 2>&1. Returns empty array on any failure (PI not
+ * installed, timeout, parse error); the caller logs a warning and proceeds without overriding
+ * models.json, which means the PI subprocess will fall back to direct upstream calls.
+ *
+ * Uses the user's real ~/.pi/agent/ for discovery (no PI_CODING_AGENT_DIR override) — symmetric
+ * with cortex init's gateway-generator.scanPIViaListModels(). ensureAuthVisible() then mirrors
+ * the auth file into PI_AGENT_DIR so the actual spawn can see those credentials.
+ */
+function discoverPIProviders(): string[] {
+  try {
+    const stdout = execSync('pi --list-models 2>&1', {
+      timeout: 10_000,
+      encoding: 'utf-8',
+      // Intentionally do NOT set PI_CODING_AGENT_DIR — read user's real PI config.
+      env: { ...process.env, PI_CODING_AGENT_DIR: '' },
+    });
+    const models = parsePiListModelsOutput(stdout);
+    const uniq = new Set<string>();
+    for (const m of models) uniq.add(m.provider);
+    return Array.from(uniq);
+  } catch (err) {
+    log.info(`pi --list-models failed at spawn: ${(err as Error).message ?? 'unknown'}`);
+    return [];
+  }
 }
 
 const DEFAULT_PI_BINARY = 'pi';
@@ -541,6 +572,7 @@ export class PIAdapter implements AgentAdapter {
       sessionDir,
       sessionId: sessionIdForSpawn,
       model: config.model ?? null,
+      provider: config.piProvider ?? null,
       systemPrompt: config.systemPrompt ?? null,
       appendSystemPrompt: config.appendSystemPrompt ?? null,
       pluginDirs: config.pluginDirs ?? null,
@@ -549,13 +581,27 @@ export class PIAdapter implements AgentAdapter {
       extraOption: config.extraOption ?? null,
     });
 
-    // Write models.json before spawn so PI subprocess reads the correct baseUrl.
-    // PI adapter is the sole writer of this file — no other code path touches it.
-    if (config.anthropicBaseUrl) {
+    // Pre-spawn config sync (sole writers of PI_AGENT_DIR — no other code path touches these files):
+    //  1. Mirror user's ~/.pi/agent/auth.json so the PI subprocess can resolve OAuth/API key auth
+    //  2. Write multi-provider models.json overriding every discovered PI provider's baseUrl to
+    //     land on the local gateway. PI uses its "Override Built-in Providers" mechanism
+    //     (PI docs/models.md §Overriding Built-in Providers) — only baseUrl is set, auth is
+    //     resolved from auth.json as usual.
+    if (config.piGatewayBaseUrl) {
       try {
-        writeAnthropicBaseUrl(config.anthropicBaseUrl);
+        ensureAuthVisible();
       } catch (err) {
-        log.warn(`Failed to write models.json: ${(err as Error).message}`);
+        log.warn(`Failed to mirror PI auth.json: ${(err as Error).message}`);
+      }
+      try {
+        const providers = discoverPIProviders();
+        if (providers.length > 0) {
+          writeProvidersConfig(providers.map(name => ({ name })), config.piGatewayBaseUrl);
+        } else {
+          log.warn('pi --list-models returned no providers; PI subprocess may fail to authenticate');
+        }
+      } catch (err) {
+        log.warn(`Failed to write PI models.json: ${(err as Error).message}`);
       }
     }
 
