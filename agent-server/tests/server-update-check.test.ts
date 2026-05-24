@@ -146,11 +146,13 @@ test.describe('checkServerUpdate (non-dev mode)', () => {
   test.before(() => {
     envBackup = process.env.CORTEX_REPO;
     delete process.env.CORTEX_REPO;
+    process.env.CORTEX_SERVER_UPDATE_ENABLE = '1';
   });
 
   test.after(() => {
     if (envBackup !== undefined) process.env.CORTEX_REPO = envBackup;
     else delete process.env.CORTEX_REPO;
+    delete process.env.CORTEX_SERVER_UPDATE_ENABLE;
   });
 
   test('getLatest returns null', async () => {
