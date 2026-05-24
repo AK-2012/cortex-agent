@@ -671,50 +671,69 @@ async function collectSlackConfig(prefill?: { signingSecret?: string; appToken?:
   await promptCopyManifestToClipboard(SLACK_APP_MANIFEST);
 
   const hasPrefill = prefill && (prefill.signingSecret || prefill.appToken || prefill.botToken);
+
+  let signingSecret: string | symbol;
+  let appToken: string | symbol;
+  let botToken: string | symbol;
+  let adminChannelRaw: string | symbol;
+
   if (hasPrefill) {
-    clack.log.info('Found existing Slack configuration — values are pre-filled. Press Enter to keep them, or type to replace.');
+    clack.log.info('Found existing Slack configuration. Press Enter to skip, or type anything to re-enter.');
+    const skip = await clack.text({
+      message: 'Skip Slack configuration? (Enter = skip, any key + Enter = re-enter)',
+      placeholder: 'Press Enter to skip',
+      defaultValue: '',
+    });
+    handleCancel(skip);
+
+    if ((skip as string).trim() === '') {
+      // User pressed Enter — reuse prefill values.
+      signingSecret = prefill!.signingSecret!;
+      appToken = prefill!.appToken!;
+      botToken = prefill!.botToken!;
+      adminChannelRaw = prefill!.adminChannel ?? '';
+    }
   }
 
-  const signingSecret = await (clack.password as any)({
-    message: 'Step 1/4: SLACK_SIGNING_SECRET (from Basic Information):',
-    initialValue: prefill?.signingSecret,
-    validate(value) {
-      if (!value) return 'Signing secret is required.';
-    },
-  });
-  handleCancel(signingSecret);
+  if (!signingSecret) {
+    signingSecret = await (clack.password as any)({
+      message: 'Step 1/4: SLACK_SIGNING_SECRET (from Basic Information):',
+      validate(value) {
+        if (!value) return 'Signing secret is required.';
+      },
+    });
+    handleCancel(signingSecret);
 
-  const appToken = await (clack.password as any)({
-    message: 'Step 2/4: SLACK_APP_TOKEN (App-Level Token, starts with xapp-):',
-    initialValue: prefill?.appToken,
-    validate(value) {
-      if (!value) return 'App token is required.';
-      if (!value.startsWith('xapp-')) return 'Token should start with xapp-';
-    },
-  });
-  handleCancel(appToken);
+    appToken = await (clack.password as any)({
+      message: 'Step 2/4: SLACK_APP_TOKEN (App-Level Token, starts with xapp-):',
+      validate(value) {
+        if (!value) return 'App token is required.';
+        if (!value.startsWith('xapp-')) return 'Token should start with xapp-';
+      },
+    });
+    handleCancel(appToken);
 
-  const botToken = await (clack.password as any)({
-    message: 'Step 3/4: SLACK_BOT_TOKEN (Bot User OAuth Token, starts with xoxb-):',
-    initialValue: prefill?.botToken,
-    validate(value) {
-      if (!value) return 'Bot token is required.';
-      if (!value.startsWith('xoxb-')) return 'Token should start with xoxb-';
-    },
-  });
-  handleCancel(botToken);
+    botToken = await (clack.password as any)({
+      message: 'Step 3/4: SLACK_BOT_TOKEN (Bot User OAuth Token, starts with xoxb-):',
+      validate(value) {
+        if (!value) return 'Bot token is required.';
+        if (!value.startsWith('xoxb-')) return 'Token should start with xoxb-';
+      },
+    });
+    handleCancel(botToken);
 
-  const adminChannelRaw = await clack.text({
-    message: 'Step 4/4: CORTEX_ADMIN_CHANNEL (optional — Slack channel ID for admin notifications):',
-    placeholder: 'e.g. C0123456789 or D0123456789 (leave blank to configure later)',
-    initialValue: prefill?.adminChannel,
-  });
-  handleCancel(adminChannelRaw);
+    adminChannelRaw = await clack.text({
+      message: 'Step 4/4: CORTEX_ADMIN_CHANNEL (optional — Slack channel ID for admin notifications):',
+      placeholder: 'e.g. C0123456789 or D0123456789 (leave blank to configure later)',
+      initialValue: prefill?.adminChannel,
+    });
+    handleCancel(adminChannelRaw);
+  }
 
   return {
-    botToken: botToken as string,
     signingSecret: signingSecret as string,
     appToken: appToken as string,
+    botToken: botToken as string,
     adminChannel: (adminChannelRaw as string).trim() || undefined,
   };
 }
