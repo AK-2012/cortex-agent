@@ -33,6 +33,7 @@ Project→conduit mapping (formerly `channel-repo.ts`) has moved into `platform/
 | `memory/` | `index-regen.ts` `consolidate.ts` `watcher.ts` `skill-scanner.ts` `claude-md-scanner.ts` `claude-md-injector.ts` |
 | `monitor/` | `gpu-monitor.ts` `disk-monitor.ts` |
 | `remote/` | `client-manager.ts` `client-bootstrap.ts` `client-hot-reload.ts` `cortex-client.ts` |
+| `system/` | `update-state.ts` (DR-0013 update-state I/O) |
 | `threads/` | `index.ts` `utils.ts` `artifact-io.ts` `template-loader.ts` `prompt-builder.ts` `state-machine.ts` `runner.ts` `hook-runner.ts` `auto-thread.ts` `template-resolver.ts` |
 | `mcp/` | `server.ts` + `tools/slack.ts` `cost.ts` `executions.ts` `task-ops.ts` `context.ts` `schedule.ts` (16 tools total) |
 
