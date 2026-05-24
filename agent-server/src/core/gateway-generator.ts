@@ -39,7 +39,7 @@ const CLAUDE_CREDENTIALS = path.join(os.homedir(), '.claude', '.credentials.json
 /** Model names used in gateway model_fallbacks (API-level model IDs). */
 const ANTHROPIC_MODEL_TIERS: Record<string, string[]> = {
   max: ['claude-opus-4-7', 'claude-sonnet-4-6', 'claude-haiku-4-5'],
-  pro: ['claude-sonnet-4-6', 'claude-haiku-4-5'],
+  pro: ['claude-opus-4-7', 'claude-sonnet-4-6', 'claude-haiku-4-5'],
   free: ['claude-haiku-4-5'],
 };
 
