@@ -7,3 +7,4 @@ Referenced by orch/ upper-layer modules via singleton references, must not inver
 | filename | role | function |
 |---|---|---|
 | `plan-approvals.ts` | singleton | Unified requestId-keyed plan approval state (merges pendingPlans + pendingHookPlans, provides register/lookup/resolve/reject/clearByChannel API, publishes plan.approved on resolve [S6-A]) |
+| `update-prompt-slack.ts` | factory | createSlackUpdatePrompt — Slack UpdatePrompt impl with 3 pre-registered actionIds |

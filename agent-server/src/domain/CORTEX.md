@@ -5,6 +5,7 @@ Currently only has threads/ subdirectory; subsequent S8-S11 will gradually add a
 
 | subdirectory | status | function |
 |---|---|---|
+| `system/` | [DR-0013] DONE | Server auto-update: UpdatePrompt interface, update state persistence |
 | `threads/` | [S7] DONE | Thread lifecycle, prompt building, config loading, artifact I/O |
 | `agents/` | [S11] DONE | Agent execution facade (config.ts + facade.ts) + bridge export, replaces claude-bridge/codex-bridge shim |
 | `tasks/` | [S2] DONE | Task system: parser (read path, core in core/task-parser.ts), mutator (write path, 17 mutations), dispatcher, archiver, recommendation |

@@ -7,7 +7,7 @@ agent-server's TypeScript ESM runtime source, organized by six-layer structure (
 | L0 | `core/` | Zero dependency: types, path constants, async-mutex, json-repository, atomic-write, CLI utilities |
 | L1 | `store/` | Persistence: 11 JsonRepository implementations |
 | L2 | `events/` | Event bus: EventBus + daily rolling jsonl + debug replay CLI |
-| L3 | `domain/` | Domain services: agents/sessions/tasks/executions/costs/scheduling/memory/monitor/remote/mcp/threads |
+| L3 | `domain/` | Domain services: agents/sessions/tasks/executions/costs/scheduling/system/memory/monitor/remote/mcp/threads |
 | L4 | `orchestration/` | Orchestration layer: orchestrator/agent-runner/thread-executor/busy-tracker + routing/ + interactions/ |
 | L5 | `entry/` | Entry points: app.ts / daemon.ts / startup-helpers / startup-notify |
 
