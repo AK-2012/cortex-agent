@@ -156,3 +156,22 @@ cortex restart        # 触碰 $STORE_DIR/.restart
 或者，如果你是在前台运行 `cortex start`，按 Ctrl-C 后重新启动。
 
 管理频道的自动检测和私信信任模型有安全影响——参见 [safety-and-approvals.md](./safety-and-approvals.md)。
+
+## 服务器自动更新（Slack 通知）
+
+当 Cortex 以发布模式运行（未设置 `CORTEX_REPO` 环境变量）时，
+它会定期检查 npm 上是否有更新的 `@cortex-agent/server` 版本。
+首次检查在启动后 60 秒进行，之后每 24 小时检查一次。
+
+当发现新版本时，Cortex 会向管理员私信发送一条带三个按钮的交互消息：
+
+| 按钮 | 行为 |
+|------|------|
+| **Update** | 以分离进程方式执行 `npm install -g @cortex-agent/server@latest`。守护进程的 post-install 钩子会触碰 `.restart`，从而在大约 30 秒内重启 `app.js`。 |
+| **Skip this version** | 关闭提示并将版本号记录到 `update-state.json` 中。同一版本不会再次提示；下一个新版本会触发新提示。 |
+| **Cancel** | 关闭提示。下一次 24 小时检查会重新提示。 |
+
+如果 24 小时内未按下任何按钮，提示将超时，视作 Cancel 处理。
+
+在开发模式（`CORTEX_REPO` 指向一个存在的目录）下，检查会被完全跳过，
+因为开发者直接管理安装。

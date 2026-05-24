@@ -23,6 +23,7 @@ import { sendStartupDmIfConfigured } from './startup-notify.js';
 import { startGateway, stopGateway } from '@domain/costs/gateway-manager.js';
 import { startClientManager, stopClientManager, startAllRemoteClients } from '@domain/remote/client-manager.js';
 import { checkAndUpdateClients, formatUpdateSlackMessage } from '@domain/remote/client-hot-reload.js';
+import { checkServerUpdate } from '@domain/system/server-update-check.js';
 import { threadStore } from '@store/thread-repo.js';
 import { sessionRepo } from '@store/session-repo.js';
 import { conversationLedger } from '@store/conversation-ledger-repo.js';
@@ -44,6 +45,7 @@ import { initScheduledRunner, createScheduler, setSchedulerRef, setBus, setInter
 import { buildInteractiveCallbacks } from '@orch/agent-runner.js';
 import { registerInteractionHandlers, initInteractionHandlers } from '@orch/interactions/interaction-handlers.js';
 import { CommandActionRouter } from '@orch/interactions/command-action-router.js';
+import { createSlackUpdatePrompt } from '@orch/interactions/update-prompt-slack.js';
 import { registerMessageHandler } from '@orch/routing/message-router.js';
 import { initRateLimitThrottle } from '@domain/costs/rate-limit-throttle.js';
 import { scheduleRepo } from '@store/schedule-repo.js';
@@ -117,6 +119,9 @@ const dispatchCommand = registerCommands({
   getExecutionStatusReport: buildExecutionStatusReport,
   commandRouter,
 });
+
+// DR-0013: wire Slack update prompt BEFORE bindToAdapter (router has no unregister API)
+const updatePrompt = createSlackUpdatePrompt(adapter, commandRouter);
 
 // Bind command action handlers (buttons, modals) to the platform adapter
 commandRouter.bindToAdapter(adapter);
@@ -238,6 +243,23 @@ process.on('SIGTERM', async () => {
     }
     await startAllRemoteClients();
   }, 2000);
+
+  // DR-0013: server auto-update — first check after 60s, then every 24h
+  setTimeout(async () => {
+    try {
+      await checkServerUpdate({ prompt: updatePrompt });
+    } catch (e) {
+      log.error(`Server auto-update check failed: ${(e as Error).message}`);
+    }
+  }, 60_000);
+
+  setInterval(async () => {
+    try {
+      await checkServerUpdate({ prompt: updatePrompt });
+    } catch (e) {
+      log.error(`Server auto-update check failed: ${(e as Error).message}`);
+    }
+  }, 24 * 60 * 60 * 1000);
 
   await scheduler.start();
 

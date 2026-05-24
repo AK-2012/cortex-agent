@@ -200,3 +200,24 @@ again.
 
 The admin channel auto-detection and DM trust model have safety implications —
 see [safety-and-approvals.md](./safety-and-approvals.md).
+
+## Server auto-update on Slack
+
+When Cortex runs in release mode (no `CORTEX_REPO` environment variable),
+it periodically checks npm for a newer `@cortex-agent/server` version.
+The first check runs 60 seconds after startup, then every 24 hours.
+
+When a newer version is found, Cortex sends an interactive message to the
+admin DM with three buttons:
+
+| Button             | Behaviour                                                                                    |
+|--------------------|----------------------------------------------------------------------------------------------|
+| **Update**         | Spawns `npm install -g @cortex-agent/server@latest` in a detached process. The daemon's post-install hook touches `.restart`, which restarts `app.js` within ~30 seconds. |
+| **Skip this version** | Dismisses the prompt and records the version in `update-state.json`. The same version will not be prompted again; the next release will trigger a new prompt. |
+| **Cancel**         | Dismisses the prompt. The next 24-hour check will re-prompt.                                 |
+
+If no button is pressed within 24 hours, the prompt times out and is
+treated as a cancel.
+
+In dev mode (`CORTEX_REPO` points to an existing directory), the check is
+skipped entirely since the developer manages the install directly.
