@@ -36,7 +36,7 @@
     "@modelcontextprotocol/sdk": "^1.27.1",
     "@slack/bolt": "^4.6.0",
     "@slack/web-api": "^7.14.1",
-    "aistatus": "^0.0.5",
+    "aistatus": "^0.0.6",
     "diff": "^7.0.0",
     "dotenv": "^16.4.7",
     "ws": "^8.20.0",
