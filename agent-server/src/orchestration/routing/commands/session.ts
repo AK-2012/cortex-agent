@@ -24,11 +24,11 @@ function formatTimeAgo(ms: number): string {
 }
 
 /** Resolve the Slack thread timestamp for the session:
- *  1. Command-level threadTs (user typed !new in-thread)
+ *  1. Command-level threadAnchorId (user typed !new in-thread)
  *  2. Conversation ledger's last status message ts (session's thread parent)
  *  3. null (no thread context available) */
-async function resolveSessionThreadTs(channel: string, threadTs?: string | null): Promise<string | null> {
-  if (threadTs) return threadTs;
+async function resolveSessionThreadTs(channel: string, threadAnchorId?: string | null): Promise<string | null> {
+  if (threadAnchorId) return threadAnchorId;
   const conv = await conversationLedger.getConversation(channel);
   if (conv?.turns.length) {
     // Walk backwards to find the last turn with a statusMessageTs
@@ -43,11 +43,11 @@ export async function handleNewCmd(
   channel: string,
   adapter: PlatformAdapter,
   opts: { skipHook?: boolean } = {},
-  threadTs?: string | null,
+  threadAnchorId?: string | null,
 ): Promise<void> {
   const dest: Destination = { type: 'interactive-reply', conduit: channel, sessionId: '' };
   if (!opts.skipHook) {
-    const resolvedThreadTs = await resolveSessionThreadTs(channel, threadTs);
+    const resolvedThreadTs = await resolveSessionThreadTs(channel, threadAnchorId);
     void fireAndForgetPreCloseHook(channel, adapter, resolvedThreadTs);
   }
 

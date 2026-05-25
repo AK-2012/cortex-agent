@@ -175,7 +175,7 @@ async function runHookAgent(
   try {
     await opts.adapter.postMessage(opts.destination, {
       text: `:hook: Hook agent (*${slackLabel}*) starting...`,
-    }, opts.threadTs ? { threadId: opts.threadTs } : undefined);
+    }, opts.threadAnchorId ? { threadId: opts.threadAnchorId } : undefined);
   } catch {}
 
   // Register execution (inherit metadata from thread for correct attribution)
@@ -210,7 +210,7 @@ async function runHookAgent(
     onFallback: null,
     isUserInitiated: false,
     onAssistantMessage: (text: string) => {
-      opts.adapter.postMessage(opts.destination, { text }, opts.threadTs ? { threadId: opts.threadTs } : undefined).catch(() => {});
+      opts.adapter.postMessage(opts.destination, { text }, opts.threadAnchorId ? { threadId: opts.threadAnchorId } : undefined).catch(() => {});
     },
     onProgress: null,
   });

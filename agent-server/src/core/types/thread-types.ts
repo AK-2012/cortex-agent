@@ -294,7 +294,7 @@ export interface RunThreadOptions {
   channel: string;
   /** Destination for the thread's OutputStream. Caller must supply — never inferred. */
   destination: Destination;
-  threadTs: string | null;
+  threadAnchorId: string | null;
   statusMsg: MessageRef | null;
   startTime: number;
   existingSessionId: string | null;

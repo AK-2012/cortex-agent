@@ -58,7 +58,7 @@ export interface AgentRunnerCtx {
   message: IncomingMessage;
   channel: string;
   adapter: PlatformAdapter;
-  threadTs: string | null;
+  threadAnchorId: string | null;
   hasFiles: boolean;
   userMessage: string;
   agentMessage: string;
@@ -93,7 +93,7 @@ export class AgentRunner {
   }
 
   private async _executeReal(ctx: AgentRunnerCtx): Promise<void> {
-    const { message, channel, adapter, threadTs, hasFiles, userMessage, agentMessage } = ctx;
+    const { message, channel, adapter, threadAnchorId, hasFiles, userMessage, agentMessage } = ctx;
     const downloadedFiles = await downloadFiles(message.files, hasFiles, adapter);
     const startTime = Date.now();
     const sessionId = await getSessionAsync(channel, resolveBackendForChannel(channel));
@@ -108,7 +108,7 @@ export class AgentRunner {
     const statusMsg = await adapter.postMessage(dest, {
       text: statusText,
       richBlocks: buildSealedStatusActionBlocks(statusText, blocksTemplate),
-    }, threadTs ? { threadId: threadTs } : undefined);
+    }, threadAnchorId ? { threadId: threadAnchorId } : undefined);
     const messageTs = message.ref.messageId;
     await initTurnTracking(channel, sessionId, sessionName, messageTs, userMessage || '', statusMsg.messageId);
     const onMessagePosted = (ref: MessageRef) => void conversationLedger.addResponseTs(channel, messageTs, ref.messageId).catch((e) => log.error(e));
@@ -118,7 +118,7 @@ export class AgentRunner {
       agentName: agentConfig.defaultAgentName || 'main',
       userMessage: agentMessage,
       userMessageTs: messageTs,
-      platformThreadId: threadTs || statusMsg.messageId,
+      platformThreadId: threadAnchorId || statusMsg.messageId,
     });
 
     // 3. Update status message with Cancel button now that we have thread.id
@@ -130,7 +130,7 @@ export class AgentRunner {
     initStatusBlocks(statusMsg, blocksTemplateWithThread);
 
     // 4. Build agent callbacks (streaming, fallback, progress — passed to runThread)
-    const callbacks = buildAgentCallbacks(adapter, dest, statusMsg, threadTs, startTime, sessionName, sessionId, onMessagePosted);
+    const callbacks = buildAgentCallbacks(adapter, dest, statusMsg, threadAnchorId, startTime, sessionName, sessionId, onMessagePosted);
 
     // 5. Build PI interactive-event callbacks (plan approval / ask-user-question routing)
     const interactiveCallbacks = buildInteractiveCallbacks(channel, sessionId, thread.id);
@@ -141,7 +141,7 @@ export class AgentRunner {
       const threadResult: ThreadRunResult = await runThread(thread.id, {
         adapter, channel,
         destination: { type: 'interactive-reply', conduit: channel, sessionId: sessionId ?? '' },
-        threadTs: threadTs || statusMsg.messageId,
+        threadAnchorId: threadAnchorId || statusMsg.messageId,
         statusMsg, startTime,
         existingSessionId: sessionId,
         sessionName,
@@ -160,7 +160,7 @@ export class AgentRunner {
       await handleDefaultAgentResult({
         result, channel, adapter, statusMsg, startTime, userMessage,
         executionId: threadResult.executionId,
-        sessionName, sessionId, threadTs, messageTs, callbacks,
+        sessionName, sessionId, threadAnchorId, messageTs, callbacks,
       });
     } catch (error) {
       clearStreamingCallback(channel);
@@ -168,7 +168,7 @@ export class AgentRunner {
         error: error as { message: string; cancelled?: boolean },
         channel, adapter, statusMsg, startTime,
         executionId: null,
-        sessionName, sessionId, threadTs, userMessageTs: messageTs,
+        sessionName, sessionId, threadAnchorId, userMessageTs: messageTs,
       });
     }
   }
@@ -199,10 +199,10 @@ export function resolveDefaultAgent(agentMessage: string, channel?: string): Age
   };
 }
 
-async function handleDefaultAgentResult({ result, channel, adapter, statusMsg, startTime, userMessage, executionId, sessionName, sessionId, threadTs, messageTs, callbacks }: {
+async function handleDefaultAgentResult({ result, channel, adapter, statusMsg, startTime, userMessage, executionId, sessionName, sessionId, threadAnchorId, messageTs, callbacks }: {
   result: AgentResult; channel: string; adapter: PlatformAdapter; statusMsg: MessageRef; startTime: number;
   userMessage: string; executionId: string | null; sessionName: string; sessionId: string | null;
-  threadTs: string | null; messageTs: string; callbacks: AgentCallbacks;
+  threadAnchorId: string | null; messageTs: string; callbacks: AgentCallbacks;
 }): Promise<void> {
   if (result?.rateLimited) {
     const { elapsedStr } = computeElapsed(startTime);
@@ -210,7 +210,7 @@ async function handleDefaultAgentResult({ result, channel, adapter, statusMsg, s
     await sealStatus(adapter, statusMsg, fallbackText, buildSealedStatusActionBlocks(fallbackText, { channel, sessionName, isDm: true }));
     return;
   }
-  await handleAgentSuccess({ result, channel, adapter, statusMsg, startTime, userMessage, executionId, trigger: 'user', sessionName, threadTs, userMessageTs: messageTs, onAssistantMessage: callbacks.onAssistantMsg });
+  await handleAgentSuccess({ result, channel, adapter, statusMsg, startTime, userMessage, executionId, trigger: 'user', sessionName, threadAnchorId, userMessageTs: messageTs, onAssistantMessage: callbacks.onAssistantMsg });
   // NOTE: createAutoThread removed — thread was created pre-execution via createDefaultThread
 }
 
@@ -226,12 +226,12 @@ async function resolveSessionName(sessionId: string | null, channel: string, use
   return sessionStore.generateSessionName();
 }
 
-function buildAgentCallbacks(adapter: PlatformAdapter, destination: Destination, statusMsg: MessageRef, threadTs: string | null, startTime: number, sessionName: string, sessionId: string | null, onMessagePosted: (ref: MessageRef) => void): AgentCallbacks {
+function buildAgentCallbacks(adapter: PlatformAdapter, destination: Destination, statusMsg: MessageRef, threadAnchorId: string | null, startTime: number, sessionName: string, sessionId: string | null, onMessagePosted: (ref: MessageRef) => void): AgentCallbacks {
   const channel = resolveDestinationConduit(destination);
   const onFallback = makeFallbackNotifier(channel, statusMsg, adapter);
   const queue = getOutboundQueue();
   const durable = queue ? buildDurableHooks(queue) : null;
-  const baseAssistantMsg = makeStreamingMessageCallback(adapter, destination, threadTs, onMessagePosted, durable);
+  const baseAssistantMsg = makeStreamingMessageCallback(adapter, destination, threadAnchorId, onMessagePosted, durable);
 
   // Tool trace: when CORTEX_SHOW_TOOL_CALLS is enabled, emit a compact per-tool Slack line
   // that merges consecutive same-tool calls and splits on different tool / assistant text.

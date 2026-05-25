@@ -11,7 +11,7 @@ export interface OrchMessageContext {
   message: IncomingMessage;
   channel: string;
   adapter: PlatformAdapter;
-  threadTs: string | null;
+  threadAnchorId: string | null;
   hasFiles: boolean;
   userMessage: string;
   agentMessage: string;

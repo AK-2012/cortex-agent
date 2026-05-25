@@ -28,7 +28,7 @@ export interface CommandDeps {
   commandRouter?: CommandActionRouter;
 }
 
-type Handler = (channel: string, adapter: PlatformAdapter, trimmedMessage: string, threadTs?: string | null) => Promise<CommandResult | void>;
+type Handler = (channel: string, adapter: PlatformAdapter, trimmedMessage: string, threadAnchorId?: string | null) => Promise<CommandResult | void>;
 
 /**
  * Execute a command handler and handle its return.
@@ -41,9 +41,9 @@ async function executeCommand(
   adapter: PlatformAdapter,
   trimmedMessage: string,
   _commandName: string,
-  threadTs?: string | null,
+  threadAnchorId?: string | null,
 ): Promise<void> {
-  const result = await handler(channel, adapter, trimmedMessage, threadTs);
+  const result = await handler(channel, adapter, trimmedMessage, threadAnchorId);
   const cmdDest: Destination = { type: 'interactive-reply', conduit: channel, sessionId: '' };
 
   if (result && typeof result === 'object' && 'text' in result) {
@@ -68,7 +68,7 @@ async function executeCommand(
   }
 }
 
-const catchHandlerError = (promise: Promise<unknown>, cmd: string, channel: string, adapter: PlatformAdapter, threadTs?: string | null): void => {
+const catchHandlerError = (promise: Promise<unknown>, cmd: string, channel: string, adapter: PlatformAdapter, threadAnchorId?: string | null): void => {
   Promise.resolve(promise).catch(err => {
     log.error(`Error in ${cmd}:`, err?.message || err);
     if (err?.data) log.error(`Slack error data:`, JSON.stringify(err.data));
@@ -93,8 +93,8 @@ export function registerCommands(deps: CommandDeps) {
 
   const EXACT_COMMANDS: Record<string, Handler> = {
     '!help':     (ch, ad, _msg) => handleHelpCmd(ch, ad),
-    '!new':      (ch, ad, _msg, threadTs) => handleNewCmd(ch, ad, {}, threadTs),
-    '!newq':     (ch, ad, _msg, threadTs) => handleNewCmd(ch, ad, { skipHook: true }, threadTs),
+    '!new':      (ch, ad, _msg, threadAnchorId) => handleNewCmd(ch, ad, {}, threadAnchorId),
+    '!newq':     (ch, ad, _msg, threadAnchorId) => handleNewCmd(ch, ad, { skipHook: true }, threadAnchorId),
     '!cancel':   (ch, ad, msg) => handleCancelCmd(ch, ad, msg),
     '!mode':     (ch, ad, _msg) => handleModeCmd(ch, ad),
     '!skills':   (ch, ad, _msg) => handleSkillsCmd(ch, ad),
@@ -131,18 +131,18 @@ export function registerCommands(deps: CommandDeps) {
     { prefix: '!dispatch',  handler: handleDispatchCmd as Handler },
   ];
 
-  const dispatchFn = function dispatchCommand(trimmedMessage: string | undefined, channel: string, adapter: PlatformAdapter, threadTs?: string | null): boolean {
+  const dispatchFn = function dispatchCommand(trimmedMessage: string | undefined, channel: string, adapter: PlatformAdapter, threadAnchorId?: string | null): boolean {
     if (!trimmedMessage) return false;
 
     const exact = EXACT_COMMANDS[trimmedMessage];
     if (exact) {
-      catchHandlerError(executeCommand(exact, channel, adapter, trimmedMessage, trimmedMessage, threadTs), trimmedMessage, channel, adapter, threadTs);
+      catchHandlerError(executeCommand(exact, channel, adapter, trimmedMessage, trimmedMessage, threadAnchorId), trimmedMessage, channel, adapter, threadAnchorId);
       return true;
     }
 
     for (const { prefix, handler } of PREFIX_COMMANDS) {
       if (trimmedMessage.startsWith(prefix)) {
-        catchHandlerError(executeCommand(handler, channel, adapter, trimmedMessage, prefix, threadTs), prefix, channel, adapter, threadTs);
+        catchHandlerError(executeCommand(handler, channel, adapter, trimmedMessage, prefix, threadAnchorId), prefix, channel, adapter, threadAnchorId);
         return true;
       }
     }

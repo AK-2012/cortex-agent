@@ -289,10 +289,10 @@ async function handleStatusNew(ctx: ActionContext): Promise<void> {
   const channel = ctx.value;
   // Status message IS the thread parent (no thread_ts on it) — use its messageId
   // as the thread context so hook messages land in the session's thread.
-  const threadTs = ctx.messageRef?.threadId || ctx.messageRef?.messageId;
+  const threadAnchorId = ctx.messageRef?.threadId || ctx.messageRef?.messageId;
 
   // Fire-and-forget: hook starts, session closes immediately without waiting
-  void fireAndForgetPreCloseHook(channel, _adapter, threadTs);
+  void fireAndForgetPreCloseHook(channel, _adapter, threadAnchorId);
 
   closeSession(channel);
   const conv = await conversationLedger.getConversation(channel);

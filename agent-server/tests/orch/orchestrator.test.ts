@@ -16,7 +16,7 @@ function makeCtx(overrides: Partial<OrchMessageContext> = {}): OrchMessageContex
     message: { ref: { channel: 'C1', messageId: 'M1', threadId: null }, text: 'hello', isBot: false, files: [], subtype: undefined } as any,
     channel: 'C1',
     adapter: {} as any,
-    threadTs: null,
+    threadAnchorId: null,
     hasFiles: false,
     userMessage: 'hello',
     agentMessage: 'hello',

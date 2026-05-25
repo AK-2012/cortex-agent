@@ -23,7 +23,7 @@ function makeCtx(overrides: Record<string, any> = {}) {
     message: { ref: { channel, messageId: 'M1', threadId: null }, text: 'hi', isBot: false, files: [], subtype: undefined } as any,
     channel,
     adapter: new MockAdapter() as any,
-    threadTs: null,
+    threadAnchorId: null,
     hasFiles: false,
     userMessage: 'hi',
     agentMessage: 'hi',

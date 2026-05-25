@@ -22,7 +22,7 @@ function makeCtx(channel: string, overrides: Record<string, any> = {}) {
     message: { ref: { channel, messageId: 'M1', threadId: null }, text: 'hi', isBot: false, files: [], subtype: undefined } as any,
     channel,
     adapter: new MockAdapter() as any,
-    threadTs: null,
+    threadAnchorId: null,
     hasFiles: false,
     agentMessage: 'hello',
     threadAddMatch: null,
@@ -165,7 +165,7 @@ test('(g) route() buffers user message when thread is running a step, skips enqu
     existingThread: runningThread,
     isActiveThread: true,
     agentMessage: 'continue please',
-    threadTs: '123.456',
+    threadAnchorId: '123.456',
   });
   delete (ctx as any).threadAddMatch;
   delete (ctx as any).threadStartMatch;

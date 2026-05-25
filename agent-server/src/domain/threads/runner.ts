@@ -111,7 +111,7 @@ function initThreadContext(threadId: string, opts: RunThreadOptions): ThreadCont
   // For all non-default threads, aggregate output into an OutputStream.
   // Default template passes through opts.onAssistantMessage from app.ts (backward compat).
   // The caller supplies the Destination (interactive-reply or project-report).
-  const stream = !isDefault ? opts.adapter.openOutputStream(opts.destination, { threadId: opts.threadTs }) : null;
+  const stream = !isDefault ? opts.adapter.openOutputStream(opts.destination, { threadId: opts.threadAnchorId }) : null;
   return { thread, isDefault, template, meta: thread.metadata, stream, lastAgentResult: null, totalNumTurns: 0 };
 }
 

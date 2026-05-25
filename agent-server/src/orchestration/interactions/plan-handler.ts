@@ -10,17 +10,17 @@ async function sendPlanToSlack(
   planContent: string | null,
   channel: string,
   adapter: PlatformAdapter,
-  { machine, threadTs }: { machine?: string; threadTs?: string | null } = {},
+  { machine, threadAnchorId }: { machine?: string; threadAnchorId?: string | null } = {},
 ): Promise<void> {
   if (!planContent) {
     const label = machine ? `**[PLAN: ${machine}]**` : '**[PLAN]**';
-    await postOnce(adapter, { type: 'interactive-reply', conduit: channel, sessionId: '' }, `:memo: ${label} Plan generated but no content found.`, { threadId: threadTs });
+    await postOnce(adapter, { type: 'interactive-reply', conduit: channel, sessionId: '' }, `:memo: ${label} Plan generated but no content found.`, { threadId: threadAnchorId });
     return;
   }
 
   const label = '**[PLAN]**';
   const prompt = 'Generated plan — use the buttons below to approve or provide feedback:';
 
-  await postOnce(adapter, { type: 'interactive-reply', conduit: channel, sessionId: '' }, `:memo: ${label} ${prompt}\n${planContent}`, { threadId: threadTs });
+  await postOnce(adapter, { type: 'interactive-reply', conduit: channel, sessionId: '' }, `:memo: ${label} ${prompt}\n${planContent}`, { threadId: threadAnchorId });
 }
 export { sendPlanToSlack };

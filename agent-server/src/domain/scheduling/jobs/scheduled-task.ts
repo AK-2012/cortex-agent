@@ -179,7 +179,7 @@ function dispatchByPlan({ plan, normalizedMessage, message, scheduleTaskId, effe
   const onProgress = statusMsg ? buildProgressUpdater(ctx.adapter!, statusMsg, startTime, effectiveProfile, sessionName) : undefined;
   const icb = ctx.buildInteractiveCallbacks?.(projectId, null);
   const baseRunOpts = {
-    adapter: ctx.adapter!, channel: projectId, threadTs: statusMsg?.messageId || null, statusMsg, startTime, onProgress,
+    adapter: ctx.adapter!, channel: projectId, threadAnchorId: statusMsg?.messageId || null, statusMsg, startTime, onProgress,
     destination: projectReportDest,
     onToolUse: icb?.onToolUse ?? null, onPlanWritten: icb?.onPlanWritten ?? null, onAskUserQuestion: icb?.onAskUserQuestion ?? null,
   };

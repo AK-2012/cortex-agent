@@ -13,7 +13,7 @@ import { getTemplate, getAgent } from '@domain/threads/index.js';
 import { orchestrator } from '../orchestrator.js';
 
 export interface MessageHandlerDeps {
-  dispatchCommand: (text: string | undefined, channel: string, adapter: PlatformAdapter, threadTs?: string | null) => boolean;
+  dispatchCommand: (text: string | undefined, channel: string, adapter: PlatformAdapter, threadAnchorId?: string | null) => boolean;
   handleMessageEdit: (ctx: MessageEditContext, adapter: PlatformAdapter) => void;
 }
 
@@ -41,9 +41,9 @@ export function registerMessageHandler(adapter: PlatformAdapter, deps: MessageHa
     const forwardedContent = extractForwardedContent(message);
     if (!userMessage && !hasFiles && !forwardedContent) return;
 
-    const threadTs = message.ref.threadId || null;
+    const threadAnchorId = message.ref.threadId || null;
 
-    if (shouldSkipForCommandDispatch(trimmedMessage, dispatchCommand, message.ref.channel, adapter, threadTs)) return;
+    if (shouldSkipForCommandDispatch(trimmedMessage, dispatchCommand, message.ref.channel, adapter, threadAnchorId)) return;
 
     const channel = message.ref.channel;
 
@@ -54,11 +54,11 @@ export function registerMessageHandler(adapter: PlatformAdapter, deps: MessageHa
 
     const threadAddMatch = trimmedMessage?.match(/^!thread\s+add\s+(\S+)(?:\s+([\s\S]+))?$/) ?? null;
     const threadStartMatch = trimmedMessage?.match(/^!thread\s+(\S+)\s+([\s\S]+)/) ?? null;
-    const existingThread = threadTs ? threadStore.findByPlatformThread(channel, threadTs) : null;
+    const existingThread = threadAnchorId ? threadStore.findByPlatformThread(channel, threadAnchorId) : null;
     const isActiveThread = !!(existingThread && (existingThread.status === 'running' || existingThread.status === 'waiting'));
 
     await orchestrator.handleMessage({
-      message, channel, adapter, threadTs, hasFiles,
+      message, channel, adapter, threadAnchorId, hasFiles,
       userMessage: userMessage || '', agentMessage,
       threadAddMatch, threadStartMatch, existingThread, isActiveThread,
     });
@@ -79,7 +79,7 @@ function routeBotMessage(message: IncomingMessage): boolean {
 
 // --- Command dispatch check ---
 
-function shouldSkipForCommandDispatch(trimmedMessage: string | undefined, dispatchCommand: MessageHandlerDeps['dispatchCommand'], channel: string, adapter: PlatformAdapter, threadTs: string | null): boolean {
+function shouldSkipForCommandDispatch(trimmedMessage: string | undefined, dispatchCommand: MessageHandlerDeps['dispatchCommand'], channel: string, adapter: PlatformAdapter, threadAnchorId: string | null): boolean {
   const threadAddMatch = trimmedMessage?.match(/^!thread\s+add\s+(\S+)(?:\s+([\s\S]+))?$/);
   const isThreadExecCmd = (() => {
     if (threadAddMatch) return true;
@@ -87,5 +87,5 @@ function shouldSkipForCommandDispatch(trimmedMessage: string | undefined, dispat
     if (!m || THREAD_RESERVED_SUBCOMMANDS.has(m[1])) return false;
     return getTemplate(m[1]) != null || getAgent(m[1]) != null;
   })();
-  return !isThreadExecCmd && dispatchCommand(trimmedMessage, channel, adapter, threadTs);
+  return !isThreadExecCmd && dispatchCommand(trimmedMessage, channel, adapter, threadAnchorId);
 }

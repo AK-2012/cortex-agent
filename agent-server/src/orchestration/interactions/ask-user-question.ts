@@ -152,7 +152,7 @@ function tryResolveHook(group) {
 
 // --- Send questions via adapter ---
 
-async function sendMessages(result, channel, adapter: PlatformAdapter, messageTs, threadTs = null, stream: OutputStream | null = null) {
+async function sendMessages(result, channel, adapter: PlatformAdapter, messageTs, threadAnchorId = null, stream: OutputStream | null = null) {
   let sentCount = 0;
   for (const payload of result.askUserQuestions || []) {
     if (!payload.questions?.length) continue;
@@ -182,7 +182,7 @@ async function sendMessages(result, channel, adapter: PlatformAdapter, messageTs
       group.responseMessageTs = ref?.messageId || null;
     } else {
       const askMsgDest: Destination = { type: 'interactive-reply', conduit: channel, sessionId: '' };
-      const ref = await adapter.postMessage(askMsgDest, { text, richBlocks }, threadTs ? { threadId: threadTs } : undefined);
+      const ref = await adapter.postMessage(askMsgDest, { text, richBlocks }, threadAnchorId ? { threadId: threadAnchorId } : undefined);
       group.responseMessageTs = ref.messageId;
     }
     for (const q of group.questions) {

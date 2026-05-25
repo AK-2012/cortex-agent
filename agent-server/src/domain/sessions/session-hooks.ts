@@ -295,11 +295,11 @@ const ONMESSAGEEND_FORMAT: SessionHookFormat = {
 };
 
 /** Resolve the Slack thread anchor for a fresh onNew vm:
- *    1. Caller-supplied threadTs (e.g. user typed !new in-thread).
+ *    1. Caller-supplied threadAnchorId (e.g. user typed !new in-thread).
  *    2. Last turn's statusMessageTs from the conversation ledger.
  *    3. null → vm starts a top-level message and self-anchors. */
-async function resolveOnNewThreadAnchor(channel: string, threadTs?: string | null): Promise<string | null> {
-  if (threadTs) return threadTs;
+async function resolveOnNewThreadAnchor(channel: string, threadAnchorId?: string | null): Promise<string | null> {
+  if (threadAnchorId) return threadAnchorId;
   const conv = await conversationLedger.getConversation(channel);
   if (conv?.turns.length) {
     for (let i = conv.turns.length - 1; i >= 0; i--) {
@@ -359,7 +359,7 @@ async function defaultLookupLedgerProfile(channel: string): Promise<string | nul
 async function prepareOnNewRun(
   channel: string,
   adapter: PlatformAdapter,
-  threadTs?: string | null,
+  threadAnchorId?: string | null,
 ): Promise<{ spec: SessionHookSpec; stream: OutputStream } | null> {
   if (!isOnNewHookConfigured()) return null;
 
@@ -378,7 +378,7 @@ async function prepareOnNewRun(
     lookupLedgerProfile:   defaultLookupLedgerProfile,
   });
 
-  const anchor = await resolveOnNewThreadAnchor(channel, threadTs);
+  const anchor = await resolveOnNewThreadAnchor(channel, threadAnchorId);
   const stream = adapter.openOutputStream({ type: 'interactive-reply', conduit: channel, sessionId: '' }, { threadId: anchor });
 
   const spec: SessionHookSpec = {
@@ -398,9 +398,9 @@ async function prepareOnNewRun(
 export async function fireAndForgetPreCloseHook(
   channel: string,
   adapter: PlatformAdapter,
-  threadTs?: string | null,
+  threadAnchorId?: string | null,
 ): Promise<void> {
-  const prepared = await prepareOnNewRun(channel, adapter, threadTs);
+  const prepared = await prepareOnNewRun(channel, adapter, threadAnchorId);
   if (!prepared) return;
   void runSessionHook(prepared.spec, prepared.stream).catch((err) => {
     log.error('onNew hook async completion failed:', err?.message || err);
@@ -413,9 +413,9 @@ export async function fireAndForgetPreCloseHook(
 export async function runPreCloseHook(
   channel: string,
   adapter: PlatformAdapter,
-  threadTs?: string | null,
+  threadAnchorId?: string | null,
 ): Promise<void> {
-  const prepared = await prepareOnNewRun(channel, adapter, threadTs);
+  const prepared = await prepareOnNewRun(channel, adapter, threadAnchorId);
   if (!prepared) return;
   await runSessionHook(prepared.spec, prepared.stream);
 }

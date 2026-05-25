@@ -33,7 +33,7 @@ const log = createLogger('lifecycle');
 
 // --- Agent success handler ---
 
-export async function handleAgentSuccess({ result, channel, adapter, statusMsg, startTime, userMessage, executionId, trigger = 'user', sessionName = null, threadTs = null, userMessageTs = null, onAssistantMessage = null }: { result: AgentResult; channel: string; adapter: PlatformAdapter; statusMsg: MessageRef; startTime: number; userMessage: string; executionId: string | null; trigger?: string; sessionName?: string | null; threadTs?: string | null; userMessageTs?: string | null; onAssistantMessage?: ((text: string) => void) | null }): Promise<void> {
+export async function handleAgentSuccess({ result, channel, adapter, statusMsg, startTime, userMessage, executionId, trigger = 'user', sessionName = null, threadAnchorId = null, userMessageTs = null, onAssistantMessage = null }: { result: AgentResult; channel: string; adapter: PlatformAdapter; statusMsg: MessageRef; startTime: number; userMessage: string; executionId: string | null; trigger?: string; sessionName?: string | null; threadAnchorId?: string | null; userMessageTs?: string | null; onAssistantMessage?: ((text: string) => void) | null }): Promise<void> {
   if (result?.sessionId) await setSessionAsync(channel, result.sessionId, resolveBackendForChannel(channel));
 
   await registerOrUpdateSession(result, sessionName, channel, trigger, projectStore.resolveFromMessage(userMessage)?.id ?? 'general');
@@ -44,7 +44,7 @@ export async function handleAgentSuccess({ result, channel, adapter, statusMsg, 
   const metrics = formatMetricsSuffix({ costUsd: result?.total_cost_usd ?? null, numTurns: result?.num_turns ?? null });
   const sessionTag = buildSessionTag(sessionName, result?.sessionId);
   const stream = (onAssistantMessage as any)?.stream ?? null;
-  const askCount = await askUserQuestion.sendMessages(result, channel, adapter, statusMsg.messageId, threadTs, stream);
+  const askCount = await askUserQuestion.sendMessages(result, channel, adapter, statusMsg.messageId, threadAnchorId, stream);
   const statusText = askCount > 0
     ? `:speech_balloon: ${sessionTag}Waiting for user input (${elapsedStr}${metrics})`
     : `:white_check_mark: Done | ${sessionTag}(${elapsedStr}${metrics})`;
@@ -112,7 +112,7 @@ async function backfillLedgerSessionId(result: { sessionId?: string | null }, ch
 
 // --- Agent error handler ---
 
-export async function handleAgentError({ error, channel, adapter, statusMsg, startTime, executionId, sessionName = null, sessionId = null, effectiveSessionId = null, threadTs = null, userMessageTs = null }: { error: { message: string; cancelled?: boolean }; channel: string; adapter: PlatformAdapter; statusMsg: MessageRef; startTime: number; executionId: string | null; sessionName?: string | null; sessionId?: string | null; effectiveSessionId?: string | null; threadTs?: string | null; userMessageTs?: string | null }): Promise<void> {
+export async function handleAgentError({ error, channel, adapter, statusMsg, startTime, executionId, sessionName = null, sessionId = null, effectiveSessionId = null, threadAnchorId = null, userMessageTs = null }: { error: { message: string; cancelled?: boolean }; channel: string; adapter: PlatformAdapter; statusMsg: MessageRef; startTime: number; executionId: string | null; sessionName?: string | null; sessionId?: string | null; effectiveSessionId?: string | null; threadAnchorId?: string | null; userMessageTs?: string | null }): Promise<void> {
   runningExecutions.fail(channel, error.message);
   const resolvedSessionId = effectiveSessionId || sessionId;
   const sessionTag = buildSessionTag(sessionName, resolvedSessionId);
@@ -143,9 +143,9 @@ export async function handleAgentError({ error, channel, adapter, statusMsg, sta
   const errorDest: Destination = { type: 'interactive-reply', conduit: channel, sessionId: resolvedSessionId ?? '' };
   const queue = getOutboundQueue();
   if (queue) {
-    await durablePost(queue, adapter, errorDest, { text: `Error: ${error.message}` }, threadTs ? { threadId: threadTs } : undefined);
+    await durablePost(queue, adapter, errorDest, { text: `Error: ${error.message}` }, threadAnchorId ? { threadId: threadAnchorId } : undefined);
   } else {
-    await adapter.postMessage(errorDest, { text: `Error: ${error.message}` }, threadTs ? { threadId: threadTs } : undefined);
+    await adapter.postMessage(errorDest, { text: `Error: ${error.message}` }, threadAnchorId ? { threadId: threadAnchorId } : undefined);
   }
 }
 

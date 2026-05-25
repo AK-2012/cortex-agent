@@ -92,8 +92,8 @@ export async function runAutoCompoundForScheduledTask({ baseResult, channel, pro
 }
 
 /** Build a streaming callback that aggregates assistant messages via OutputStream. */
-export function makeStreamingMessageCallback(adapter: PlatformAdapter, destination: Destination, threadTs: string | null = null, onMessagePosted: ((ref: MessageRef) => void) | null = null, durable?: import('@platform/types.js').DurableHooks | null): ((text: string) => void) & { stream: OutputStream } {
-  const stream = adapter.openOutputStream(destination, { threadId: threadTs, onMessagePosted, durable: durable ?? null });
+export function makeStreamingMessageCallback(adapter: PlatformAdapter, destination: Destination, threadAnchorId: string | null = null, onMessagePosted: ((ref: MessageRef) => void) | null = null, durable?: import('@platform/types.js').DurableHooks | null): ((text: string) => void) & { stream: OutputStream } {
+  const stream = adapter.openOutputStream(destination, { threadId: threadAnchorId, onMessagePosted, durable: durable ?? null });
   const callback = (text: string) => stream.emitText(text);
   (callback as ((text: string) => void) & { stream: OutputStream }).stream = stream;
   return callback as ((text: string) => void) & { stream: OutputStream };

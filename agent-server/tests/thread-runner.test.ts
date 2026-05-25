@@ -103,7 +103,7 @@ function makeRunOpts(channel: string, overrides: Partial<RunThreadOptions> = {})
     adapter: new MockAdapter() as any,
     channel,
     destination: { type: 'interactive-reply', conduit: channel, sessionId: '' },
-    threadTs: null,
+    threadAnchorId: null,
     statusMsg: null,
     startTime: Date.now(),
     existingSessionId: null,
