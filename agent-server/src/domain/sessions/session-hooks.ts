@@ -9,6 +9,7 @@ import { readFileSync } from 'fs';
 import * as path from 'path';
 import { DATA_DIR, CONFIG_DIR } from '@core/paths.js';
 import { createLogger } from '@core/log.js';
+import { Icons } from '../../core/icons.js';
 import type { PlatformAdapter, OutputStream } from '@platform/index.js';
 import { runAgent, resolveBackendForChannel } from '@domain/agents/index.js';
 import { getSessionAsync } from '@domain/sessions/session.js';
@@ -265,7 +266,7 @@ export async function runSessionHook(
   } catch (err: any) {
     const msg = err?.message || String(err);
     log.error(`hook ${spec.name} injected agent failed: ${msg}`);
-    stream.emitText(`:warning: ${spec.name} hook follow-up failed: ${msg}`);
+    stream.emitText(`${Icons.warning} ${spec.name} hook follow-up failed: ${msg}`);
   } finally {
     await stream.flush().catch((e: any) => log.warn(`stream.flush after inject failed (${label}): ${e?.message || e}`));
   }
@@ -274,22 +275,22 @@ export async function runSessionHook(
 // ── onNew (pre-close) entry points ────────────────────────────────────────────
 
 const ONNEW_FORMAT: SessionHookFormat = {
-  statusLine: () => ':hook: Running `!new` hook…',
+  statusLine: () => `${Icons.hook} Running \`!new\` hook…`,
   previewLine: (out) => {
     const preview = out.length > 80 ? out.slice(0, 80) + '…' : out;
-    return `:hook: ${preview}`;
+    return `${Icons.hook} ${preview}`;
   },
-  errorLine: (err) => `:warning: \`!new\` hook failed: ${err}`,
-  emptyLine: () => ':hook: hook returned empty output — nothing to inject.',
+  errorLine: (err) => `${Icons.warning} \`!new\` hook failed: ${err}`,
+  emptyLine: () => `${Icons.hook} hook returned empty output — nothing to inject.`,
 };
 
 const ONMESSAGEEND_FORMAT: SessionHookFormat = {
-  statusLine: () => ':hook: Checking for unreleased locks…',
+  statusLine: () => `${Icons.hook} Checking for unreleased locks…`,
   previewLine: (out) => {
     const preview = out.length > 80 ? out.slice(0, 80) + '…' : out;
-    return `:hook: ${preview}`;
+    return `${Icons.hook} ${preview}`;
   },
-  errorLine: (err) => `:warning: Lock check failed: ${err}`,
+  errorLine: (err) => `${Icons.warning} Lock check failed: ${err}`,
   // onMessageEnd is silent on empty output — the common case is "nothing to remind".
   emptyLine: () => null,
 };

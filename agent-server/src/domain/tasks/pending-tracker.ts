@@ -6,6 +6,7 @@ import { readFileSync, writeFileSync } from 'fs';
 import * as path from 'path';
 import type { PlatformAdapter, MessageRef } from '@platform/index.js';
 import { STORE_DIR, formatDurationCompact } from '@core/utils.js';
+import { Icons } from '../../core/icons.js';
 import { createLogger } from '@core/log.js';
 import * as executionRegistry from '../executions/registry.js';
 
@@ -53,7 +54,7 @@ if (pendingTasks.size > 0) {
 
 function buildTrackingMetaParts({ startedAtMs, elapsed_s }: { startedAtMs?: number; elapsed_s?: number }): string {
   const elapsed = elapsed_s ?? ((Date.now() - startedAtMs) / 1000);
-  return `:stopwatch: ${formatDurationCompact(elapsed || 0)}`;
+  return `${Icons.stopwatch} ${formatDurationCompact(elapsed || 0)}`;
 }
 
 function buildTrackingMessage({ taskId, machine, taskText, startedAtMs, elapsed_s, turn_count, status, cost_usd, duration_s, num_turns, finalOutput }: {
@@ -67,15 +68,15 @@ function buildTrackingMessage({ taskId, machine, taskText, startedAtMs, elapsed_
     const dur = formatDurationCompact(duration_s || elapsed_s || 0);
     const costStr = cost_usd != null ? ` | $${cost_usd.toFixed(4)}` : '';
     const outputStr = finalOutput ? `\n\n${finalOutput}` : '';
-    return `:white_check_mark: *[${taskId}]* ${label}\nCompleted on ${machine} | :stopwatch: ${dur} | ${num_turns || turn_count || '?'} turns${costStr}${outputStr}`;
+    return `${Icons.ok} *[${taskId}]* ${label}\nCompleted on ${machine} | ${Icons.stopwatch} ${dur} | ${num_turns || turn_count || '?'} turns${costStr}${outputStr}`;
   }
   if (status === 'failed') {
     const dur = formatDurationCompact(duration_s || elapsed_s || 0);
     const costStr = cost_usd != null ? ` | $${cost_usd.toFixed(4)}` : '';
     const outputStr = finalOutput ? `\n\n${finalOutput}` : '';
-    return `:x: *[${taskId}]* ${label}\nFailed on ${machine} | :stopwatch: ${dur} | ${num_turns || turn_count || '?'} turns${costStr}${outputStr}`;
+    return `${Icons.error} *[${taskId}]* ${label}\nFailed on ${machine} | ${Icons.stopwatch} ${dur} | ${num_turns || turn_count || '?'} turns${costStr}${outputStr}`;
   }
-  return `:satellite: *[${taskId}]* ${label}\nRunning on ${machine} | ${buildTrackingMetaParts({ startedAtMs, elapsed_s })}`;
+  return `${Icons.satellite} *[${taskId}]* ${label}\nRunning on ${machine} | ${buildTrackingMetaParts({ startedAtMs, elapsed_s })}`;
 }
 
 // --- Public API ---

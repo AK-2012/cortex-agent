@@ -1,4 +1,5 @@
 import { createLogger } from '@core/log.js';
+import { Icons } from '../../../core/icons.js';
 import type { Destination, PlatformAdapter } from '@platform/index.js';
 import type { CommandResult } from './command-context.js';
 import type { CommandActionRouter } from '@orch/interactions/command-action-router.js';
@@ -73,7 +74,7 @@ const catchHandlerError = (promise: Promise<unknown>, cmd: string, channel: stri
     log.error(`Error in ${cmd}:`, err?.message || err);
     if (err?.data) log.error(`Slack error data:`, JSON.stringify(err.data));
     const cmdDest: Destination = { type: 'interactive-reply', conduit: channel, sessionId: '' };
-    adapter.postMessage(cmdDest, { text: `:x: Command error: ${err?.message || 'unknown error'}` }).catch(() => {});
+    adapter.postMessage(cmdDest, { text: `${Icons.error} Command error: ${err?.message || 'unknown error'}` }).catch(() => {});
   });
 };
 
@@ -150,7 +151,7 @@ export function registerCommands(deps: CommandDeps) {
     if (trimmedMessage.startsWith('!')) {
       const cmd = trimmedMessage.split(/\s+/)[0];
       const cmdDest: Destination = { type: 'interactive-reply', conduit: channel, sessionId: '' };
-      adapter.postMessage(cmdDest, { text: `:x: Unknown command: \`${cmd}\`. Run \`!help\` for available commands.` });
+      adapter.postMessage(cmdDest, { text: `${Icons.error} Unknown command: \`${cmd}\`. Run \`!help\` for available commands.` });
       return true;
     }
     return false;

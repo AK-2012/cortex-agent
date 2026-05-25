@@ -3,6 +3,7 @@ import type { CommandResult } from './command-context.js';
 import type { CommandActionRouter } from '@orch/interactions/command-action-router.js';
 import { getOnlineDevices } from '@domain/remote/client-manager.js';
 import { getMachineRegistry } from '@domain/tasks/dispatch-utils.js';
+import { Icons } from '../../../core/icons.js';
 
 function formatTimeAgo(ms: number): string {
   const seconds = Math.floor(ms / 1000);
@@ -28,9 +29,9 @@ function buildDevicesText(): string {
     if (online) {
       const connAgo = formatTimeAgo(now - online.connectedAt.getTime());
       const hbAgo = formatTimeAgo(now - online.lastHeartbeat.getTime());
-      lines.push(`:white_check_mark: \`${name}\`  ${online.platform}  connected ${connAgo}  heartbeat ${hbAgo}`);
+      lines.push(`${Icons.ok} \`${name}\`  ${online.platform}  connected ${connAgo}  heartbeat ${hbAgo}`);
     } else {
-      lines.push(`:x: \`${name}\`  offline`);
+      lines.push(`${Icons.error} \`${name}\`  offline`);
     }
   }
 

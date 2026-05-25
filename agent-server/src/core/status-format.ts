@@ -4,6 +4,7 @@
 // >>> If I am updated, update my header comment and the parent folder's CORTEX.md <<<
 
 import { formatDurationCompact } from './utils.js';
+import { Icons } from './icons.js';
 
 export function computeElapsed(startTime: number): { elapsedStr: string; elapsedS: number } {
   const elapsedS = (Date.now() - startTime) / 1000;
@@ -28,6 +29,6 @@ export function buildSessionTag(sessionName: string | null, sessionId: string | 
 export function buildUserProcessingMessage({ startTime, elapsed_s = null, num_turns = null, profileName, sessionName = null, sessionId = null }: { startTime: number; elapsed_s?: number | null; num_turns?: number | null; profileName: string; sessionName?: string | null; sessionId?: string | null }): string {
   const elapsed = elapsed_s ?? ((Date.now() - startTime) / 1000);
   const sessionTag = buildSessionTag(sessionName, sessionId);
-  const turnsStr = num_turns != null ? ` | :repeat: ${num_turns} turns` : '';
-  return `:hourglass_flowing_sand: Processing | ${sessionTag}${profileName || 'default'} | :stopwatch: ${formatDurationCompact(elapsed || 0)}${turnsStr}`;
+  const turnsStr = num_turns != null ? ` | ${Icons.repeat} ${num_turns} turns` : '';
+  return `${Icons.processing} Processing | ${sessionTag}${profileName || 'default'} | ${Icons.stopwatch} ${formatDurationCompact(elapsed || 0)}${turnsStr}`;
 }

@@ -5,6 +5,7 @@
 
 import { getMachineRegistry } from '../tasks/dispatch-utils.js';
 import { sendCommand, isDeviceOnline } from '../remote/client-manager.js';
+import { Icons } from '../../core/icons.js';
 
 type GpuProc = {
   pid: string;
@@ -141,7 +142,7 @@ function formatGiB(mb: number) {
 }
 
 function renderGpuSnapshot(snapshot: GpuSnapshot, historyByGpu: Map<string, number[]>, refreshSeconds = 5) {
-  const lines = [`:desktop_computer: ${snapshot.machine} · refresh ${refreshSeconds}s`, ''];
+  const lines = [`${Icons.desktop} ${snapshot.machine} · refresh ${refreshSeconds}s`, ''];
   for (const gpu of snapshot.gpus) {
     const history = historyByGpu.get(gpu.uuid) || [];
     const memPercent = gpu.memTotalMB > 0 ? (gpu.memUsedMB / gpu.memTotalMB) * 100 : 0;

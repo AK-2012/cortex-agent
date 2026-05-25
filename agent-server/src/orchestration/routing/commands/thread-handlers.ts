@@ -4,6 +4,7 @@
 // >>> If I am updated, update my header comment and the parent folder's CORTEX.md <<<
 
 import { createLogger } from '@core/log.js';
+import { Icons } from '../../../core/icons.js';
 import type { Destination, PlatformAdapter } from '@platform/index.js';
 import { threadStore } from '@store/thread-repo.js';
 import { listTemplates, listAgents } from '@domain/threads/index.js';
@@ -65,7 +66,7 @@ async function handleThreadAgents(channel: string, adapter: PlatformAdapter) {
     lines.push('');
     lines.push(`*Active Thread* \`${active.id}\``);
     for (const [slotId, slot] of Object.entries(active.agents)) {
-      const isActiveAgent = slotId === active.activeAgent ? ' :arrow_left:' : '';
+      const isActiveAgent = slotId === active.activeAgent ? ` ${Icons.arrowLeft}` : '';
       const sessionStr = slot.sessionName || 'no session';
       lines.push(`  • *${slotId}* (${slot.profile}) — ${slot.status} | ${sessionStr}${isActiveAgent}`);
     }
@@ -79,7 +80,7 @@ async function handleThreadCancelAlias(channel: string, adapter: PlatformAdapter
   if (runningExecutions.killByKey(channel)) {
     log.info('Cancel requested for channel:', channel);
     channelQueues.delete(channel);
-    await adapter.postMessage(dest, { text: ':octagonal_sign: Cancelled. Session preserved — next message will resume.' });
+    await adapter.postMessage(dest, { text: `${Icons.stopped} Cancelled. Session preserved — next message will resume.` });
   } else {
     await adapter.postMessage(dest, { text: 'Nothing running to cancel.' });
   }

@@ -48,6 +48,11 @@ if ! $QUICK; then
   npx depcruise src --validate
 fi
 
+# ── Slack emoji shortcode lint ──────────────────────────────────
+
+echo "[run-tests] lint: no Slack emoji shortcodes"
+node --import tsx scripts/lint-no-slack-shortcodes.ts
+
 # ── Run tests ────────────────────────────────────────────────────
 
 echo "[run-tests] running test suite"

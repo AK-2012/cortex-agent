@@ -1,6 +1,7 @@
 import { createLogger } from '@core/log.js';
 import type { Destination, PlatformAdapter } from '@platform/index.js';
 import type { CommandResult } from './command-context.js';
+import { Icons } from '../../../core/icons.js';
 import type { CommandActionRouter } from '@orch/interactions/command-action-router.js';
 import { closeSession, getActiveBackend, getActiveProfile, setActiveProfile, resolveBackendForChannel } from '@domain/agents/index.js';
 import { deleteSessionAsync, setSessionAsync } from '@domain/sessions/session.js';
@@ -83,7 +84,7 @@ export function createResumeHandler(router?: CommandActionRouter) {
       if (!record) {
         if (ctx.messageRef) {
           await adapter.updateMessage(ctx.messageRef, {
-            text: `:x: Session \`${name}\` not found.`,
+            text: `${Icons.error} Session \`${name}\` not found.`,
           }).catch(() => {});
         }
         return;
@@ -94,7 +95,7 @@ export function createResumeHandler(router?: CommandActionRouter) {
       const profileNote = record.profileName ? ` (profile: ${record.profileName})` : '';
       if (ctx.messageRef) {
         await adapter.updateMessage(ctx.messageRef, {
-          text: `:arrows_counterclockwise: Switched to session \`${name}\`${profileNote}`,
+          text: `${Icons.refresh} Switched to session \`${name}\`${profileNote}`,
         }).catch(() => {});
       }
     };
@@ -116,14 +117,14 @@ export function createResumeHandler(router?: CommandActionRouter) {
       const name = args[0];
       const record = await sessionStore.lookupSession(name);
       if (!record) {
-        await adapter.postMessage(dest, { text: `:x: Session \`${name}\` not found. Run \`!resume\` to list sessions.` });
+        await adapter.postMessage(dest, { text: `${Icons.error} Session \`${name}\` not found. Run \`!resume\` to list sessions.` });
         return;
       }
       if (record.profileName) setActiveProfile(record.profileName, channel);
       await setSessionAsync(channel, record.sessionId, record.backend);
       await conversationLedger.switchSession(channel, { sessionId: record.sessionId, sessionName: name, backend: record.backend, profileName: record.profileName });
       const profileNote = record.profileName ? ` (profile: ${record.profileName})` : '';
-      await adapter.postMessage(dest, { text: `:arrows_counterclockwise: Switched to session \`${name}\`${profileNote}` });
+      await adapter.postMessage(dest, { text: `${Icons.refresh} Switched to session \`${name}\`${profileNote}` });
       return;
     }
 
@@ -140,7 +141,7 @@ export function createResumeHandler(router?: CommandActionRouter) {
       const activeTag = isActive ? ' *(active)*' : '';
       const ago = formatTimeAgo(now - new Date(s.lastUsedAt).getTime());
       const label = s.label ? ` — ${s.label}` : '';
-      const kind = s.kind === 'scheduled' ? ' :clock1:' : '';
+      const kind = s.kind === 'scheduled' ? ` ${Icons.scheduled}` : '';
       lines.push(`• \`${s.name}\`${activeTag}${kind}${label} — ${ago}`);
     }
     const text = lines.join('\n');

@@ -3,6 +3,7 @@
 // pos:    Status message and execution helper functions collection
 // >>> If I am updated, update my header comment and the parent folder's CORTEX.md <<<
 import { createLogger } from '@core/log.js';
+import { Icons } from '../core/icons.js';
 import type { Destination, PlatformAdapter, MessageRef, IncomingAttachment, RichBlock, ActionElement, OutputStream } from '@platform/index.js';
 import type { AgentResult } from '@core/types/agent-types.js';
 import type { ExecutionRecord } from '@domain/executions/registry.js';
@@ -62,7 +63,7 @@ export function makeFallbackNotifier(channel: string, statusMsg: MessageRef | nu
     if (statusMsg) {
       try {
         await adapter.updateMessage(statusMsg, {
-          text: `:warning: ${fromLabel} rate limited, falling back to *${toLabel}*...`,
+          text: `${Icons.warning} ${fromLabel} rate limited, falling back to *${toLabel}*...`,
         });
       } catch {}
     }

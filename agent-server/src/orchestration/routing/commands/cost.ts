@@ -1,5 +1,6 @@
 import type { Destination, PlatformAdapter } from '@platform/index.js';
 import { formatCostReport, checkBudget, setBudget } from '@domain/costs/cost-tracker.js';
+import { Icons } from '../../../core/icons.js';
 
 export async function handleCostCmd(channel: string, adapter: PlatformAdapter, trimmedMessage: string): Promise<void> {
   const dest: Destination = { type: 'interactive-reply', conduit: channel, sessionId: '' };
@@ -23,5 +24,5 @@ export async function handleBudgetCmd(channel: string, adapter: PlatformAdapter,
     daily_usd: daily ? parseFloat(daily) : undefined,
     monthly_usd: monthly ? parseFloat(monthly) : undefined,
   });
-  await adapter.postMessage(dest, { text: `:white_check_mark: Budget updated: $${result.daily_usd}/day, $${result.monthly_usd}/month` });
+  await adapter.postMessage(dest, { text: `${Icons.ok} Budget updated: $${result.daily_usd}/day, $${result.monthly_usd}/month` });
 }

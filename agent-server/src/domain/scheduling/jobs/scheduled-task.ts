@@ -5,6 +5,7 @@
 
 import { register, ctx } from '../job-registry.js';
 import { createLogger } from '@core/log.js';
+import { Icons } from '../../../core/icons.js';
 import * as executionRegistry from '../../executions/registry.js';
 
 const log = createLogger('scheduled-task');
@@ -114,7 +115,7 @@ async function runScheduledTaskAsync({ normalizedMessage, message, projectId, sc
   // Skip plans short-circuit before posting the processing status, so they don't pollute Slack.
   if (plan.kind === 'skip') {
     log.info(`Skipping schedule ${scheduleTaskId}: ${plan.reason}`);
-    try { await adapter.postMessage(projectReportDest, { text: `:fast_forward: Scheduled task skipped — ${plan.reason}` }); } catch {}
+    try { await adapter.postMessage(projectReportDest, { text: `${Icons.superseded} Scheduled task skipped — ${plan.reason}` }); } catch {}
     return;
   }
 
@@ -133,7 +134,7 @@ async function runScheduledTaskAsync({ normalizedMessage, message, projectId, sc
     if (result?.rateLimited) {
       const { elapsedStr } = computeElapsed(startTime);
       if (statusMsg) {
-        const text = `:warning: ${buildSessionTag(sessionName, result?.sessionId)}Rate limited — all fallbacks exhausted (${elapsedStr})`;
+        const text = `${Icons.warning} ${buildSessionTag(sessionName, result?.sessionId)}Rate limited — all fallbacks exhausted (${elapsedStr})`;
         const queue = getOutboundQueue();
         if (queue) { await durableUpdate(queue, adapter, statusMsg, { text }); }
         else { await adapter.updateMessage(statusMsg, { text }); }
@@ -148,7 +149,7 @@ async function runScheduledTaskAsync({ normalizedMessage, message, projectId, sc
     const { elapsedStr } = computeElapsed(startTime);
     const queue = getOutboundQueue();
     if (statusMsg) {
-      const text = `:x: ${buildSessionTag(sessionName, null)}Error (${elapsedStr})`;
+      const text = `${Icons.error} ${buildSessionTag(sessionName, null)}Error (${elapsedStr})`;
       if (queue) { await durableUpdate(queue, adapter, statusMsg, { text }); }
       else { await adapter.updateMessage(statusMsg, { text }); }
     }

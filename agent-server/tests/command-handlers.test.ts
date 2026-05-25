@@ -299,7 +299,7 @@ test('plain !cancel still cancels the current active process', async (t) => {
   assert.equal(killed, true);
   assert.equal(channelQueues.has('C123'), false);
   assert.equal(adapter.posted[0].destination.conduit, 'C123');
-  assert.equal(adapter.posted[0].content.text, ':octagonal_sign: Cancelled. Session preserved — next message will resume.');
+  assert.equal(adapter.posted[0].content.text, '🛑 Cancelled. Session preserved — next message will resume.');
 });
 
 // ── !cancel --all ─────────────────────────────────────────────────────────

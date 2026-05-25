@@ -3,6 +3,7 @@
 // pos:    periodic fetch + cherry-pick from public/main to main (non-LLM programmatic work)
 
 import { register, ctx } from '../job-registry.js';
+import { Icons } from '../../../core/icons.js';
 import { execSync } from 'child_process';
 
 const SYNC_SCRIPT = '/home/fangxin/Cortex/scripts/sync-pull-from-public.sh';
@@ -23,13 +24,13 @@ register('sync-public', async (payload: unknown) => {
       // Quiet success — no message needed unless there were actual syncs
       const countLine = lines.find(l => l.includes('cherry-picked'));
       if (countLine && !countLine.includes('0 cherry-picked')) {
-        await adapter.postMessage({ type: 'interactive-reply', conduit: channel }, { text: `:arrows_counterclockwise: Public sync: ${countLine.trim()}` });
+        await adapter.postMessage({ type: 'interactive-reply', conduit: channel }, { text: `${Icons.refresh} Public sync: ${countLine.trim()}` });
       }
     } else {
-      await adapter.postMessage({ type: 'interactive-reply', conduit: channel }, { text: `:warning: Public sync issue:\n\`\`\`\n${output.slice(-500)}\n\`\`\`` });
+      await adapter.postMessage({ type: 'interactive-reply', conduit: channel }, { text: `${Icons.warning} Public sync issue:\n\`\`\`\n${output.slice(-500)}\n\`\`\`` });
     }
   } catch (err: any) {
     const msg = err?.stderr || err?.message || String(err);
-    await adapter.postMessage({ type: 'interactive-reply', conduit: channel }, { text: `:warning: Public sync error: ${msg.slice(0, 500)}` });
+    await adapter.postMessage({ type: 'interactive-reply', conduit: channel }, { text: `${Icons.warning} Public sync error: ${msg.slice(0, 500)}` });
   }
 });

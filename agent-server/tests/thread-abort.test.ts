@@ -218,10 +218,10 @@ function minimalAbortedThread(reason: string | null, endedAt: string | null): Th
   };
 }
 
-test('buildThreadSummary renders :octagonal_sign: emoji for aborted status', () => {
+test('buildThreadSummary renders stopped emoji for aborted status', () => {
   const thread = minimalAbortedThread('blocked on upstream', '2026-04-16T10:00:05Z');
   const summary = buildThreadSummary({ thread, finalOutput: null, totalCostUsd: 0, totalNumTurns: 0, isDefault: false, lastAgentResult: null, executionId: null });
-  assert.match(summary, /^:octagonal_sign:/);
+  assert.match(summary, /^🛑/);
   assert.match(summary, /Aborted: blocked on upstream/);
 });
 

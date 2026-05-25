@@ -6,6 +6,7 @@
 import { watch, FSWatcher } from 'fs';
 import { execSync } from 'child_process';
 import { randomBytes } from 'crypto';
+import { Icons } from '../../core/icons.js';
 import { DATA_DIR } from '@core/utils.js';
 import { createLogger } from '@core/log.js';
 import { getDefaultProfileName } from '../agents/profile-manager.js';
@@ -345,7 +346,7 @@ class Scheduler {
 
     if (added || removed || updated) {
       log.info(`Hot-reload: +${added} -${removed} ~${updated} task(s), total ${this.timers.size}`);
-      this._adminNotifier?.(`:arrows_counterclockwise: \`schedules.json\` hot-reloaded: +${added} -${removed} ~${updated} task(s), ${this.timers.size} total`);
+      this._adminNotifier?.(`${Icons.refresh} \`schedules.json\` hot-reloaded: +${added} -${removed} ~${updated} task(s), ${this.timers.size} total`);
     }
   }
 

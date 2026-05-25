@@ -8,6 +8,7 @@ import { readFileSync, watch, existsSync, type FSWatcher } from 'fs';
 import * as path from 'path';
 import { CONFIG_DIR } from '@core/utils.js';
 import { createLogger } from '@core/log.js';
+import { Icons } from '../../core/icons.js';
 
 const log = createLogger('machine-registry');
 
@@ -59,10 +60,10 @@ function loadMachinesFromFile(failOnError = true): void {
     if (isReload) {
       if (oldKeys !== newKeys) {
         log.info(`Hot-reload: machines changed [${oldKeys}] → [${newKeys}]`);
-        _adminNotifier?.(`:arrows_counterclockwise: \`machines.json\` hot-reloaded: [${oldKeys}] → [${newKeys}]`);
+        _adminNotifier?.(`${Icons.refresh} \`machines.json\` hot-reloaded: [${oldKeys}] → [${newKeys}]`);
       } else {
         log.info(`Hot-reload: ${Object.keys(parsed).length} machines reloaded`);
-        _adminNotifier?.(`:arrows_counterclockwise: \`machines.json\` hot-reloaded (${Object.keys(parsed).length} machines)`);
+        _adminNotifier?.(`${Icons.refresh} \`machines.json\` hot-reloaded (${Object.keys(parsed).length} machines)`);
       }
     } else {
       log.info(`Loaded ${Object.keys(parsed).length} machines: ${Object.keys(parsed).join(', ')}`);
@@ -73,7 +74,7 @@ function loadMachinesFromFile(failOnError = true): void {
       throw new Error(msg);
     }
     log.error(msg + ' — keeping previous config');
-    _adminNotifier?.(`:warning: \`machines.json\` hot-reload FAILED — keeping previous config`);
+    _adminNotifier?.(`${Icons.warning} \`machines.json\` hot-reload FAILED — keeping previous config`);
   }
 }
 

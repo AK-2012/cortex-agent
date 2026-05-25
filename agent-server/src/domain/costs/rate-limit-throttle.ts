@@ -5,6 +5,7 @@
 
 import type { PlatformAdapter } from '@platform/index.js';
 import { createLogger } from '@core/log.js';
+import { Icons } from '../../core/icons.js';
 
 const log = createLogger('rate-limit-throttle');
 
@@ -47,7 +48,7 @@ function clearThrottle(): void {
   _resetsAt = null;
   _rateLimitedModes.clear();
   _resumeTimer = null;
-  sendDM(':white_check_mark: Rate limit throttle cleared.');
+  sendDM(`${Icons.ok} Rate limit throttle cleared.`);
   _persistence?.save(null).catch(e => {
     log.error(`Failed to persist cleared throttle: ${(e as Error).message}`);
   });
@@ -125,7 +126,7 @@ async function handleRateLimitEvent(info: RateLimitInfo, mode?: string): Promise
 
   const resetStr = formatResetTime(_resetsAt);
   const modeNote = mode ? ` (mode: ${mode})` : '';
-  sendDM(`:warning: Rate limit throttle activated — utilization ${(info.utilization * 100).toFixed(0)}%${modeNote}.\nAuto-resume at ${resetStr}.`);
+  sendDM(`${Icons.warning} Rate limit throttle activated — utilization ${(info.utilization * 100).toFixed(0)}%${modeNote}.\nAuto-resume at ${resetStr}.`);
 }
 
 function isThrottled(): boolean {

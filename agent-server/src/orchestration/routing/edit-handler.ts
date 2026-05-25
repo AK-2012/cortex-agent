@@ -5,6 +5,7 @@
 import type { PlatformAdapter, MessageEditContext } from '@platform/index.js';
 import type { LedgerTurn, ChannelConversation } from '@store/conversation-ledger-repo.js';
 import { createLogger } from '@core/log.js';
+import { Icons } from '../../core/icons.js';
 import { conversationLedger } from '@store/conversation-ledger-repo.js';
 import * as sessionBackup from '@domain/sessions/session-backup.js';
 import { deleteSessionAsync } from '@domain/sessions/session.js';
@@ -192,7 +193,7 @@ async function cleanupSupersededMessages(supersededTurns: LedgerTurn[], channel:
       promises.push(
         adapter.updateMessage(
           { channel, messageId: turn.statusMessageTs },
-          { text: `:fast_forward: Superseded by edit` },
+          { text: `${Icons.superseded} Superseded by edit` },
         ).catch(() => {})
       );
     }

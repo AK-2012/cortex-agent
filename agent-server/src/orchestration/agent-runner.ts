@@ -18,6 +18,7 @@ import { handleAgentSuccess, handleAgentError, initTurnTracking } from './lifecy
 import { buildSessionTag, buildUserProcessingMessage, makeFallbackNotifier, makeStreamingMessageCallback, computeElapsed, writeStatus, sealStatus, buildStatusActionBlocks, buildSealedStatusActionBlocks, initStatusBlocks } from './status-helpers.js';
 import { readFileSync } from 'fs';
 import { createLogger } from '@core/log.js';
+import { Icons } from '../core/icons.js';
 import { getOutboundQueue } from '@store/outbound-queue.js';
 import { buildDurableHooks } from './durable-helpers.js';
 
@@ -206,7 +207,7 @@ async function handleDefaultAgentResult({ result, channel, adapter, statusMsg, s
 }): Promise<void> {
   if (result?.rateLimited) {
     const { elapsedStr } = computeElapsed(startTime);
-    const fallbackText = `:warning: ${buildSessionTag(sessionName, sessionId)}Rate limited — all fallbacks exhausted (${elapsedStr})`;
+    const fallbackText = `${Icons.warning} ${buildSessionTag(sessionName, sessionId)}Rate limited — all fallbacks exhausted (${elapsedStr})`;
     await sealStatus(adapter, statusMsg, fallbackText, buildSealedStatusActionBlocks(fallbackText, { channel, sessionName, isDm: true }));
     return;
   }

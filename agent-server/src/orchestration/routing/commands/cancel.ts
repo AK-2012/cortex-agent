@@ -1,4 +1,5 @@
 import { createLogger } from '@core/log.js';
+import { Icons } from '../../../core/icons.js';
 import type { Destination, PlatformAdapter } from '@platform/index.js';
 import type { CommandResult } from './command-context.js';
 import type { CommandActionRouter } from '@orch/interactions/command-action-router.js';
@@ -40,7 +41,7 @@ export function createCancelHandler(cancelDispatchedTask: ((opts: { taskId: stri
 
       if (ctx.messageRef) {
         await adapter.updateMessage(ctx.messageRef, {
-          text: `:octagonal_sign: Cancelled (${threadId || registryKey})`,
+          text: `${Icons.stopped} Cancelled (${threadId || registryKey})`,
         }).catch(() => {});
       }
     };
@@ -75,7 +76,7 @@ export function createCancelHandler(cancelDispatchedTask: ((opts: { taskId: stri
           runningExecutions.killByKey(exec.registryKey);
         }
         channelQueues.delete(channel);
-        await adapter.postMessage(dest, { text: `:octagonal_sign: Cancelled ${executions.length} execution(s).` });
+        await adapter.postMessage(dest, { text: `${Icons.stopped} Cancelled ${executions.length} execution(s).` });
         return;
       }
 
@@ -88,7 +89,7 @@ export function createCancelHandler(cancelDispatchedTask: ((opts: { taskId: stri
             await setSessionAsync(channel, exec.sessionId, getActiveBackend()).catch(() => {});
           }
           log.info('Cancel requested for thread:', firstArg);
-          await adapter.postMessage(dest, { text: `:octagonal_sign: Thread \`${firstArg}\` cancelled.` });
+          await adapter.postMessage(dest, { text: `${Icons.stopped} Thread \`${firstArg}\` cancelled.` });
         } else {
           await adapter.postMessage(dest, { text: `No running thread \`${firstArg}\` found to cancel.` });
         }
@@ -125,7 +126,7 @@ export function createCancelHandler(cancelDispatchedTask: ((opts: { taskId: stri
         await setSessionAsync(channel, exec.sessionId, getActiveBackend()).catch(() => {});
       }
       channelQueues.delete(channel);
-      await adapter.postMessage(dest, { text: ':octagonal_sign: Cancelled. Session preserved — next message will resume.' });
+      await adapter.postMessage(dest, { text: `${Icons.stopped} Cancelled. Session preserved — next message will resume.` });
       return;
     }
 

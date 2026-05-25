@@ -186,7 +186,7 @@ test('scheduled success path creates thread and runs via thread system', async (
         costRecords.push({ project, trigger, cost_usd: threadResult.totalCostUsd, num_turns: threadResult.totalNumTurns });
       }
       if (statusMsg) {
-        statusUpdates.push({ channel, messageId: statusMsg.messageId, text: `:white_check_mark: Done | cortex-test (1.0s)` });
+        statusUpdates.push({ channel, messageId: statusMsg.messageId, text: `✅ Done | cortex-test (1.0s)` });
       }
     },
     // planScheduledDispatch \u2014 default to fresh in this test (legacy success-path is the fresh branch).
@@ -244,5 +244,5 @@ test('scheduled success path creates thread and runs via thread system', async (
 
   // Verify status message was updated to success
   const lastUpdate = statusUpdates[statusUpdates.length - 1];
-  assert.ok(lastUpdate.text.includes(':white_check_mark:'), 'expected success status update');
+  assert.ok(lastUpdate.text.includes('✅'), 'expected success status update');
 });

@@ -20,6 +20,7 @@ import { sessionStore } from '@store/session-registry-repo.js';
 import { conversationLedger } from '@store/conversation-ledger-repo.js';
 import { closeSession, getActiveBackend, getActiveProfile, setActiveProfile, resolveBackendForChannel } from '@domain/agents/index.js';
 import { fireAndForgetPreCloseHook } from '@domain/sessions/session-hooks.js';
+import { Icons } from '../../core/icons.js';
 import * as sessionBackup from '@domain/sessions/session-backup.js';
 import { cancelThread as cancelThreadById } from '@domain/threads/index.js';
 import type { PendingPlan } from './plan-approvals.js';
@@ -194,8 +195,8 @@ function registerExitPlanModeHandlers(adapter: PlatformAdapter): void {
       await adapter.updateMessage(
         ctx.messageRef,
         {
-          text: ':white_check_mark: Plan approved \u2014 Cortex will proceed.',
-          richBlocks: [{ type: 'section', text: ':white_check_mark: *Plan approved* \u2014 Cortex will proceed.' }],
+          text: `${Icons.ok} Plan approved \u2014 Cortex will proceed.`,
+          richBlocks: [{ type: 'section', text: `${Icons.ok} *Plan approved* \u2014 Cortex will proceed.` }],
         },
       ).catch(() => {});
     }
@@ -217,7 +218,7 @@ function registerExitPlanModeHandlers(adapter: PlatformAdapter): void {
     if (!tryResolvePIPlan(pending, feedback)) {
       resolveHookRequest(requestId, { approved: false, reason: feedback });
     }
-    const feedbackText = `:pencil2: Plan feedback sent \u2014 Cortex will revise.\n> ${feedback}`;
+    const feedbackText = `${Icons.edit} Plan feedback sent \u2014 Cortex will revise.\n> ${feedback}`;
     const streamingCb = getStreamingCallback(pending.channel);
     const feedbackDest: Destination = { type: 'interactive-reply', conduit: pending.channel, sessionId: '' };
     if (streamingCb) {
@@ -262,7 +263,7 @@ async function handleStatusCancel(ctx: ActionContext): Promise<void> {
   channelQueues.delete(exec.channel ?? channel);
   if (ctx.messageRef) {
     await _adapter.updateMessage(ctx.messageRef, {
-      text: ':octagonal_sign: Cancelled. Session preserved — next message will resume.',
+      text: `${Icons.stopped} Cancelled. Session preserved — next message will resume.`,
     }).catch(() => {});
   }
 }
@@ -280,7 +281,7 @@ async function handleStatusResume(ctx: ActionContext): Promise<void> {
   const profileNote = record.profileName ? ` (profile: ${record.profileName})` : '';
   const resumeDest: Destination = { type: 'interactive-reply', conduit: ctx.channelId, sessionId: record.sessionId ?? '' };
   await _adapter.postMessage(resumeDest, {
-    text: `:arrows_counterclockwise: Session \`${sessionName}\` active — send your message below.${profileNote}`,
+    text: `${Icons.refresh} Session \`${sessionName}\` active — send your message below.${profileNote}`,
   }).catch(() => {});
 }
 

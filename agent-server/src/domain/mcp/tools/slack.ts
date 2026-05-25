@@ -9,6 +9,7 @@ import { z } from 'zod';
 import * as fs from 'fs';
 import * as path from 'path';
 import { TokenBucketRateLimiter } from '../../../platform/utils/rate-limiter.js';
+import { Icons } from '../../../core/icons.js';
 
 export interface SlackToolDeps {
   slack: WebClient | null;
@@ -46,8 +47,8 @@ function readRouteContext(routeContextFile: string | null): Record<string, any> 
 
 function withReplyPrefix(text: string | undefined, { branchMachine, callbackSource }: { branchMachine?: string; callbackSource?: string }): string | undefined {
   if (!text) return text;
-  if (branchMachine) return `:satellite: *[branch: ${branchMachine}]* ${text}`;
-  if (callbackSource) return `:leftwards_arrow_with_hook: *[callback: ${callbackSource}]* ${text}`;
+  if (branchMachine) return `${Icons.satellite} *[branch: ${branchMachine}]* ${text}`;
+  if (callbackSource) return `${Icons.reply} *[callback: ${callbackSource}]* ${text}`;
   return text;
 }
 

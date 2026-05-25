@@ -1,4 +1,5 @@
 import type { Destination, PlatformAdapter } from '@platform/index.js';
+import { Icons } from '../../../core/icons.js';
 import type { CommandResult } from './command-context.js';
 import type { CommandActionRouter } from '@orch/interactions/command-action-router.js';
 import type { Task } from '@core/task-parser.js';
@@ -25,7 +26,7 @@ function formatTaskList(tasks: Task[], filter: TaskFilter, project: string): str
   const lines = [`*Tasks for \`${project}\`* (${filtered.length}/${tasks.length})${filterLabel}\n`];
 
   for (const task of filtered) {
-    const status = task.status === 'done' ? ':white_check_mark:' : (task.blocked_by ? ':no_entry_sign:' : (task.claimed_by ? ':arrows_counterclockwise:' : (task.paused ? ':double_vertical_bar:' : ':radio_button:')));
+    const status = task.status === 'done' ? Icons.ok : (task.blocked_by ? Icons.blocked : (task.claimed_by ? Icons.refresh : (task.paused ? Icons.paused : Icons.pending)));
     const id = task.id ? `\`${task.id}\`` : '—';
     const tags: string[] = [];
     if (task.priority) tags.push(task.priority);
@@ -122,13 +123,13 @@ export function createTasksHandler(router?: CommandActionRouter) {
     const dest: Destination = { type: 'interactive-reply', conduit: channel, sessionId: '' };
     const args = trimmedMessage.split(/\s+/).slice(1);
     if (args.length === 0) {
-      await adapter.postMessage(dest, { text: ':x: Usage: `!tasks <project>`' });
+      await adapter.postMessage(dest, { text: `${Icons.error} Usage: \`!tasks <project>\`` });
       return;
     }
     const project = args[0];
     const projectDir = path.join(PROJECTS_DIR, project);
     if (!existsSync(projectDir)) {
-      await adapter.postMessage(dest, { text: `:x: Project not found: \`${project}\`` });
+      await adapter.postMessage(dest, { text: `${Icons.error} Project not found: \`${project}\`` });
       return;
     }
     const tasks = scanAllTasks(project);

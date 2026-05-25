@@ -21,6 +21,7 @@ import {
   resolveSystemVars,
 } from './index.js';
 import { runAgent, getClaudeMode, getActiveBackend, getActiveProfile } from '../agents/index.js';
+import { Icons } from '../../core/icons.js';
 import { closeSessionsByPrefix } from '../agents/index.js';
 import * as executionRegistry from '../executions/registry.js';
 import { sessionStore } from '@store/session-registry-repo.js';
@@ -142,13 +143,13 @@ async function resolveAndNotifyStep(
   if (ctx.stream && multiAgent && !isFirstStep) {
     const prevStep = threadRecord.steps[threadRecord.steps.length - 1];
     const prevLabel = prevStep ? formatAgentStageLabel(prevStep.agentSlotId, prevStep.stage) : '?';
-    ctx.stream.emitText(`:arrow_right: Step ${threadRecord.currentStepIndex + 1}: *${label}* starting (prev: ${prevLabel})`);
+    ctx.stream.emitText(`${Icons.arrowRight} Step ${threadRecord.currentStepIndex + 1}: *${label}* starting (prev: ${prevLabel})`);
   }
 
   // Update status message (multi-agent thread format; skip if caller provides onProgress)
   if (ctx.stream && multiAgent && !opts.onProgress) {
     const elapsed = (Date.now() - opts.startTime) / 1000;
-    const statusText = `:hourglass_flowing_sand: Thread ${threadRecord.id.substring(0, 12)} | Step ${threadRecord.currentStepIndex + 1}: *${label}* | :stopwatch: ${formatDurationCompact(elapsed)}`;
+    const statusText = `${Icons.processing} Thread ${threadRecord.id.substring(0, 12)} | Step ${threadRecord.currentStepIndex + 1}: *${label}* | ${Icons.stopwatch} ${formatDurationCompact(elapsed)}`;
     try {
       if (opts.statusMsg) {
         await opts.adapter.updateMessage(opts.statusMsg, { text: statusText });
@@ -263,7 +264,7 @@ function setupStepCallbacks(
           const elapsed = (Date.now() - opts.startTime) / 1000;
           if (opts.statusMsg) {
             opts.adapter.updateMessage(opts.statusMsg, {
-              text: `:hourglass_flowing_sand: Thread ${threadRecord.id.substring(0, 12)} | Step ${threadRecord.currentStepIndex + 1}: *${label}* (${progress?.num_turns || '?'} turns) | :stopwatch: ${formatDurationCompact(elapsed)}`,
+              text: `${Icons.processing} Thread ${threadRecord.id.substring(0, 12)} | Step ${threadRecord.currentStepIndex + 1}: *${label}* (${progress?.num_turns || '?'} turns) | ${Icons.stopwatch} ${formatDurationCompact(elapsed)}`,
             }).catch(() => {});
           }
         }
@@ -497,7 +498,7 @@ async function runThread(threadId: string, opts: RunThreadOptions): Promise<Thre
         if (ctx.stream) {
           const reasonStr = abortCheck.reason ? `: ${abortCheck.reason}` : '';
           const abortLabel = formatAgentStageLabel(stepCtx.agentSlotId, stepCtx.stage);
-          ctx.stream.emitText(`:octagonal_sign: Thread aborted by *${abortLabel}*${reasonStr}`);
+          ctx.stream.emitText(`${Icons.stopped} Thread aborted by *${abortLabel}*${reasonStr}`);
         }
         break;
       }
@@ -562,10 +563,10 @@ function buildThreadSummary(result: ThreadRunResult): string {
     ? (new Date(thread.endedAt).getTime() - new Date(thread.createdAt).getTime()) / 1000
     : 0;
 
-  const statusEmoji = thread.status === 'completed' ? ':white_check_mark:'
-    : thread.status === 'cancelled' ? ':no_entry_sign:'
-    : thread.status === 'aborted' ? ':octagonal_sign:'
-    : ':x:';
+  const statusEmoji = thread.status === 'completed' ? Icons.ok
+    : thread.status === 'cancelled' ? Icons.blocked
+    : thread.status === 'aborted' ? Icons.stopped
+    : Icons.error;
 
   const lines = [
     `${statusEmoji} Thread complete | ${steps.length} steps | $${totalCostUsd.toFixed(4)} | ${formatDurationCompact(elapsed)}`,

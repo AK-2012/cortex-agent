@@ -122,7 +122,7 @@ test('buildThreadSummary renders completed single-step thread on one line', () =
     steps: [{ stepIndex: 0, agentSlotId: 'main', stage: null, executionId: null, sessionId: null, sessionName: null, input: '', output: 'ok', costUsd: 0.1234, numTurns: 2, durationS: 12, startedAt: null, endedAt: null }],
   });
   const summary = buildThreadSummary({ thread, finalOutput: 'ok', totalCostUsd: 0.1234, totalNumTurns: 2, isDefault: false, lastAgentResult: null, executionId: null });
-  assert.match(summary, /^:white_check_mark: Thread complete \| 1 steps \| \$0\.1234 \|/);
+  assert.match(summary, /^✅ Thread complete \| 1 steps \| \$0\.1234 \|/);
   assert.equal(summary.split('\n').length, 1, 'single-step threads should not include per-step breakdown');
 });
 
@@ -142,14 +142,14 @@ test('buildThreadSummary includes per-step breakdown when >1 step', () => {
   assert.match(lines[2], /coder: 3 turns · \$0\.2000 ·/);
 });
 
-test('buildThreadSummary uses :no_entry_sign: for cancelled and :x: for failed', () => {
+test('buildThreadSummary uses blocked emoji for cancelled and error for failed', () => {
   const base = makeThreadRecord({ id: 'thr_y', channel: 'C1', createdAt: '2026-04-16T10:00:00Z', endedAt: '2026-04-16T10:00:01Z' });
   const cancelled = { ...base, status: 'cancelled' as const };
   const failed = { ...base, status: 'failed' as const, error: 'boom' };
   const sCancel = buildThreadSummary({ thread: cancelled, finalOutput: null, totalCostUsd: 0, totalNumTurns: 0, isDefault: false, lastAgentResult: null, executionId: null });
   const sFail = buildThreadSummary({ thread: failed, finalOutput: null, totalCostUsd: 0, totalNumTurns: 0, isDefault: false, lastAgentResult: null, executionId: null });
-  assert.match(sCancel, /^:no_entry_sign:/);
-  assert.match(sFail, /^:x:/);
+  assert.match(sCancel, /^🚫/);
+  assert.match(sFail, /^❌/);
   assert.match(sFail, /Error: boom/);
 });
 

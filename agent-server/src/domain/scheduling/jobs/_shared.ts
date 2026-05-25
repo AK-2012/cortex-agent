@@ -6,6 +6,7 @@ import type { PlatformAdapter, MessageRef } from '@platform/index.js';
 import type { AgentResult } from '@core/types/agent-types.js';
 import { buildSessionTag, buildUserProcessingMessage, computeElapsed, formatMetricsSuffix } from '@core/status-format.js';
 import { createLogger } from '@core/log.js';
+import { Icons } from '../../../core/icons.js';
 import { sessionStore } from '@store/session-registry-repo.js';
 import { getOutboundQueue, durableUpdate } from '@store/outbound-queue.js';
 import { getActiveBackend, getActiveProfile } from '../../agents/index.js';
@@ -43,7 +44,7 @@ export async function finalizeThreadSuccess(adapter: PlatformAdapter, channel: s
   }
   const metrics = formatMetricsSuffix({ costUsd: threadResult.totalCostUsd, numTurns: threadResult.totalNumTurns });
   if (statusMsg) {
-    const text = `:white_check_mark: ${statusPrefix} | ${buildSessionTag(sessionName, result?.sessionId)}(${elapsedStr}${metrics})`;
+    const text = `${Icons.ok} ${statusPrefix} | ${buildSessionTag(sessionName, result?.sessionId)}(${elapsedStr}${metrics})`;
     const queue = getOutboundQueue();
     if (queue) {
       await durableUpdate(queue, adapter, statusMsg, { text });

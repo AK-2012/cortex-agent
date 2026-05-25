@@ -15,6 +15,7 @@ import * as path from 'path';
 import { JsonRepository } from '@core/json-repository.js';
 import { CONFIG_DIR } from '@core/paths.js';
 import { createLogger } from '@core/log.js';
+import { Icons } from '../core/icons.js';
 import type { ProfilesFile } from '@domain/agents/profile-manager.js';
 
 const log = createLogger('profile-repo');
@@ -116,10 +117,10 @@ export function startProfileWatcher(
       repo.invalidate();
       repo.readSync(); // re-fill cache from the validated content
       log.info('Hot-reload: profiles.json reloaded');
-      _adminNotifier?.(':arrows_counterclockwise: `profiles.json` hot-reloaded');
+      _adminNotifier?.(`${Icons.refresh} \`profiles.json\` hot-reloaded`);
     } catch (e) {
       log.error(`Hot-reload profiles.json failed: ${(e as Error).message} — keeping previous config`);
-      _adminNotifier?.(`:warning: \`profiles.json\` hot-reload FAILED — keeping previous config`);
+      _adminNotifier?.(`${Icons.warning} \`profiles.json\` hot-reload FAILED — keeping previous config`);
     }
   };
 

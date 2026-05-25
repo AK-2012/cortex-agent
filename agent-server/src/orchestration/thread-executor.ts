@@ -5,6 +5,7 @@
 
 import * as path from 'path';
 import type { Destination, PlatformAdapter, MessageRef, DownloadedFile, IncomingMessage, PlatformFileRef } from '@platform/index.js';
+import { Icons } from '../core/icons.js';
 import { channelQueues, enqueue } from './channel-queue.js';
 import { trackPendingTask } from './busy-tracker.js';
 import { addAgentToThread, createThread, getTemplate, getAgent } from '@domain/threads/index.js';
@@ -91,24 +92,24 @@ export class ThreadExecutor {
       const errorBlocksTemplate = { channel, sessionName: null, isDm: false };
       if (isCancelled) {
         if (statusMsg) {
-          const cancelText = `:octagonal_sign: Cancelled (${elapsedStr})`;
+          const cancelText = `${Icons.stopped} Cancelled (${elapsedStr})`;
           await adapter.updateMessage(statusMsg, {
             text: cancelText,
             richBlocks: buildSealedStatusActionBlocks(cancelText, errorBlocksTemplate),
           }).catch(() => {});
         } else {
-          await adapter.postMessage(interactiveDest, { text: ':octagonal_sign: Cancelled' }, ctx.threadAnchorId ? { threadId: ctx.threadAnchorId } : undefined).catch(() => {});
+          await adapter.postMessage(interactiveDest, { text: `${Icons.stopped} Cancelled` }, ctx.threadAnchorId ? { threadId: ctx.threadAnchorId } : undefined).catch(() => {});
         }
       } else {
         const errorMsg = (error as Error)?.message || 'Unknown error';
         if (statusMsg) {
-          const failText = `:x: Thread failed (${elapsedStr}): ${errorMsg}`;
+          const failText = `${Icons.error} Thread failed (${elapsedStr}): ${errorMsg}`;
           await adapter.updateMessage(statusMsg, {
             text: failText,
             richBlocks: buildSealedStatusActionBlocks(failText, errorBlocksTemplate),
           }).catch(() => {});
         } else {
-          await adapter.postMessage(interactiveDest, { text: `:x: Thread failed: ${errorMsg}` }, ctx.threadAnchorId ? { threadId: ctx.threadAnchorId } : undefined).catch(() => {});
+          await adapter.postMessage(interactiveDest, { text: `${Icons.error} Thread failed: ${errorMsg}` }, ctx.threadAnchorId ? { threadId: ctx.threadAnchorId } : undefined).catch(() => {});
         }
       }
     }
@@ -132,7 +133,7 @@ async function handleThreadAdd({ threadAddMatch, existingThread, channel, adapte
   await addAgentToThread(targetThread.id, addAgentName, addMessage);
   const platformThreadId = targetThread.platformThreadId || threadAnchorId;
   const threadBlocksTemplate = { channel, sessionName: null, isDm: false, threadId: targetThread.id };
-  const addText = `:heavy_plus_sign: Adding *${addAgentName}* to thread ${targetThread.id.substring(0, 12)}...`;
+  const addText = `${Icons.add} Adding *${addAgentName}* to thread ${targetThread.id.substring(0, 12)}...`;
   const statusMsg = await adapter.postMessage(interactiveDest, {
     text: addText,
     richBlocks: buildStatusActionBlocks(addText, threadBlocksTemplate),
@@ -156,16 +157,16 @@ async function handleThreadAdd({ threadAddMatch, existingThread, channel, adapte
 async function validateThreadAddTarget(addAgentName: string, existingThread: any, channel: string, adapter: PlatformAdapter, threadAnchorId: string | null): Promise<any> {
   const interactiveDest: Destination = { type: 'interactive-reply', conduit: channel, sessionId: '' };
   if (!getAgent(addAgentName)) {
-    await adapter.postMessage(interactiveDest, { text: `:x: Unknown agent: \`${addAgentName}\`. Use \`!thread agents\` to see available agents.` }, threadAnchorId ? { threadId: threadAnchorId } : undefined);
+    await adapter.postMessage(interactiveDest, { text: `${Icons.error} Unknown agent: \`${addAgentName}\`. Use \`!thread agents\` to see available agents.` }, threadAnchorId ? { threadId: threadAnchorId } : undefined);
     return null;
   }
   const targetThread = existingThread || threadStore.findByChannel(channel).find((t: any) => t.status === 'completed' || t.status === 'waiting');
   if (!targetThread) {
-    await adapter.postMessage(interactiveDest, { text: `:x: No thread found. Start one first with \`!thread <agent> <message>\`.` }, threadAnchorId ? { threadId: threadAnchorId } : undefined);
+    await adapter.postMessage(interactiveDest, { text: `${Icons.error} No thread found. Start one first with \`!thread <agent> <message>\`.` }, threadAnchorId ? { threadId: threadAnchorId } : undefined);
     return null;
   }
   if (targetThread.status === 'running' && getActiveHandle(channel)) {
-    await adapter.postMessage(interactiveDest, { text: `:warning: Thread ${targetThread.id.substring(0, 12)} is currently running. Wait for it to finish.` }, threadAnchorId ? { threadId: threadAnchorId } : undefined);
+    await adapter.postMessage(interactiveDest, { text: `${Icons.warning} Thread ${targetThread.id.substring(0, 12)} is currently running. Wait for it to finish.` }, threadAnchorId ? { threadId: threadAnchorId } : undefined);
     return null;
   }
   return targetThread;
@@ -177,7 +178,7 @@ async function handleThreadContinue({ existingThread, agentMessage, channel, ada
 }): Promise<MessageRef> {
   const interactiveDest: Destination = { type: 'interactive-reply', conduit: channel, sessionId: '' };
   const continueBlocksTemplate = { channel, sessionName: null, isDm: false, threadId: existingThread.id };
-  const continueText = `:hourglass_flowing_sand: Continuing thread ${existingThread.id.substring(0, 12)}...`;
+  const continueText = `${Icons.processing} Continuing thread ${existingThread.id.substring(0, 12)}...`;
   const statusMsg = await adapter.postMessage(interactiveDest, {
     text: continueText,
     richBlocks: buildStatusActionBlocks(continueText, continueBlocksTemplate),
@@ -208,12 +209,12 @@ async function handleThreadStart({ threadStartMatch, messageId, channel, adapter
   const template = getTemplate(name);
   const agent = getAgent(name);
   if (!template && !agent) {
-    await adapter.postMessage(interactiveDest, { text: `:x: Unknown template or agent: \`${name}\`. Use \`!thread templates\` or \`!thread agents\`.` });
+    await adapter.postMessage(interactiveDest, { text: `${Icons.error} Unknown template or agent: \`${name}\`. Use \`!thread templates\` or \`!thread agents\`.` });
     return null;
   }
 
   const startBlocksTemplate = { channel, sessionName: null, isDm: false };
-  const startText = `:hourglass_flowing_sand: Starting thread (${template ? name : `agent:${name}`})...`;
+  const startText = `${Icons.processing} Starting thread (${template ? name : `agent:${name}`})...`;
   const statusMsg = await adapter.postMessage(interactiveDest, {
     text: startText,
     // No Cancel button initially — threadId needed first
@@ -277,7 +278,7 @@ async function bufferUserMessage(ctx: ThreadExecCtx): Promise<void> {
   threadStore.set(thread).catch(() => {});
 
   await adapter.postMessage(interactiveDest, {
-    text: ':inbox_tray: Message buffered — will be included in the next step’s prompt',
+    text: `${Icons.inbox} Message buffered — will be included in the next step’s prompt`,
   }, threadAnchorId ? { threadId: threadAnchorId } : undefined);
 }
 

@@ -12,6 +12,7 @@ import * as executionRegistry from '../executions/registry.js';
 import { sessionStore } from '@store/session-registry-repo.js';
 import { DATA_DIR } from '@core/utils.js';
 import { createLogger } from '@core/log.js';
+import { Icons } from '../../core/icons.js';
 import { runningExecutions } from '../../core/running-executions.js';
 import type {
   ThreadHookConfig,
@@ -174,7 +175,7 @@ async function runHookAgent(
   const slackLabel = isTargetMode ? `→ ${slotId}` : `hook:${phase}`;
   try {
     await opts.adapter.postMessage(opts.destination, {
-      text: `:hook: Hook agent (*${slackLabel}*) starting...`,
+      text: `${Icons.hook} Hook agent (*${slackLabel}*) starting...`,
     }, opts.threadAnchorId ? { threadId: opts.threadAnchorId } : undefined);
   } catch {}
 

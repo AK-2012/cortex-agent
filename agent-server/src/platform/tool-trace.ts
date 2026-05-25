@@ -5,6 +5,8 @@
 
 import type { OutputStream, MutableRegion } from '@platform/index.js';
 
+import { Icons } from '../core/icons.js';
+
 const MAX_LINE_LEN = 120;
 const ELLIPSIS = '…';
 
@@ -97,7 +99,7 @@ function renderToolLine(
   const prefix = opts?.prefix ? `${opts.prefix} ` : '';
   const display = stripMcpPrefix(toolName) || '?';
   const count = summaries.length;
-  const head = `${prefix}:wrench: ${display} \u00d7${count}`;
+  const head = `${prefix}${Icons.tools} ${display} \u00d7${count}`;
   const nonEmpty = summaries.filter(s => s && s.trim().length > 0);
   if (nonEmpty.length === 0) return head;
 

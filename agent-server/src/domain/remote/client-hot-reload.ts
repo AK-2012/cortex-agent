@@ -10,6 +10,7 @@ import { getMachineRegistry, type MachineEntry } from '../tasks/dispatch-utils.j
 import { sshExec, clientPids, buildRemoteSpawnCommand } from './client-manager.js';
 import { STORE_DIR } from '@core/utils.js';
 import { createLogger } from '@core/log.js';
+import { Icons } from '../../core/icons.js';
 
 const log = createLogger('client-hot-reload');
 
@@ -447,11 +448,11 @@ function formatUpdateSlackMessage(result: ClientUpdateResult): string {
     : `\`${result.oldVersion}\` → \`${result.newVersion}\``;
 
   const lines: string[] = [
-    `:arrows_counterclockwise: *Client hot-reload ${modeLabel}*  ${versionLabel}  (${(result.duration / 1000).toFixed(1)}s)`,
+    `${Icons.refresh} *Client hot-reload ${modeLabel}*  ${versionLabel}  (${(result.duration / 1000).toFixed(1)}s)`,
   ];
 
   for (const d of result.devices) {
-    const icon = d.updated && d.restarted ? ':white_check_mark:' : ':x:';
+    const icon = d.updated && d.restarted ? Icons.ok : Icons.error;
     lines.push(`  ${d.device}: ${icon}${d.error ? `  _${d.error}_` : ''}`);
   }
 

@@ -2,6 +2,7 @@ import type { Destination, PlatformAdapter } from '@platform/index.js';
 import { statSync, openSync, readSync, closeSync } from 'fs';
 import * as path from 'path';
 import { moduleDir } from '@core/utils.js';
+import { Icons } from '../../../core/icons.js';
 
 const DAEMON_LOG_PATH = path.join(moduleDir(import.meta.url), '..', '..', '..', '..', 'logs', 'daemon.log');
 
@@ -22,7 +23,7 @@ async function stopTail(channel: string, adapter: PlatformAdapter): Promise<void
   }
   clearInterval(active.interval);
   activeTails.delete(channel);
-  await adapter.postMessage(dest, { text: ':octagonal_sign: Tail stopped.' });
+  await adapter.postMessage(dest, { text: `${Icons.stopped} Tail stopped.` });
 }
 
 async function sendInitialTailPreview(channel: string, adapter: PlatformAdapter): Promise<number | null> {
@@ -35,10 +36,10 @@ async function sendInitialTailPreview(channel: string, adapter: PlatformAdapter)
     readSync(fd, buf, 0, previewBytes, stat.size - previewBytes);
     closeSync(fd);
     const lines = buf.toString('utf-8').split('\n').filter(Boolean).slice(-30);
-    await adapter.postMessage(previewDest, { text: `:scroll: *Tailing daemon.log* (last ${lines.length} lines, refresh every 3s)\n\`\`\`\n${lines.join('\n')}\n\`\`\`\nUse \`!tail stop\` to stop.` });
+    await adapter.postMessage(previewDest, { text: `${Icons.scroll} *Tailing daemon.log* (last ${lines.length} lines, refresh every 3s)\n\`\`\`\n${lines.join('\n')}\n\`\`\`\nUse \`!tail stop\` to stop.` });
     return stat.size;
   } catch (err) {
-    await adapter.postMessage(previewDest, { text: `:x: Cannot read daemon.log: ${(err as Error).message}` });
+    await adapter.postMessage(previewDest, { text: `${Icons.error} Cannot read daemon.log: ${(err as Error).message}` });
     return null;
   }
 }

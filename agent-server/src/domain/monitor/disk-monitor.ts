@@ -6,6 +6,7 @@
 import { promises as fsp } from 'fs';
 import type { PlatformAdapter } from '@platform/index.js';
 import { createLogger } from '@core/log.js';
+import { Icons } from '../../core/icons.js';
 
 const log = createLogger('disk-monitor');
 
@@ -78,7 +79,7 @@ async function checkDiskOnce(): Promise<void> {
   _state = decision.newState;
 
   if (decision.alert) {
-    const msg = `:warning: Disk low on \`${WATCH_PATH}\`: only *${formatBytes(freeBytes)}* free (< ${formatBytes(WARN_BYTES)} threshold). Clean up or Cortex may crash.`;
+    const msg = `${Icons.warning} Disk low on \`${WATCH_PATH}\`: only *${formatBytes(freeBytes)}* free (< ${formatBytes(WARN_BYTES)} threshold). Clean up or Cortex may crash.`;
     log.info(`ALERT: free=${formatBytes(freeBytes)}`);
     sendDM(msg);
   }

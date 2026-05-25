@@ -4,6 +4,7 @@ import type { CommandActionRouter } from '@orch/interactions/command-action-rout
 import type { ModalDefinition } from '@platform/types.js';
 import { projectStore } from '@domain/projects/index.js';
 import { projectDirRepo } from '@store/project-dir-repo.js';
+import { Icons } from '../../../core/icons.js';
 import { getMachineRegistry } from '@domain/tasks/dispatch-utils.js';
 
 export async function handleProjectsCmd(channel: string, adapter: PlatformAdapter): Promise<void> {
@@ -34,7 +35,7 @@ export function createRegisterHandler(router?: CommandActionRouter) {
         await adapter.bindProjectConduit(project, ctx.channelId);
         if (ctx.messageRef) {
           await adapter.updateMessage(ctx.messageRef, {
-            text: `:white_check_mark: Registered for \`${project}\` task notifications.`,
+            text: `${Icons.ok} Registered for \`${project}\` task notifications.`,
           }).catch(() => {});
         }
       } catch { /* ignore */ }
@@ -57,11 +58,11 @@ export function createRegisterHandler(router?: CommandActionRouter) {
       const project = args[0];
       const projects = projectStore.list().map(p => p.id);
       if (!projects.includes(project)) {
-        await adapter.postMessage(dest, { text: `:x: Unknown project: \`${project}\`\nAvailable: ${projects.map(p => `\`${p}\``).join(', ')}` });
+        await adapter.postMessage(dest, { text: `${Icons.error} Unknown project: \`${project}\`\nAvailable: ${projects.map(p => `\`${p}\``).join(', ')}` });
         return;
       }
       await adapter.bindProjectConduit(project, channel);
-      await adapter.postMessage(dest, { text: `:white_check_mark: This channel is now registered for project \`${project}\` task notifications.` });
+      await adapter.postMessage(dest, { text: `${Icons.ok} This channel is now registered for project \`${project}\` task notifications.` });
       return;
     }
 
@@ -117,11 +118,11 @@ export async function handleUnregisterCmd(channel: string, adapter: PlatformAdap
   const registrations = await adapter.getProjectConduits();
   const current = registrations[project] ?? null;
   if (!current || current !== channel) {
-    await adapter.postMessage(dest, { text: `:x: This channel is not registered for project \`${project}\`.` });
+    await adapter.postMessage(dest, { text: `${Icons.error} This channel is not registered for project \`${project}\`.` });
     return;
   }
   await adapter.unbindProjectConduit(project);
-  await adapter.postMessage(dest, { text: `:white_check_mark: Unregistered this channel from project \`${project}\`.` });
+  await adapter.postMessage(dest, { text: `${Icons.ok} Unregistered this channel from project \`${project}\`.` });
 }
 
 function buildProjectDirModal(channel: string): ModalDefinition {
@@ -167,7 +168,7 @@ export function createProjectDirHandler(router?: CommandActionRouter) {
           if (!project || !machine || !dirPath) return;
           await projectDirRepo.setProjectDir(project, machine, dirPath);
           await adapter.postMessage(modalDest, {
-            text: `:white_check_mark: \`${project}\` on \`${machine}\` → \`${dirPath}\``,
+            text: `${Icons.ok} \`${project}\` on \`${machine}\` → \`${dirPath}\``,
           });
         },
       }],
@@ -182,19 +183,19 @@ export function createProjectDirHandler(router?: CommandActionRouter) {
 
     if (args.length > 0) {
       if (args.length < 2) {
-        await adapter.postMessage(dest, { text: ':x: Usage: `!project-dir <project> <machine> <path>` or `!project-dir <project> <machine> --remove`' });
+        await adapter.postMessage(dest, { text: `${Icons.error} Usage: \`!project-dir <project> <machine> <path>\` or \`!project-dir <project> <machine> --remove\`` });
         return;
       }
       const [project, machine] = args;
       const validMachines = Object.keys(getMachineRegistry());
       if (!validMachines.includes(machine)) {
-        await adapter.postMessage(dest, { text: `:x: Unknown machine: \`${machine}\`\nValid: ${validMachines.map(m => `\`${m}\``).join(', ')}` });
+        await adapter.postMessage(dest, { text: `${Icons.error} Unknown machine: \`${machine}\`\nValid: ${validMachines.map(m => `\`${m}\``).join(', ')}` });
         return;
       }
       if (args.length === 2 || args[2] === '--remove') {
         if (args[2] === '--remove') {
           await projectDirRepo.removeProjectDir(project, machine);
-          await adapter.postMessage(dest, { text: `:white_check_mark: Removed \`${project}\` directory on \`${machine}\`.` });
+          await adapter.postMessage(dest, { text: `${Icons.ok} Removed \`${project}\` directory on \`${machine}\`.` });
         } else {
           const dir = await projectDirRepo.getProjectDir(project, machine);
           if (dir) {
@@ -207,7 +208,7 @@ export function createProjectDirHandler(router?: CommandActionRouter) {
       }
       const dirPath = args.slice(2).join(' ');
       await projectDirRepo.setProjectDir(project, machine, dirPath);
-      await adapter.postMessage(dest, { text: `:white_check_mark: \`${project}\` on \`${machine}\` → \`${dirPath}\`` });
+      await adapter.postMessage(dest, { text: `${Icons.ok} \`${project}\` on \`${machine}\` → \`${dirPath}\`` });
       return;
     }
 

@@ -2,6 +2,7 @@ import type { Destination, PlatformAdapter } from '@platform/index.js';
 import { queryGpuSnapshot, renderGpuSnapshot } from '@domain/monitor/gpu-monitor.js';
 import { getMachineRegistry, getLocalMachine } from '@domain/tasks/dispatch-utils.js';
 import { sendCommand, isDeviceOnline } from '@domain/remote/client-manager.js';
+import { Icons } from '../../../core/icons.js';
 
 const NVTOP_REFRESH_MS = 1000;
 const NVTOP_HISTORY_LIMIT = 12;
@@ -38,15 +39,15 @@ export async function handleNvidiaSmiCmd(channel: string, adapter: PlatformAdapt
   const reg = getMachineRegistry()[machine];
   if (!reg) {
     const valid = Object.keys(getMachineRegistry()).filter(m => getMachineRegistry()[m].gpuCount > 0).map(m => `\`${m}\``).join(', ');
-    await adapter.postMessage(dest, { text: `:x: Unknown machine: \`${machine}\`\nGPU machines: ${valid}` });
+    await adapter.postMessage(dest, { text: `${Icons.error} Unknown machine: \`${machine}\`\nGPU machines: ${valid}` });
     return;
   }
   if (reg.gpuCount === 0) {
-    await adapter.postMessage(dest, { text: `:x: \`${machine}\` has no GPU.` });
+    await adapter.postMessage(dest, { text: `${Icons.error} \`${machine}\` has no GPU.` });
     return;
   }
   if (!isDeviceOnline(machine)) {
-    await adapter.postMessage(dest, { text: `:x: Device \`${machine}\` is not online.` });
+    await adapter.postMessage(dest, { text: `${Icons.error} Device \`${machine}\` is not online.` });
     return;
   }
   try {
@@ -54,7 +55,7 @@ export async function handleNvidiaSmiCmd(channel: string, adapter: PlatformAdapt
     const output = result.stdout || result.stderr || '(no output)';
     await adapter.postMessage(dest, { text: `*nvidia-smi* on \`${machine}\`\n\`\`\`\n${output}\n\`\`\`` });
   } catch (err) {
-    await adapter.postMessage(dest, { text: `:x: nvidia-smi failed on \`${machine}\`: ${(err as Error).message}` });
+    await adapter.postMessage(dest, { text: `${Icons.error} nvidia-smi failed on \`${machine}\`: ${(err as Error).message}` });
   }
 }
 
@@ -69,7 +70,7 @@ export async function handleNvtopCmd(channel: string, adapter: PlatformAdapter, 
     }
     clearInterval(active.interval);
     activeNvtopMonitors.delete(channel);
-    await adapter.postMessage(dest, { text: `:octagonal_sign: nvtop stopped on \`${active.machine}\`.` });
+    await adapter.postMessage(dest, { text: `${Icons.stopped} nvtop stopped on \`${active.machine}\`.` });
     return;
   }
 
@@ -82,11 +83,11 @@ export async function handleNvtopCmd(channel: string, adapter: PlatformAdapter, 
   const reg = getMachineRegistry()[machine];
   if (!reg) {
     const valid = Object.keys(getMachineRegistry()).filter(m => getMachineRegistry()[m].gpuCount > 0).map(m => `\`${m}\``).join(', ');
-    await adapter.postMessage(dest, { text: `:x: Unknown machine: \`${machine}\`\nGPU machines: ${valid}` });
+    await adapter.postMessage(dest, { text: `${Icons.error} Unknown machine: \`${machine}\`\nGPU machines: ${valid}` });
     return;
   }
   if (reg.gpuCount === 0) {
-    await adapter.postMessage(dest, { text: `:x: nvtop monitoring is not supported on \`${machine}\` yet.` });
+    await adapter.postMessage(dest, { text: `${Icons.error} nvtop monitoring is not supported on \`${machine}\` yet.` });
     return;
   }
 
@@ -110,6 +111,6 @@ export async function handleNvtopCmd(channel: string, adapter: PlatformAdapter, 
       historyByGpu,
     });
   } catch (err) {
-    await adapter.postMessage(dest, { text: `:x: nvtop failed on \`${machine}\`: ${(err as Error).message}` });
+    await adapter.postMessage(dest, { text: `${Icons.error} nvtop failed on \`${machine}\`: ${(err as Error).message}` });
   }
 }

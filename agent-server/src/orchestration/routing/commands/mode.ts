@@ -1,5 +1,6 @@
 import type { Destination, PlatformAdapter } from '@platform/index.js';
 import type { CommandResult } from './command-context.js';
+import { Icons } from '../../../core/icons.js';
 import type { CommandActionRouter } from '@orch/interactions/command-action-router.js';
 import { switchMode, getActiveBackend, setActiveBackend, getClaudeModel, setClaudeModel, getActiveProfile, setActiveProfile, clearChannelProfile, getDefaultAgent, setDefaultAgent } from '@domain/agents/index.js';
 import { getDefaultProfileName, listProfiles, resolveProfile } from '@domain/agents/profile-manager.js';
@@ -26,7 +27,7 @@ function formatProfileList(channel?: string): string {
 export async function handleModeCmd(channel: string, adapter: PlatformAdapter): Promise<void> {
   const { newMode } = switchMode();
   const dest: Destination = { type: 'interactive-reply', conduit: channel, sessionId: '' };
-  await adapter.postMessage(dest, { text: `:arrows_counterclockwise: Switched to *${newMode === 'api' ? 'API' : 'Plan'}* mode` });
+  await adapter.postMessage(dest, { text: `${Icons.refresh} Switched to *${newMode === 'api' ? 'API' : 'Plan'}* mode` });
 }
 
 export async function handleBackendCmd(channel: string, adapter: PlatformAdapter, trimmedMessage: string): Promise<void> {
@@ -35,7 +36,7 @@ export async function handleBackendCmd(channel: string, adapter: PlatformAdapter
   setActiveBackend(newBackend);
   const dest: Destination = { type: 'interactive-reply', conduit: channel, sessionId: '' };
   await adapter.postMessage(dest, {
-    text: `:arrows_counterclockwise: Backend: *${newBackend === 'claude' ? 'Claude Code' : 'Codex'}*`,
+    text: `${Icons.refresh} Backend: *${newBackend === 'claude' ? 'Claude Code' : 'Codex'}*`,
   });
 }
 
@@ -48,11 +49,11 @@ export async function handleModelCmd(channel: string, adapter: PlatformAdapter, 
   }
   const model = args.join(' ').trim();
   if (!model) {
-    await adapter.postMessage(dest, { text: ':x: Usage: `!model <model-name>`' });
+    await adapter.postMessage(dest, { text: `${Icons.error} Usage: \`!model <model-name>\`` });
     return;
   }
   setClaudeModel(model);
-  await adapter.postMessage(dest, { text: `:white_check_mark: Claude model set to *${getClaudeModel()}*` });
+  await adapter.postMessage(dest, { text: `${Icons.ok} Claude model set to *${getClaudeModel()}*` });
 }
 
 const MAX_PROFILE_BUTTONS = 10;
@@ -86,7 +87,7 @@ export function createProfileHandler(router?: CommandActionRouter) {
         const { name, channel } = JSON.parse(ctx.value) as { name: string; channel: string };
         resolveProfile(name);
         setActiveProfile(name, channel);
-        const text = `:white_check_mark: Channel profile set to *${name}*\n${formatProfileList(channel)}`;
+        const text = `${Icons.ok} Channel profile set to *${name}*\n${formatProfileList(channel)}`;
         if (ctx.messageRef) {
           await adapter.updateMessage(ctx.messageRef, {
             text,
@@ -100,7 +101,7 @@ export function createProfileHandler(router?: CommandActionRouter) {
       } catch (error) {
         if (ctx.messageRef) {
           await adapter.updateMessage(ctx.messageRef, {
-            text: `:x: ${(error as Error).message}`,
+            text: `${Icons.error} ${(error as Error).message}`,
           }).catch(() => {});
         }
       }
@@ -123,24 +124,24 @@ export function createProfileHandler(router?: CommandActionRouter) {
       if (args[0] === 'reset') {
         clearChannelProfile(channel);
         const fallback = getActiveProfile() || getDefaultProfileName();
-        await adapter.postMessage(dest, { text: `:white_check_mark: Channel profile cleared, using global: *${fallback}*` });
+        await adapter.postMessage(dest, { text: `${Icons.ok} Channel profile cleared, using global: *${fallback}*` });
         await handleNewCmd(channel, adapter, { skipHook: true });
         return;
       }
 
       if (args[0] === 'global') {
         if (args.length < 2) {
-          await adapter.postMessage(dest, { text: ':x: Usage: `!profile global <name>`' });
+          await adapter.postMessage(dest, { text: `${Icons.error} Usage: \`!profile global <name>\`` });
           return;
         }
         const profileName = args[1];
         try {
           resolveProfile(profileName);
           setActiveProfile(profileName);
-          await adapter.postMessage(dest, { text: `:white_check_mark: Global profile set to *${profileName}*\n${formatProfileList(channel)}` });
+          await adapter.postMessage(dest, { text: `${Icons.ok} Global profile set to *${profileName}*\n${formatProfileList(channel)}` });
           await handleNewCmd(channel, adapter, { skipHook: true });
         } catch (error) {
-          await adapter.postMessage(dest, { text: `:x: ${(error as Error).message}` });
+          await adapter.postMessage(dest, { text: `${Icons.error} ${(error as Error).message}` });
         }
         return;
       }
@@ -149,10 +150,10 @@ export function createProfileHandler(router?: CommandActionRouter) {
       try {
         resolveProfile(profileName);
         setActiveProfile(profileName, channel);
-        await adapter.postMessage(dest, { text: `:white_check_mark: Channel profile set to *${profileName}*\n${formatProfileList(channel)}` });
+        await adapter.postMessage(dest, { text: `${Icons.ok} Channel profile set to *${profileName}*\n${formatProfileList(channel)}` });
         await handleNewCmd(channel, adapter, { skipHook: true });
       } catch (error) {
-        await adapter.postMessage(dest, { text: `:x: ${(error as Error).message}` });
+        await adapter.postMessage(dest, { text: `${Icons.error} ${(error as Error).message}` });
       }
       return;
     }
@@ -237,7 +238,7 @@ export function createAgentHandler(router?: CommandActionRouter) {
       if (!agentDef) return;
       setDefaultAgent(name);
       const claudeAgentStr = agentDef.claudeAgent ? ` · agent:${agentDef.claudeAgent}` : '';
-      const text = `:white_check_mark: Default agent set to *${name}* (${agentDef.profile}${claudeAgentStr})`;
+      const text = `${Icons.ok} Default agent set to *${name}* (${agentDef.profile}${claudeAgentStr})`;
       if (ctx.messageRef) {
         await adapter.updateMessage(ctx.messageRef, {
           text,
@@ -254,9 +255,9 @@ export function createAgentHandler(router?: CommandActionRouter) {
       setDefaultAgent(null);
       if (ctx.messageRef) {
         await adapter.updateMessage(ctx.messageRef, {
-          text: ':white_check_mark: Default agent disabled.',
+          text: `${Icons.ok} Default agent disabled.`,
           richBlocks: [
-            { type: 'section', text: ':white_check_mark: Default agent disabled.' },
+            { type: 'section', text: `${Icons.ok} Default agent disabled.` },
             { type: 'actions', elements: buildAgentButtons() },
           ],
         }).catch(() => {});
@@ -283,18 +284,18 @@ export function createAgentHandler(router?: CommandActionRouter) {
       const name = args.split(/\s+/)[0];
       if (name === 'off' || name === 'none' || name === 'disable') {
         setDefaultAgent(null);
-        await adapter.postMessage(dest, { text: ':white_check_mark: Default agent disabled.' });
+        await adapter.postMessage(dest, { text: `${Icons.ok} Default agent disabled.` });
         return;
       }
       const agentDef = getAgent(name);
       if (!agentDef) {
         const available = listAgents().map(a => `\`${a.name}\``).join(', ');
-        await adapter.postMessage(dest, { text: `:x: Unknown agent: \`${name}\`\nAvailable: ${available}` });
+        await adapter.postMessage(dest, { text: `${Icons.error} Unknown agent: \`${name}\`\nAvailable: ${available}` });
         return;
       }
       setDefaultAgent(name);
       const claudeAgentStr = agentDef.claudeAgent ? ` · agent:${agentDef.claudeAgent}` : '';
-      await adapter.postMessage(dest, { text: `:white_check_mark: Default agent set to *${name}* (${agentDef.profile}${claudeAgentStr})` });
+      await adapter.postMessage(dest, { text: `${Icons.ok} Default agent set to *${name}* (${agentDef.profile}${claudeAgentStr})` });
       return;
     }
 

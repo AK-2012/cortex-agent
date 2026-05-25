@@ -6,6 +6,7 @@ import { readFileSync, writeFileSync, existsSync, mkdirSync, watch, type FSWatch
 import * as path from 'path';
 import { CONFIG_DIR, DATA_DIR, PROMPTS_DIR } from '@core/utils.js';
 import { createLogger } from '@core/log.js';
+import { Icons } from '../../core/icons.js';
 import { resolveTemplate } from './template-resolver.js';
 import type { AgentDefinition, ThreadTemplate, ThreadConfigFile } from '@core/types/thread-types.js';
 
@@ -182,7 +183,7 @@ function scheduleConfigReload(): void {
   _reloadTimer = setTimeout(() => {
     _reloadTimer = null;
     log.info('Detected change in thread-templates.json, reloading...');
-    _adminNotifier?.(':arrows_counterclockwise: `thread-templates.json` hot-reloaded');
+    _adminNotifier?.(`${Icons.refresh} \`thread-templates.json\` hot-reloaded`);
     loadConfig();
   }, 300);
 }
@@ -216,7 +217,7 @@ function startPromptsWatcher(): void {
           _promptsReloadTimer = setTimeout(() => {
             _promptsReloadTimer = null;
             log.info(`Detected change in prompts/${rel}/${filename || '?'}, reloading config...`);
-            _adminNotifier?.(`:arrows_counterclockwise: prompts/\`${rel}/${filename || '?'}\` changed — thread-templates reloaded`);
+            _adminNotifier?.(`${Icons.refresh} prompts/\`${rel}/${filename || '?'}\` changed — thread-templates reloaded`);
             loadConfig();
           }, 300);
         });

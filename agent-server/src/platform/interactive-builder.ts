@@ -4,6 +4,7 @@
 // >>> If I am updated, update my header comment and the parent folder's CORTEX.md <<<
 
 import type { RichBlock, ModalDefinition, ActionElement } from './types.js';
+import { Icons } from '../core/icons.js';
 
 // --- Question group types ---
 
@@ -37,7 +38,7 @@ export function buildQuestionGroupBlocks(group: QuestionGroup): RichBlock[] {
     const answer = group.answers.get(q.pendingId);
     if (answer) {
       const formatted = Array.isArray(answer.value) ? `[${answer.value.join(', ')}]` : answer.value;
-      blocks.push({ type: 'context', text: `:white_check_mark: ${formatted}` });
+      blocks.push({ type: 'context', text: `${Icons.ok} ${formatted}` });
     } else {
       const optionsList = q.options.map(o => o.label).join(' · ');
       blocks.push({ type: 'context', text: `_${optionsList}_` });
@@ -117,7 +118,7 @@ export function buildQuestionModalDefinition(group: QuestionGroup): ModalDefinit
 export function buildPlanApprovalContent(requestId: string): { richBlocks: RichBlock[]; actions: ActionElement[] } {
   return {
     richBlocks: [
-      { type: 'section', text: ':memo: *Plan ready for review.* Approve to proceed or provide feedback.' },
+      { type: 'section', text: `${Icons.memo} *Plan ready for review.* Approve to proceed or provide feedback.` },
     ],
     actions: [
       { type: 'button', text: 'Approve', actionId: 'hook_plan_approve', value: requestId, style: 'primary' },

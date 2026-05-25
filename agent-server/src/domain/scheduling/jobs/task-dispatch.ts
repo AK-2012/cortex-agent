@@ -4,6 +4,7 @@
 
 import { register, ctx } from '../job-registry.js';
 import { createLogger } from '@core/log.js';
+import { Icons } from '../../../core/icons.js';
 import * as executionRegistry from '../../executions/registry.js';
 
 const log = createLogger('task-dispatch');
@@ -104,7 +105,7 @@ async function executeDispatchTask({ selected, selectedTask, channel, scheduleTa
   let statusMsg: MessageRef | null = null;
   try {
     statusMsg = await adapter.postMessage({ type: 'project-report', projectId: selectedTask.project || channel, trigger: 'task-dispatch', sessionId: '' }, {
-      text: `:satellite: Dispatching: [${selectedTask.project}] ${selectedTask.text.substring(0, 80)}... | ${sessionName} | ${effectiveProfile}`,
+      text: `${Icons.satellite} Dispatching: [${selectedTask.project}] ${selectedTask.text.substring(0, 80)}... | ${sessionName} | ${effectiveProfile}`,
     });
   } catch {}
 
@@ -139,7 +140,7 @@ async function executeDispatchTask({ selected, selectedTask, channel, scheduleTa
     const { elapsedStr } = computeElapsed(startTime);
     await taskMutator.unclaim(selectedTask.id);
     if (statusMsg) {
-      const text = `:warning: [${selectedTask.project}] ${selectedTask.text.substring(0, 80)} | ${buildSessionTag(sessionName, result?.sessionId)}Rate limited — all fallbacks exhausted (${elapsedStr})`;
+      const text = `${Icons.warning} [${selectedTask.project}] ${selectedTask.text.substring(0, 80)} | ${buildSessionTag(sessionName, result?.sessionId)}Rate limited — all fallbacks exhausted (${elapsedStr})`;
       const queue = getOutboundQueue();
       if (queue) { await durableUpdate(queue, adapter, statusMsg, { text }); }
       else { await adapter.updateMessage(statusMsg, { text }); }
@@ -183,12 +184,12 @@ async function handleDispatchError(error: Error, selectedTask: Record<string, an
   try {
     const queue = getOutboundQueue();
     if (blocked && selectedTask) {
-      const text = `:no_entry: Auto-blocked after ${DISPATCH_FAILURE_QUARANTINE_THRESHOLD} consecutive dispatch failures. Reason recorded in TASKS.yaml. Task: [${selectedTask.project}] ${String(selectedTask.text).substring(0, 80)}. Last error: ${error.message}. Unblock with \`cortex-task unblock --task-id ${selectedTask.id}\`.`;
+      const text = `${Icons.blocked} Auto-blocked after ${DISPATCH_FAILURE_QUARANTINE_THRESHOLD} consecutive dispatch failures. Reason recorded in TASKS.yaml. Task: [${selectedTask.project}] ${String(selectedTask.text).substring(0, 80)}. Last error: ${error.message}. Unblock with \`cortex-task unblock --task-id ${selectedTask.id}\`.`;
       const projDest = { type: 'project-report' as const, projectId: selectedTask.project || errChannel, trigger: 'task-dispatch', sessionId: '' };
       if (queue) { await durablePost(queue, adapter, projDest, { text }); }
       else { await adapter.postMessage(projDest, { text }); }
     } else {
-      const text = `:x: Task dispatch error: ${error.message}`;
+      const text = `${Icons.error} Task dispatch error: ${error.message}`;
       const projDest = { type: 'project-report' as const, projectId: selectedTask?.project || errChannel, trigger: 'task-dispatch', sessionId: '' };
       if (queue) { await durablePost(queue, adapter, projDest, { text }); }
       else { await adapter.postMessage(projDest, { text }); }
@@ -204,7 +205,7 @@ export async function cancelDispatchedTask({ taskId, channel }: { taskId: string
   try {
     executionRegistry.cancelExecutionByTaskId(taskId);
     pendingTaskTracker.clearTask(taskId);
-    return { ok: true, message: `:octagonal_sign: Cancelled task [${taskId}].` };
+    return { ok: true, message: `${Icons.stopped} Cancelled task [${taskId}].` };
   } catch (error) {
     return { ok: false, message: `Failed to cancel \`${taskId}\`: ${(error as Error).message}` };
   }
