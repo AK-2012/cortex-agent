@@ -118,6 +118,7 @@ $CORTEX_HOME/
 | `CORTEX_SHOW_TOOL_CALLS` | — | 在 VirtualMessage 尾部内联渲染工具调用 |
 | `CORTEX_INJECT_USER_CONTEXT` | — | 设置为 `1` 以将 `USER.md` 上下文注入线程 |
 | `CORTEX_GPU_MONITOR_MOCK` | — | 用于测试的模拟 GPU 数据 JSON（覆盖真实的 nvidia-smi 查询） |
+| `CORTEX_SERVER_UPDATE_DISABLE` | — | 设置为 `1` 以禁用服务器自动更新检查（默认开启） |
 
 ## profiles.json
 

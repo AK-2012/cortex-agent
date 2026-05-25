@@ -207,6 +207,9 @@ When Cortex runs in release mode (no `CORTEX_REPO` environment variable),
 it periodically checks npm for a newer `@cortex-agent/server` version.
 The first check runs 60 seconds after startup, then every 24 hours.
 
+Auto-update is enabled by default. To disable it, set
+`CORTEX_SERVER_UPDATE_DISABLE=1` in your `.env` file.
+
 When a newer version is found, Cortex sends an interactive message to the
 admin DM with three buttons:
 

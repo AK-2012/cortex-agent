@@ -163,6 +163,9 @@ cortex restart        # 触碰 $STORE_DIR/.restart
 它会定期检查 npm 上是否有更新的 `@cortex-agent/server` 版本。
 首次检查在启动后 60 秒进行，之后每 24 小时检查一次。
 
+自动更新默认开启。如需禁用，在 `.env` 文件中设置
+`CORTEX_SERVER_UPDATE_DISABLE=1`。
+
 当发现新版本时，Cortex 会向管理员私信发送一条带三个按钮的交互消息：
 
 | 按钮 | 行为 |

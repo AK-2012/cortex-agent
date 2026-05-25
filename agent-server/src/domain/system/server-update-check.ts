@@ -98,8 +98,8 @@ export interface CheckServerUpdateResult {
 export async function checkServerUpdate(
   deps: CheckServerUpdateDeps,
 ): Promise<CheckServerUpdateResult> {
-  // 1. Enable toggle: auto-update is off by default, opt-in via env var
-  if (process.env.CORTEX_SERVER_UPDATE_ENABLE !== '1') {
+  // 1. Disable toggle: auto-update is on by default, opt-out via env var
+  if (process.env.CORTEX_SERVER_UPDATE_DISABLE === '1') {
     return { action: null, latestVersion: null };
   }
 
