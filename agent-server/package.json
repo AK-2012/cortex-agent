@@ -1,6 +1,6 @@
 {
   "name": "@cortex-agent/server",
-  "version": "2026.5.24-1",
+  "version": "2026.5.25",
   "type": "module",
   "description": "Autonomous agent system for long-running projects — mission-driven, multi-agent pipelines, self-evolving skills.",
   "engines": {
