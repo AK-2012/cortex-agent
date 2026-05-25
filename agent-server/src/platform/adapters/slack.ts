@@ -78,7 +78,6 @@ export class SlackAdapter implements PlatformAdapter {
     messageEdit: true,
     modals: true,
     reactions: true,
-    ephemeral: true,
     fileUpload: true,
     richFormatting: true,
     maxMessageLength: 3000,
@@ -579,12 +578,6 @@ export class SlackAdapter implements PlatformAdapter {
     } catch {
       return null;
     }
-  }
-
-  async postEphemeral(channel: string, userId: string, text: string): Promise<void> {
-    await this.rateLimitedCall('chat.postEphemeral', channel, () =>
-      this.client.chat.postEphemeral({ channel, user: userId, text })
-    );
   }
 
   /** Write CORTEX_ADMIN_CHANNEL to the .env file for persistence across restarts. */

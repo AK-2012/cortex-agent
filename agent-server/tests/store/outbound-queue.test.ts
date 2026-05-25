@@ -62,7 +62,6 @@ function createMockAdapter(overrides: {
     uploadFile: async () => {},
     downloadFile: async () => ({ localPath: '', mimetype: '', name: '' }),
     getPermalink: async () => null,
-    postEphemeral: async () => {},
   } as any;
 }
 

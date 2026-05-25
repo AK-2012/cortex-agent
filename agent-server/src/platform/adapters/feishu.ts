@@ -48,7 +48,6 @@ export class FeishuAdapter implements PlatformAdapter {
     messageEdit: false,      // Feishu has no message_changed event
     modals: false,           // No native modal; openModal() degrades to card form
     reactions: true,         // im.v1.messageReaction.create
-    ephemeral: false,        // Feishu has no ephemeral messages
     fileUpload: true,        // im.v1.file.create + message
     richFormatting: true,    // Message cards with markdown
     maxMessageLength: 4000,  // Card 30KB limit, ~4000 chars safe
@@ -328,10 +327,6 @@ export class FeishuAdapter implements PlatformAdapter {
   async getPermalink(_ref: MessageRef): Promise<string | null> {
     // Feishu has no public permalink API.
     return null;
-  }
-
-  async postEphemeral(_channel: string, _userId: string, _text: string): Promise<void> {
-    // Feishu does not support ephemeral messages — no-op.
   }
 
   // --- Output stream ---

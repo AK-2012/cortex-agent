@@ -55,8 +55,9 @@ async function handleOpenModal(ctx: ActionContext): Promise<void> {
   if (!group || askUserQuestion.isExpired(group)) {
     if (group && askUserQuestion.isExpired(group)) askUserQuestion.deleteGroup(group.groupId);
     const msg = group ? 'This AskUserQuestion prompt has expired. Please ask again if you still need it.' : 'This AskUserQuestion prompt is no longer active.';
-    if (ctx.channelId && ctx.userId) {
-      await _adapter.postEphemeral(ctx.channelId, ctx.userId, msg).catch(() => {});
+    if (ctx.channelId) {
+      const expiredDest: Destination = { type: 'interactive-reply', conduit: ctx.channelId, sessionId: '' };
+      await _adapter.postMessage(expiredDest, { text: msg }).catch(() => {});
     }
     return;
   }

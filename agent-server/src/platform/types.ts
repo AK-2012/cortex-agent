@@ -173,7 +173,6 @@ export interface PlatformCapabilities {
   messageEdit: boolean;
   modals: boolean;
   reactions: boolean;
-  ephemeral: boolean;
   fileUpload: boolean;
   richFormatting: boolean;
   maxMessageLength: number;

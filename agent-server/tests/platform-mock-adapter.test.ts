@@ -21,7 +21,6 @@ test('MockAdapter exposes platform name and default capability flags', () => {
   assert.equal(adapter.capabilities.messageEdit, true);
   assert.equal(adapter.capabilities.modals, true);
   assert.equal(adapter.capabilities.reactions, true);
-  assert.equal(adapter.capabilities.ephemeral, true);
   assert.equal(adapter.capabilities.fileUpload, true);
   assert.equal(adapter.capabilities.richFormatting, true);
 });
@@ -105,10 +104,8 @@ test('markQueued records its input', async () => {
   const adapter = new MockAdapter();
   const ref = await adapter.postMessage('C1', { text: 'hi' });
   await adapter.markQueued(ref);
-  await adapter.postEphemeral('C1', 'U1', 'only for you');
 
   assert.deepEqual(adapter.marksQueued, [{ ref }]);
-  assert.deepEqual(adapter.ephemeralMessages, [{ channel: 'C1', userId: 'U1', text: 'only for you' }]);
 });
 
 test('uploadFile records filePath + opts and downloadFile synthesises localPath', async () => {
@@ -228,7 +225,6 @@ test('reset() clears every recorded interaction list', async () => {
   await adapter.markQueued(ref);
   await adapter.uploadFile(dest, '/tmp/a');
   await adapter.openModal('t', { callbackId: 'cb', title: 'T', fields: [] });
-  await adapter.postEphemeral('C1', 'U1', 'x');
 
   adapter.reset();
   assert.deepEqual(adapter.posted, []);
@@ -237,5 +233,4 @@ test('reset() clears every recorded interaction list', async () => {
   assert.deepEqual(adapter.marksQueued, []);
   assert.deepEqual(adapter.uploads, []);
   assert.deepEqual(adapter.modals, []);
-  assert.deepEqual(adapter.ephemeralMessages, []);
 });

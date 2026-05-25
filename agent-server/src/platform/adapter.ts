@@ -58,7 +58,6 @@ export interface PlatformAdapter {
 
   // --- Misc ---
   getPermalink(ref: MessageRef): Promise<string | null>;
-  postEphemeral(channel: string, userId: string, text: string): Promise<void>;
 
   // --- Output streams ---
 

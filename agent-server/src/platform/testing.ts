@@ -56,12 +56,6 @@ export interface OpenedModal {
   modal: ModalDefinition;
 }
 
-export interface EphemeralMessage {
-  channel: string;
-  userId: string;
-  text: string;
-}
-
 // --- MockOutputStream types ---
 
 export interface MockSegmentRecord {
@@ -157,7 +151,6 @@ export class MockAdapter implements PlatformAdapter {
   marksQueued: MarkedQueued[] = [];
   uploads: UploadedFile[] = [];
   modals: OpenedModal[] = [];
-  ephemeralMessages: EphemeralMessage[] = [];
 
   /** Optional fault injection for tests: count of remaining failures, then succeed. */
   failPostMessageCount: number = 0;
@@ -180,7 +173,6 @@ export class MockAdapter implements PlatformAdapter {
       messageEdit: true,
       modals: true,
       reactions: true,
-      ephemeral: true,
       fileUpload: true,
       richFormatting: true,
       maxMessageLength: 3000,
@@ -260,10 +252,6 @@ export class MockAdapter implements PlatformAdapter {
 
   async getPermalink(ref: MessageRef): Promise<string | null> {
     return `https://mock.test/permalink/${ref.channel}/${ref.messageId}`;
-  }
-
-  async postEphemeral(channel: string, userId: string, text: string): Promise<void> {
-    this.ephemeralMessages.push({ channel, userId, text });
   }
 
   // --- Output stream ---
@@ -375,7 +363,6 @@ export class MockAdapter implements PlatformAdapter {
     this.marksQueued = [];
     this.uploads = [];
     this.modals = [];
-    this.ephemeralMessages = [];
     this.nextId = 1000;
     this.failPostMessageCount = 0;
     this.failUpdateMessageCount = 0;
