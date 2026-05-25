@@ -53,7 +53,6 @@ test('plain bot message (no BRANCH_CALLBACK prefix) returns early without dispat
   await adapter.simulateMessage('C1', 'hello from a bot', { isBot: true });
   assert.equal(dispatchCalls.length, 0);
   assert.equal(adapter.posted.length, 0);
-  assert.equal(adapter.reactions.length, 0);
 });
 
 test('[BRANCH_CALLBACK] bot message has prefix stripped and continues processing', async () => {

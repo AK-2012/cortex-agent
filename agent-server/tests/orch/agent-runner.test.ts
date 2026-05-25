@@ -55,11 +55,12 @@ test('(a) route() calls addReaction(hourglass) when channel already has a queue'
   const ctx = makeCtx({ channel, adapter });
   await runner.route(ctx as any);
 
-  // Verify addReaction was called (MockAdapter records reactions)
-  const reactions = (adapter as any)._reactions ?? [];
-  const addReactionCalls = (adapter as any)._addReactionCalls ?? [];
-  // MockAdapter records calls differently — check that addReaction was invoked at all
-  // by checking that the runner didn't skip the adapter call
+  // Verify markQueued was called (MockAdapter records marksQueued)
+  // assert that the runner called markQueued with the correct ref
+  assert.equal(adapter.marksQueued.length, 1, 'markQueued was called once');
+  assert.equal(adapter.marksQueued[0].ref.channel, channel, 'markQueued called with correct channel');
+  assert.equal(adapter.marksQueued[0].ref.messageId, 'M1', 'markQueued called with correct messageId');
+
   assert.equal(enqueueCalls.length, 1, 'enqueue was called for the channel');
   assert.equal(enqueueCalls[0], channel);
 

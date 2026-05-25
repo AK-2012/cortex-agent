@@ -58,7 +58,7 @@ function createMockAdapter(overrides: {
       return { channel, messageId: 'mock-interactive' };
     },
     openModal: async () => {},
-    addReaction: async () => {},
+    markQueued: async () => {},
     uploadFile: async () => {},
     downloadFile: async () => ({ localPath: '', mimetype: '', name: '' }),
     getPermalink: async () => null,

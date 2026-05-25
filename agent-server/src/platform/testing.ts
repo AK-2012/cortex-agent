@@ -41,9 +41,8 @@ export interface DeletedMessage {
   ref: MessageRef;
 }
 
-export interface AddedReaction {
+export interface MarkedQueued {
   ref: MessageRef;
-  emoji: string;
 }
 
 export interface UploadedFile {
@@ -155,7 +154,7 @@ export class MockAdapter implements PlatformAdapter {
   posted: PostedMessage[] = [];
   updated: UpdatedMessage[] = [];
   deleted: DeletedMessage[] = [];
-  reactions: AddedReaction[] = [];
+  marksQueued: MarkedQueued[] = [];
   uploads: UploadedFile[] = [];
   modals: OpenedModal[] = [];
   ephemeralMessages: EphemeralMessage[] = [];
@@ -247,8 +246,8 @@ export class MockAdapter implements PlatformAdapter {
     this.modals.push({ triggerId, modal });
   }
 
-  async addReaction(ref: MessageRef, emoji: string): Promise<void> {
-    this.reactions.push({ ref, emoji });
+  async markQueued(ref: MessageRef): Promise<void> {
+    this.marksQueued.push({ ref });
   }
 
   async uploadFile(destination: Destination, filePath: string, opts?: FileUploadOpts): Promise<void> {
@@ -372,7 +371,7 @@ export class MockAdapter implements PlatformAdapter {
     this.posted = [];
     this.updated = [];
     this.deleted = [];
-    this.reactions = [];
+    this.marksQueued = [];
     this.uploads = [];
     this.modals = [];
     this.ephemeralMessages = [];

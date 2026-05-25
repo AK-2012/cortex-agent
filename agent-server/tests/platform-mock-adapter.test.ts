@@ -101,13 +101,13 @@ test('openModal records every opened modal with triggerId', async () => {
   assert.equal(adapter.modals[1].modal.callbackId, 'cb-2');
 });
 
-test('addReaction and postEphemeral record their inputs', async () => {
+test('markQueued records its input', async () => {
   const adapter = new MockAdapter();
   const ref = await adapter.postMessage('C1', { text: 'hi' });
-  await adapter.addReaction(ref, 'thumbsup');
+  await adapter.markQueued(ref);
   await adapter.postEphemeral('C1', 'U1', 'only for you');
 
-  assert.deepEqual(adapter.reactions, [{ ref, emoji: 'thumbsup' }]);
+  assert.deepEqual(adapter.marksQueued, [{ ref }]);
   assert.deepEqual(adapter.ephemeralMessages, [{ channel: 'C1', userId: 'U1', text: 'only for you' }]);
 });
 
@@ -225,7 +225,7 @@ test('reset() clears every recorded interaction list', async () => {
   const ref = await adapter.postMessage(dest, { text: 'x' });
   await adapter.updateMessage(ref, { text: 'y' });
   await adapter.deleteMessage(ref);
-  await adapter.addReaction(ref, 'ok');
+  await adapter.markQueued(ref);
   await adapter.uploadFile(dest, '/tmp/a');
   await adapter.openModal('t', { callbackId: 'cb', title: 'T', fields: [] });
   await adapter.postEphemeral('C1', 'U1', 'x');
@@ -234,7 +234,7 @@ test('reset() clears every recorded interaction list', async () => {
   assert.deepEqual(adapter.posted, []);
   assert.deepEqual(adapter.updated, []);
   assert.deepEqual(adapter.deleted, []);
-  assert.deepEqual(adapter.reactions, []);
+  assert.deepEqual(adapter.marksQueued, []);
   assert.deepEqual(adapter.uploads, []);
   assert.deepEqual(adapter.modals, []);
   assert.deepEqual(adapter.ephemeralMessages, []);

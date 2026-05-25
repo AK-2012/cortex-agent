@@ -251,17 +251,21 @@ export class FeishuAdapter implements PlatformAdapter {
     });
   }
 
-  // --- Reactions ---
+  // --- Queue backpressure ---
 
-  async addReaction(ref: MessageRef, emoji: string): Promise<void> {
+  private async _addHourglassReaction(ref: MessageRef): Promise<void> {
     try {
       await this.client.im.v1.messageReaction.create({
         path: { message_id: ref.messageId },
-        data: { reaction_type: { emoji_type: emoji } },
+        data: { reaction_type: { emoji_type: 'hourglass' } },
       });
     } catch {
       // Best-effort: emoji name may not map to Feishu's emoji set
     }
+  }
+
+  async markQueued(ref: MessageRef): Promise<void> {
+    await this._addHourglassReaction(ref);
   }
 
   // --- Files ---

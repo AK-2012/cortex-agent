@@ -49,8 +49,8 @@ export interface PlatformAdapter {
   // --- Modals ---
   openModal(triggerId: string, modal: ModalDefinition): Promise<void>;
 
-  // --- Reactions ---
-  addReaction(ref: MessageRef, emoji: string): Promise<void>;
+  // --- Queue backpressure ---
+  markQueued(ref: MessageRef): Promise<void>;
 
   // --- Files ---
   uploadFile(destination: Destination, filePath: string, opts?: FileUploadOpts): Promise<void>;

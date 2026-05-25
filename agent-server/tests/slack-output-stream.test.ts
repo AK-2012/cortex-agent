@@ -401,11 +401,11 @@ test('MockAdapter: simulateAction triggers registered handler', async () => {
 test('MockAdapter: reset clears all recorded state', async () => {
   const adapter = new MockAdapter();
   await adapter.postMessage(testDest('C1'), { text: 'hi' });
-  await adapter.addReaction({ channel: 'C1', messageId: '1' }, 'thumbsup');
+  await adapter.markQueued({ channel: 'C1', messageId: '1' });
   adapter.reset();
 
   assert.equal(adapter.posted.length, 0);
-  assert.equal(adapter.reactions.length, 0);
+  assert.equal(adapter.marksQueued.length, 0);
 });
 
 // --- Regression: silent message drops on transient adapter failures ---

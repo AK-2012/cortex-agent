@@ -468,16 +468,20 @@ export class SlackAdapter implements PlatformAdapter {
     );
   }
 
-  // --- Reactions ---
+  // --- Queue backpressure ---
 
-  async addReaction(ref: MessageRef, emoji: string): Promise<void> {
+  private async _addHourglassReaction(ref: MessageRef): Promise<void> {
     await this.rateLimitedCall('reactions.add', ref.channel, () =>
       this.client.reactions.add({
         channel: ref.channel,
-        name: emoji,
+        name: 'hourglass',
         timestamp: ref.messageId,
       })
     );
+  }
+
+  async markQueued(ref: MessageRef): Promise<void> {
+    await this._addHourglassReaction(ref);
   }
 
   // --- Files ---

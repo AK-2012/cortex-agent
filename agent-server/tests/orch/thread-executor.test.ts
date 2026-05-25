@@ -94,10 +94,11 @@ test('(c) route() calls addReaction(hourglass) when channel already has a runnin
   const ctx = makeCtx(channel, { adapter, threadStartMatch: ['!thread coder hi', 'coder', 'hi'] as any });
   await executor.route(ctx as any);
 
-  // addReaction should have been called (check via mock)
+  // markQueued should have been called when the channel already had a queue
+  assert.equal(adapter.marksQueued.length, 1, 'markQueued was called once');
+  assert.equal(adapter.marksQueued[0].ref.channel, channel, 'markQueued called with correct channel');
+  assert.equal(adapter.marksQueued[0].ref.messageId, 'M1', 'markQueued called with correct messageId');
   assert.equal(enqueueCalls.length, 1, 'enqueue was called');
-  // Verify addReaction was invoked on adapter — MockAdapter may record differently
-  // At minimum, route() completed without throwing (synchronous part was safe)
 
   unlockPrior();
   const tail = channelQueues.get(channel);
@@ -127,9 +128,8 @@ test('(e) route() on fresh channel skips addReaction (no prior queue)', async ()
   await executor.route(ctx as any);
 
   assert.equal(enqueueCalls.length, 1, 'enqueue was called');
-  // No prior queue → addReaction was NOT called (channelQueues.has returned false)
-  // We can't directly inspect adapter.addReaction was NOT called without a spy,
-  // but the test verifies route() completes without error when no queue exists
+  // No prior queue → markQueued was NOT called (channelQueues.has returned false)
+  assert.equal(adapter.marksQueued.length, 0, 'markQueued was not called when no prior queue');
   assert.ok(true, 'route() completed synchronously without throwing');
 });
 

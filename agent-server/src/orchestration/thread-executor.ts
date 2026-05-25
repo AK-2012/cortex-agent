@@ -59,7 +59,7 @@ export class ThreadExecutor {
     }
 
     if (channelQueues.has(channel)) {
-      await adapter.addReaction({ channel, messageId: message.ref.messageId }, 'hourglass').catch(() => {});
+      await adapter.markQueued({ channel, messageId: message.ref.messageId }).catch(() => {});
     }
     this._track(+1);
 
