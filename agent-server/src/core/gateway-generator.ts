@@ -1,10 +1,11 @@
-// input:  fs, path, os, Claude credentials.json, `pi --list-models` output
+// input:  fs, path, os, `pi --list-models` output
 // output: discoverEndpoints / generateGatewayYaml / writeGatewayYaml / parsePiListModelsOutput
-//         — scans Claude OAuth + spawns pi --list-models, produces gateway.yaml content
+//         — spawns pi --list-models, produces gateway.yaml content
 // pos:    init-time gateway config auto-generation. PI model metadata is owned by the PI agent
 //         (we shell out to `pi --list-models` rather than maintain provider/model whitelists).
+//         Claude plan mode is always assumed (user must have claude login), no credential scanning.
 
-import { readFileSync, writeFileSync, copyFileSync, mkdirSync, existsSync } from 'fs';
+import { writeFileSync, copyFileSync, mkdirSync, existsSync } from 'fs';
 import { execSync } from 'child_process';
 import * as path from 'path';
 import * as os from 'os';
@@ -30,18 +31,9 @@ export interface DiscoveredEndpoint {
   gatewayManaged: boolean;
 }
 
-// ─── Paths ─────────────────────────────────────────────────────────
+// ─── Anthropic models (default tier) ─────────────────────────────
 
-const CLAUDE_CREDENTIALS = path.join(os.homedir(), '.claude', '.credentials.json');
-
-// ─── Anthropic Claude Code tier table (only used for Claude OAuth path) ─────
-
-/** Model names used in gateway model_fallbacks (API-level model IDs). */
-const ANTHROPIC_MODEL_TIERS: Record<string, string[]> = {
-  max: ['claude-opus-4-7', 'claude-sonnet-4-6', 'claude-haiku-4-5'],
-  pro: ['claude-opus-4-7', 'claude-sonnet-4-6', 'claude-haiku-4-5'],
-  free: ['claude-haiku-4-5'],
-};
+const ANTHROPIC_MODELS = ['claude-opus-4-7', 'claude-sonnet-4-6', 'claude-haiku-4-5'];
 
 // ─── PI provider → upstream URL lookup (manually maintained) ────────────────
 
@@ -89,60 +81,6 @@ const PI_PROVIDER_UPSTREAM: Record<string, { url: string; auth_style: string }> 
   // env-driven URLs (region / account ID / resource name) — not safely templated here.
   // Users wanting these through the gateway must edit gateway.yaml manually.
 };
-
-// ─── Scanning: Claude Code ────────────────────────────────────────
-
-interface ClaudeCreds {
-  subscriptionType?: string;
-  accessToken?: string;
-}
-
-/** Try to read Claude Code credentials from macOS Keychain.
- *  On macOS, Claude Code stores OAuth tokens in Keychain (service "Claude Code-credentials"),
- *  not in ~/.claude/.credentials.json. Falls back gracefully on timeout/error. */
-function readClaudeCredentialsDarwin(): object | null {
-  try {
-    const raw = execSync(
-      'security find-generic-password -s "Claude Code-credentials" -w',
-      { timeout: 5000, stdio: ['ignore', 'pipe', 'ignore'] },
-    ).toString().trim();
-    if (!raw) return null;
-    return JSON.parse(raw);
-  } catch {
-    return null; // Keychain locked, entry missing, or security not available
-  }
-}
-
-/** Read and parse Claude Code credentials. Returns null if not logged in. */
-function scanClaudeCode(): ClaudeCreds | null {
-  try {
-    // macOS: try Keychain first, fall back to JSON file
-    let raw: object | null = null;
-    if (process.platform === 'darwin') {
-      raw = readClaudeCredentialsDarwin();
-    }
-    if (!raw) {
-      if (!existsSync(CLAUDE_CREDENTIALS)) {
-        log.info('Claude Code credentials not found — user may not be logged in');
-        return null;
-      }
-      raw = JSON.parse(readFileSync(CLAUDE_CREDENTIALS, 'utf-8'));
-    }
-
-    const oauth = (raw as any)?.claudeAiOauth;
-    if (!oauth?.accessToken) {
-      log.info('Claude Code credentials exist but no OAuth token found');
-      return null;
-    }
-    return {
-      subscriptionType: oauth.subscriptionType || 'free',
-      accessToken: oauth.accessToken,
-    };
-  } catch (e) {
-    log.warn(`Failed to read Claude Code credentials: ${(e as Error).message}`);
-    return null;
-  }
-}
 
 // ─── Scanning: PI via `pi --list-models` ──────────────────────────
 
@@ -219,36 +157,30 @@ function scanPIViaListModels(): PiDiscoveredModel[] {
 export function discoverEndpoints(): DiscoveredEndpoint[] {
   const endpoints: DiscoveredEndpoint[] = [];
 
-  // ── Claude Code → Anthropic plan mode ──
-  const claude = scanClaudeCode();
-  if (claude) {
-    const models = ANTHROPIC_MODEL_TIERS[claude.subscriptionType || 'free'] || ANTHROPIC_MODEL_TIERS.free;
+  // ── Claude Code → Anthropic plan mode (always on) ──
+  endpoints.push({
+    mode: 'plan',
+    endpoint: 'anthropic',
+    base_url: 'https://api.anthropic.com',
+    auth_style: 'bearer',
+    keys: [],
+    passthrough: true,
+    models: ANTHROPIC_MODELS,
+    gatewayManaged: true,
+  });
 
-    // plan mode — OAuth bearer passthrough
+  // api mode — only if ANTHROPIC_API_KEY is set
+  if (process.env.ANTHROPIC_API_KEY) {
     endpoints.push({
-      mode: 'plan',
+      mode: 'api',
       endpoint: 'anthropic',
       base_url: 'https://api.anthropic.com',
-      auth_style: 'bearer',
-      keys: [],
+      auth_style: 'anthropic',
+      keys: ['$ANTHROPIC_API_KEY'],
       passthrough: true,
-      models,
+      models: ANTHROPIC_MODELS,
       gatewayManaged: true,
     });
-
-    // api mode — only if ANTHROPIC_API_KEY is set
-    if (process.env.ANTHROPIC_API_KEY) {
-      endpoints.push({
-        mode: 'api',
-        endpoint: 'anthropic',
-        base_url: 'https://api.anthropic.com',
-        auth_style: 'anthropic',
-        keys: ['$ANTHROPIC_API_KEY'],
-        passthrough: true,
-        models,
-        gatewayManaged: true,
-      });
-    }
   }
 
   // ── PI → per-provider endpoints (one mode per provider) ──
