@@ -117,9 +117,19 @@ function renderToolLine(
     }
   }
   if (kept.length < nonEmpty.length) {
-    const missing = nonEmpty.length - kept.length;
-    const withTail = `${line}${sep}+${missing}${ELLIPSIS}`;
-    if (withTail.length <= MAX_LINE_LEN + 4) line = withTail;
+    // Reserve room for the "+N…" tail; pop kept summaries until it fits.
+    // Dropping the tail entirely would hide the fact that items were truncated.
+    let missing = nonEmpty.length - kept.length;
+    let withTail = `${line}${sep}+${missing}${ELLIPSIS}`;
+    while (withTail.length > MAX_LINE_LEN + 4 && kept.length > 0) {
+      kept.pop();
+      missing = nonEmpty.length - kept.length;
+      line = kept.length === 0
+        ? head
+        : `${head}${sep}${kept.join(sep)}`;
+      withTail = `${line}${sep}+${missing}${ELLIPSIS}`;
+    }
+    line = withTail;
   }
   // Final hard-cap (if even the head+first summary exceeded — rare).
   if (line.length > MAX_LINE_LEN + 4) {
