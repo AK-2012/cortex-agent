@@ -4,7 +4,10 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import * as path from 'path';
+import { existsSync, renameSync } from 'fs';
 import { getCliHelp, runCli } from '../src/entry/cli.js';
+import { STORE_DIR } from '../src/core/utils.js';
 
 // ─── getCliHelp ─────────────────────────────────────────────────
 
@@ -13,6 +16,7 @@ test('getCliHelp includes all subcommand names', () => {
   assert.match(help, /init/);
   assert.match(help, /start/);
   assert.match(help, /daemon/);
+  assert.match(help, /daemon stop/);
   assert.match(help, /task/);
   assert.match(help, /config/);
 });
@@ -59,4 +63,33 @@ test('runCli config returns path info', async () => {
   assert.match(result.stdout, /INSTALL_ROOT/);
   assert.match(result.stdout, /DATA_DIR/);
   assert.equal(result.stderr, '');
+});
+
+// ─── daemon stop ─────────────────────────────────────────────────
+
+test('runCli daemon stop when no PID file exists', async () => {
+  const pidFile = path.join(STORE_DIR, 'daemon.pid');
+  const backup = pidFile + '.test-backup';
+
+  // Temporarily move real PID file to avoid killing a live daemon
+  if (existsSync(pidFile)) {
+    renameSync(pidFile, backup);
+  }
+  try {
+    const result = await runCli(['daemon', 'stop']);
+    assert.equal(result.exitCode, 0);
+    assert.match(result.stdout, /not running/);
+    assert.equal(result.stderr, '');
+  } finally {
+    // Restore
+    if (existsSync(backup)) {
+      renameSync(backup, pidFile);
+    }
+  }
+});
+
+test('runCli bare daemon returns error when not main entry', async () => {
+  const result = await runCli(['daemon']);
+  assert.equal(result.exitCode, 0);
+  assert.match(result.stderr, /must be run from the main entry/);
 });

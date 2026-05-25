@@ -4,6 +4,7 @@
 //           init [--home <path>]  — interactive init (async, runInit)
 //           start                 — fork app.js
 //           daemon                — fork daemon.js
+//           daemon stop           — stop running daemon gracefully (SIGTERM)
 //           task <subcommand>     — delegate to task-cli
 //           config                — show resolved paths
 //         Packaged as dist/entry/cli.js, registered in package.json bin.
@@ -13,7 +14,7 @@ import { fork } from 'child_process';
 import * as path from 'path';
 import * as os from 'os';
 import { fileURLToPath } from 'url';
-import { existsSync, readdirSync, mkdirSync, writeFileSync, utimesSync } from 'fs';
+import { existsSync, readdirSync, mkdirSync, writeFileSync, utimesSync, readFileSync, unlinkSync } from 'fs';
 import { INSTALL_ROOT, DATA_DIR, STORE_DIR, PROJECTS_DIR, WORKSPACE_DIR, isMainModule } from '@core/utils.js';
 import { formatHelp } from '@core/cli-utils.js';
 import { createLogger } from '@core/log.js';
@@ -81,7 +82,8 @@ export function getCliHelp(): string {
     commands: [
       { name: 'init', description: 'Initialize CORTEX_HOME directory with configs and API keys' },
       { name: 'start', description: 'Start the Cortex server (node dist/entry/app.js)' },
-      { name: 'daemon', description: 'Daemon mode with file watching and auto-restart' },
+      { name: 'daemon', description: 'Start daemon mode with file watching and auto-restart' },
+      { name: 'daemon stop', description: 'Stop the running daemon gracefully (SIGTERM)' },
       { name: 'restart', description: 'Signal a running daemon to drain and respawn app.js (touches $STORE_DIR/.restart)' },
       { name: 'task', description: 'Task system CLI (delegate to cortex-task)' },
       { name: 'config', description: 'Show resolved paths and initialization status' },
@@ -96,8 +98,82 @@ export function getCliHelp(): string {
       { description: 'Show resolved paths', command: 'cortex config' },
       { description: 'Re-generate gateway config', command: 'cortex setup-gateway' },
       { description: 'Start the server', command: 'cortex start' },
+      { description: 'Stop the daemon', command: 'cortex daemon stop' },
     ],
   });
+}
+
+// ─── Daemon stop ──────────────────────────────────────────────────
+
+async function stopDaemonInternal(): Promise<CliResult> {
+  const pidFile = path.join(STORE_DIR, 'daemon.pid');
+
+  // Case 1: No PID file
+  if (!existsSync(pidFile)) {
+    return { exitCode: 0, stdout: 'Cortex daemon is not running.\n', stderr: '' };
+  }
+
+  // Read PID
+  let pid: number;
+  try {
+    const raw = readFileSync(pidFile, 'utf8').trim();
+    pid = Number(raw);
+    if (!Number.isFinite(pid) || pid <= 0) {
+      try { unlinkSync(pidFile); } catch {}
+      return { exitCode: 0, stdout: 'Cortex daemon is not running (removed corrupted PID file).\n', stderr: '' };
+    }
+  } catch (err: any) {
+    return { exitCode: 1, stdout: '', stderr: `Failed to read PID file: ${err.message}\n` };
+  }
+
+  // Case 2: PID file exists but process is dead (stale)
+  let alive = false;
+  try { process.kill(pid, 0); alive = true; } catch { alive = false; }
+  if (!alive) {
+    try { unlinkSync(pidFile); } catch {}
+    return { exitCode: 0, stdout: `Cortex daemon is not running (removed stale PID file for PID ${pid}).\n`, stderr: '' };
+  }
+
+  // Case 3: Process is alive — send SIGTERM
+  try {
+    process.kill(pid, 'SIGTERM');
+  } catch (err: any) {
+    return { exitCode: 1, stdout: '', stderr: `Failed to send signal to daemon (PID ${pid}): ${err.message}\n` };
+  }
+
+  // Poll until the process exits (up to 10 seconds, 200ms intervals)
+  const maxWaitMs = 10_000;
+  const pollIntervalMs = 200;
+  const deadline = Date.now() + maxWaitMs;
+
+  while (Date.now() < deadline) {
+    await new Promise(r => setTimeout(r, pollIntervalMs));
+    try { process.kill(pid, 0); } catch { break; }
+  }
+
+  // Recheck liveness
+  try {
+    process.kill(pid, 0);
+    // Still alive after timeout — force kill
+    try { process.kill(pid, 'SIGKILL'); } catch {}
+    return {
+      exitCode: 1,
+      stdout: '',
+      stderr: `Daemon (PID ${pid}) did not stop within ${maxWaitMs / 1000}s. Forcibly killed (SIGKILL).\n`,
+    };
+  } catch {
+    // Process is dead — success
+  }
+
+  // Clean up PID file in case daemon's exit handler didn't run
+  try {
+    if (existsSync(pidFile)) {
+      const raw = readFileSync(pidFile, 'utf8').trim();
+      if (Number(raw) === pid) unlinkSync(pidFile);
+    }
+  } catch {}
+
+  return { exitCode: 0, stdout: `Cortex daemon stopped (PID ${pid}).\n`, stderr: '' };
 }
 
 // ─── Config output ──────────────────────────────────────────────
@@ -223,8 +299,17 @@ export async function runCli(argv: string[]): Promise<CliResult> {
     }
 
     case 'start':
-    case 'daemon':
-      return { exitCode: 0, stdout: '', stderr: `'${cmd}' must be run from the main entry point, not imported.\nUse: node dist/entry/cli.js ${cmd}` };
+      return { exitCode: 0, stdout: '', stderr: `'start' must be run from the main entry point, not imported.\nUse: node dist/entry/cli.js start` };
+
+    case 'daemon': {
+      if (rest[0] === 'stop') {
+        return stopDaemonInternal();
+      }
+      if (rest.includes('--help') || rest.includes('-h')) {
+        return { exitCode: 0, stdout: getCliHelp(), stderr: '' };
+      }
+      return { exitCode: 0, stdout: '', stderr: `'daemon' must be run from the main entry point, not imported.\nUse: node dist/entry/cli.js daemon` };
+    }
 
     default:
       return { exitCode: 1, stdout: '', stderr: `Unknown command: '${cmd}'. Use --help to see available commands.` };
@@ -274,6 +359,15 @@ function main(): void {
   }
 
   if (cmd === 'daemon') {
+    // Subcommand: daemon stop — delegate to runCli, do not fork
+    if (rest[0] === 'stop') {
+      runCli(args).then((result) => {
+        if (result.stdout) console.log(result.stdout);
+        if (result.stderr) console.error(result.stderr);
+        process.exit(result.exitCode);
+      });
+      return;
+    }
     if (!existsSync(DAEMON_JS)) {
       log.error(`Entry not found: ${DAEMON_JS}`);
       log.error('Run `npm run build` first.');
