@@ -34,7 +34,7 @@ import {
   unclaimTask,
 } from './task-state.js';
 import { completeTask, uncompleteTask } from './task-completion.js';
-import { addTask, batchEdit, decomposeTask } from './task-mutations.js';
+import { addTask, batchEdit, bulkAddTasks, decomposeTask } from './task-mutations.js';
 import { stopTask, stopTaskDryRun } from './task-process.js';
 import {
   acquireLock,
@@ -63,6 +63,7 @@ interface ParsedValues {
   clearDependsOn: boolean;
   taskIds: string[];
   subtasksFile: string | null;
+  bulkFile: string | null;
   status: string | null;
   hasDeps: boolean;
   noDeps: boolean;
@@ -81,7 +82,7 @@ const WRITE_COMMANDS = new Set([
   'claim', 'unclaim', 'pause', 'resume', 'pending', 'complete', 'uncomplete',
   'request-approval', 'approve', 'clear-approval',
   'block', 'unblock',
-  'add', 'edit', 'batch-edit', 'decompose',
+  'add', 'edit', 'batch-edit', 'bulk-add', 'decompose',
   'assign-ids', 'validate', 'stop',
   'lock-acquire', 'lock-release', 'lock-status', 'lock-force-release',
 ]);
@@ -100,7 +101,7 @@ const COMMANDS_NEEDING_PROJECT = new Set([
   'claim', 'unclaim', 'pause', 'resume', 'pending', 'complete', 'uncomplete',
   'request-approval', 'approve', 'clear-approval',
   'block', 'unblock',
-  'add', 'edit', 'batch-edit', 'decompose',
+  'add', 'edit', 'batch-edit', 'bulk-add', 'decompose',
   'lock-acquire', 'lock-release', 'lock-force-release',
 ]);
 
@@ -137,6 +138,7 @@ const COMMAND_FLAG_ALLOWLIST: Record<string, Set<string>> = {
     '--depends-on', '--add-depends-on', '--remove-depends-on', '--clear-depends-on', '--auto-lock',
   ]),
   decompose: new Set([...COMMON_FLAGS, '--task', '--subtasks-file', '--dry-run', '--auto-lock']),
+  'bulk-add': new Set([...COMMON_FLAGS, '--file', '--auto-lock']),
   'assign-ids': new Set([...COMMON_FLAGS, '--auto-lock']),
   validate: new Set([...COMMON_FLAGS]),
   stop: new Set([...COMMON_FLAGS, '--dry-run']),
@@ -194,6 +196,7 @@ const HELP_CONFIG = {
       heading: 'Mutation',
       commands: [
         { name: 'add', description: 'Add new task (--text, --why, --done-when, --plan, --template ...)' },
+        { name: 'bulk-add', description: 'Bulk-add tasks from JSON file (--file, use "key" for intra-batch deps)' },
         { name: 'edit', description: 'Edit task fields (--text, --why, --done-when, ...)' },
         { name: 'batch-edit', description: 'Apply same edit to multiple tasks (--task-ids)' },
         { name: 'decompose', description: 'Replace task with subtasks (--subtasks-file)' },
@@ -236,6 +239,7 @@ const HELP_CONFIG = {
     { flag: '--remove-depends-on <id>', description: 'Remove a dependency (edit only, repeatable)' },
     { flag: '--clear-depends-on', description: 'Clear all dependencies (edit only)' },
     { flag: '--subtasks-file <path>', description: 'JSON file with subtasks (decompose; use - for stdin)' },
+    { flag: '--file <path>', description: 'JSON file of tasks (bulk-add; use - for stdin)' },
     { flag: '--status <status>', description: 'Filter by status (read commands)' },
     { flag: '--has-deps', description: 'Read-only: tasks with dependencies' },
     { flag: '--no-deps', description: 'Read-only: tasks without dependencies' },
@@ -276,6 +280,7 @@ const STRING_OPT_KEYS: Record<string, keyof ParsedValues> = {
   '--priority': 'priority',
   '--template': 'template',
   '--subtasks-file': 'subtasksFile',
+  '--file': 'bulkFile',
   '--status': 'status',
   '--skip-verify-reason': 'skipVerifyReason',
 };
@@ -293,6 +298,7 @@ const VALUE_OPTIONS = new Set([
   ...Object.keys(STRING_OPT_KEYS),
   ...Object.keys(APPEND_OPT_KEYS),
   '--task-ids',
+  '--file',
 ]);
 
 function getCliHelp(): string {
@@ -319,6 +325,7 @@ function createDefaults(): ParsedValues {
     clearDependsOn: false,
     taskIds: [],
     subtasksFile: null,
+    bulkFile: null,
     status: null,
     hasDeps: false,
     noDeps: false,
@@ -444,6 +451,9 @@ function validateCommand(command: string, values: ParsedValues): void {
   }
   if (command === 'add' && !values.text) {
     throw cliError('--text is required for add');
+  }
+  if (command === 'bulk-add' && !values.bulkFile) {
+    throw cliError('--file is required for bulk-add (use - for stdin)');
   }
   if (COMMANDS_NEEDING_PROJECT.has(command) && !values.project) {
     throw cliError('--project is required');
@@ -783,6 +793,18 @@ const WRITE_HANDLERS: Record<string, WriteHandler> = {
   edit: handleEdit,
   'batch-edit': handleBatchEdit,
   decompose: handleDecompose,
+  'bulk-add': (v) => {
+    const content = v.bulkFile === '-'
+      ? readStdinSync()
+      : fs.readFileSync(v.bulkFile!, 'utf8');
+    let inputs: any[];
+    try {
+      inputs = JSON.parse(content);
+    } catch (e: any) {
+      return { success: false, message: `Failed to parse JSON input: ${e.message || e}` };
+    }
+    return bulkAddTasks(v.project!, inputs);
+  },
   stop: handleStop,
   'assign-ids': (v) => assignIds(v.project),
   validate: () => validateIds(),
@@ -792,7 +814,7 @@ const WRITE_HANDLERS: Record<string, WriteHandler> = {
   'lock-force-release': handleLockForceRelease,
 };
 
-const LOCK_GUARD_COMMANDS = new Set(['add', 'edit', 'batch-edit', 'decompose']);
+const LOCK_GUARD_COMMANDS = new Set(['add', 'edit', 'batch-edit', 'bulk-add', 'decompose']);
 
 const LOCK_GUARD_ASSIGN_IDS = 'assign-ids';
 
