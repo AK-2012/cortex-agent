@@ -189,7 +189,7 @@ type StatusState = { chain: Promise<unknown>; sealed: boolean; blocksTemplate?: 
 const statusStates = new Map<string, StatusState>();
 
 function statusKey(ref: MessageRef): string {
-  return `${ref.channel}:${ref.messageId}`;
+  return `${ref.conduit}:${ref.messageId}`;
 }
 
 function getOrCreateStatusState(ref: MessageRef): StatusState {

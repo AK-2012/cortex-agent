@@ -20,7 +20,7 @@ function freshChannel() { return `ar-test-${++_seq}`; }
 function makeCtx(overrides: Record<string, any> = {}) {
   const channel = overrides.channel ?? freshChannel();
   return {
-    message: { ref: { channel, messageId: 'M1', threadId: null }, text: 'hi', isBot: false, files: [], subtype: undefined } as any,
+    message: { ref: { conduit: channel, messageId: 'M1', threadId: null }, text: 'hi', isBot: false, files: [], subtype: undefined } as any,
     channel,
     adapter: new MockAdapter() as any,
     threadAnchorId: null,
@@ -58,7 +58,7 @@ test('(a) route() calls addReaction(hourglass) when channel already has a queue'
   // Verify markQueued was called (MockAdapter records marksQueued)
   // assert that the runner called markQueued with the correct ref
   assert.equal(adapter.marksQueued.length, 1, 'markQueued was called once');
-  assert.equal(adapter.marksQueued[0].ref.channel, channel, 'markQueued called with correct channel');
+  assert.equal(adapter.marksQueued[0].ref.conduit, channel, 'markQueued called with correct channel');
   assert.equal(adapter.marksQueued[0].ref.messageId, 'M1', 'markQueued called with correct messageId');
 
   assert.equal(enqueueCalls.length, 1, 'enqueue was called for the channel');

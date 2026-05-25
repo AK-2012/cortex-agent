@@ -208,7 +208,7 @@ export class MockAdapter implements PlatformAdapter {
     const channel = resolveDestinationConduit(destination, this._adminChannel);
     const messageId = String(this.nextId++);
     this.posted.push({ destination, content, threadId: opts?.threadId });
-    return { channel, messageId, threadId: opts?.threadId };
+    return { conduit: channel, messageId, threadId: opts?.threadId };
   }
 
   async updateMessage(ref: MessageRef, content: MessageContent): Promise<void> {
@@ -231,7 +231,7 @@ export class MockAdapter implements PlatformAdapter {
     const channel = resolveDestinationConduit(destination, this._adminChannel);
     const messageId = String(this.nextId++);
     this.posted.push({ destination, content, threadId: opts?.threadId, actions: content.actions });
-    return { channel, messageId, threadId: opts?.threadId };
+    return { conduit: channel, messageId, threadId: opts?.threadId };
   }
 
   async openModal(triggerId: string, modal: ModalDefinition): Promise<void> {
@@ -251,7 +251,7 @@ export class MockAdapter implements PlatformAdapter {
   }
 
   async getPermalink(ref: MessageRef): Promise<string | null> {
-    return `https://mock.test/permalink/${ref.channel}/${ref.messageId}`;
+    return `https://mock.test/permalink/${ref.conduit}/${ref.messageId}`;
   }
 
   // --- Output stream ---
@@ -288,7 +288,7 @@ export class MockAdapter implements PlatformAdapter {
   /** Simulate an inbound message for testing event handlers. */
   async simulateMessage(channel: string, text: string, opts?: { senderId?: string; threadId?: string; isBot?: boolean }): Promise<void> {
     const ref: MessageRef = {
-      channel,
+      conduit: channel,
       messageId: String(this.nextId++),
       threadId: opts?.threadId,
     };
@@ -316,7 +316,7 @@ export class MockAdapter implements PlatformAdapter {
   /** Simulate a message edit for testing edit handlers. */
   async simulateMessageEdit(channel: string, messageId: string, newText: string): Promise<void> {
     const ctx: MessageEditContext = {
-      originalRef: { channel, messageId },
+      originalRef: { conduit: channel, messageId },
       newText,
       raw: {},
     };

@@ -154,7 +154,7 @@ export class SlackAdapter implements PlatformAdapter {
           if (editedMsg.bot_id || editedMsg.subtype === 'bot_message') return;
           if (editedMsg.text === previousMsg.text) return;
           await this.editHandler({
-            originalRef: { channel: msg.channel, messageId: editedMsg.ts },
+            originalRef: { conduit: msg.channel, messageId: editedMsg.ts },
             newText: editedMsg.text || '',
             raw: msg,
           });
@@ -179,7 +179,7 @@ export class SlackAdapter implements PlatformAdapter {
       }
 
       const ref: MessageRef = {
-        channel: msg.channel,
+        conduit: msg.channel,
         messageId: msg.ts,
         threadId: msg.thread_ts || undefined,
       };
@@ -217,7 +217,7 @@ export class SlackAdapter implements PlatformAdapter {
       await handler({
         message: incoming,
         async reply(content, opts) {
-          return adapter.postMessage({ type: 'interactive-reply', conduit: ref.channel, sessionId: '' }, content, {
+          return adapter.postMessage({ type: 'interactive-reply', conduit: ref.conduit, sessionId: '' }, content, {
             threadId: opts?.threadId || ref.threadId,
           });
         },
@@ -237,7 +237,7 @@ export class SlackAdapter implements PlatformAdapter {
         value: action.value,
         triggerId: body.trigger_id,
         messageRef: body.message?.ts ? {
-          channel: body.channel?.id || '',
+          conduit: body.channel?.id || '',
           messageId: body.message.ts,
         } : undefined,
         userId: body.user?.id || '',
@@ -300,7 +300,7 @@ export class SlackAdapter implements PlatformAdapter {
   async postMessage(destination: Destination, content: MessageContent, opts?: PostMessageOpts): Promise<MessageRef> {
     const resolved = await this.resolveDestination(destination);
     if (!resolved.channel) {
-      return { channel: '', messageId: '' };
+      return { conduit: '', messageId: '' };
     }
     const blocks = content.richBlocks ? this.richBlocksToSlack(content.richBlocks) : undefined;
     const payload: any = {
@@ -313,7 +313,7 @@ export class SlackAdapter implements PlatformAdapter {
       this.client.chat.postMessage(payload)
     );
     return {
-      channel: resolved.channel,
+      conduit: resolved.channel,
       messageId: result.ts!,
       threadId: opts?.threadId,
     };
@@ -335,7 +335,7 @@ export class SlackAdapter implements PlatformAdapter {
    * instead of recursing, which avoids coalescing confusion.
    */
   async updateMessage(ref: MessageRef, content: MessageContent): Promise<void> {
-    const key = `${ref.channel}:${ref.messageId}`;
+    const key = `${ref.conduit}:${ref.messageId}`;
     const existing = this.pendingEdits.get(key);
 
     if (existing) {
@@ -361,7 +361,7 @@ export class SlackAdapter implements PlatformAdapter {
     // whether new content arrived during the send.
     while (this.pendingEdits.has(key)) {
       try {
-        await this.rateLimiter.acquire('chat.update', ref.channel);
+        await this.rateLimiter.acquire('chat.update', ref.conduit);
 
         const entry = this.pendingEdits.get(key);
         if (!entry) { resolve!(); return; } // cleaned up (deleteMessage / eviction)
@@ -370,7 +370,7 @@ export class SlackAdapter implements PlatformAdapter {
 
         const blocks = snapshot.richBlocks ? this.richBlocksToSlack(snapshot.richBlocks) : undefined;
         await this.client.chat.update({
-          channel: ref.channel,
+          channel: ref.conduit,
           ts: ref.messageId,
           text: snapshot.text,
           ...(blocks && { blocks }),
@@ -387,7 +387,7 @@ export class SlackAdapter implements PlatformAdapter {
       } catch (e: any) {
         const retryAfterSec = Number(e?.retryAfter ?? e?.headers?.['retry-after']);
         if (Number.isFinite(retryAfterSec) && retryAfterSec > 0) {
-          this.rateLimiter.reportThrottled('chat.update', ref.channel, retryAfterSec);
+          this.rateLimiter.reportThrottled('chat.update', ref.conduit, retryAfterSec);
           // Entry stays in the map with latest coalesced content — just loop.
           continue;
         }
@@ -418,15 +418,15 @@ export class SlackAdapter implements PlatformAdapter {
   async deleteMessage(ref: MessageRef): Promise<void> {
     // Clean up any pending edit for this message so coalescing doesn't
     // try to update a deleted message.
-    const key = `${ref.channel}:${ref.messageId}`;
+    const key = `${ref.conduit}:${ref.messageId}`;
     const pending = this.pendingEdits.get(key);
     if (pending) {
       this.pendingEdits.delete(key);
       pending.resolve();
     }
-    await this.rateLimitedCall('chat.delete', ref.channel, () =>
+    await this.rateLimitedCall('chat.delete', ref.conduit, () =>
       this.client.chat.delete({
-        channel: ref.channel,
+        channel: ref.conduit,
         ts: ref.messageId,
       })
     );
@@ -437,7 +437,7 @@ export class SlackAdapter implements PlatformAdapter {
   async postInteractive(destination: Destination, content: MessageContent & { actions: ActionElement[] }, opts?: PostMessageOpts): Promise<MessageRef> {
     const resolved = await this.resolveDestination(destination);
     if (!resolved.channel) {
-      return { channel: '', messageId: '' };
+      return { conduit: '', messageId: '' };
     }
     const blocks = [
       ...(content.richBlocks ? this.richBlocksToSlack(content.richBlocks) : []),
@@ -455,7 +455,7 @@ export class SlackAdapter implements PlatformAdapter {
       })
     );
     return {
-      channel: resolved.channel,
+      conduit: resolved.channel,
       messageId: result.ts!,
       threadId: opts?.threadId,
     };
@@ -475,9 +475,9 @@ export class SlackAdapter implements PlatformAdapter {
   // --- Queue backpressure ---
 
   private async _addHourglassReaction(ref: MessageRef): Promise<void> {
-    await this.rateLimitedCall('reactions.add', ref.channel, () =>
+    await this.rateLimitedCall('reactions.add', ref.conduit, () =>
       this.client.reactions.add({
-        channel: ref.channel,
+        channel: ref.conduit,
         name: 'hourglass',
         timestamp: ref.messageId,
       })
@@ -571,7 +571,7 @@ export class SlackAdapter implements PlatformAdapter {
   async getPermalink(ref: MessageRef): Promise<string | null> {
     try {
       const result = await this.client.chat.getPermalink({
-        channel: ref.channel,
+        channel: ref.conduit,
         message_ts: ref.messageId,
       });
       return result?.permalink || null;

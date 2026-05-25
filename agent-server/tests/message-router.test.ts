@@ -41,7 +41,7 @@ test('registerMessageHandler wires both onMessage and onMessageEdit on the adapt
   // onMessageEdit delegation: edit ctx is forwarded to deps.handleMessageEdit.
   await adapter.simulateMessageEdit('C1', 'M1', 'edited text');
   assert.equal(editCalls.length, 1);
-  assert.equal(editCalls[0].originalRef.channel, 'C1');
+  assert.equal(editCalls[0].originalRef.conduit, 'C1');
   assert.equal(editCalls[0].newText, 'edited text');
 });
 
@@ -80,7 +80,7 @@ test('message with kind=system is skipped before dispatchCommand', async () => {
       isBot: false,
       text: 'ignored',
       files: [],
-      ref: { channel: 'C1', messageId: 'M1' },
+      ref: { conduit: 'C1', messageId: 'M1' },
     },
     reply: async () => {},
   });

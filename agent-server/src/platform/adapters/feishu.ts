@@ -139,7 +139,7 @@ export class FeishuAdapter implements PlatformAdapter {
   async postMessage(destination: Destination, content: MessageContent, opts?: PostMessageOpts): Promise<MessageRef> {
     const resolved = await this.resolveDestination(destination);
     if (!resolved.channel) {
-      return { channel: '', messageId: '' };
+      return { conduit: '', messageId: '' };
     }
     const threadId = opts?.threadId;
 
@@ -159,7 +159,7 @@ export class FeishuAdapter implements PlatformAdapter {
     });
 
     const messageId = (res as any)?.data?.message_id || '';
-    return { channel: resolved.channel, messageId };
+    return { conduit: resolved.channel, messageId };
   }
 
   async updateMessage(ref: MessageRef, content: MessageContent): Promise<void> {
@@ -186,7 +186,7 @@ export class FeishuAdapter implements PlatformAdapter {
   ): Promise<MessageRef> {
     const resolved = await this.resolveDestination(destination);
     if (!resolved.channel) {
-      return { channel: '', messageId: '' };
+      return { conduit: '', messageId: '' };
     }
     const elements = content.richBlocks
       ? this.richBlocksToFeishuElements(content.richBlocks)
@@ -216,7 +216,7 @@ export class FeishuAdapter implements PlatformAdapter {
         },
       });
       const messageId = (res as any)?.data?.message_id || '';
-      return { channel: resolved.channel, messageId, threadId };
+      return { conduit: resolved.channel, messageId, threadId };
     }
 
     const res = await this.client.im.v1.message.create({
@@ -229,7 +229,7 @@ export class FeishuAdapter implements PlatformAdapter {
     });
 
     const messageId = (res as any)?.data?.message_id || '';
-    return { channel: resolved.channel, messageId };
+    return { conduit: resolved.channel, messageId };
   }
 
   async openModal(triggerId: string, modal: ModalDefinition): Promise<void> {
@@ -409,7 +409,7 @@ export class FeishuAdapter implements PlatformAdapter {
     const parentId = message.parent_id || undefined;
 
     const ref: MessageRef = {
-      channel: chatId,
+      conduit: chatId,
       messageId,
       threadId: rootId || parentId || undefined,
     };
@@ -437,7 +437,7 @@ export class FeishuAdapter implements PlatformAdapter {
     await this.messageHandler({
       message: incoming,
       async reply(content, replyOpts) {
-        return adapter.postMessage({ type: 'interactive-reply', conduit: ref.channel, sessionId: '' }, content, {
+        return adapter.postMessage({ type: 'interactive-reply', conduit: ref.conduit, sessionId: '' }, content, {
           threadId: replyOpts?.threadId || ref.threadId,
         });
       },
@@ -490,7 +490,7 @@ export class FeishuAdapter implements PlatformAdapter {
         actionId,
         value: typeof actionValue === 'string' ? actionValue : JSON.stringify(actionValue),
         triggerId: `${chatId}:${messageId}`,
-        messageRef: messageId ? { channel: chatId, messageId } : undefined,
+        messageRef: messageId ? { conduit: chatId, messageId } : undefined,
         userId,
         channelId: chatId,
       });
@@ -534,7 +534,7 @@ export class FeishuAdapter implements PlatformAdapter {
     });
 
     const messageId = (res as any)?.data?.message_id || '';
-    return { channel: '', messageId, threadId: threadMessageId };
+    return { conduit: '', messageId, threadId: threadMessageId };
   }
 
   /** Convert RichBlock[] to Feishu card schema 2.0 elements. */

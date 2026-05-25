@@ -144,7 +144,7 @@ test('!cancel with 2+ executions: clicking cancel button kills execution', async
 
   await adapter.simulateAction('cmd:cancel:exec-0',
     JSON.stringify({ threadId: null, registryKey: 'exec-cancel-test' }),
-    { channelId: 'C123', messageRef: { channel: 'C123', messageId: 'msg-1' } },
+    { channelId: 'C123', messageRef: { conduit: 'C123', messageId: 'msg-1' } },
   );
 
   assert.equal(runningExecutions.getByKey('exec-cancel-test'), null);
@@ -299,7 +299,7 @@ test('!status Refresh button click re-runs report and updates message', async ()
   router.bindToAdapter(adapter);
 
   await adapter.simulateAction('cmd:status:refresh', '',
-    { channelId: 'C123', messageRef: { channel: 'C123', messageId: 'status-msg-1' } },
+    { channelId: 'C123', messageRef: { conduit: 'C123', messageId: 'status-msg-1' } },
   );
 
   assert.equal(callCount, 1, 'should have called getExecutionStatusReport again');
@@ -358,7 +358,7 @@ test('!help category button click updates message to show filtered commands', as
   router.bindToAdapter(adapter);
 
   await adapter.simulateAction('cmd:help:cat-session', 'session',
-    { channelId: 'C123', messageRef: { channel: 'C123', messageId: 'help-msg-1' } },
+    { channelId: 'C123', messageRef: { conduit: 'C123', messageId: 'help-msg-1' } },
   );
 
   const lastUpdated = adapter.updated[adapter.updated.length - 1];
@@ -377,7 +377,7 @@ test('!help "Show All" button click updates message to full help', async () => {
   router.bindToAdapter(adapter);
 
   await adapter.simulateAction('cmd:help:cat-all', 'all',
-    { channelId: 'C123', messageRef: { channel: 'C123', messageId: 'help-msg-1' } },
+    { channelId: 'C123', messageRef: { conduit: 'C123', messageId: 'help-msg-1' } },
   );
 
   const lastUpdated = adapter.updated[adapter.updated.length - 1];
@@ -420,7 +420,7 @@ test('!devices Refresh button click updates message with fresh device data', asy
   router.bindToAdapter(adapter);
 
   await adapter.simulateAction('cmd:devices:refresh', 'refresh',
-    { channelId: 'C123', messageRef: { channel: 'C123', messageId: 'devices-msg-1' } },
+    { channelId: 'C123', messageRef: { conduit: 'C123', messageId: 'devices-msg-1' } },
   );
 
   const lastUpdated = adapter.updated[adapter.updated.length - 1];
@@ -482,7 +482,7 @@ test('!tasks filter action handler is registered when router present', async () 
   // (won't update because no real project data, but shouldn't throw)
   await adapter.simulateAction('cmd:tasks:filter-all',
     JSON.stringify({ project: 'nonexistent', filter: 'all' }),
-    { channelId: 'C123', messageRef: { channel: 'C123', messageId: 'tasks-msg-1' } },
+    { channelId: 'C123', messageRef: { conduit: 'C123', messageId: 'tasks-msg-1' } },
   );
   // No crash = handler is registered and runs gracefully with missing data
 });
@@ -517,7 +517,7 @@ test('!resume with router registers switch action handlers', async () => {
   // Action handlers for session switching should be registered
   // Simulate a switch action — won't find a real session but shouldn't throw
   await adapter.simulateAction('cmd:resume:switch-0', 'nonexistent-session',
-    { channelId: 'C123', messageRef: { channel: 'C123', messageId: 'resume-msg-1' } },
+    { channelId: 'C123', messageRef: { conduit: 'C123', messageId: 'resume-msg-1' } },
   );
   // No crash = handlers registered correctly
 });
@@ -560,7 +560,7 @@ test('!profile switch button click changes profile', async () => {
 
   // Simulate clicking a profile switch button
   await adapter.simulateAction('cmd:profile:set-0', JSON.stringify({ name: 'plan', channel: 'C123' }),
-    { channelId: 'C123', messageRef: { channel: 'C123', messageId: 'profile-msg-1' } },
+    { channelId: 'C123', messageRef: { conduit: 'C123', messageId: 'profile-msg-1' } },
   );
 
   const lastUpdated = adapter.updated[adapter.updated.length - 1];
@@ -613,7 +613,7 @@ test('!agent disable button click disables default agent', async () => {
   router.bindToAdapter(adapter);
 
   await adapter.simulateAction('cmd:agent:disable', '',
-    { channelId: 'C123', messageRef: { channel: 'C123', messageId: 'agent-msg-1' } },
+    { channelId: 'C123', messageRef: { conduit: 'C123', messageId: 'agent-msg-1' } },
   );
 
   const lastUpdated = adapter.updated[adapter.updated.length - 1];
@@ -651,7 +651,7 @@ test('!register with router registers action handlers', async () => {
 
   // Registration action handler should exist
   await adapter.simulateAction('cmd:register:project-0', 'nonexistent-project',
-    { channelId: 'C123', messageRef: { channel: 'C123', messageId: 'reg-msg-1' } },
+    { channelId: 'C123', messageRef: { conduit: 'C123', messageId: 'reg-msg-1' } },
   );
   // No crash = handlers registered
 });
@@ -694,7 +694,7 @@ test('!schedule list with router registers action handlers for pause/resume/remo
 
   // Pause/resume/remove action handlers should exist
   await adapter.simulateAction('cmd:schedule:pause-0', 'test-id',
-    { channelId: 'C123', messageRef: { channel: 'C123', messageId: 'sched-msg-1' } },
+    { channelId: 'C123', messageRef: { conduit: 'C123', messageId: 'sched-msg-1' } },
   );
   // No crash = handlers registered
 });

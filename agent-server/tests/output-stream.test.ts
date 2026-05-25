@@ -130,7 +130,7 @@ test('SlackOutputStream: getParentRef returns first message ref', async () => {
   await stream.flush();
   const ref = stream.getParentRef();
   assert.ok(ref);
-  assert.equal(ref!.channel, 'C123');
+  assert.equal(ref!.conduit, 'C123');
   assert.equal(ref!.messageId, '1000');
 });
 

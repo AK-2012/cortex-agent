@@ -284,7 +284,7 @@ function buildRetryProgressUpdater(adapter: PlatformAdapter, channel: string, st
 // --- Internal helpers ---
 
 function updateRetryPermalinks(adapter: PlatformAdapter, channel: string, userMessageTs: string, statusMsg: MessageRef, supersededTimestamps: string[] | undefined, retryPrefix: string, startTime: number, sessionName: string | null, sessionId: string | null): void {
-  const userPermalinkP = adapter.getPermalink({ channel, messageId: userMessageTs }).catch(() => null);
+  const userPermalinkP = adapter.getPermalink({ conduit: channel, messageId: userMessageTs }).catch(() => null);
   const statusPermalinkP = supersededTimestamps?.length
     ? adapter.getPermalink(statusMsg).catch(() => null)
     : Promise.resolve(null);
@@ -296,7 +296,7 @@ function updateRetryPermalinks(adapter: PlatformAdapter, channel: string, userMe
     if (statusPermalink && supersededTimestamps?.length) {
       for (const oldTs of supersededTimestamps) {
         adapter.updateMessage(
-          { channel, messageId: oldTs },
+          { conduit: channel, messageId: oldTs },
           { text: `${Icons.superseded} Superseded by edit \u2014 <${statusPermalink}|see new reply>` },
         ).catch(() => {});
       }

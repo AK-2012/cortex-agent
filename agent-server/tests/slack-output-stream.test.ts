@@ -153,7 +153,7 @@ test('SlackOutputStream: getParentRef returns full MessageRef', async () => {
   await flush(stream);
   const ref = stream.getParentRef();
   assert.ok(ref);
-  assert.equal(ref!.channel, 'C123');
+  assert.equal(ref!.conduit, 'C123');
   assert.equal(ref!.messageId, '1000');
 });
 
@@ -401,7 +401,7 @@ test('MockAdapter: simulateAction triggers registered handler', async () => {
 test('MockAdapter: reset clears all recorded state', async () => {
   const adapter = new MockAdapter();
   await adapter.postMessage(testDest('C1'), { text: 'hi' });
-  await adapter.markQueued({ channel: 'C1', messageId: '1' });
+  await adapter.markQueued({ conduit: 'C1', messageId: '1' });
   adapter.reset();
 
   assert.equal(adapter.posted.length, 0);

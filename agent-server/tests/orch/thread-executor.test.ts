@@ -19,7 +19,7 @@ function freshChannel() { return `te-test-${++_seq}`; }
 
 function makeCtx(channel: string, overrides: Record<string, any> = {}) {
   return {
-    message: { ref: { channel, messageId: 'M1', threadId: null }, text: 'hi', isBot: false, files: [], subtype: undefined } as any,
+    message: { ref: { conduit: channel, messageId: 'M1', threadId: null }, text: 'hi', isBot: false, files: [], subtype: undefined } as any,
     channel,
     adapter: new MockAdapter() as any,
     threadAnchorId: null,
@@ -96,7 +96,7 @@ test('(c) route() calls addReaction(hourglass) when channel already has a runnin
 
   // markQueued should have been called when the channel already had a queue
   assert.equal(adapter.marksQueued.length, 1, 'markQueued was called once');
-  assert.equal(adapter.marksQueued[0].ref.channel, channel, 'markQueued called with correct channel');
+  assert.equal(adapter.marksQueued[0].ref.conduit, channel, 'markQueued called with correct channel');
   assert.equal(adapter.marksQueued[0].ref.messageId, 'M1', 'markQueued called with correct messageId');
   assert.equal(enqueueCalls.length, 1, 'enqueue was called');
 

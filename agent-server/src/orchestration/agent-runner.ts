@@ -80,7 +80,7 @@ export class AgentRunner {
   async route(ctx: AgentRunnerCtx): Promise<void> {
     const { message, channel, adapter } = ctx;
     if (channelQueues.has(channel)) {
-      await adapter.markQueued({ channel, messageId: message.ref.messageId }).catch(() => {});
+      await adapter.markQueued({ conduit: channel, messageId: message.ref.messageId }).catch(() => {});
     }
     this._track(+1);
 

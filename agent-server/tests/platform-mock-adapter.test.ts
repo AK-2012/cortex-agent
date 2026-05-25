@@ -59,7 +59,7 @@ test('postMessage records destination/content/threadId and returns unique ascend
   assert.equal(adapter.posted.length, 2);
   assert.deepEqual(adapter.posted[0], { destination: dest1, content: { text: 'hello' }, threadId: undefined });
   assert.deepEqual(adapter.posted[1], { destination: dest2, content: { text: 'world' }, threadId: 'T1' });
-  assert.equal(ref1.channel, 'C1');
+  assert.equal(ref1.conduit, 'C1');
   assert.ok(ref1.messageId);
   assert.ok(ref2.messageId);
   assert.notEqual(ref1.messageId, ref2.messageId);
@@ -88,7 +88,7 @@ test('postInteractive records actions alongside content', async () => {
   assert.equal(adapter.posted[0].actions, actions);
   assert.equal(adapter.posted[0].threadId, 'T1');
   assert.equal(adapter.posted[0].destination, dest);
-  assert.equal(ref.channel, 'C1');
+  assert.equal(ref.conduit, 'C1');
 });
 
 test('openModal records every opened modal with triggerId', async () => {
@@ -129,7 +129,7 @@ test('uploadFile records filePath + opts and downloadFile synthesises localPath'
 
 test('getPermalink returns deterministic mock URL', async () => {
   const adapter = new MockAdapter();
-  const ref = { channel: 'C1', messageId: 'M7' };
+  const ref = { conduit: 'C1', messageId: 'M7' };
   assert.equal(await adapter.getPermalink(ref), 'https://mock.test/permalink/C1/M7');
 });
 
@@ -166,7 +166,7 @@ test('onMessageEdit handlers fire for simulateMessageEdit with original ref + ne
   let captured: MessageEditContext | null = null;
   adapter.onMessageEdit(async (ctx) => { captured = ctx; });
   await adapter.simulateMessageEdit('C1', 'M-7', 'new body');
-  assert.equal(captured!.originalRef.channel, 'C1');
+  assert.equal(captured!.originalRef.conduit, 'C1');
   assert.equal(captured!.originalRef.messageId, 'M-7');
   assert.equal(captured!.newText, 'new body');
 });

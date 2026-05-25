@@ -142,7 +142,7 @@ function collectModalAnswers(group: QuestionGroup, values: Record<string, Record
 async function updateQuestionMessage(group: QuestionGroup & { responseMessageTs?: string; channel: string }): Promise<void> {
   if (!group.responseMessageTs || !_adapter) return;
   await _adapter.updateMessage(
-    { channel: group.channel, messageId: group.responseMessageTs },
+    { conduit: group.channel, messageId: group.responseMessageTs },
     {
       text: `Questions (${group.answers.size}/${group.questions.length} answered)`,
       richBlocks: askUserQuestion.buildQuestionGroupBlocks(group),

@@ -8,7 +8,8 @@
 /** Universal reference to a message on any platform.
  *  Replaces the Slack-specific (channel, ts, thread_ts) triplet. */
 export interface MessageRef {
-  channel: string;
+  /** Adapter-defined conduit identifier (Slack channel id; Feishu chat_id; TUI synthetic connection id) */
+  conduit: string;
   messageId: string;
   threadId?: string;
 }

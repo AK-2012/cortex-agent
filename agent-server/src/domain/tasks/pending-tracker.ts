@@ -150,7 +150,7 @@ function handleTaskProgress({ task_id, machine, cost_usd, turn_count, elapsed_s 
   const text = buildTrackingMessage({ taskId: task_id, machine: machine || t.machine, taskText: t.taskText, startedAtMs: t.launchedAt, elapsed_s, turn_count, cost_usd, status: 'running' });
   (async () => {
     try {
-      await _adapter!.updateMessage({ channel: channel, messageId: t.trackingTs! }, { text });
+      await _adapter!.updateMessage({ conduit: channel, messageId: t.trackingTs! }, { text });
     } catch (e) {
       log.error(`Failed to update tracking for ${task_id}:`, (e as Error).message);
     }

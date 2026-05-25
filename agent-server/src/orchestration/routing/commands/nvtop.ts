@@ -29,7 +29,7 @@ async function updateNvtopMessage(channel: string, adapter: PlatformAdapter): Pr
   const snapshot = await queryGpuSnapshot(active.machine);
   rememberGpuHistory(active.historyByGpu, snapshot);
   const text = renderGpuSnapshot(snapshot, active.historyByGpu, NVTOP_REFRESH_MS / 1000);
-  await adapter.updateMessage({ channel, messageId: active.trackingTs }, { text });
+  await adapter.updateMessage({ conduit: channel, messageId: active.trackingTs }, { text });
 }
 
 export async function handleNvidiaSmiCmd(channel: string, adapter: PlatformAdapter, trimmedMessage: string): Promise<void> {

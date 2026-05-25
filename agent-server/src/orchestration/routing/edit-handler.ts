@@ -44,7 +44,7 @@ function createEditHandler(deps: {
 }) {
   return async function handleMessageEdit(ctx: MessageEditContext, adapter: PlatformAdapter) {
     const { originalRef, newText } = ctx;
-    const channel = originalRef.channel;
+    const channel = originalRef.conduit;
     const originalTs = originalRef.messageId;
 
     log.info('Message edited:', { channel, ts: originalTs, new: newText?.substring(0, 40) });
@@ -182,7 +182,7 @@ async function cleanupSupersededMessages(supersededTurns: LedgerTurn[], channel:
   for (const turn of supersededTurns) {
     for (const ts of turn.responseMessageTimestamps) {
       promises.push(
-        adapter.deleteMessage({ channel, messageId: ts }).catch((e) => {
+        adapter.deleteMessage({ conduit: channel, messageId: ts }).catch((e) => {
           log.warn('Failed to delete message:', ts, (e as Error).message);
         })
       );
@@ -192,7 +192,7 @@ async function cleanupSupersededMessages(supersededTurns: LedgerTurn[], channel:
       supersededStatusTimestamps.push(turn.statusMessageTs);
       promises.push(
         adapter.updateMessage(
-          { channel, messageId: turn.statusMessageTs },
+          { conduit: channel, messageId: turn.statusMessageTs },
           { text: `${Icons.superseded} Superseded by edit` },
         ).catch(() => {})
       );

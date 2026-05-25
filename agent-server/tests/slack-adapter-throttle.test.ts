@@ -59,7 +59,7 @@ function makeAdapter(opts?: { rateLimiter?: TokenBucketRateLimiter }) {
 
 test('SlackAdapter: concurrent updates to same message coalesce into one API call', async () => {
   const { adapter, calls } = makeAdapter();
-  const ref = { channel: 'C1', messageId: 'ts-1' };
+  const ref = { conduit: 'C1', messageId: 'ts-1' };
 
   // Three concurrent updates to the same message
   await Promise.all([
@@ -75,9 +75,9 @@ test('SlackAdapter: concurrent updates to same message coalesce into one API cal
 test('SlackAdapter: updates to different messages are independent', async () => {
   const { adapter, calls } = makeAdapter();
   await Promise.all([
-    adapter.updateMessage({ channel: 'C1', messageId: 'ts-A' }, { text: 'a' }),
-    adapter.updateMessage({ channel: 'C1', messageId: 'ts-B' }, { text: 'b' }),
-    adapter.updateMessage({ channel: 'C2', messageId: 'ts-A' }, { text: 'c' }),
+    adapter.updateMessage({ conduit: 'C1', messageId: 'ts-A' }, { text: 'a' }),
+    adapter.updateMessage({ conduit: 'C1', messageId: 'ts-B' }, { text: 'b' }),
+    adapter.updateMessage({ conduit: 'C2', messageId: 'ts-A' }, { text: 'c' }),
   ]);
 
   assert.equal(calls.length, 3);
@@ -85,7 +85,7 @@ test('SlackAdapter: updates to different messages are independent', async () => 
 
 test('SlackAdapter: coalesced update sends the latest content only', async () => {
   const { adapter, calls } = makeAdapter();
-  const ref = { channel: 'C1', messageId: 'ts-coalesce' };
+  const ref = { conduit: 'C1', messageId: 'ts-coalesce' };
   let lastReceived: any = null;
   (adapter as any).client.chat.update = async (args: any) => {
     calls.push({ method: 'chat.update', ts: Date.now() });
@@ -113,7 +113,7 @@ test('SlackAdapter: 429 on chat.update triggers rate limiter backoff and retry',
     cleanupIntervalMs: 100_000,
   });
   const { adapter, calls } = makeAdapter({ rateLimiter: tightLimiter });
-  const ref = { channel: 'C1', messageId: 'ts-429' };
+  const ref = { conduit: 'C1', messageId: 'ts-429' };
 
   // Use a call-counter: first call fails (429), subsequent succeed
   let callCount = 0;
@@ -140,7 +140,7 @@ test('SlackAdapter: 429 on chat.update triggers rate limiter backoff and retry',
 
 test('SlackAdapter: coalescing works during in-flight API call that returns 429', { timeout: 10000 }, async () => {
   const { adapter, calls } = makeAdapter();
-  const ref = { channel: 'C1', messageId: 'ts-coalesce-429' };
+  const ref = { conduit: 'C1', messageId: 'ts-coalesce-429' };
 
   // Track what text each chat.update call receives
   const receivedTexts: string[] = [];
@@ -221,7 +221,7 @@ test('SlackAdapter: 429 on rateLimitedCall propagates to rate limiter', async ()
 
 test('SlackAdapter: deleteMessage clears pending edits', async () => {
   const { adapter, calls } = makeAdapter();
-  const ref = { channel: 'C1', messageId: 'ts-del' };
+  const ref = { conduit: 'C1', messageId: 'ts-del' };
 
   // Start an update that will be pending (no rate limit contention with fast limiter,
   // but just verify the pending edit is cleaned up on delete)

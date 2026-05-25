@@ -82,9 +82,9 @@ test('scheduled success path creates thread and runs via thread system', async (
     postMessage: async (dest, content, opts?) => {
       // dest is a Destination object; extract channel for the MessageRef
       const channel = typeof dest === 'string' ? dest : 'C123';
-      return { channel, messageId: 'status-ts', threadId: opts?.threadId };
+      return { conduit: channel, messageId: 'status-ts', threadId: opts?.threadId };
     },
-    updateMessage: async (ref, content) => { statusUpdates.push({ channel: ref.channel, messageId: ref.messageId, text: content.text }); },
+    updateMessage: async (ref, content) => { statusUpdates.push({ channel: ref.conduit, messageId: ref.messageId, text: content.text }); },
   };
 
   const sessionRegistered = [];

@@ -49,13 +49,13 @@ function createMockAdapter(overrides: {
     postMessage: overrides.postMessage ?? (async (destination: Destination, _content: MessageContent, opts?: PostMessageOpts): Promise<MessageRef> => {
       postCount++;
       const channel = destination.type === 'interactive-reply' ? destination.conduit : 'unknown';
-      return { channel, messageId: `mock-ts-${postCount}`, threadId: opts?.threadId };
+      return { conduit: channel, messageId: `mock-ts-${postCount}`, threadId: opts?.threadId };
     }),
     updateMessage: overrides.updateMessage ?? (async () => {}),
     deleteMessage: async () => {},
     postInteractive: async (destination: Destination) => {
       const channel = destination.type === 'interactive-reply' ? destination.conduit : 'unknown';
-      return { channel, messageId: 'mock-interactive' };
+      return { conduit: channel, messageId: 'mock-interactive' };
     },
     openModal: async () => {},
     markQueued: async () => {},
@@ -175,7 +175,7 @@ test('OutboundQueue - drain sends pending post entries', async () => {
     postMessage: async (destination: Destination, content) => {
       const channel = destination.type === 'interactive-reply' ? destination.conduit : 'unknown';
       posted.push({ channel, text: content.text });
-      return { channel, messageId: `ts-${posted.length}` };
+      return { conduit: channel, messageId: `ts-${posted.length}` };
     },
   });
 
@@ -199,7 +199,7 @@ test('OutboundQueue - drain sends pending update entries', async () => {
   const updated: { channel: string; messageId: string; text: string }[] = [];
   const adapter = createMockAdapter({
     updateMessage: async (ref, content) => {
-      updated.push({ channel: ref.channel, messageId: ref.messageId, text: content.text });
+      updated.push({ channel: ref.conduit, messageId: ref.messageId, text: content.text });
     },
   });
 
@@ -222,7 +222,7 @@ test('OutboundQueue - drain falls back to post when update fails', async () => {
     postMessage: async (destination: Destination, content) => {
       const channel = destination.type === 'interactive-reply' ? destination.conduit : 'unknown';
       posted.push({ channel, text: content.text });
-      return { channel, messageId: 'fallback-ts' };
+      return { conduit: channel, messageId: 'fallback-ts' };
     },
   });
 
@@ -242,7 +242,7 @@ test('OutboundQueue - drain marks sent entries and does not re-send', async () =
   const adapter = createMockAdapter({
     postMessage: async (_destination: Destination) => {
       postCount++;
-      return { channel: 'C1', messageId: `ts-${postCount}` };
+      return { conduit: 'C1', messageId: `ts-${postCount}` };
     },
   });
 
@@ -290,7 +290,7 @@ test('OutboundQueue - drain skips entries older than TTL', async () => {
   const adapter = createMockAdapter({
     postMessage: async (_destination: Destination) => {
       postCount++;
-      return { channel: 'C1', messageId: `ts-${postCount}` };
+      return { conduit: 'C1', messageId: `ts-${postCount}` };
     },
   });
 
@@ -317,7 +317,7 @@ test('OutboundQueue - drain sends entries within TTL', async () => {
   const adapter = createMockAdapter({
     postMessage: async (_destination: Destination) => {
       postCount++;
-      return { channel: 'C1', messageId: `ts-${postCount}` };
+      return { conduit: 'C1', messageId: `ts-${postCount}` };
     },
   });
 
@@ -402,7 +402,7 @@ test('OutboundQueue - drain retries on transient adapter failure', async () => {
     postMessage: async (_destination: Destination) => {
       attempt++;
       if (attempt === 1) throw new Error('transient');
-      return { channel: 'C1', messageId: 'ts-ok' };
+      return { conduit: 'C1', messageId: 'ts-ok' };
     },
   });
 

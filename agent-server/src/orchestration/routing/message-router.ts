@@ -43,9 +43,9 @@ export function registerMessageHandler(adapter: PlatformAdapter, deps: MessageHa
 
     const threadAnchorId = message.ref.threadId || null;
 
-    if (shouldSkipForCommandDispatch(trimmedMessage, dispatchCommand, message.ref.channel, adapter, threadAnchorId)) return;
+    if (shouldSkipForCommandDispatch(trimmedMessage, dispatchCommand, message.ref.conduit, adapter, threadAnchorId)) return;
 
-    const channel = message.ref.channel;
+    const channel = message.ref.conduit;
 
     let agentMessage = normalizeSkillCommandPrefix(userMessage || '');
     if (forwardedContent) {

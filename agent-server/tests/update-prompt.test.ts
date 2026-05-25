@@ -113,7 +113,7 @@ test('Apply button click resolves ask() with "apply" and confirms', async () => 
 
   await adapter.simulateAction('cmd:update:apply', '2026.5.30', {
     channelId: 'C-admin',
-    messageRef: { channel: 'C-admin', messageId: 'msg-apply' },
+    messageRef: { conduit: 'C-admin', messageId: 'msg-apply' },
   });
 
   const result = await askPromise;
@@ -136,7 +136,7 @@ test('Skip button click resolves ask() with "skip" and confirms', async () => {
 
   await adapter.simulateAction('cmd:update:skip', '2026.5.30', {
     channelId: 'C-admin',
-    messageRef: { channel: 'C-admin', messageId: 'msg-skip' },
+    messageRef: { conduit: 'C-admin', messageId: 'msg-skip' },
   });
 
   const result = await askPromise;
@@ -159,7 +159,7 @@ test('Cancel button click resolves ask() with "cancel" and confirms', async () =
 
   await adapter.simulateAction('cmd:update:cancel', '2026.5.30', {
     channelId: 'C-admin',
-    messageRef: { channel: 'C-admin', messageId: 'msg-cancel' },
+    messageRef: { conduit: 'C-admin', messageId: 'msg-cancel' },
   });
 
   const result = await askPromise;
@@ -186,7 +186,7 @@ test('stale button click without pending promise is no-op', async () => {
   // Click without any pending ask() — should not throw
   await adapter.simulateAction('cmd:update:apply', '2026.5.30', {
     channelId: 'C-admin',
-    messageRef: { channel: 'C-admin', messageId: 'stale-msg' },
+    messageRef: { conduit: 'C-admin', messageId: 'stale-msg' },
   });
 
   // No message should have been updated
@@ -221,7 +221,7 @@ test('re-prompt while pending resolves old promise with null', async () => {
   // Second promise should still be pending — resolve it with a button click
   await adapter.simulateAction('cmd:update:apply', '2026.5.31', {
     channelId: 'C-admin',
-    messageRef: { channel: 'C-admin', messageId: 'msg-reprompt' },
+    messageRef: { conduit: 'C-admin', messageId: 'msg-reprompt' },
   });
 
   const secondResult = await secondAsk;

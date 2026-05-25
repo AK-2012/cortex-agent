@@ -186,7 +186,7 @@ export class OutboundQueue {
         } else {
           try {
             await this.adapter.updateMessage(
-              { channel: entry.channel, messageId: entry.messageId! },
+              { conduit: entry.channel, messageId: entry.messageId! },
               { text: entry.text, ...(entry.richBlocks && { richBlocks: entry.richBlocks }) },
             );
             await this.markSent(entry.id);
@@ -333,7 +333,7 @@ export async function durableUpdate(
 ): Promise<void> {
   const walId = await queue.enqueue({
     type: 'update',
-    channel: ref.channel,
+    channel: ref.conduit,
     messageId: ref.messageId,
     text: content.text,
     richBlocks: content.richBlocks,

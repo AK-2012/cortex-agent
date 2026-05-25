@@ -12,7 +12,7 @@ import { MockAdapter } from '../src/platform/testing.js';
 
 test('writeStatus: serialized writes land on adapter in call order', async () => {
   const adapter = new MockAdapter();
-  const ref = { channel: 'C1', messageId: 'M1' };
+  const ref = { conduit: 'C1', messageId: 'M1' };
 
   // Awaiting the returned promises drains the chain deterministically.
   await writeStatus(adapter, ref, 'one');
@@ -29,7 +29,7 @@ test('writeStatus: serialized writes land on adapter in call order', async () =>
 
 test('sealStatus: final text is the last write (in-flight progress cannot overwrite it)', async () => {
   const adapter = new MockAdapter();
-  const ref = { channel: 'C1', messageId: 'M1' };
+  const ref = { conduit: 'C1', messageId: 'M1' };
 
   // Simulate the production flow: many progress writes fire-and-forget, then
   // seal with the final "done" text.
@@ -45,7 +45,7 @@ test('sealStatus: final text is the last write (in-flight progress cannot overwr
 
 test('sealStatus: writeStatus issued after seal is dropped — the key race fix', async () => {
   const adapter = new MockAdapter();
-  const ref = { channel: 'C2', messageId: 'M2' };
+  const ref = { conduit: 'C2', messageId: 'M2' };
 
   // Agent completes → seal writes "done".
   await sealStatus(adapter, ref, 'done');
@@ -61,7 +61,7 @@ test('sealStatus: writeStatus issued after seal is dropped — the key race fix'
 
 test('sealStatus: awaits pending chain before writing final (no truncated race)', async () => {
   const adapter = new MockAdapter();
-  const ref = { channel: 'C3', messageId: 'M3' };
+  const ref = { conduit: 'C3', messageId: 'M3' };
 
   // Fire many writes, then seal without awaiting them individually.
   writeStatus(adapter, ref, 'p1');
@@ -83,8 +83,8 @@ test('sealStatus: awaits pending chain before writing final (no truncated race)'
 
 test('sealing one statusMsg does not block writes to a different statusMsg', async () => {
   const adapter = new MockAdapter();
-  const refA = { channel: 'C1', messageId: 'A' };
-  const refB = { channel: 'C1', messageId: 'B' };
+  const refA = { conduit: 'C1', messageId: 'A' };
+  const refB = { conduit: 'C1', messageId: 'B' };
 
   await sealStatus(adapter, refA, 'A done');
   await writeStatus(adapter, refB, 'B processing');
@@ -101,7 +101,7 @@ test('sealing one statusMsg does not block writes to a different statusMsg', asy
 test('writeStatus: a failed update does not break the chain for subsequent writes', async () => {
   const adapter = new MockAdapter();
   adapter.failUpdateMessageCount = 1; // first updateMessage throws
-  const ref = { channel: 'C4', messageId: 'M4' };
+  const ref = { conduit: 'C4', messageId: 'M4' };
 
   const first = writeStatus(adapter, ref, 'will-fail');
   const second = writeStatus(adapter, ref, 'should-still-run');
@@ -118,7 +118,7 @@ test('writeStatus: a failed update does not break the chain for subsequent write
 test('sealStatus: in-flight failed progress write does not block final write', async () => {
   const adapter = new MockAdapter();
   adapter.failUpdateMessageCount = 1;
-  const ref = { channel: 'C5', messageId: 'M5' };
+  const ref = { conduit: 'C5', messageId: 'M5' };
 
   // Let the failing write actually fire (and its error be caught internally)
   // before sealing, so the fault counter is consumed by the progress write.

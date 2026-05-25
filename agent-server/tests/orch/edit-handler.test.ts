@@ -121,7 +121,7 @@ test('Bug 1: edit on Claude conversation invokes closePooledSession with backend
 
   const adapter = new MockAdapter();
   await handler({
-    originalRef: { channel, messageId: 'M1', threadId: null },
+    originalRef: { conduit: channel, messageId: 'M1', threadId: null },
     newText: 'edited turn 1',
   } as any, adapter as any);
 
@@ -172,7 +172,7 @@ test('Bug 2: edit on conversation with PI channel profile routes through PI rest
 
   const adapter = new MockAdapter();
   await handler({
-    originalRef: { channel, messageId: 'M1', threadId: null },
+    originalRef: { conduit: channel, messageId: 'M1', threadId: null },
     newText: 'edited turn 1',
   } as any, adapter as any);
 
