@@ -1,6 +1,7 @@
 // input:  MCP SDK + tui-plan + tui-ask tool modules + agent-server webhook
 // output: MCP stdio service for TUI-mode Claude — exposes cortex_plan_enter / cortex_plan_exit / cortex_ask_user
 // pos:    DR-0012 Phase 3 — cortex-tui-bridge MCP server, loaded ONLY by Claude TUI sessions
+// NOTE: "TUI" here refers to Claude CLI's Ink terminal mode (DR-0012), not to the upcoming Cortex TUI.
 // >>> If I am updated, update my header comment and the parent folder's CORTEX.md <<<
 
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';

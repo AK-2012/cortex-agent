@@ -1,6 +1,6 @@
 // input:  @platform/index.js + @orch/interactions/command-action-router.js + @domain/system/update-prompt.js
-// output: createSlackUpdatePrompt(adapter, router, opts?) => UpdatePrompt
-// pos:    Slack-specific UpdatePrompt implementation — pre-registers three actionIds on router,
+// output: createUpdatePrompt(adapter, router, opts?) => UpdatePrompt
+// pos:    Platform-neutral UpdatePrompt implementation — pre-registers three actionIds on router,
 //         posts interactive message to system-notice, resolves ask() promise on button click.
 // >>> If I am updated, update my header comment and the parent folder's CORTEX.md <<<
 
@@ -20,7 +20,7 @@ const DEFAULT_TIMEOUT_MS = 86_400_000; // 24h
 
 // --- Factory ---
 
-export function createSlackUpdatePrompt(
+export function createUpdatePrompt(
   adapter: PlatformAdapter,
   router: CommandActionRouter,
   opts?: { timeoutMs?: number },

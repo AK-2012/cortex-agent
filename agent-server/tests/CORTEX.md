@@ -84,7 +84,7 @@ Reference implementation: the `freshModuleWithCleanup(t)` helper in `tests/rate-
 | `slack-adapter-throttle.test.ts` | Test | SlackAdapter.updateMessage per-message throttle + 429 retry-after |
 | `status-helpers.test.ts` | Test | writeStatus/sealStatus serialization |
 | `tool-trace.test.ts` | Test | Tool lines merge via OutputStream mutable region |
-| `update-prompt-slack.test.ts` | Test | 8-path coverage: 3-button registration, click paths, stale, re-prompt, timeout ([DR-0013]) |
+| `update-prompt.test.ts` | Test | 8-path coverage: 3-button registration, click paths, stale, re-prompt, timeout ([DR-0013]) |
 | `update-state.test.ts` | Test | update-state.ts round-trip / missing-file / malformed-json coverage ([DR-0013]) |
 | `server-update-check.test.ts` | Test | compareCalVer (4 CalVer + suffix + cross-digit), isUpdateDevMode (3 cases), checkServerUpdate (11 branches, all deps injectable) ([DR-0013]) |
 | `store/execution-repo.test.ts` | Test | ExecutionRepo concurrent mutate, index consistency, flush draining (Pattern B) |

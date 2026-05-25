@@ -45,7 +45,7 @@ import { initScheduledRunner, createScheduler, setSchedulerRef, setBus, setInter
 import { buildInteractiveCallbacks } from '@orch/agent-runner.js';
 import { registerInteractionHandlers, initInteractionHandlers } from '@orch/interactions/interaction-handlers.js';
 import { CommandActionRouter } from '@orch/interactions/command-action-router.js';
-import { createSlackUpdatePrompt } from '@orch/interactions/update-prompt-slack.js';
+import { createUpdatePrompt } from '@orch/interactions/update-prompt.js';
 import { registerMessageHandler } from '@orch/routing/message-router.js';
 import { initRateLimitThrottle } from '@domain/costs/rate-limit-throttle.js';
 import { scheduleRepo } from '@store/schedule-repo.js';
@@ -121,7 +121,7 @@ const dispatchCommand = registerCommands({
 });
 
 // DR-0013: wire Slack update prompt BEFORE bindToAdapter (router has no unregister API)
-const updatePrompt = createSlackUpdatePrompt(adapter, commandRouter);
+const updatePrompt = createUpdatePrompt(adapter, commandRouter);
 
 // Bind command action handlers (buttons, modals) to the platform adapter
 commandRouter.bindToAdapter(adapter);

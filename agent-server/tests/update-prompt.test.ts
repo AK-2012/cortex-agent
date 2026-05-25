@@ -1,5 +1,5 @@
-// input:  Node test runner + createSlackUpdatePrompt + MockAdapter + CommandActionRouter
-// output: tests for update-prompt-slack.ts — 3-button registration, click paths, stale, re-prompt, timeout
+// input:  Node test runner + createUpdatePrompt + MockAdapter + CommandActionRouter
+// output: tests for update-prompt.ts — 3-button registration, click paths, stale, re-prompt, timeout
 // >>> If I am updated, update my header comment and the parent folder's CORTEX.md <<<
 
 import test from 'node:test';
@@ -7,7 +7,7 @@ import assert from 'node:assert/strict';
 import { setImmediate } from 'node:timers/promises';
 import { MockAdapter } from '../src/platform/testing.js';
 import { CommandActionRouter } from '../src/orchestration/interactions/command-action-router.js';
-import { createSlackUpdatePrompt } from '../src/orchestration/interactions/update-prompt-slack.js';
+import { createUpdatePrompt } from '../src/orchestration/interactions/update-prompt.js';
 
 /** Flush microtask queue so async `ask()` can set up internal pending state. */
 const flush = () => setImmediate();
@@ -16,10 +16,10 @@ const flush = () => setImmediate();
 // Registration
 // ============================================================
 
-test('createSlackUpdatePrompt registers three actionIds on router', () => {
+test('createUpdatePrompt registers three actionIds on router', () => {
   const adapter = new MockAdapter({ adminChannel: 'C-admin' } as any);
   const router = new CommandActionRouter();
-  createSlackUpdatePrompt(adapter, router);
+  createUpdatePrompt(adapter, router);
   router.bindToAdapter(adapter);
 
   // Each should not throw — handler is registered
@@ -41,7 +41,7 @@ test('createSlackUpdatePrompt registers three actionIds on router', () => {
 test('ask() posts interactive message to system-notice with three buttons', async () => {
   const adapter = new MockAdapter({ adminChannel: 'C-admin' } as any);
   const router = new CommandActionRouter();
-  const prompt = createSlackUpdatePrompt(adapter, router);
+  const prompt = createUpdatePrompt(adapter, router);
   router.bindToAdapter(adapter);
 
   prompt.ask({ latestVersion: '2026.5.30' });
@@ -81,7 +81,7 @@ test('ask() posts interactive message to system-notice with three buttons', asyn
 test('ask() does not embed an actions block inside richBlocks (avoid duplicate buttons)', () => {
   const adapter = new MockAdapter({ adminChannel: 'C-admin' } as any);
   const router = new CommandActionRouter();
-  const prompt = createSlackUpdatePrompt(adapter, router);
+  const prompt = createUpdatePrompt(adapter, router);
   router.bindToAdapter(adapter);
 
   prompt.ask({ latestVersion: '2026.5.30' });
@@ -105,7 +105,7 @@ test('ask() does not embed an actions block inside richBlocks (avoid duplicate b
 test('Apply button click resolves ask() with "apply" and confirms', async () => {
   const adapter = new MockAdapter({ adminChannel: 'C-admin' } as any);
   const router = new CommandActionRouter();
-  const prompt = createSlackUpdatePrompt(adapter, router);
+  const prompt = createUpdatePrompt(adapter, router);
   router.bindToAdapter(adapter);
 
   const askPromise = prompt.ask({ latestVersion: '2026.5.30' });
@@ -128,7 +128,7 @@ test('Apply button click resolves ask() with "apply" and confirms', async () => 
 test('Skip button click resolves ask() with "skip" and confirms', async () => {
   const adapter = new MockAdapter({ adminChannel: 'C-admin' } as any);
   const router = new CommandActionRouter();
-  const prompt = createSlackUpdatePrompt(adapter, router);
+  const prompt = createUpdatePrompt(adapter, router);
   router.bindToAdapter(adapter);
 
   const askPromise = prompt.ask({ latestVersion: '2026.5.30' });
@@ -151,7 +151,7 @@ test('Skip button click resolves ask() with "skip" and confirms', async () => {
 test('Cancel button click resolves ask() with "cancel" and confirms', async () => {
   const adapter = new MockAdapter({ adminChannel: 'C-admin' } as any);
   const router = new CommandActionRouter();
-  const prompt = createSlackUpdatePrompt(adapter, router);
+  const prompt = createUpdatePrompt(adapter, router);
   router.bindToAdapter(adapter);
 
   const askPromise = prompt.ask({ latestVersion: '2026.5.30' });
@@ -178,7 +178,7 @@ test('Cancel button click resolves ask() with "cancel" and confirms', async () =
 test('stale button click without pending promise is no-op', async () => {
   const adapter = new MockAdapter({ adminChannel: 'C-admin' } as any);
   const router = new CommandActionRouter();
-  createSlackUpdatePrompt(adapter, router);
+  createUpdatePrompt(adapter, router);
   router.bindToAdapter(adapter);
 
   assert.equal(adapter.updated.length, 0);
@@ -200,7 +200,7 @@ test('stale button click without pending promise is no-op', async () => {
 test('re-prompt while pending resolves old promise with null', async () => {
   const adapter = new MockAdapter({ adminChannel: 'C-admin' } as any);
   const router = new CommandActionRouter();
-  const prompt = createSlackUpdatePrompt(adapter, router);
+  const prompt = createUpdatePrompt(adapter, router);
   router.bindToAdapter(adapter);
 
   const firstAsk = prompt.ask({ latestVersion: '2026.5.30' });
@@ -241,7 +241,7 @@ test('re-prompt while pending resolves old promise with null', async () => {
 test('timeout resolves ask() with null and edits message', async (t) => {
   const adapter = new MockAdapter({ adminChannel: 'C-admin' } as any);
   const router = new CommandActionRouter();
-  const prompt = createSlackUpdatePrompt(adapter, router, { timeoutMs: 50 });
+  const prompt = createUpdatePrompt(adapter, router, { timeoutMs: 50 });
   router.bindToAdapter(adapter);
 
   const askPromise = prompt.ask({ latestVersion: '2026.5.30' });
