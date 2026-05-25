@@ -27,6 +27,7 @@ import {
 import type { ConfigStatus } from './init.js';
 import { discoverEndpoints, generateGatewayYaml, writeGatewayYaml, dryRunGatewayYaml } from '@core/gateway-generator.js';
 import { generateProfiles, writeProfilesJson } from '@core/profile-generator.js';
+import { CORTEX_VERSION } from '@core/version.js';
 
 // ─── Paths ──────────────────────────────────────────────────────
 
@@ -308,6 +309,9 @@ export async function runCli(argv: string[]): Promise<CliResult> {
       if (rest.includes('--help') || rest.includes('-h')) {
         return { exitCode: 0, stdout: getCliHelp(), stderr: '' };
       }
+      if (rest.includes('--version') || rest.includes('-V')) {
+        return { exitCode: 0, stdout: `${CORTEX_VERSION}\n`, stderr: '' };
+      }
       return { exitCode: 0, stdout: '', stderr: `'daemon' must be run from the main entry point, not imported.\nUse: node dist/entry/cli.js daemon` };
     }
 
@@ -340,6 +344,14 @@ function main(): void {
       process.exit(0);
     }
     // Other subcommands (init, task, config, setup-gateway) handle --help internally via runCli()
+  }
+
+  // Handle --version / -V for subcommands
+  if (rest.includes('--version') || rest.includes('-V')) {
+    if (cmd === 'daemon') {
+      console.log(CORTEX_VERSION);
+      process.exit(0);
+    }
   }
 
   // ── Subcommands that replace the process (fork + wait) ──
