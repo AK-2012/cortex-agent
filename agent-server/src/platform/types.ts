@@ -22,7 +22,7 @@ export interface IncomingMessage {
   isBot: boolean;
   files?: PlatformFileRef[];
   attachments?: IncomingAttachment[];
-  subtype?: string;
+  kind: 'user' | 'system' | 'file_share';
   raw: unknown;
 }
 

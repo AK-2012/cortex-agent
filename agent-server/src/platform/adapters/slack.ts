@@ -198,6 +198,11 @@ export class SlackAdapter implements PlatformAdapter {
         isForwarded: !!(att.is_msg_unfurl || att.author_name || att.from_url),
       }));
 
+      const kind: 'user' | 'system' | 'file_share' =
+        msg.subtype === undefined ? 'user'
+        : msg.subtype === 'file_share' ? 'file_share'
+        : 'system';
+
       const incoming = {
         ref,
         text: msg.text || '',
@@ -205,7 +210,7 @@ export class SlackAdapter implements PlatformAdapter {
         isBot: !!msg.bot_id,
         files,
         attachments,
-        subtype: msg.subtype,
+        kind,
         raw: msg,
       };
 

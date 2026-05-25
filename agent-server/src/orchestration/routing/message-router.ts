@@ -28,12 +28,12 @@ export function registerMessageHandler(adapter: PlatformAdapter, deps: MessageHa
 
   adapter.onMessage(async (ctx) => {
     const message = ctx.message;
-    log.info('Message event:', JSON.stringify({ subtype: message.subtype, isBot: message.isBot, text: message.text?.substring(0, 50), files: message.files?.length, threadId: message.ref.threadId }));
+    log.info('Message event:', JSON.stringify({ kind: message.kind, isBot: message.isBot, text: message.text?.substring(0, 50), files: message.files?.length, threadId: message.ref.threadId }));
 
     if (routeBotMessage(message)) { /* stripped BRANCH_CALLBACK prefix, continue */ }
     else if (message.isBot) return;
 
-    if (message.subtype && message.subtype !== 'file_share') return;
+    if (message.kind === 'system') return;
 
     const hasFiles = (message.files?.length || 0) > 0;
     const userMessage = message.text;

@@ -67,16 +67,16 @@ test('[BRANCH_CALLBACK] bot message has prefix stripped and continues processing
   assert.equal(dispatchCalls[0].text, '!status');
 });
 
-test('message with non-file_share subtype is skipped before dispatchCommand', async () => {
+test('message with kind=system is skipped before dispatchCommand', async () => {
   const adapter = new MockAdapter();
   const { deps, dispatchCalls } = buildDeps();
   registerMessageHandler(adapter, deps);
 
-  // Inject a non-file_share subtype via raw message shape.
+  // Inject a system-kind message via raw message shape.
   const handlers = (adapter as any).messageHandlers as Array<(ctx: any) => Promise<void>>;
   await handlers[0]({
     message: {
-      subtype: 'channel_join',
+      kind: 'system',
       isBot: false,
       text: 'ignored',
       files: [],

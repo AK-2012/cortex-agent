@@ -426,13 +426,15 @@ export class FeishuAdapter implements PlatformAdapter {
 
     // TODO: Parse Feishu forwarded/merged messages (merge_forward msg type) into
     // IncomingAttachment[]. Feishu's format differs from Slack's msg.attachments.
+    const kind: 'user' | 'file_share' = files ? 'file_share' : 'user';
+
     const incoming = {
       ref,
       text,
       senderId,
       isBot,
       files,
-      subtype: message.message_type,
+      kind,
       raw: data,
     };
 

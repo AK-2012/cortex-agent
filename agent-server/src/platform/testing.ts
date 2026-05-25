@@ -311,6 +311,7 @@ export class MockAdapter implements PlatformAdapter {
         text,
         senderId: opts?.senderId || 'user-1',
         isBot: opts?.isBot ?? false,
+        kind: 'user',
         raw: {},
       },
       async reply(content, replyOpts) {
