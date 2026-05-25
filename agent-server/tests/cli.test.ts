@@ -14,6 +14,8 @@ test('getCliHelp includes all subcommand names', () => {
   assert.match(help, /start/);
   assert.match(help, /daemon/);
   assert.match(help, /daemon stop/);
+  assert.match(help, /daemon status/);
+  assert.match(help, /daemon restart/);
   assert.match(help, /task/);
   assert.match(help, /config/);
 });
@@ -66,4 +68,28 @@ test('runCli bare daemon returns error when not main entry', async () => {
   const result = await runCli(['daemon']);
   assert.equal(result.exitCode, 0);
   assert.match(result.stderr, /must be run from the main entry/);
+});
+
+test('runCli daemon status reports daemon state (running or not)', async () => {
+  const result = await runCli(['daemon', 'status']);
+  assert.equal(result.exitCode, 0);
+  assert.equal(result.stderr, '');
+  // Output must mention "daemon" and either "running" or "not running"
+  assert.match(result.stdout, /daemon/i);
+  assert.ok(
+    /running/.test(result.stdout) || /not running/.test(result.stdout),
+    `expected status output to mention running or not running, got: ${result.stdout}`,
+  );
+});
+
+test('runCli daemon restart exit code reflects daemon state', async () => {
+  const result = await runCli(['daemon', 'restart']);
+  // If daemon is running: exit 0 + success message. If not: exit 1 + error.
+  if (result.exitCode === 0) {
+    assert.match(result.stdout, /Restart signal sent/);
+    assert.equal(result.stderr, '');
+  } else {
+    assert.match(result.stderr, /not running/);
+    assert.equal(result.stdout, '');
+  }
 });

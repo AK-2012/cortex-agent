@@ -29,6 +29,7 @@ let _adapter: PlatformAdapter | null = null;
 let _bus: EventBus | null = null;
 
 const log = createLogger('cancel-button');
+const askLog = createLogger('ask-user-question-modal');
 
 /** Called once from app.ts during startup, after EventBus is constructed. */
 export function initInteractionHandlers(bus: EventBus): void {
@@ -62,19 +63,46 @@ async function handleOpenModal(ctx: ActionContext): Promise<void> {
 }
 
 async function handleModalSubmit(ctx: ModalSubmitContext): Promise<void> {
-  if (!_adapter) return;
-  const { groupId } = JSON.parse(ctx.privateMetadata);
+  if (!_adapter) { askLog.error('handleModalSubmit: _adapter is null'); return; }
+
+  let groupId: string;
+  try {
+    const meta = JSON.parse(ctx.privateMetadata || '{}');
+    groupId = meta.groupId;
+  } catch {
+    askLog.error('handleModalSubmit: failed to parse privateMetadata', { privateMetadata: ctx.privateMetadata });
+    await ctx.ack();
+    return;
+  }
+
+  if (!groupId) {
+    askLog.error('handleModalSubmit: privateMetadata missing groupId', { privateMetadata: ctx.privateMetadata });
+    await ctx.ack();
+    return;
+  }
+
   const group = askUserQuestion.getGroup(groupId);
-  if (!group) { await ctx.ack(); return; }
+  if (!group) {
+    askLog.warn('handleModalSubmit: group not found (may have expired)', { groupId });
+    await ctx.ack();
+    return;
+  }
 
   const answers = collectModalAnswers(group, ctx.values);
-  if (answers.errors) { await ctx.ack({ errors: answers.errors }); return; }
+  if (answers.errors) {
+    askLog.info('handleModalSubmit: validation errors', { groupId, errors: answers.errors });
+    await ctx.ack({ errors: answers.errors });
+    return;
+  }
   await ctx.ack();
+
+  askLog.info('handleModalSubmit: answers collected', { groupId, totalQuestions: group.questions.length });
 
   for (const [pendingId, answer] of answers.collected!) group.answers.set(pendingId, answer);
   await updateQuestionMessage(group);
 
   if (group.answers.size === group.questions.length) {
+    askLog.info('handleModalSubmit: all questions answered, resolving', { groupId });
     const g = group as unknown as { channel: string; sessionId: string; hookRequestId?: string };
     _bus?.publish({ type: 'ask-user.answered', channel: g.channel, requestId: g.hookRequestId, sessionId: g.sessionId, answer: askUserQuestion.formatGroupResponse(group) });
     const resolved = askUserQuestion.tryResolveHook(group);

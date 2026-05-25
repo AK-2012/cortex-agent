@@ -20,9 +20,15 @@ const log = createLogger('version-migrations');
 // so we parse into numeric components and compare element-wise.
 // Returns negative if a < b, positive if a > b, 0 if equal.
 
+/** Strip -N suffix from CalVer strings so that "2026.5.24-1" → "2026.5.24". */
+function stripSuffix(v: string): string {
+  const dash = v.indexOf('-');
+  return dash === -1 ? v : v.slice(0, dash);
+}
+
 export function compareCalVer(a: string, b: string): number {
-  const [aYear, aMonth, aDay] = a.split('.').map(Number);
-  const [bYear, bMonth, bDay] = b.split('.').map(Number);
+  const [aYear, aMonth, aDay] = stripSuffix(a).split('.').map(Number);
+  const [bYear, bMonth, bDay] = stripSuffix(b).split('.').map(Number);
   if (aYear !== bYear) return aYear - bYear;
   if (aMonth !== bMonth) return aMonth - bMonth;
   return aDay - bDay;

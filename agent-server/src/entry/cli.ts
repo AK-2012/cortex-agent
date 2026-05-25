@@ -5,6 +5,8 @@
 //           start                 — fork app.js
 //           daemon                — fork daemon.js
 //           daemon stop           — stop running daemon gracefully (SIGTERM)
+//           daemon status         — check if daemon is running (PID, uptime)
+//           daemon restart        — signal daemon to drain and respawn app.js
 //           task <subcommand>     — delegate to task-cli
 //           config                — show resolved paths
 //         Packaged as dist/entry/cli.js, registered in package.json bin.
@@ -85,6 +87,8 @@ export function getCliHelp(): string {
       { name: 'start', description: 'Start the Cortex server (node dist/entry/app.js)' },
       { name: 'daemon', description: 'Start daemon mode with file watching and auto-restart' },
       { name: 'daemon stop', description: 'Stop the running daemon gracefully (SIGTERM)' },
+      { name: 'daemon status', description: 'Check if the daemon is running (PID, uptime)' },
+      { name: 'daemon restart', description: 'Signal a running daemon to drain and respawn app.js' },
       { name: 'restart', description: 'Signal a running daemon to drain and respawn app.js (touches $STORE_DIR/.restart)' },
       { name: 'task', description: 'Task system CLI (delegate to cortex-task)' },
       { name: 'config', description: 'Show resolved paths and initialization status' },
@@ -100,6 +104,8 @@ export function getCliHelp(): string {
       { description: 'Re-generate gateway config', command: 'cortex setup-gateway' },
       { description: 'Start the server', command: 'cortex start' },
       { description: 'Stop the daemon', command: 'cortex daemon stop' },
+      { description: 'Check daemon status', command: 'cortex daemon status' },
+      { description: 'Restart app.js via daemon', command: 'cortex daemon restart' },
     ],
   });
 }
@@ -175,6 +181,131 @@ async function stopDaemonInternal(): Promise<CliResult> {
   } catch {}
 
   return { exitCode: 0, stdout: `Cortex daemon stopped (PID ${pid}).\n`, stderr: '' };
+}
+
+// ─── Daemon status ────────────────────────────────────────────────
+
+/** Format a duration in milliseconds as a human-readable string. */
+function formatDuration(ms: number): string {
+  const seconds = Math.floor(ms / 1000);
+  const hours = Math.floor(seconds / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  const secs = seconds % 60;
+  if (hours > 0) return `${hours}h ${minutes}m ${secs}s`;
+  if (minutes > 0) return `${minutes}m ${secs}s`;
+  return `${secs}s`;
+}
+
+/** Get the uptime of a process from /proc/<pid>/stat. Returns 'unknown' on non-Linux or failure. */
+function getProcessUptime(pid: number): string {
+  try {
+    const statPath = `/proc/${pid}/stat`;
+    if (!existsSync(statPath)) return 'unknown';
+
+    const stat = readFileSync(statPath, 'utf8');
+    // Format: pid (comm) state ppid ... starttime ...
+    // starttime is field 22 (1-indexed), which is index 19 in the fields after comm
+    const commEnd = stat.lastIndexOf(')');
+    const afterComm = stat.substring(commEnd + 2).split(' ');
+    const starttimeTicks = parseInt(afterComm[19], 10);
+    if (!Number.isFinite(starttimeTicks)) return 'unknown';
+
+    const uptimeRaw = readFileSync('/proc/uptime', 'utf8');
+    const systemUptimeSec = parseFloat(uptimeRaw.split(' ')[0]);
+    const clkTck = 100; // Linux CONFIG_HZ default
+    const bootTimeMs = Date.now() - systemUptimeSec * 1000;
+    const processStartMs = bootTimeMs + (starttimeTicks / clkTck) * 1000;
+    const elapsedMs = Date.now() - processStartMs;
+
+    if (elapsedMs < 0) return 'unknown';
+    return formatDuration(elapsedMs);
+  } catch {
+    return 'unknown';
+  }
+}
+
+function getDaemonStatusInternal(): CliResult {
+  const pidFile = path.join(STORE_DIR, 'daemon.pid');
+
+  // Case 1: No PID file
+  if (!existsSync(pidFile)) {
+    return { exitCode: 0, stdout: 'Cortex daemon is not running.\n', stderr: '' };
+  }
+
+  // Read PID
+  let pid: number;
+  try {
+    const raw = readFileSync(pidFile, 'utf8').trim();
+    pid = Number(raw);
+    if (!Number.isFinite(pid) || pid <= 0) {
+      try { unlinkSync(pidFile); } catch {}
+      return { exitCode: 0, stdout: 'Cortex daemon is not running (removed corrupted PID file).\n', stderr: '' };
+    }
+  } catch (err: any) {
+    return { exitCode: 1, stdout: '', stderr: `Failed to read PID file: ${err.message}\n` };
+  }
+
+  // Case 2: PID file exists but process is dead (stale)
+  let alive = false;
+  try { process.kill(pid, 0); alive = true; } catch { alive = false; }
+  if (!alive) {
+    try { unlinkSync(pidFile); } catch {}
+    return { exitCode: 0, stdout: `Cortex daemon is not running (removed stale PID file for PID ${pid}).\n`, stderr: '' };
+  }
+
+  // Case 3: Process is alive — report status
+  const uptime = getProcessUptime(pid);
+
+  const lines = [
+    'Cortex daemon is running.',
+    `  PID:     ${pid}`,
+    `  Uptime:  ${uptime}`,
+  ];
+
+  return { exitCode: 0, stdout: lines.join('\n') + '\n', stderr: '' };
+}
+
+// ─── Daemon restart ────────────────────────────────────────────────
+
+function daemonRestartInternal(): CliResult {
+  const pidFile = path.join(STORE_DIR, 'daemon.pid');
+
+  if (!existsSync(pidFile)) {
+    return { exitCode: 1, stdout: '', stderr: 'Cortex daemon is not running. Nothing to restart.\n' };
+  }
+
+  let pid: number;
+  try {
+    const raw = readFileSync(pidFile, 'utf8').trim();
+    pid = Number(raw);
+    if (!Number.isFinite(pid) || pid <= 0) {
+      return { exitCode: 1, stdout: '', stderr: 'Daemon PID file is corrupted. Is the daemon running?\n' };
+    }
+  } catch (err: any) {
+    return { exitCode: 1, stdout: '', stderr: `Failed to read PID file: ${err.message}\n` };
+  }
+
+  let alive = false;
+  try { process.kill(pid, 0); alive = true; } catch { alive = false; }
+  if (!alive) {
+    try { unlinkSync(pidFile); } catch {}
+    return { exitCode: 1, stdout: '', stderr: 'Cortex daemon is not running. Nothing to restart.\n' };
+  }
+
+  // Touch .restart trigger file for the daemon to pick up
+  const trigger = path.join(STORE_DIR, '.restart');
+  try {
+    mkdirSync(STORE_DIR, { recursive: true });
+    if (existsSync(trigger)) {
+      const now = new Date();
+      utimesSync(trigger, now, now);
+    } else {
+      writeFileSync(trigger, '');
+    }
+    return { exitCode: 0, stdout: `Restart signal sent to daemon (PID ${pid}).\n`, stderr: '' };
+  } catch (err: any) {
+    return { exitCode: 1, stdout: '', stderr: `Failed to signal daemon restart: ${err.message || String(err)}\n` };
+  }
 }
 
 // ─── Config output ──────────────────────────────────────────────
@@ -306,6 +437,12 @@ export async function runCli(argv: string[]): Promise<CliResult> {
       if (rest[0] === 'stop') {
         return stopDaemonInternal();
       }
+      if (rest[0] === 'status') {
+        return getDaemonStatusInternal();
+      }
+      if (rest[0] === 'restart') {
+        return daemonRestartInternal();
+      }
       if (rest.includes('--help') || rest.includes('-h')) {
         return { exitCode: 0, stdout: getCliHelp(), stderr: '' };
       }
@@ -371,8 +508,8 @@ function main(): void {
   }
 
   if (cmd === 'daemon') {
-    // Subcommand: daemon stop — delegate to runCli, do not fork
-    if (rest[0] === 'stop') {
+    // Subcommands that don't fork: stop, status, restart — delegate to runCli
+    if (rest[0] === 'stop' || rest[0] === 'status' || rest[0] === 'restart') {
       runCli(args).then((result) => {
         if (result.stdout) console.log(result.stdout);
         if (result.stderr) console.error(result.stderr);

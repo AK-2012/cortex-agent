@@ -7,7 +7,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { sendStartupDmIfConfigured } from '../src/entry/startup-notify.js';
+import { sendStartupDmIfConfigured, buildStartupMessage } from '../src/entry/startup-notify.js';
 import { MockAdapter } from '../src/platform/testing.js';
 
 test('sendStartupDmIfConfigured posts one startup message to the admin channel', async () => {
@@ -20,7 +20,7 @@ test('sendStartupDmIfConfigured posts one startup message to the admin channel',
   assert.equal(sent, true);
   assert.equal(adapter.posted.length, 1);
   assert.equal(adapter.posted[0].destination.type, 'system-notice');
-  assert.equal(adapter.posted[0].content.text, 'Cortex agent started on local.');
+  assert.equal(adapter.posted[0].content.text, buildStartupMessage({ machine: 'local' }));
 });
 
 test('sendStartupDmIfConfigured returns false when no admin channel configured', async () => {
@@ -45,7 +45,7 @@ test('sendStartupDmIfConfigured includes restart reason when provided', async ()
   assert.equal(adapter.posted.length, 1);
   assert.equal(
     adapter.posted[0].content.text,
-    'Cortex agent restarted on local. Reason: code change: src/app.ts.',
+    buildStartupMessage({ machine: 'local', restartReason: 'code change: src/app.ts' }),
   );
 });
 

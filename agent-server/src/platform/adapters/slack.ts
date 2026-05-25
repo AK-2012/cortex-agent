@@ -245,21 +245,25 @@ export class SlackAdapter implements PlatformAdapter {
   onModalSubmit(callbackId: string, handler: (ctx: ModalSubmitContext) => Promise<void>): void {
     this.app.view(callbackId, async ({ ack, body, view }: any) => {
       let ackCalled = false;
-      await handler({
-        callbackId,
-        privateMetadata: view.private_metadata || '',
-        values: this.normalizeModalValues(view.state?.values || {}),
-        userId: body.user?.id || '',
-        async ack(response) {
-          if (ackCalled) return;
-          ackCalled = true;
-          if (response?.errors) {
-            await ack({ response_action: 'errors', errors: response.errors } as any);
-          } else {
-            await ack();
-          }
-        },
-      });
+      try {
+        await handler({
+          callbackId,
+          privateMetadata: view.private_metadata || '',
+          values: this.normalizeModalValues(view.state?.values || {}),
+          userId: body.user?.id || '',
+          async ack(response) {
+            if (ackCalled) return;
+            ackCalled = true;
+            if (response?.errors) {
+              await ack({ response_action: 'errors', errors: response.errors } as any);
+            } else {
+              await ack();
+            }
+          },
+        });
+      } catch (err: any) {
+        log.error(`Modal submit handler crashed for callbackId=${callbackId}: ${err?.message || err}`, err?.stack);
+      }
       if (!ackCalled) await ack();
     });
   }
