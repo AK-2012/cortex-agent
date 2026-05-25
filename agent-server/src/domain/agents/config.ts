@@ -269,7 +269,7 @@ export function configureEnvForMode(mode: string, metadata?: Record<string, stri
   }
 
   // Gateway unhealthy — fallback to direct connection
-  log.info(`Gateway unhealthy — using direct Anthropic connection (mode=${mode})`);
+  log.debug(`Gateway unhealthy — using direct Anthropic connection (mode=${mode})`);
 
   if (mode === 'plan') {
     // Plan mode direct: delete everything, let Claude Code use OAuth
