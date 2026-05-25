@@ -102,14 +102,19 @@ export function createSlackUpdatePrompt(
       // Stamp version onto buttons
       const versionedButtons = buttonTemplates.map(b => ({ ...b, value: spec.latestVersion }));
 
-      // Post interactive message to admin DM
+      // Post interactive message to admin DM.
+      // Convention: richBlocks contains content-only sections; buttons go in the
+      // top-level `actions` field. The Slack adapter's postInteractive
+      // (adapters/slack.ts:434-440) appends an actions block from content.actions,
+      // so embedding another actions block inside richBlocks would duplicate the
+      // button row. Pattern follows buildPlanApprovalContent
+      // (platform/interactive-builder.ts:117-127).
       const messageRef = await adapter.postInteractive(
         { type: 'system-notice' },
         {
           text: `Cortex Server v${spec.latestVersion} is available. Update now?`,
           richBlocks: [
             { type: 'section', text: `Cortex Server v${spec.latestVersion} is available.` },
-            { type: 'actions', elements: versionedButtons },
           ],
           actions: versionedButtons,
         },

@@ -72,6 +72,32 @@ test('ask() posts interactive message to system-notice with three buttons', asyn
   assert.equal(cancelBtn!.value, '2026.5.30');
 });
 
+// Regression: postInteractive appends an actions block from content.actions
+// (slack.ts:434-440) AND renders any actions block inside richBlocks
+// (slack.ts:711-715, via richBlocksToSlack). If both are populated, the user
+// sees two identical button rows in Slack. richBlocks must contain content
+// blocks only — buttons belong in the top-level actions array.
+// Pattern reference: buildPlanApprovalContent (interactive-builder.ts:117-127).
+test('ask() does not embed an actions block inside richBlocks (avoid duplicate buttons)', () => {
+  const adapter = new MockAdapter({ adminChannel: 'C-admin' } as any);
+  const router = new CommandActionRouter();
+  const prompt = createSlackUpdatePrompt(adapter, router);
+  router.bindToAdapter(adapter);
+
+  prompt.ask({ latestVersion: '2026.5.30' });
+
+  const noticePost = adapter.posted.find(p => p.destination.type === 'system-notice');
+  assert.ok(noticePost, 'expected a system-notice post');
+
+  const richBlocks = noticePost.content.richBlocks ?? [];
+  const embeddedActionsBlocks = richBlocks.filter((b: any) => b.type === 'actions');
+  assert.equal(
+    embeddedActionsBlocks.length,
+    0,
+    'richBlocks must not contain actions blocks — postInteractive auto-appends actions, so embedding here causes a duplicate button row',
+  );
+});
+
 // ============================================================
 // Button click paths
 // ============================================================
