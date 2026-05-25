@@ -5,8 +5,11 @@
 //           start                 — fork app.js
 //           daemon                — fork daemon.js
 //           daemon stop           — stop running daemon gracefully (SIGTERM)
-//           daemon status         — check if daemon is running (PID, uptime)
-//           daemon restart        — signal daemon to drain and respawn app.js
+//           daemon status         — check daemon + child status (PID, uptime)
+//           daemon restart        — graceful: signal daemon to drain and respawn app.js
+//           daemon restart --hard — hard: send SIGTERM directly to app.js (daemon recovers)
+//           daemon restart --force— force: send SIGKILL immediately to app.js
+//           daemon restart-self   — stop daemon, then re-fork daemon.js
 //           task <subcommand>     — delegate to task-cli
 //           config                — show resolved paths
 //         Packaged as dist/entry/cli.js, registered in package.json bin.
@@ -87,9 +90,12 @@ export function getCliHelp(): string {
       { name: 'start', description: 'Start the Cortex server (node dist/entry/app.js)' },
       { name: 'daemon', description: 'Start daemon mode with file watching and auto-restart' },
       { name: 'daemon stop', description: 'Stop the running daemon gracefully (SIGTERM)' },
-      { name: 'daemon status', description: 'Check if the daemon is running (PID, uptime)' },
-      { name: 'daemon restart', description: 'Signal a running daemon to drain and respawn app.js' },
-      { name: 'restart', description: 'Signal a running daemon to drain and respawn app.js (touches $STORE_DIR/.restart)' },
+      { name: 'daemon status', description: 'Check daemon + child status (PID, uptime)' },
+      { name: 'daemon restart', description: 'Graceful restart — signal daemon to drain and respawn app.js' },
+      { name: 'daemon restart --hard', description: 'Hard restart — send SIGTERM directly to app.js (daemon auto-recovers)' },
+      { name: 'daemon restart --force', description: 'Force restart — send SIGKILL immediately to app.js' },
+      { name: 'daemon restart-self', description: 'Stop and restart the daemon process itself' },
+      { name: 'restart', description: 'Legacy alias for daemon restart (touches $STORE_DIR/.restart)' },
       { name: 'task', description: 'Task system CLI (delegate to cortex-task)' },
       { name: 'config', description: 'Show resolved paths and initialization status' },
       { name: 'setup-gateway', description: 'Auto-detect Claude/PI configs and generate gateway.yaml + profiles.json' },
@@ -105,7 +111,9 @@ export function getCliHelp(): string {
       { description: 'Start the server', command: 'cortex start' },
       { description: 'Stop the daemon', command: 'cortex daemon stop' },
       { description: 'Check daemon status', command: 'cortex daemon status' },
-      { description: 'Restart app.js via daemon', command: 'cortex daemon restart' },
+      { description: 'Graceful restart', command: 'cortex daemon restart' },
+      { description: 'Hard restart app.js', command: 'cortex daemon restart --hard' },
+      { description: 'Restart daemon itself', command: 'cortex daemon restart-self' },
     ],
   });
 }
@@ -262,6 +270,28 @@ function getDaemonStatusInternal(): CliResult {
     `  Uptime:  ${uptime}`,
   ];
 
+  // Check child (app.js) status via daemon-child.pid
+  const childPidFile = path.join(STORE_DIR, 'daemon-child.pid');
+  if (existsSync(childPidFile)) {
+    try {
+      const raw = readFileSync(childPidFile, 'utf8').trim();
+      const childPid = Number(raw);
+      if (Number.isFinite(childPid) && childPid > 0) {
+        let childAlive = false;
+        try { process.kill(childPid, 0); childAlive = true; } catch {}
+        if (childAlive) {
+          const childUptime = getProcessUptime(childPid);
+          lines.push(`  Child:   app.js (PID ${childPid}, uptime ${childUptime})`);
+        } else {
+          lines.push(`  Child:   none (stale PID ${childPid} — daemon will restart)`);
+        }
+      }
+    } catch {}
+  }
+  if (!lines.some(l => l.startsWith('  Child:'))) {
+    lines.push('  Child:   starting...');
+  }
+
   return { exitCode: 0, stdout: lines.join('\n') + '\n', stderr: '' };
 }
 
@@ -306,6 +336,67 @@ function daemonRestartInternal(): CliResult {
   } catch (err: any) {
     return { exitCode: 1, stdout: '', stderr: `Failed to signal daemon restart: ${err.message || String(err)}\n` };
   }
+}
+
+// ─── Daemon hard restart (SIGTERM/SIGKILL directly to app.js) ─────
+
+function daemonRestartHardInternal(force: boolean): CliResult {
+  const pidFile = path.join(STORE_DIR, 'daemon.pid');
+
+  // Verify daemon is running first
+  if (!existsSync(pidFile)) {
+    return { exitCode: 1, stdout: '', stderr: 'Cortex daemon is not running. Nothing to restart.\n' };
+  }
+
+  let daemonPid: number;
+  try {
+    const raw = readFileSync(pidFile, 'utf8').trim();
+    daemonPid = Number(raw);
+    if (!Number.isFinite(daemonPid) || daemonPid <= 0) {
+      return { exitCode: 1, stdout: '', stderr: 'Daemon PID file is corrupted.\n' };
+    }
+  } catch (err: any) {
+    return { exitCode: 1, stdout: '', stderr: `Failed to read daemon PID file: ${err.message}\n` };
+  }
+
+  let daemonAlive = false;
+  try { process.kill(daemonPid, 0); daemonAlive = true; } catch {}
+  if (!daemonAlive) {
+    try { unlinkSync(pidFile); } catch {}
+    return { exitCode: 1, stdout: '', stderr: 'Cortex daemon is not running.\n' };
+  }
+
+  // Read child PID
+  const childPidFile = path.join(STORE_DIR, 'daemon-child.pid');
+  if (!existsSync(childPidFile)) {
+    return { exitCode: 1, stdout: '', stderr: 'No child PID file found. Is app.js running?\n' };
+  }
+
+  let childPid: number;
+  try {
+    const raw = readFileSync(childPidFile, 'utf8').trim();
+    childPid = Number(raw);
+    if (!Number.isFinite(childPid) || childPid <= 0) {
+      return { exitCode: 1, stdout: '', stderr: 'Child PID file is corrupted.\n' };
+    }
+  } catch (err: any) {
+    return { exitCode: 1, stdout: '', stderr: `Failed to read child PID file: ${err.message}\n` };
+  }
+
+  let childAlive = false;
+  try { process.kill(childPid, 0); childAlive = true; } catch {}
+  if (!childAlive) {
+    return { exitCode: 1, stdout: '', stderr: `Child process (PID ${childPid}) is not running.\n` };
+  }
+
+  const signal = force ? 'SIGKILL' : 'SIGTERM';
+  try {
+    process.kill(childPid, signal);
+  } catch (err: any) {
+    return { exitCode: 1, stdout: '', stderr: `Failed to send ${signal} to app.js (PID ${childPid}): ${err.message}\n` };
+  }
+
+  return { exitCode: 0, stdout: `Sent ${signal} to app.js (PID ${childPid}). Daemon will restart it automatically.\n`, stderr: '' };
 }
 
 // ─── Config output ──────────────────────────────────────────────
@@ -441,6 +532,8 @@ export async function runCli(argv: string[]): Promise<CliResult> {
         return getDaemonStatusInternal();
       }
       if (rest[0] === 'restart') {
+        if (rest[1] === '--hard') return daemonRestartHardInternal(false);
+        if (rest[1] === '--force') return daemonRestartHardInternal(true);
         return daemonRestartInternal();
       }
       if (rest.includes('--help') || rest.includes('-h')) {
@@ -508,6 +601,30 @@ function main(): void {
   }
 
   if (cmd === 'daemon') {
+    // restart-self: stop the running daemon, wait, then re-fork
+    if (rest[0] === 'restart-self') {
+      runCli(['daemon', 'stop']).then(async (stopResult) => {
+        if (stopResult.stdout) console.log(stopResult.stdout);
+        if (stopResult.stderr) console.error(stopResult.stderr);
+
+        if (!existsSync(DAEMON_JS)) {
+          log.error(`Entry not found: ${DAEMON_JS}`);
+          log.error('Run `npm run build` first.');
+          process.exit(1);
+        }
+
+        console.log('Starting daemon...');
+        fork(DAEMON_JS, [], {
+          cwd: DATA_DIR,
+          detached: true,
+          stdio: 'ignore',
+          env: { ...process.env },
+        });
+        process.exit(0);
+      });
+      return;
+    }
+
     // Subcommands that don't fork: stop, status, restart — delegate to runCli
     if (rest[0] === 'stop' || rest[0] === 'status' || rest[0] === 'restart') {
       runCli(args).then((result) => {

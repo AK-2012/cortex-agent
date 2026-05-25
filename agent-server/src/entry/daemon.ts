@@ -54,6 +54,7 @@ const log = createLogger('daemon');
 // --- Paths ---
 const MODULE_DIR = moduleDir(import.meta.url);
 const PID_FILE = path.join(STORE_DIR, 'daemon.pid');
+const CHILD_PID_FILE = path.join(STORE_DIR, 'daemon-child.pid');
 
 // --- Config ---
 const APP_ENTRY = path.join(MODULE_DIR, 'app.js');
@@ -133,6 +134,9 @@ function startChild() {
 
   log.info(`app.ts started — PID ${child.pid}`);
 
+  // Persist child PID so CLI (daemon status / daemon restart --hard) can find it
+  try { writeFileSync(CHILD_PID_FILE, String(child.pid), 'utf8'); } catch {}
+
   // IPC: app.ts tells us when it's busy/idle
   child.on('message', (msg) => {
     if (msg?.type === 'busy') {
@@ -161,6 +165,9 @@ function startChild() {
   child.on('exit', (code, signal) => {
     child = null;
     childBusy = false;
+
+    // Clean up child PID file
+    try { if (existsSync(CHILD_PID_FILE)) unlinkSync(CHILD_PID_FILE); } catch {}
 
     if (shuttingDown) {
       log.info('app.ts exited (shutdown).');
@@ -506,6 +513,9 @@ function releaseSingletonLock() {
     if (!existsSync(PID_FILE)) return;
     const raw = readFileSync(PID_FILE, 'utf8').trim();
     if (Number(raw) === process.pid) unlinkSync(PID_FILE);
+  } catch {}
+  try {
+    if (existsSync(CHILD_PID_FILE)) unlinkSync(CHILD_PID_FILE);
   } catch {}
 }
 
