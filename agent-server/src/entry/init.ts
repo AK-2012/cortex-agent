@@ -104,6 +104,8 @@ export interface InitAnswers {
   planChoice?: ModelChoice;
   /** Explicit (mode, model) for the `execute` profile. Same semantics as planChoice. */
   executeChoice?: ModelChoice;
+  /** Additional models to register as standalone named profiles. Non-interactive only. */
+  extraProfiles?: ModelChoice[];
 }
 
 /** Parse "mode:model" stdin string into a ModelChoice. Returns undefined for empty/invalid. */
@@ -117,6 +119,19 @@ function parseChoiceLine(raw: string | undefined): ModelChoice | undefined {
     mode: trimmed.substring(0, colonIdx).trim(),
     model: trimmed.substring(colonIdx + 1).trim(),
   };
+}
+
+/** Parse comma-separated "mode:model" pairs for extra profiles. Returns undefined for empty. */
+function parseExtraProfilesLine(raw: string | undefined): ModelChoice[] | undefined {
+  if (!raw) return undefined;
+  const trimmed = raw.trim();
+  if (!trimmed) return undefined;
+  const choices: ModelChoice[] = [];
+  for (const part of trimmed.split(',')) {
+    const choice = parseChoiceLine(part.trim());
+    if (choice) choices.push(choice);
+  }
+  return choices.length > 0 ? choices : undefined;
 }
 
 // ─── Dot env generation ──────────────────────────────────────────
@@ -980,6 +995,7 @@ async function collectAnswersNonInteractive(): Promise<InitAnswers> {
 
   const planChoice = parseChoiceLine(lines[profileChoiceStart]);
   const executeChoice = parseChoiceLine(lines[profileChoiceStart + 1]);
+  const extraProfiles = parseExtraProfilesLine(lines[profileChoiceStart + 2]);
 
   return {
     backends: backends.length > 0 ? backends : ['claude'],
@@ -994,6 +1010,7 @@ async function collectAnswersNonInteractive(): Promise<InitAnswers> {
     installService: installServiceRaw?.toLowerCase() === 'y',
     planChoice,
     executeChoice,
+    extraProfiles,
   };
 }
 
@@ -1311,6 +1328,7 @@ async function pickPlanExecuteInteractive(
   executeChoice?: ModelChoice;
   planFallback?: ModelChoice[];
   executeFallback?: ModelChoice[];
+  extraProfiles?: ModelChoice[];
   overwrite: boolean;
 }> {
   // If existing profiles.json has plan/execute, ask before overwriting
@@ -1391,11 +1409,26 @@ async function pickPlanExecuteInteractive(
     if (arr.length > 0) executeFallback = arr.map(parseValue);
   }
 
+  // ── Extra profiles: additional models to register as standalone named profiles ──
+  let extraProfiles: ModelChoice[] | undefined;
+  if (options.length > 0) {
+    const sel = await clack.multiselect({
+      message: 'Pick additional models to register as standalone profiles (profile name = model name, space to toggle, enter to confirm, leave empty to skip):',
+      options,
+      required: false,
+      initialValues: [],
+    });
+    handleCancel(sel);
+    const arr = sel as string[];
+    if (arr.length > 0) extraProfiles = arr.map(parseValue);
+  }
+
   return {
     planChoice,
     executeChoice: execChoice,
     planFallback,
     executeFallback,
+    extraProfiles,
     overwrite: true,
   };
 }
@@ -1404,7 +1437,7 @@ async function runGatewaySetup(
   backends: InitBackend[],
   paths: InitPaths,
   gatewayConfigDir?: string,
-  answers?: Pick<InitAnswers, 'planChoice' | 'executeChoice'>,
+  answers?: Pick<InitAnswers, 'planChoice' | 'executeChoice' | 'extraProfiles'>,
 ): Promise<void> {
   // Discover endpoints from Claude/PI local configs
   const endpoints = discoverEndpoints();
@@ -1427,11 +1460,12 @@ async function runGatewaySetup(
   const gatewayPath = writeGatewayYaml(yamlContent, gatewayConfigDir);
   clack.log.success(`Gateway config written to ${gatewayPath}`);
 
-  // Resolve plan/execute choices + fallback chains + overwrite intent.
+  // Resolve plan/execute choices + fallback chains + extra profiles + overwrite intent.
   let planChoice = answers?.planChoice;
   let executeChoice = answers?.executeChoice;
   let planFallback: ModelChoice[] | undefined;
   let executeFallback: ModelChoice[] | undefined;
+  let extraProfiles = answers?.extraProfiles;
   let overwrite: boolean;
 
   if (processStdin.isTTY) {
@@ -1441,6 +1475,7 @@ async function runGatewaySetup(
     executeChoice = picked.executeChoice ?? executeChoice;
     planFallback = picked.planFallback;
     executeFallback = picked.executeFallback;
+    extraProfiles = picked.extraProfiles ?? extraProfiles;
     overwrite = picked.overwrite;
   } else {
     // Non-interactive: stdin already provided choices (or empty → lex-first default).
@@ -1456,12 +1491,13 @@ async function runGatewaySetup(
     executeChoice,
     planFallback,
     executeFallback,
+    extraProfiles,
     overwrite,
   });
   clack.log.success(`Profiles written to ${profilesPath}`);
 
   // Show profile summary (reflects what was actually generated, not what was merged)
-  const profiles = generateProfiles(endpoints, { planChoice, executeChoice, planFallback, executeFallback });
+  const profiles = generateProfiles(endpoints, { planChoice, executeChoice, planFallback, executeFallback, extraProfiles });
   const profileNames = Object.keys(profiles.profiles).join(', ');
   clack.log.info(`Generated profiles: ${profileNames} (default: ${profiles.defaultProfile})`);
 }

@@ -357,3 +357,76 @@ test('writeProfilesJson: overwrite=true forces overwrite of existing plan/execut
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
 });
+
+// ─── extraProfiles: additional standalone named profiles ─────────
+
+test('generateProfiles: extraProfiles creates additional profile entries keyed by model name', () => {
+  const result = generateProfiles([ANTHROPIC_PLAN, DEEPSEEK], {
+    planChoice: { mode: 'plan', model: 'claude-opus-4-7' },
+    extraProfiles: [
+      { mode: 'deepseek', model: 'deepseek-v4-pro' },
+      { mode: 'plan', model: 'claude-sonnet-4-6' },
+    ],
+  });
+  // plan + execute + 2 extra
+  assert.equal(Object.keys(result.profiles).length, 4);
+  assert.ok(result.profiles['deepseek-v4-pro']);
+  assert.equal(result.profiles['deepseek-v4-pro'].model, 'deepseek-v4-pro');
+  assert.equal(result.profiles['deepseek-v4-pro'].mode, 'deepseek');
+  assert.equal(result.profiles['deepseek-v4-pro'].backend, 'pi');
+  assert.ok(result.profiles['claude-sonnet-4-6']);
+  assert.equal(result.profiles['claude-sonnet-4-6'].model, 'claude-sonnet-4-6');
+  assert.equal(result.profiles['claude-sonnet-4-6'].mode, 'plan');
+  assert.equal(result.profiles['claude-sonnet-4-6'].backend, 'claude');
+});
+
+test('generateProfiles: extraProfiles does not overwrite plan/execute', () => {
+  const result = generateProfiles([ANTHROPIC_PLAN, DEEPSEEK], {
+    planChoice: { mode: 'plan', model: 'claude-opus-4-7' },
+    executeChoice: { mode: 'deepseek', model: 'deepseek-v4-flash' },
+    extraProfiles: [
+      { mode: 'deepseek', model: 'deepseek-v4-pro' },
+    ],
+  });
+  // plan and execute should retain their explicit choices
+  assert.equal(result.profiles.plan.model, 'claude-opus-4-7');
+  assert.equal(result.profiles.execute.model, 'deepseek-v4-flash');
+  // extra profile exists separately
+  assert.equal(result.profiles['deepseek-v4-pro'].model, 'deepseek-v4-pro');
+});
+
+test('generateProfiles: extraProfiles skips names colliding with managed profile names', () => {
+  // "plan" and "execute" as model names should be skipped with a warning
+  const result = generateProfiles([ANTHROPIC_PLAN], {
+    extraProfiles: [
+      { mode: 'plan', model: 'plan' },
+      { mode: 'plan', model: 'execute' },
+      { mode: 'plan', model: 'claude-haiku-4-5' },
+    ],
+  });
+  // Only claude-haiku-4-5 should be added; plan/execute are skipped (name collision)
+  assert.ok(result.profiles['claude-haiku-4-5']);
+  // plan and execute are managed profiles, not overwritten
+  assert.equal(result.profiles.plan.model, 'claude-haiku-4-5'); // default lexicographic
+});
+
+test('writeProfilesJson: extraProfiles plumbed through to file', () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cortex-profile-write-'));
+  try {
+    writeProfilesJson([ANTHROPIC_PLAN, DEEPSEEK], {
+      outputDir: tmpDir,
+      planChoice: { mode: 'plan', model: 'claude-opus-4-7' },
+      extraProfiles: [
+        { mode: 'deepseek', model: 'deepseek-v4-pro' },
+        { mode: 'plan', model: 'claude-sonnet-4-6' },
+      ],
+    });
+    const content = JSON.parse(fs.readFileSync(path.join(tmpDir, 'profiles.json'), 'utf-8'));
+    assert.ok(content.profiles['deepseek-v4-pro']);
+    assert.equal(content.profiles['deepseek-v4-pro'].backend, 'pi');
+    assert.ok(content.profiles['claude-sonnet-4-6']);
+    assert.equal(content.profiles['claude-sonnet-4-6'].backend, 'claude');
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});

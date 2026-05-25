@@ -45,6 +45,8 @@ export interface GenerateOpts {
   planFallback?: ModelChoice[];
   /** Ordered fallback chain for the `execute` profile. */
   executeFallback?: ModelChoice[];
+  /** Additional models to register as standalone named profiles (profile name = model name). */
+  extraProfiles?: ModelChoice[];
 }
 
 // ─── Endpoint → backend mapping ────────────────────────────────────
@@ -187,13 +189,31 @@ export function generateProfiles(
   const executeProfile: ProfileEntry = makeProfileEntry(executeEntry);
   if (executeFallback) executeProfile.fallback = executeFallback;
 
-  return {
-    defaultProfile: 'plan',
-    profiles: {
-      plan: planProfile,
-      execute: executeProfile,
-    },
+  const profiles: Record<string, ProfileEntry> = {
+    plan: planProfile,
+    execute: executeProfile,
   };
+
+  // Extra profiles: user-picked additional models to register as standalone named profiles.
+  // Profile name = model name (e.g., selecting deepseek-v4-pro → profile "deepseek-v4-pro").
+  if (opts.extraProfiles && opts.extraProfiles.length > 0) {
+    for (const choice of opts.extraProfiles) {
+      const name = choice.model;
+      if (name === 'plan' || name === 'execute') {
+        log.warn(`Skipping extra profile "${name}": name conflicts with managed profile`);
+        continue;
+      }
+      if (profiles[name]) {
+        log.warn(`Skipping extra profile "${name}": already exists`);
+        continue;
+      }
+      const entry = findModelEntry(models, choice, `extraProfiles[${name}]`);
+      profiles[name] = makeProfileEntry(entry);
+      log.info(`Added extra profile: ${name} (mode=${entry.mode}, backend=${entry.backend})`);
+    }
+  }
+
+  return { defaultProfile: 'plan', profiles };
 }
 
 // ─── File I/O ─────────────────────────────────────────────────────
@@ -256,6 +276,8 @@ export interface WriteProfilesOpts extends GenerateOpts {
   outputDir?: string;
   /** Force overwrite of existing `plan` / `execute` profiles. Default false. */
   overwrite?: boolean;
+  /** Additional models to register as standalone named profiles. */
+  extraProfiles?: ModelChoice[];
 }
 
 /**
@@ -276,6 +298,7 @@ export function writeProfilesJson(
     executeChoice: opts.executeChoice,
     planFallback: opts.planFallback,
     executeFallback: opts.executeFallback,
+    extraProfiles: opts.extraProfiles,
   });
   const merged = mergeProfilesJson(generated, opts.outputDir, opts.overwrite ?? false);
 
