@@ -6,6 +6,8 @@
     "moduleResolution": "NodeNext",
     "strict": false,
     "noImplicitAny": false,
+    "jsx": "react-jsx",
+    "jsxImportSource": "react",
     "esModuleInterop": true,
     "resolveJsonModule": true,
     "skipLibCheck": true,
