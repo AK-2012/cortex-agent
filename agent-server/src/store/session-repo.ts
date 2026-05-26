@@ -9,6 +9,33 @@ import { STORE_DIR } from '@core/paths.js';
 
 const SESSIONS_FILE = path.join(STORE_DIR, 'sessions.json');
 
+/**
+ * A conduit provider resolves session+project info for non-file-based conduits
+ * (e.g., TUI in-memory conduit state). Returns null for unrecognized conduitIds
+ * so the file-based lookup is used as fallback.
+ */
+export type ConduitProvider = (conduitId: string, backend: string) => { sessionId: string; projectId: string } | null;
+
+/** Registered conduit providers, tried in registration order before file lookup. */
+const conduitProviders: ConduitProvider[] = [];
+
+/**
+ * Register a conduit provider callback. Called by adapters (e.g., TuiGatewayAdapter)
+ * during start() so session lookup can resolve in-memory conduit state.
+ */
+export function registerConduitProvider(provider: ConduitProvider): void {
+  conduitProviders.push(provider);
+}
+
+/** Try conduit providers in registration order; returns null if none match. */
+async function lookupViaProviders(channel: string, backend: string): Promise<string | undefined> {
+  for (const provider of conduitProviders) {
+    const result = provider(channel, backend);
+    if (result) return result.sessionId;
+  }
+  return undefined;
+}
+
 /** Shape of sessions.json: `{"backend:channel": sessionId, "legacyChannel": sessionId, ...}` */
 export type SessionsData = Record<string, string>;
 
@@ -37,6 +64,10 @@ class SessionRepo {
   });
 
   async getSessionAsync(channel: string, backend: string): Promise<string | undefined> {
+    // Try conduit providers first (TUI in-memory state, etc.)
+    const providerResult = await lookupViaProviders(channel, backend);
+    if (providerResult !== undefined) return providerResult;
+    // Fall back to file storage
     const sessions = await this._repo.read();
     return sessions[sessionKey(backend, channel)] ?? sessions[channel] ?? undefined;
   }
