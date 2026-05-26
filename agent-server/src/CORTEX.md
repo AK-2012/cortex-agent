@@ -41,7 +41,7 @@ Project→conduit mapping (formerly `channel-repo.ts`) has moved into `platform/
 | Path | Function |
 |---|---|
 | `running-executions.ts` | Unified execution registry (byKey/byThreadId/byExecutionId) + agent.* event publishing |
-| `channel-queue.ts` | Per-channel serial Promise queue |
+| `conduit-queue.ts` | Per-conduit serial Promise queue |
 | `superseded-edits.ts` | Message edit supersede marker |
 | `busy-tracker.ts` | activeLlmCount + IPC busy/idle (S13: subscriber-as-source-of-truth) |
 | `orchestrator.ts` | Two-branch decision tree (thread-match / default) |

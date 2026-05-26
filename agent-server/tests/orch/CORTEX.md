@@ -6,7 +6,7 @@ Covers API and event publication contracts for running-executions, channel-queue
 | filename | role | function |
 |---|---|---|
 | `running-executions.test.ts` | Test | RunningExecutions three-index consistency, kill chain, event publication (Phase 1 Step 1) |
-| `channel-queue.test.ts` | Test | channelQueues Map + enqueue() serialization and auto-cleanup (S6-B) |
+| `channel-queue.test.ts` | Test | conduitQueues Map + enqueue() serialization and auto-cleanup (S6-B) |
 | `superseded-edits.test.ts` | Test | supersededEdits mark/check/clear API (S6-B) |
 | `plan-approvals.test.ts` | Test | PlanApprovals register/lookup/resolve/reject/clearByChannel + plan.approved event (S6-A) |
 | `busy-tracker.test.ts` | Test | BusyTracker +1/-1 publish+IPC, multi-publisher aggregate, re-entrant safety (S6-C) |

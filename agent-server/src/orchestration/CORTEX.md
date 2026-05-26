@@ -5,7 +5,7 @@ and plan approval state. Depends on core / store / events / domain / platform, m
 
 | filename | role | function |
 |---|---|---|
-| `channel-queue.ts` | singleton | per-channel serial Promise queue (channelQueues Map + enqueue(), [S6-B]) |
+| `conduit-queue.ts` | singleton | per-conduit serial Promise queue (conduitQueues Map + enqueue(), [S6-B]) |
 | `superseded-edits.ts` | singleton | Message edit supersede marker (mark/check/clear API, [S6-B]) |
 | `interactions/plan-approvals.ts` | singleton | Unified requestId-keyed plan approval state (merges pendingPlans + pendingHookPlans, publishes plan.approved [S6-A]) |
 | `busy-tracker.ts` | singleton | activeLlmCount tracking + publish llm.active-count-delta + IPC busy/idle signaling ([S6-C], S13 subscriber-as-source-of-truth) |

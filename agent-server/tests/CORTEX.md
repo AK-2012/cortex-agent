@@ -20,7 +20,7 @@ Reference implementation: the `freshModuleWithCleanup(t)` helper in `tests/rate-
 | filename | role | function |
 |---|---|---|
 | `agent-adapter/` | Subdirectory | Three-backend fixture-replay tests |
-| `orch/` | Subdirectory | Orch orchestration layer (running-executions / channel-queue / superseded-edits / plan-approvals / ask-user-question-pi) regression tests |
+| `orch/` | Subdirectory | Orch orchestration layer (running-executions / conduit-queue / superseded-edits / plan-approvals / ask-user-question-pi) regression tests |
 | `threads/` | Subdirectory | domain/threads/ domain layer regression tests ([S7]) |
 | `agent-adapter.test.ts` | Test | getAdapter/Capability/tool-names contract |
 | `agent-adapter-claude.test.ts` | Test | Claude buildSpawnArgs/hooks/summarizer |

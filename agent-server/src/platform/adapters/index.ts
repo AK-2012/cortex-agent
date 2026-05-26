@@ -10,7 +10,7 @@ import { FeishuAdapter } from './feishu.js';
 import type { FeishuAdapterConfig } from './feishu.js';
 import { MockAdapter } from '../testing.js';
 
-export type PlatformType = 'slack' | 'discord' | 'telegram' | 'feishu' | 'test';
+export type PlatformType = 'slack' | 'discord' | 'telegram' | 'feishu' | 'tui' | 'test';
 
 export interface AdapterConfig {
   platform: PlatformType;

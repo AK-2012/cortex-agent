@@ -1,4 +1,4 @@
-// input:  orch/busy-tracker(trackPendingTask), orch/channel-queue, orch/interactions/plan-approvals, ask-user-question, hook-bridge, adapter
+// input:  orch/busy-tracker(trackPendingTask), orch/conduit-queue, orch/interactions/plan-approvals, ask-user-question, hook-bridge, adapter
 // output: registerInteractionHandlers(adapter)
 // pos:    AskUserQuestion + ExitPlanMode interaction handler registration
 // >>> If I am updated, update my header comment and the parent folder's CORTEX.md <<<
