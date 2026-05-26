@@ -45,63 +45,169 @@ import type {
 
 // ── Representative frames (one per variant, all fields populated) ──
 
+// Reusable MessageRef fixture (matches platform/types.ts shape)
+const REF = { conduit: 'tui:abc-123', messageId: 'm-001', threadId: 'anchor-1' } as const;
+
+// Children of TranscriptReplay (defined separately so we can reference them)
+const REPLAY_CHILD_POST: ChatPost = {
+  type: CHAT_POST, ref: REF, content: { text: 'hi' }, seq: 10,
+};
+const REPLAY_CHILD_UPDATE: ChatUpdate = {
+  type: CHAT_UPDATE, ref: REF, content: { text: 'hi (edited)' }, seq: 11,
+};
+const REPLAY_CHILD_INTERACTIVE: InteractivePost = {
+  type: INTERACTIVE_POST, ref: REF,
+  content: { text: 'choose:' },
+  actions: [{ type: 'button', text: 'Go', actionId: 'go', value: '1' }],
+  seq: 12,
+};
+
 const REPRESENTATIVE_FRAMES: TuiFrame[] = [
-  // Lifecycle
-  { type: HANDSHAKE_HELLO, protocolVersion: PROTOCOL_VERSION, clientInfo: 'test-client' } satisfies HandshakeHello,
-  { type: HANDSHAKE_ACK, protocolVersion: PROTOCOL_VERSION, serverInfo: 'test-server' } satisfies HandshakeAck,
-  { type: SESSION_SWITCH, sessionId: 'sess-001', projectId: 'proj-a' } satisfies SessionSwitch,
-  { type: SESSION_SWITCHED, sessionId: 'sess-001', ok: true } satisfies SessionSwitched,
-  { type: PING, timestamp: 1234567890 } satisfies Ping,
-  { type: PONG, timestamp: 1234567890 } satisfies Pong,
-  { type: CLOSE, reason: 'shutdown' } satisfies Close,
+  // --- Lifecycle ---
+  {
+    type: HANDSHAKE_HELLO, protocolVersion: PROTOCOL_VERSION,
+    clientName: 'cortex-tui', clientVersion: '0.1.0',
+    resume: { sessionId: 'sess-prev' }, project: 'cortex-self',
+  } satisfies HandshakeHello,
+  {
+    type: HANDSHAKE_ACK, protocolVersion: PROTOCOL_VERSION,
+    serverVersion: '1.2.3', conduitId: 'tui:abc-123',
+    defaultProjectId: 'general', seq: 0,
+  } satisfies HandshakeAck,
+  {
+    type: SESSION_SWITCH, id: 'req-1', projectId: 'cortex-self', sessionId: 'sess-001',
+  } satisfies SessionSwitch,
+  {
+    type: SESSION_SWITCHED, id: 'req-1', projectId: 'cortex-self',
+    sessionId: 'sess-001', sessionName: 'cortex-AB12',
+    isFresh: false, seq: 1,
+  } satisfies SessionSwitched,
+  { type: PING, ts: 1700000000000 } satisfies Ping,
+  { type: PONG, ts: 1700000000000 } satisfies Pong,
+  { type: CLOSE, reason: 'user-quit' } satisfies Close,
 
-  // Chat outbound
-  { type: CHAT_POST, conduit: 'C123', content: { text: 'hello', richBlocks: [{ type: 'markdown', text: '**bold**' }] }, messageId: 'm1', threadId: 't1' } satisfies ChatPost,
-  { type: CHAT_UPDATE, conduit: 'C123', messageId: 'm1', content: { text: 'updated' } } satisfies ChatUpdate,
-  { type: CHAT_DELETE, conduit: 'C123', messageId: 'm1' } satisfies ChatDelete,
-  { type: CHAT_MARK_QUEUED, conduit: 'C123', messageId: 'm1' } satisfies ChatMarkQueued,
+  // --- Chat outbound (S→C, with seq + ref) ---
+  {
+    type: CHAT_POST, ref: REF,
+    content: { text: 'hello', richBlocks: [{ type: 'markdown', text: '**bold**' }] },
+    threadAnchorId: 'anchor-1', seq: 2,
+  } satisfies ChatPost,
+  {
+    type: CHAT_UPDATE, ref: REF, content: { text: 'updated' }, seq: 3,
+  } satisfies ChatUpdate,
+  { type: CHAT_DELETE, ref: REF, seq: 4 } satisfies ChatDelete,
+  { type: CHAT_MARK_QUEUED, ref: REF, seq: 5 } satisfies ChatMarkQueued,
 
-  // Chat inbound
-  { type: MSG_USER, conduit: 'C123', text: 'hello', senderId: 'u1', isBot: false, messageId: 'm1', threadId: 't1' } satisfies MsgUser,
-  { type: MSG_EDIT, conduit: 'C123', messageId: 'm1', newText: 'edited' } satisfies MsgEdit,
+  // --- Chat inbound (C→S, with id + attachments) ---
+  {
+    type: MSG_USER, id: 'msg-req-1', text: 'hello',
+    threadAnchorId: 'anchor-1',
+    attachments: [{ path: '/tmp/a.png', mimeType: 'image/png', name: 'a.png' }],
+  } satisfies MsgUser,
+  { type: MSG_EDIT, id: 'edit-req-1', ref: REF, newText: 'edited' } satisfies MsgEdit,
 
-  // Streaming
-  { type: STREAM_TEXT, conduit: 'C123', text: 'part1', streamId: 's1' } satisfies StreamText,
-  { type: STREAM_MUTABLE_OPEN, conduit: 'C123', text: 'initial', streamId: 's1', mutableId: 'm1' } satisfies StreamMutableOpen,
-  { type: STREAM_MUTABLE_UPDATE, conduit: 'C123', text: 'update', streamId: 's1', mutableId: 'm1' } satisfies StreamMutableUpdate,
-  { type: STREAM_FLUSH, conduit: 'C123', streamId: 's1' } satisfies StreamFlush,
+  // --- Streaming (S→C, with seq) ---
+  { type: STREAM_TEXT, streamId: 's1', text: 'part1', seq: 6 } satisfies StreamText,
+  {
+    type: STREAM_MUTABLE_OPEN, streamId: 's1', regionId: 'r1',
+    text: 'initial', seq: 7,
+  } satisfies StreamMutableOpen,
+  {
+    type: STREAM_MUTABLE_UPDATE, streamId: 's1', regionId: 'r1',
+    text: 'updated', seq: 8,
+  } satisfies StreamMutableUpdate,
+  { type: STREAM_FLUSH, streamId: 's1', seq: 9 } satisfies StreamFlush,
 
-  // Interactive
-  { type: INTERACTIVE_POST, conduit: 'C123', text: 'choose:', actions: [{ type: 'button', text: 'Go', actionId: 'go', value: '1' }], richBlocks: [{ type: 'divider' }] } satisfies InteractivePost,
-  { type: MODAL_OPEN, triggerId: 'trig-1', modal: { callbackId: 'cb1', title: 'Form', fields: [{ type: 'text_input', blockId: 'b1', label: 'Name', actionId: 'a1' }] } } satisfies ModalOpen,
-  { type: MODAL_ACK, ok: true } satisfies ModalAck,
-  { type: ACTION_CLICK, actionId: 'btn_go', value: '1', triggerId: 'trig-1', conduit: 'C123', messageId: 'm1' } satisfies ActionClick,
-  { type: MODAL_SUBMIT, callbackId: 'cb1', values: { q_0: { selection: { selectedOption: { value: '0' } } } }, privateMetadata: '{}' } satisfies ModalSubmit,
+  // --- Interactive ---
+  {
+    type: INTERACTIVE_POST, ref: REF,
+    content: { text: 'choose:' },
+    actions: [{ type: 'button', text: 'Go', actionId: 'go', value: '1' }],
+    threadAnchorId: 'anchor-1', seq: 12,
+  } satisfies InteractivePost,
+  {
+    type: MODAL_OPEN, triggerId: 'tui:abc-123:trig-1',
+    modal: {
+      callbackId: 'cb1', title: 'Form',
+      fields: [{ type: 'text_input', blockId: 'b1', label: 'Name', actionId: 'a1' }],
+    },
+    seq: 13,
+  } satisfies ModalOpen,
+  { type: MODAL_ACK, id: 'sub-req-1', errors: { b1: 'required' }, seq: 14 } satisfies ModalAck,
+  {
+    type: ACTION_CLICK, id: 'act-req-1', actionId: 'btn_go', value: '1',
+    triggerId: 'tui:abc-123:trig-1', messageRef: REF, userId: 'cortex-tui',
+  } satisfies ActionClick,
+  {
+    type: MODAL_SUBMIT, id: 'sub-req-1', callbackId: 'cb1',
+    privateMetadata: '{"groupId":"grp-1"}',
+    values: { q_0: { selection: { selectedOption: { value: '0' } } } },
+    userId: 'cortex-tui',
+  } satisfies ModalSubmit,
 
-  // Other
-  { type: TRANSCRIPT_REPLAY, conduit: 'C123', messages: [{ role: 'user', text: 'hi' }, { role: 'assistant', text: 'hello' }], streamId: 's1' } satisfies TranscriptReplay,
-  { type: NOTIFICATION, level: 'info', message: 'task complete', title: 'Done' } satisfies Notification,
+  // --- Transcript replay (S→C, no own seq) ---
+  {
+    type: TRANSCRIPT_REPLAY, sessionId: 'sess-001',
+    items: [REPLAY_CHILD_POST, REPLAY_CHILD_UPDATE, REPLAY_CHILD_INTERACTIVE],
+    seqStart: 10, seqEnd: 12, isCatchUp: true,
+  } satisfies TranscriptReplay,
 
-  // UI side-channel
-  { type: UI_QUERY, queryId: 'q1', selector: '#root' } satisfies UiQuery,
-  { type: UI_QUERY_RESULT, queryId: 'q1', data: { width: 800 } } satisfies UiQueryResult,
-  { type: UI_MUTATE, mutationId: 'm1', action: 'setTheme', payload: { theme: 'dark' } } satisfies UiMutate,
-  { type: UI_MUTATE_RESULT, mutationId: 'm1', ok: true } satisfies UiMutateResult,
-  { type: UI_SUBSCRIBE, event: 'resize', subId: 'sub1' } satisfies UiSubscribe,
-  { type: UI_EVENT, event: 'resize', subId: 'sub1', data: { width: 1024 } } satisfies UiEvent,
-  { type: UI_UNSUBSCRIBE, subId: 'sub1' } satisfies UiUnsubscribe,
+  // --- Notification (S→C) ---
+  {
+    type: NOTIFICATION, kind: 'project-report',
+    projectId: 'cortex-self', sessionId: 'sess-other',
+    title: 'Scheduled report', body: 'Daily scan complete',
+    ref: REF, seq: 15,
+  } satisfies Notification,
 
-  // Error
-  { type: ERROR, code: 400, message: 'bad request', originalType: CHAT_POST } satisfies ErrorFrame,
+  // --- UI side-channel ---
+  {
+    type: UI_QUERY, id: 'q1', scope: 'projects.list', params: { resumable: true },
+  } satisfies UiQuery,
+  {
+    type: UI_QUERY_RESULT, id: 'q1', ok: true, data: [{ id: 'cortex-self' }],
+  } satisfies UiQueryResult,
+  {
+    type: UI_QUERY_RESULT, id: 'q2', ok: false,
+    error: { code: 'invalid-args', message: 'bad scope' },
+  } satisfies UiQueryResult,
+  {
+    type: UI_MUTATE, id: 'm1', op: 'schedules.pause', args: { scheduleId: 'sch-1' },
+  } satisfies UiMutate,
+  {
+    type: UI_MUTATE_RESULT, id: 'm1', ok: true, data: { paused: true },
+  } satisfies UiMutateResult,
+  {
+    type: UI_MUTATE_RESULT, id: 'm2', ok: false,
+    error: { code: 'task-lock-busy', message: 'held by another agent' },
+  } satisfies UiMutateResult,
+  {
+    type: UI_SUBSCRIBE, id: 'sub1',
+    filter: { events: ['task.completed', 'thread.completed'], projectId: 'cortex-self' },
+  } satisfies UiSubscribe,
+  {
+    type: UI_EVENT, id: 'sub1',
+    event: { type: 'task.completed', ts: '2026-05-26T05:00:00Z', payload: { taskId: 'abcd' } },
+    seq: 16,
+  } satisfies UiEvent,
+  { type: UI_UNSUBSCRIBE, id: 'sub1' } satisfies UiUnsubscribe,
+
+  // --- Error (S→C, no seq) ---
+  {
+    type: ERROR, code: 4002, message: 'unknown frame type',
+    refId: 'msg-req-99', closeAfter: false,
+  } satisfies ErrorFrame,
 ];
 
 // ── Group 1: Round-trip per frame type ──
 
 for (const frame of REPRESENTATIVE_FRAMES) {
-  test(`round-trip: ${frame.type}`, () => {
+  // Disambiguate the two UiQueryResult / UiMutateResult variants by `ok`
+  const tag = ('ok' in frame) ? `${frame.type} (ok=${(frame as { ok: boolean }).ok})` : frame.type;
+  test(`round-trip: ${tag}`, () => {
     const encoded = encodeFrame(frame);
     const decoded = parseFrame(encoded);
-    assert.ok(decoded !== null, `parseFrame returned null for ${frame.type}`);
+    assert.ok(decoded !== null, `parseFrame returned null for ${tag}`);
     assert.deepEqual(decoded, frame);
   });
 }
@@ -138,35 +244,44 @@ test('parseFrame returns null for unknown discriminator', () => {
 });
 
 test('parseFrame returns null when required field is missing', () => {
-  // ChatPost requires 'conduit' and 'content'
+  // ChatPost requires ref, content, seq
   assert.equal(parseFrame('{"type":"chat.post"}'), null);
-  assert.equal(parseFrame('{"type":"chat.post","conduit":"C123"}'), null);
-  // ModalOpen requires 'triggerId' and 'modal'
+  assert.equal(parseFrame('{"type":"chat.post","ref":{}}'), null);
+  assert.equal(parseFrame('{"type":"chat.post","ref":{},"content":{"text":"x"}}'), null);
+  // ModalOpen requires triggerId, modal, seq
   assert.equal(parseFrame('{"type":"modal.open"}'), null);
-  // HandshakeHello requires 'protocolVersion'
+  assert.equal(parseFrame('{"type":"modal.open","triggerId":"t"}'), null);
+  // HandshakeHello requires protocolVersion + clientName + clientVersion
   assert.equal(parseFrame('{"type":"handshake.hello"}'), null);
-  // Error requires 'code' and 'message'
+  assert.equal(parseFrame('{"type":"handshake.hello","protocolVersion":1}'), null);
+  // MsgUser requires id + text (attachments / threadAnchorId optional)
+  assert.equal(parseFrame('{"type":"msg.user"}'), null);
+  assert.equal(parseFrame('{"type":"msg.user","id":"x"}'), null);
+  // Error requires code + message
   assert.equal(parseFrame('{"type":"error"}'), null);
+  // UiSubscribe requires id + filter
+  assert.equal(parseFrame('{"type":"ui.subscribe","id":"x"}'), null);
 });
 
-// ── Group 3: Modal submit values round-trip ──
+test('parseFrame rejects null on required nullable fields (treats null as absent)', () => {
+  // 'ref' is required; explicitly null should fail (matches "not present" semantics)
+  assert.equal(parseFrame('{"type":"chat.post","ref":null,"content":{"text":"x"},"seq":0}'), null);
+});
+
+// ── Group 3: Modal submit values round-trip (matches ModalSubmitContext.values shape) ──
 
 test('modal.submit values round-trip matches ModalSubmitContext.values shape', () => {
   const frame: ModalSubmit = {
     type: MODAL_SUBMIT,
+    id: 'sub-1',
     callbackId: 'ask_user_question_modal_submit',
     values: {
-      q_0: {
-        selection: { selectedOption: { value: '0' } },
-      },
-      b_text: {
-        input: { value: 'some text' },
-      },
-      b_multi: {
-        picks: { selectedOptions: [{ value: 'a' }, { value: 'b' }] },
-      },
+      q_0: { selection: { selectedOption: { value: '0' } } },
+      b_text: { input: { value: 'some text' } },
+      b_multi: { picks: { selectedOptions: [{ value: 'a' }, { value: 'b' }] } },
     },
     privateMetadata: JSON.stringify({ groupId: 'grp-1' }),
+    userId: 'cortex-tui',
   };
 
   const encoded = encodeFrame(frame);
@@ -174,9 +289,10 @@ test('modal.submit values round-trip matches ModalSubmitContext.values shape', (
   assert.ok(decoded !== null, 'parseFrame returned null for modal.submit');
   assert.equal(decoded.type, MODAL_SUBMIT);
 
-  // Verify nested values shape matches ModalSubmitContext.values
   const submit = decoded as ModalSubmit;
+  assert.equal(submit.id, 'sub-1');
   assert.equal(submit.callbackId, 'ask_user_question_modal_submit');
+  assert.equal(submit.userId, 'cortex-tui');
   assert.equal(submit.values.q_0.selection.selectedOption?.value, '0');
   assert.equal(submit.values.b_text.input.value, 'some text');
   assert.equal(submit.values.b_multi.picks.selectedOptions?.[0]?.value, 'a');
@@ -186,8 +302,7 @@ test('modal.submit values round-trip matches ModalSubmitContext.values shape', (
 
 // ── Group 4: Guard discrimination ──
 
-test('guards narrow correctly under strict type checking', () => {
-  // Each guard must return true only for its own variant type
+test('every guard returns true for its own variant and false for all others', () => {
   for (const frame of REPRESENTATIVE_FRAMES) {
     const frameType = frame.type;
     for (const typeStr of ALL_FRAME_TYPES) {
@@ -203,9 +318,11 @@ test('guards narrow correctly under strict type checking', () => {
   }
 });
 
-// Specific narrowing checks that TypeScript can infer (ensures discrim union works)
-test('specific guard narrowing (type narrowing safety)', () => {
-  const f: TuiFrame = { type: HANDSHAKE_HELLO, protocolVersion: 1 };
+test('specific guard narrowing (type narrowing safety under --strict)', () => {
+  const f: TuiFrame = {
+    type: HANDSHAKE_HELLO, protocolVersion: 1,
+    clientName: 'c', clientVersion: '0.1',
+  };
 
   assert.ok(isHandshakeHello(f));
   assert.ok(!isChatPost(f));
@@ -213,17 +330,18 @@ test('specific guard narrowing (type narrowing safety)', () => {
   assert.ok(!isNotification(f));
   assert.ok(!isModalOpen(f));
 
-  // Narrowed usage: after guard, TS knows the concrete type
   if (isHandshakeHello(f)) {
-    assert.equal(f.protocolVersion, 1); // Would fail compile if narrowing didn't work
+    // After narrowing, the compiler knows f.clientName / f.protocolVersion exist
+    assert.equal(f.protocolVersion, 1);
+    assert.equal(f.clientName, 'c');
   } else {
     assert.fail('should have narrowed to HandshakeHello');
   }
 });
 
-// ── Group 5: Frame inventory test ──
+// ── Group 5: Frame inventory ──
 
-test('every type string in ALL_FRAME_TYPES has a guard in GUARD_BY_TYPE', () => {
+test('every type in ALL_FRAME_TYPES has a guard in GUARD_BY_TYPE', () => {
   for (const typeStr of ALL_FRAME_TYPES) {
     const guard = GUARD_BY_TYPE[typeStr];
     assert.ok(
@@ -236,8 +354,20 @@ test('every type string in ALL_FRAME_TYPES has a guard in GUARD_BY_TYPE', () => 
 
 test('GUARD_BY_TYPE has no extra entries beyond ALL_FRAME_TYPES', () => {
   const guardCount = Object.keys(GUARD_BY_TYPE).length;
-  assert.equal(guardCount, ALL_FRAME_TYPES.length,
-    `GUARD_BY_TYPE has ${guardCount} entries but ALL_FRAME_TYPES has ${ALL_FRAME_TYPES.length}`);
+  assert.equal(
+    guardCount, ALL_FRAME_TYPES.length,
+    `GUARD_BY_TYPE has ${guardCount} entries but ALL_FRAME_TYPES has ${ALL_FRAME_TYPES.length}`,
+  );
+});
+
+test('every type in ALL_FRAME_TYPES is exercised by REPRESENTATIVE_FRAMES', () => {
+  const covered = new Set<string>(REPRESENTATIVE_FRAMES.map(f => f.type));
+  for (const typeStr of ALL_FRAME_TYPES) {
+    assert.ok(
+      covered.has(typeStr),
+      `REPRESENTATIVE_FRAMES is missing a fixture for type: ${typeStr}`,
+    );
+  }
 });
 
 // ── Protocol version ──
