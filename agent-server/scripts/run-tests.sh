@@ -69,6 +69,7 @@ TEST_FILES=(
   tests/orch/*.test.ts
   tests/threads/*.test.ts
   tests/domain/**/*.test.ts
+  tests/platform/*.test.ts
 )
 shopt -u nullglob
 

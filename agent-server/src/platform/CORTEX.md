@@ -15,3 +15,4 @@ Specific SDK calls are encapsulated in the adapters/ subdirectory.
 | `interactive-builder.ts` | builder | AskUserQuestion / ExitPlanMode component building |
 | `tool-trace.ts` | UI helper | tool_use compact traces rendered via OutputStream openMutable/update |
 | `testing.ts` | testing | MockAdapter in-memory mock implementation + MockOutputStream typed segment trail recorder |
+| `tui/` | subdirectory | TUI protocol types + wire format (M4: TuiFrame union + guards + parseFrame/encodeFrame) |
