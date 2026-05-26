@@ -16,3 +16,4 @@ Specific SDK calls are encapsulated in the adapters/ subdirectory.
 | `tool-trace.ts` | UI helper | tool_use compact traces rendered via OutputStream openMutable/update |
 | `testing.ts` | testing | MockAdapter in-memory mock implementation + MockOutputStream typed segment trail recorder |
 | `tui/` | subdirectory | TUI protocol types + wire format (M4: TuiFrame union + guards + parseFrame/encodeFrame) |
+| `adapters/index.ts` | factory | `createPrimaryAdapterFromEnv` + `decideTuiEnabled` + `tuiPort` — TUI auto-enable, composite vs bare vs primary-only selection |

@@ -5,7 +5,7 @@
 import * as dotenv from 'dotenv';
 import { mkdirSync } from 'fs';
 import * as path from 'path';
-import { createAdapterFromEnv } from '@platform/index.js';
+import { createAdapterFromEnv, extractTuiAdapter } from '@platform/index.js';
 import type { PlatformAdapter } from '@platform/index.js';
 import { WORKSPACE_DIR, CONFIG_DIR } from '@core/utils.js';
 import { closeAllSessions, closeSession as closeClaudePooledSession, shutdownCodex } from '@domain/agents/index.js';
@@ -86,6 +86,10 @@ startMachineRegistryWatcher();
 
 // --- Create platform adapter (replaces direct Slack App instantiation) ---
 const adapter: PlatformAdapter = createAdapterFromEnv();
+
+// Wire EventBus into the TUI gateway before start() so it can subscribe
+// to bus events during its own start() lifecycle.
+extractTuiAdapter(adapter)?.setBus(bus);
 
 // --- Wire hot-reload admin notifiers ---
 const notifyAdmin = (text: string) => {
@@ -186,6 +190,33 @@ process.on('SIGTERM', async () => {
   }
   executionRepo.load();
   await executionRegistry.markMissingRunningExecutionsStale((record) => record.kind === 'dispatch');
+
+  // ── NEW: Wire UI service into the TUI gateway ─────────────────────────────
+  //
+  // UI service (M3) injects store-backed query/mutate capabilities into the
+  // TUI gateway. When M3 has not yet landed, the dynamic import fails and the
+  // gateway responds with "ui-service-unavailable" errors for UI side-channel
+  // frames — daemon boots without it.
+  let uiService: unknown = null;
+  try {
+    const { createUiService }: { createUiService: (opts: any) => unknown } =
+      await import('@domain/ui/index.js' as string);
+    uiService = createUiService({
+      projectStore,
+      sessionStore,
+      threadStore,
+      taskStore,
+      scheduler,
+      executionRegistry,
+      runningExecutions,
+      bus,
+      adapter,
+    });
+  } catch (e) {
+    log.warn(`UI service not available (M3 not yet landed): ${(e as Error).message}`);
+  }
+  extractTuiAdapter(adapter)?.setUiService(uiService);
+
   await adapter.start();
 
   try {

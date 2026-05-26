@@ -1,5 +1,5 @@
-// input:  process argv, child_process, @core/paths, @core/cli-utils, ./init, @domain/tasks/system/task-cli, @domain/system/install-cli
-// output: CLI dispatcher: cortex {init,start,daemon,task,config,install,setup-gateway}
+// input:  process argv, child_process, net, @core/paths, @core/cli-utils, ./init, @domain/tasks/system/task-cli, @domain/system/install-cli
+// output: CLI dispatcher: cortex {init,start,daemon,task,config,install,setup-gateway,tui}
 // pos:    Bin entry point (`cortex`). Dispatches to:
 //           init [--home <path>]  — interactive init (async, runInit)
 //           start                 — fork app.js
@@ -13,11 +13,13 @@
 //           task <subcommand>     — delegate to task-cli
 //           install latest        — install latest Cortex from npm
 //           config                — show resolved paths
+//           tui [options]         — start Terminal UI client (forks dist/tui/index.js)
 //         Packaged as dist/entry/cli.js, registered in package.json bin.
 // >>> If I am updated, update my header comment and the parent folder's CORTEX.md <<<
 
 import { fork } from 'child_process';
 import * as path from 'path';
+import * as net from 'net';
 import * as os from 'os';
 import { fileURLToPath } from 'url';
 import { existsSync, readdirSync, mkdirSync, writeFileSync, utimesSync, readFileSync, unlinkSync } from 'fs';
@@ -43,6 +45,7 @@ const log = createLogger('cli');
 const MODULE_DIR = path.dirname(fileURLToPath(import.meta.url));
 const APP_JS = path.join(MODULE_DIR, 'app.js');
 const DAEMON_JS = path.join(MODULE_DIR, 'daemon.js');
+const TUI_JS = path.join(MODULE_DIR, '..', 'tui', 'index.js');
 
 // ─── Help ───────────────────────────────────────────────────────
 
@@ -82,6 +85,94 @@ export function getSetupGatewayHelp(): string {
   ].join('\n');
 }
 
+// ─── TUI arguments ─────────────────────────────────────────────────
+
+export interface TuiCliOptions {
+  resume: boolean;
+  project?: string;
+  port?: number;
+}
+
+/** Parse arguments for the `cortex tui` subcommand. */
+export function parseTuiArgs(args: string[]): TuiCliOptions {
+  const opts: TuiCliOptions = { resume: false };
+  for (let i = 0; i < args.length; i++) {
+    switch (args[i]) {
+      case '--resume':
+        opts.resume = true;
+        break;
+      case '--project':
+        opts.project = args[++i];
+        break;
+      case '--port':
+        opts.port = Number(args[++i]);
+        break;
+    }
+  }
+  return opts;
+}
+
+/** Check whether a TCP server is listening on 127.0.0.1:port (500ms timeout). */
+export function tuiPortListening(port: number): Promise<boolean> {
+  return new Promise(resolve => {
+    const sock = net.connect({ host: '127.0.0.1', port }, () => {
+      sock.end();
+      resolve(true);
+    });
+    sock.setTimeout(500);
+    sock.on('timeout', () => { sock.destroy(); resolve(false); });
+    sock.on('error', () => resolve(false));
+  });
+}
+
+export function getTuiHelp(): string {
+  return [
+    'Start the Cortex TUI (terminal UI) client',
+    '',
+    'Usage: cortex tui [options]',
+    '',
+    'Connects to a running Cortex daemon via WebSocket and opens',
+    'a terminal-based chat interface.',
+    '',
+    'Options:',
+    '  --resume              Open the resume-session picker on connect',
+    '  --project <id>        Start a fresh session in the named project',
+    '  --port <n>            Override TUI port (default: 3003, or CORTEX_TUI_PORT)',
+    '  --help, -h            Show this help',
+  ].join('\n');
+}
+
+/** Execute the `cortex tui` subcommand: check daemon liveness, fork Ink client. */
+export async function cmdTui(args: string[]): Promise<void> {
+  const opts = parseTuiArgs(args);
+  const port = opts.port ?? (Number(process.env.CORTEX_TUI_PORT) || 3003);
+
+  if (!await tuiPortListening(port)) {
+    process.stderr.write(
+      `Cortex daemon is not running on port ${port}.\n` +
+      `Start it with: cortex daemon\n`,
+    );
+    process.exit(1);
+  }
+
+  if (!existsSync(TUI_JS)) {
+    log.error(`TUI entry not found: ${TUI_JS}`);
+    log.error('Run `npm run build` first.');
+    process.exit(1);
+  }
+
+  const childArgs: string[] = [];
+  if (opts.resume) childArgs.push('--resume');
+  if (opts.project) { childArgs.push('--project', opts.project); }
+
+  const child = fork(TUI_JS, childArgs, {
+    stdio: 'inherit',
+    env: { ...process.env, CORTEX_TUI_PORT: String(port) },
+  });
+  child.on('exit', code => process.exit(code ?? 0));
+  await new Promise<never>(() => {}); // keep alive until child exits
+}
+
 export function getCliHelp(): string {
   return formatHelp({
     name: 'cortex',
@@ -102,6 +193,7 @@ export function getCliHelp(): string {
       { name: 'install latest', description: 'Install the latest version of Cortex from npm' },
       { name: 'config', description: 'Show resolved paths and initialization status' },
       { name: 'setup-gateway', description: 'Auto-detect Claude/PI configs and generate gateway.yaml + profiles.json' },
+      { name: 'tui', description: 'Start the Terminal UI (TUI) client for local interaction' },
     ],
     options: [
       { flag: '--help, -h', description: 'Show this help' },
@@ -583,6 +675,10 @@ function main(): void {
       console.log(getCliHelp());
       process.exit(0);
     }
+    if (cmd === 'tui') {
+      console.log(getTuiHelp());
+      process.exit(0);
+    }
     // Other subcommands (init, task, config, setup-gateway) handle --help internally via runCli()
   }
 
@@ -659,6 +755,12 @@ function main(): void {
       env: { ...process.env },
     });
     process.exit(0);
+  }
+
+  // ── Subcommands that fork with stdio: 'inherit' ──
+  if (cmd === 'tui') {
+    cmdTui(rest);
+    return;
   }
 
   // ── Subcommands that return results ──

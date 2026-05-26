@@ -4,7 +4,7 @@ PlatformAdapter's concrete platform implementations. Each adapter is a thin brid
 
 | filename | role | function |
 |---|---|---|
-| `index.ts` | factory | Select adapter by CORTEX_PLATFORM |
+| `index.ts` | factory | Select adapter by CORTEX_PLATFORM / CORTEX_TUI — `createPrimaryAdapterFromEnv` + `createAdapterFromEnv` with composite vs bare vs primary-only |
 | `slack.ts` | adapter | Slack Bolt + WebClient implementation (updateMessage has built-in per-message ≥1.1s throttle to prevent chat.update 429; gains `openOutputStream` + project conduit methods in S1) |
 | `slack-output-stream.ts` | output stream | SlackOutputStream — coalescing OutputStream for Slack: content coalescing, mutable tail, table/HR split heuristics, retry backoff, pendingEdits-based `updateMessage` |
 | `slack-project-conduits.ts` | store | File-backed project→conduit mapping (JsonRepository + STORE_DIR/channel-registry.json) |
