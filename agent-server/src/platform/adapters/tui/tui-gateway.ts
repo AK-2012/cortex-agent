@@ -133,14 +133,19 @@ export class TuiGatewayAdapter implements PlatformAdapter, TuiAdapterControls {
       return { sessionId: state.sessionId ?? '', projectId: state.projectId };
     });
 
-    // Bind WebSocket server
+    // Bind WebSocket server — listen on 'listening' / 'error' for async binding
+    this._wss = new WebSocketServer({ port: this._port, host: this._host });
+
     try {
-      this._wss = new WebSocketServer({ port: this._port, host: this._host });
+      await new Promise<void>((resolve, reject) => {
+        this._wss!.once('listening', () => resolve());
+        this._wss!.once('error', (err: Error) => reject(err));
+      });
     } catch (err: any) {
-      if (err.code === 'EADDRINUSE') {
+      this._wss = null;
+      if (err.code === 'EADDRINUSE' || err.message?.includes('EADDRINUSE') || err.message?.includes('in use')) {
         log.warn(`TUI port ${this._port} in use — adapter is no-op outbound`);
         this._noopOutbound = true;
-        this._wss = null;
         return;
       }
       throw err;
@@ -459,7 +464,20 @@ export class TuiGatewayAdapter implements PlatformAdapter, TuiAdapterControls {
       const raw = data.toString('utf8');
       const frame = parseFrame(raw);
       if (!frame) {
-        // Parse error
+        // Check if raw JSON parses to an object with an unknown type string
+        let parsed: any;
+        try { parsed = JSON.parse(raw); } catch { parsed = null; }
+        if (parsed && typeof parsed?.type === 'string') {
+          // Valid JSON, unknown type → error 4002 (no close)
+          conn.send({
+            type: 'error',
+            code: 4002,
+            message: `Unknown frame type: ${parsed.type}`,
+            refId: parsed.id,
+          });
+          return;
+        }
+        // Invalid JSON / missing type → parse error 4001
         conn.send({
           type: 'error',
           code: 4001,
@@ -620,7 +638,7 @@ export class TuiGatewayAdapter implements PlatformAdapter, TuiAdapterControls {
     }
   }
 
-  private async _createFreshSession(conn: TuiConnection, projectId: string): Promise<void> {
+  private async _createFreshSession(conn: TuiConnection, projectId: string, requestId = ''): Promise<void> {
     const sessionName = await sessionStore.generateSessionName();
     const sessionId = crypto.randomUUID();
     await sessionStore.registerSession(sessionName, {
@@ -643,7 +661,7 @@ export class TuiGatewayAdapter implements PlatformAdapter, TuiAdapterControls {
 
     conn.send({
       type: 'session.switched',
-      id: '',
+      id: requestId,
       projectId,
       sessionId,
       sessionName,
@@ -730,7 +748,7 @@ export class TuiGatewayAdapter implements PlatformAdapter, TuiAdapterControls {
       }
     } else {
       // Fresh session in projectId
-      await this._createFreshSession(conn, projectId);
+      await this._createFreshSession(conn, projectId, id);
     }
   }
 

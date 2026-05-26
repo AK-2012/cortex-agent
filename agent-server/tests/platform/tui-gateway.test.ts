@@ -1,0 +1,715 @@
+// input:  TuiGatewayAdapter + protocol.ts + TuiFrame types
+// output: regression tests — handshake, msg.user, session.switch, EADDRINUSE, resume, serial queue, notifications
+// pos:    verifies TUI Gateway Adapter M1 implementation
+// >>> If I am updated, update the parent folder's CORTEX.md <<<
+
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { WebSocket } from 'ws';
+import { TuiGatewayAdapter } from '../../src/platform/adapters/tui/tui-gateway.js';
+import { sendProjectReport, sendSystemNotice } from '../../src/platform/adapters/tui/tui-notifications.js';
+import { sessionStore } from '../../src/store/session-registry-repo.js';
+import { conversationLedger } from '../../src/store/conversation-ledger-repo.js';
+import type { TuiFrame } from '../../src/platform/tui/protocol.js';
+
+// ── Helpers ────────────────────────────────────────────────────────────
+
+function delay(ms: number): Promise<void> {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
+function waitForOpen(ws: WebSocket): Promise<void> {
+  return new Promise((resolve, reject) => {
+    ws.on('open', resolve);
+    ws.on('error', reject);
+  });
+}
+
+function waitForClose(ws: WebSocket): Promise<void> {
+  return new Promise((resolve) => {
+    ws.on('close', () => resolve());
+  });
+}
+
+function sendFrame(ws: WebSocket, frame: TuiFrame): void {
+  ws.send(JSON.stringify(frame));
+}
+
+function makeFrameCollector(ws: WebSocket) {
+  const queue: any[] = [];
+  let pendingResolve: ((frame: any) => void) | null = null;
+
+  ws.on('message', (data: Buffer) => {
+    let parsed: any;
+    try {
+      parsed = JSON.parse(data.toString());
+    } catch {
+      return;
+    }
+    if (pendingResolve) {
+      const r = pendingResolve;
+      pendingResolve = null;
+      r(parsed);
+    } else {
+      queue.push(parsed);
+    }
+  });
+
+  const read = async (timeoutMs = 3000): Promise<any> => {
+    if (queue.length > 0) return queue.shift()!;
+    return new Promise((resolve, reject) => {
+      pendingResolve = resolve;
+      setTimeout(() => {
+        if (pendingResolve) {
+          pendingResolve = null;
+          reject(new Error('Frame receive timeout'));
+        }
+      }, timeoutMs);
+    });
+  };
+
+  /** Drain any queued frames without reading them (for cleanup between test steps). */
+  const drain = (): void => {
+    queue.length = 0;
+  };
+
+  return { read, drain };
+}
+
+async function startEphemeralGateway(): Promise<{
+  adapter: TuiGatewayAdapter;
+  port: number;
+  stop: () => Promise<void>;
+}> {
+  const adapter = new TuiGatewayAdapter({ port: 0, host: '127.0.0.1' });
+  await adapter.start();
+  const wss = (adapter as any)._wss;
+  if (!wss) throw new Error('Gateway failed to start (EADDRINUSE on ephemeral port)');
+  const addr = wss.address();
+  if (!addr || typeof addr !== 'object') throw new Error('Gateway not listening');
+  const port = addr.port;
+  return {
+    adapter,
+    port,
+    stop: async () => { await adapter.stop(); },
+  };
+}
+
+async function wsConnect(port: number): Promise<WebSocket> {
+  const ws = new WebSocket(`ws://127.0.0.1:${port}`);
+  await waitForOpen(ws);
+  return ws;
+}
+
+async function handshake(
+  ws: WebSocket,
+  collector: ReturnType<typeof makeFrameCollector>,
+  opts?: { project?: string; resume?: { sessionId: string } | null },
+): Promise<{
+  conduitId: string;
+  sessionId: string;
+  sessionName: string;
+}> {
+  sendFrame(ws, {
+    type: 'handshake.hello',
+    protocolVersion: 1,
+    clientName: 'test',
+    clientVersion: '1.0',
+    project: opts?.project ?? 'general',
+    resume: opts?.resume ?? null,
+  });
+
+  const ack: any = await collector.read();
+  assert.equal(ack.type, 'handshake.ack');
+  assert.equal(ack.protocolVersion, 1);
+
+  const switched: any = await collector.read();
+  assert.equal(switched.type, 'session.switched');
+
+  return {
+    conduitId: ack.conduitId,
+    sessionId: switched.sessionId,
+    sessionName: switched.sessionName,
+  };
+}
+
+// ── Tests ──────────────────────────────────────────────────────────────
+
+test('handshake → session.attach → msg.user → chat.post → session.switch → close', async (t) => {
+  const { adapter, port, stop } = await startEphemeralGateway();
+  t.after(() => stop());
+
+  const ws = await wsConnect(port);
+  const coll = makeFrameCollector(ws);
+  t.after(() => ws.close());
+
+  // Step 1: Handshake — fresh session
+  const { sessionId: initialSessionId } = await handshake(ws, coll);
+
+  // Step 2: Register message handler
+  let capturedText = '';
+  adapter.onMessage(async (ctx) => {
+    capturedText = ctx.message.text;
+    await ctx.reply({ text: 'hello back' });
+  });
+
+  // Step 3: Send msg.user
+  sendFrame(ws, { type: 'msg.user', id: 'm1', text: 'hello from tui' });
+
+  const chatPost: any = await coll.read();
+  assert.equal(chatPost.type, 'chat.post');
+  assert.equal(chatPost.content.text, 'hello back');
+  assert.equal(chatPost.ref.conduit.length > 0, true);
+  assert.equal(chatPost.ref.messageId.length > 0, true);
+  assert.equal(capturedText, 'hello from tui');
+
+  // Step 4: Session switch (fresh — echo request id)
+  sendFrame(ws, { type: 'session.switch', id: 's1', projectId: 'general', sessionId: null });
+
+  const switched: any = await coll.read();
+  assert.equal(switched.type, 'session.switched');
+  assert.equal(switched.id, 's1', 'session.switched echoes session.switch request id');
+  assert.equal(switched.isFresh, true);
+  assert.notEqual(switched.sessionId, initialSessionId);
+
+  // Step 5: Close
+  ws.close();
+  await waitForClose(ws);
+});
+
+test('handshake protocol version mismatch causes error + close', async (t) => {
+  const { adapter, port, stop } = await startEphemeralGateway();
+  t.after(() => stop());
+
+  const ws = await wsConnect(port);
+  const coll = makeFrameCollector(ws);
+  t.after(() => ws.close());
+
+  sendFrame(ws, {
+    type: 'handshake.hello',
+    protocolVersion: 999,
+    clientName: 'test',
+    clientVersion: '1.0',
+  });
+
+  const error: any = await coll.read();
+  assert.equal(error.type, 'error');
+  assert.equal(error.code, 4000);
+  assert.ok(error.message.includes('Protocol version mismatch'));
+
+  await waitForClose(ws);
+});
+
+test('handshake timeout closes connection', async (t) => {
+  const { adapter, port, stop } = await startEphemeralGateway();
+  t.after(() => stop());
+
+  const ws = await wsConnect(port);
+  t.after(() => ws.close());
+
+  // Don't send handshake — should be closed by 5s timeout
+  await waitForClose(ws);
+});
+
+test('unknown frame type returns error 4002 without close', async (t) => {
+  const { adapter, port, stop } = await startEphemeralGateway();
+  t.after(() => stop());
+
+  const ws = await wsConnect(port);
+  const coll = makeFrameCollector(ws);
+  t.after(() => ws.close());
+
+  await handshake(ws, coll);
+
+  // Send unknown frame type — should get 4002 (not 4001)
+  sendFrame(ws, { type: 'unknown.type', id: 'x1' } as any);
+
+  const error: any = await coll.read();
+  assert.equal(error.type, 'error');
+  assert.equal(error.code, 4002);
+
+  // Connection should still be open
+  assert.equal(ws.readyState, WebSocket.OPEN);
+});
+
+test('message edit dispatches to edit handler', async (t) => {
+  const { adapter, port, stop } = await startEphemeralGateway();
+  t.after(() => stop());
+
+  const ws = await wsConnect(port);
+  const coll = makeFrameCollector(ws);
+  t.after(() => ws.close());
+
+  await handshake(ws, coll);
+
+  let capturedEdit: any = null;
+  adapter.onMessageEdit(async (ctx) => {
+    capturedEdit = { ref: ctx.originalRef, newText: ctx.newText };
+  });
+
+  sendFrame(ws, {
+    type: 'msg.edit',
+    id: 'e1',
+    ref: { conduit: 'c1', messageId: 'm1' },
+    newText: 'edited text',
+  });
+
+  await delay(100);
+  assert.ok(capturedEdit);
+  assert.equal(capturedEdit.newText, 'edited text');
+});
+
+test('action click dispatches to registered handler', async (t) => {
+  const { adapter, port, stop } = await startEphemeralGateway();
+  t.after(() => stop());
+
+  const ws = await wsConnect(port);
+  const coll = makeFrameCollector(ws);
+  t.after(() => ws.close());
+
+  await handshake(ws, coll);
+
+  let capturedAction: any = null;
+  adapter.onAction('test_action', async (ctx) => {
+    capturedAction = { actionId: ctx.actionId, value: ctx.value, userId: ctx.userId };
+  });
+
+  sendFrame(ws, {
+    type: 'action.click',
+    id: 'a1',
+    actionId: 'test_action',
+    value: 'click_val',
+    triggerId: 'trig-1',
+    userId: 'user-1',
+  });
+
+  await delay(100);
+  assert.ok(capturedAction);
+  assert.equal(capturedAction.actionId, 'test_action');
+  assert.equal(capturedAction.value, 'click_val');
+});
+
+test('modal submit → ack roundtrip', async (t) => {
+  const { adapter, port, stop } = await startEphemeralGateway();
+  t.after(() => stop());
+
+  const ws = await wsConnect(port);
+  const coll = makeFrameCollector(ws);
+  t.after(() => ws.close());
+
+  await handshake(ws, coll);
+
+  let acked = false;
+  adapter.onModalSubmit('test_modal', async (ctx) => {
+    await ctx.ack();
+    acked = true;
+  });
+
+  sendFrame(ws, {
+    type: 'modal.submit',
+    id: 'ms1',
+    callbackId: 'test_modal',
+    privateMetadata: '{}',
+    values: {},
+    userId: 'user-1',
+  });
+
+  const ack: any = await coll.read();
+  assert.equal(ack.type, 'modal.ack');
+  assert.equal(ack.id, 'ms1');
+  assert.equal(acked, true);
+});
+
+test('modal submit with errors sends error response', async (t) => {
+  const { adapter, port, stop } = await startEphemeralGateway();
+  t.after(() => stop());
+
+  const ws = await wsConnect(port);
+  const coll = makeFrameCollector(ws);
+  t.after(() => ws.close());
+
+  await handshake(ws, coll);
+
+  adapter.onModalSubmit('validate_modal', async (ctx) => {
+    await ctx.ack({ errors: { field1: 'Required' } });
+  });
+
+  sendFrame(ws, {
+    type: 'modal.submit',
+    id: 'ms2',
+    callbackId: 'validate_modal',
+    privateMetadata: '{}',
+    values: {},
+    userId: 'user-1',
+  });
+
+  const ack: any = await coll.read();
+  assert.equal(ack.type, 'modal.ack');
+  assert.deepEqual(ack.errors, { field1: 'Required' });
+});
+
+test('ping triggers pong', async (t) => {
+  const { adapter, port, stop } = await startEphemeralGateway();
+  t.after(() => stop());
+
+  const ws = await wsConnect(port);
+  const coll = makeFrameCollector(ws);
+  t.after(() => ws.close());
+
+  await handshake(ws, coll);
+
+  sendFrame(ws, { type: 'ping', ts: Date.now() });
+
+  const pong: any = await coll.read();
+  assert.equal(pong.type, 'pong');
+  assert.ok(typeof pong.ts === 'number');
+});
+
+// ── EADDRINUSE ─────────────────────────────────────────────────────────
+
+test('EADDRINUSE soft-failure — second adapter becomes noop', async (t) => {
+  const adapter1 = new TuiGatewayAdapter({ port: 0, host: '127.0.0.1' });
+  await adapter1.start();
+  t.after(() => adapter1.stop());
+
+  const actualPort = (adapter1 as any)._wss.address().port;
+
+  const adapter2 = new TuiGatewayAdapter({ port: actualPort, host: '127.0.0.1' });
+  await adapter2.start();
+  t.after(() => adapter2.stop());
+
+  assert.equal(adapter2.noopOutbound, true);
+});
+
+// ── Per-conduit serial queue ──────────────────────────────────────────
+
+test('per-conduit serial queue — same conduit serialised, different conduits parallel', async (t) => {
+  const { adapter, port, stop } = await startEphemeralGateway();
+  t.after(() => stop());
+
+  const order: string[] = [];
+  const handlerDelay = 200;
+
+  adapter.onMessage(async (ctx) => {
+    order.push(`start-${ctx.message.text}`);
+    await delay(handlerDelay);
+    await ctx.reply({ text: `reply-${ctx.message.text}` });
+    order.push(`end-${ctx.message.text}`);
+  });
+
+  // Connect two clients
+  const ws1 = await wsConnect(port);
+  const coll1 = makeFrameCollector(ws1);
+  t.after(() => ws1.close());
+
+  const ws2 = await wsConnect(port);
+  const coll2 = makeFrameCollector(ws2);
+  t.after(() => ws2.close());
+
+  await handshake(ws1, coll1);
+  await handshake(ws2, coll2);
+
+  // Send two msgs on same conduit (ws1) — should be serialised
+  sendFrame(ws1, { type: 'msg.user', id: 's1a', text: 'a' });
+  sendFrame(ws1, { type: 'msg.user', id: 's1b', text: 'b' });
+
+  // Wait for both replies
+  const r1: any = await coll1.read();
+  assert.equal(r1.type, 'chat.post');
+  assert.equal(r1.content.text, 'reply-a');
+
+  const r2: any = await coll1.read();
+  assert.equal(r2.type, 'chat.post');
+  assert.equal(r2.content.text, 'reply-b');
+
+  // Verify serialisation: handler-b did not start before handler-a ended
+  const aIdx = order.indexOf('start-a');
+  const aEndIdx = order.indexOf('end-a');
+  const bIdx = order.indexOf('start-b');
+  assert.ok(aIdx >= 0, 'handler-a started');
+  assert.ok(aEndIdx >= 0, 'handler-a ended');
+  assert.ok(bIdx >= 0, 'handler-b started');
+  assert.ok(aEndIdx < bIdx, 'handler-b started after handler-a ended (serialised)');
+});
+
+test('different conduits run message handlers in parallel', async (t) => {
+  const { adapter, port, stop } = await startEphemeralGateway();
+  t.after(() => stop());
+
+  const startOrder: string[] = [];
+
+  adapter.onMessage(async (ctx) => {
+    startOrder.push(ctx.message.text);
+    await delay(200);
+    await ctx.reply({ text: `done-${ctx.message.text}` });
+  });
+
+  const ws1 = await wsConnect(port);
+  const coll1 = makeFrameCollector(ws1);
+  t.after(() => ws1.close());
+
+  const ws2 = await wsConnect(port);
+  const coll2 = makeFrameCollector(ws2);
+  t.after(() => ws2.close());
+
+  await handshake(ws1, coll1);
+  await handshake(ws2, coll2);
+
+  sendFrame(ws1, { type: 'msg.user', id: 'p1', text: 'x' });
+  sendFrame(ws2, { type: 'msg.user', id: 'p2', text: 'y' });
+
+  // Both should have started before either handler delay completes
+  await delay(50);
+
+  assert.equal(startOrder.includes('x'), true, 'conduit-x handler started');
+  assert.equal(startOrder.includes('y'), true, 'conduit-y handler started');
+});
+
+// ── UI side-channel ───────────────────────────────────────────────────
+
+test('ui.query without uiService returns error result', async (t) => {
+  const { adapter, port, stop } = await startEphemeralGateway();
+  t.after(() => stop());
+
+  const ws = await wsConnect(port);
+  const coll = makeFrameCollector(ws);
+  t.after(() => ws.close());
+
+  await handshake(ws, coll);
+
+  sendFrame(ws, { type: 'ui.query', id: 'q1', scope: 'test', params: {} });
+
+  const result: any = await coll.read();
+  assert.equal(result.type, 'ui.queryResult');
+  assert.equal(result.ok, false);
+  assert.equal(result.error.code, 'ui-service-unavailable');
+});
+
+test('ui.mutate without uiService returns error result', async (t) => {
+  const { adapter, port, stop } = await startEphemeralGateway();
+  t.after(() => stop());
+
+  const ws = await wsConnect(port);
+  const coll = makeFrameCollector(ws);
+  t.after(() => ws.close());
+
+  await handshake(ws, coll);
+
+  sendFrame(ws, { type: 'ui.mutate', id: 'm1', op: 'test', args: {} });
+
+  const result: any = await coll.read();
+  assert.equal(result.type, 'ui.mutateResult');
+  assert.equal(result.ok, false);
+  assert.equal(result.error.code, 'ui-service-unavailable');
+});
+
+// ── Notification routing (unit-level, no WS) ─────────────────────────
+
+test('sendProjectReport routes per activeSession equality', async (t) => {
+  const adapter = new TuiGatewayAdapter({ port: 0, host: '127.0.0.1' });
+  await adapter.start();
+  const actualPort = (adapter as any)._wss.address().port;
+  t.after(() => adapter.stop());
+
+  // Two WS connections → two conduits with distinct sessions
+  const ws1 = await wsConnect(actualPort);
+  const coll1 = makeFrameCollector(ws1);
+  t.after(() => ws1.close());
+
+  const ws2 = await wsConnect(actualPort);
+  const coll2 = makeFrameCollector(ws2);
+  t.after(() => ws2.close());
+
+  await handshake(ws1, coll1, { project: 'test-proj' });
+  await handshake(ws2, coll2, { project: 'test-proj' });
+
+  // Drain handshake leftover frames
+  coll1.drain();
+  coll2.drain();
+
+  const conns = Array.from(adapter.connections.values());
+  assert.equal(conns.length, 2);
+  assert.notEqual(conns[0].activeSessionId, conns[1].activeSessionId);
+
+  // Use conns[0].activeSessionId as source
+  const sourceSessionId = conns[0].activeSessionId!;
+  sendProjectReport(conns, 'test-proj', sourceSessionId, 'Report', 'Body');
+
+  // Collect frames from both WS connections
+  const ws1Frame = await coll1.read(2000).catch(() => null);
+  const ws2Frame = await coll2.read(2000).catch(() => null);
+
+  // Exactly one chat.post and one notification
+  const received = [ws1Frame, ws2Frame].filter(Boolean);
+  assert.equal(received.length, 2, 'two frames received');
+
+  const postFrames = received.filter((f: any) => f.type === 'chat.post');
+  const notifFrames = received.filter((f: any) => f.type === 'notification');
+  assert.equal(postFrames.length, 1, 'one chat.post');
+  assert.equal(notifFrames.length, 1, 'one notification');
+  assert.equal(notifFrames[0].kind, 'project-report');
+});
+
+test('sendSystemNotice fans out to all connections', async (t) => {
+  const adapter = new TuiGatewayAdapter({ port: 0, host: '127.0.0.1' });
+  await adapter.start();
+  const actualPort = (adapter as any)._wss.address().port;
+  t.after(() => adapter.stop());
+
+  const ws1 = await wsConnect(actualPort);
+  const coll1 = makeFrameCollector(ws1);
+  t.after(() => ws1.close());
+
+  const ws2 = await wsConnect(actualPort);
+  const coll2 = makeFrameCollector(ws2);
+  t.after(() => ws2.close());
+
+  await handshake(ws1, coll1);
+  await handshake(ws2, coll2);
+
+  // Drain leftover frames
+  coll1.drain();
+  coll2.drain();
+
+  const conns = Array.from(adapter.connections.values());
+
+  sendSystemNotice(conns, 'System Alert', 'Something happened');
+
+  // Both should receive a notification frame
+  const ws1Frame: any = await coll1.read(2000);
+  const ws2Frame: any = await coll2.read(2000);
+
+  assert.equal(ws1Frame.type, 'notification');
+  assert.equal(ws1Frame.kind, 'system-notice');
+  assert.equal(ws2Frame.type, 'notification');
+  assert.equal(ws2Frame.kind, 'system-notice');
+});
+
+// ── uploadFile sends path-offer notification ──────────────────────────
+
+test('uploadFile sends notification with absolute path', async (t) => {
+  const { adapter, port, stop } = await startEphemeralGateway();
+  t.after(() => stop());
+
+  const ws = await wsConnect(port);
+  const coll = makeFrameCollector(ws);
+  t.after(() => ws.close());
+
+  const { sessionId } = await handshake(ws, coll);
+  coll.drain();
+
+  await adapter.uploadFile(
+    { type: 'interactive-reply', conduit: '', sessionId },
+    '/tmp/test-file.txt',
+  );
+
+  const frame: any = await coll.read();
+  assert.equal(frame.type, 'notification');
+  assert.equal(frame.kind, 'system-notice');
+  assert.ok(frame.body.includes('/tmp/test-file.txt'));
+});
+
+// ── Conduit state tracking ────────────────────────────────────────────
+
+test('conduits are tracked and cleaned up on close', async (t) => {
+  const { adapter, port, stop } = await startEphemeralGateway();
+  t.after(() => stop());
+
+  assert.equal(adapter.connections.size, 0);
+
+  const ws = await wsConnect(port);
+  const coll = makeFrameCollector(ws);
+
+  await handshake(ws, coll);
+
+  assert.equal(adapter.connections.size, 1);
+
+  ws.close();
+  await waitForClose(ws);
+
+  // Give async cleanup time to run
+  await delay(100);
+
+  assert.equal(adapter.connections.size, 0);
+});
+
+// ── Resolve target connections by destination type ────────────────────
+
+test('postMessage sends to connection matching sessionId', async (t) => {
+  const { adapter, port, stop } = await startEphemeralGateway();
+  t.after(() => stop());
+
+  const ws = await wsConnect(port);
+  const coll = makeFrameCollector(ws);
+  t.after(() => ws.close());
+
+  const { sessionId } = await handshake(ws, coll);
+  coll.drain();
+
+  const ref = await adapter.postMessage(
+    { type: 'interactive-reply', conduit: '', sessionId },
+    { text: 'outbound test' },
+  );
+
+  const frame: any = await coll.read();
+  assert.equal(frame.type, 'chat.post');
+  assert.equal(frame.content.text, 'outbound test');
+  assert.equal(frame.ref.conduit.length > 0, true);
+});
+
+test('postMessage on noop adapter returns empty ref', async () => {
+  const adapter = new TuiGatewayAdapter({ port: 0, host: '127.0.0.1' });
+  // Simulate EADDRINUSE by directly setting noop
+  (adapter as any)._noopOutbound = true;
+
+  const ref = await adapter.postMessage(
+    { type: 'interactive-reply', conduit: 'c1', sessionId: '' },
+    { text: 'noop' },
+  );
+
+  assert.equal(ref.conduit, '');
+  assert.equal(ref.messageId, '');
+});
+
+// ── OpenOutputStream ──────────────────────────────────────────────────
+
+test('openOutputStream creates TuiOutputStream for matching connection', async (t) => {
+  const { adapter, port, stop } = await startEphemeralGateway();
+  t.after(() => stop());
+
+  const ws = await wsConnect(port);
+  const coll = makeFrameCollector(ws);
+  t.after(() => ws.close());
+
+  const { sessionId } = await handshake(ws, coll);
+  coll.drain();
+
+  const stream = adapter.openOutputStream(
+    { type: 'interactive-reply', conduit: '', sessionId },
+  );
+
+  stream.emitText('stream test');
+  await stream.flush();
+
+  // Should receive stream.text frame
+  const frame: any = await coll.read();
+  assert.equal(frame.type, 'stream.text');
+  assert.equal(frame.text, 'stream test');
+});
+
+test('openOutputStream on noop adapter returns noop stream', async (t) => {
+  const { adapter, port, stop } = await startEphemeralGateway();
+  t.after(() => stop());
+
+  const stream = adapter.openOutputStream(
+    { type: 'system-notice' },
+  );
+
+  // Noop stream should not throw
+  stream.emitText('test');
+  stream.openMutable('test');
+  await stream.postInteractive('test');
+  await stream.flush();
+  assert.equal(stream.getRefs().length, 0);
+  assert.equal(stream.getParentRef(), null);
+});
