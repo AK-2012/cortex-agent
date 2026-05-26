@@ -67,4 +67,5 @@ Project→conduit mapping (formerly `channel-repo.ts`) has moved into `platform/
 |---|---|
 | `agent-adapter/` | Claude/Codex/PI three-backend abstraction layer (unchanged) |
 | `platform/` | Platform abstraction layer Slack/Feishu (unchanged) + `tool-trace.ts` (UI helper for OutputStream tool traces) |
+| `tui/` | Ink TUI client (M5) — chat-only terminal client speaking M4 protocol (ws-client, hooks, components, render utilities) |
 | `hooks/` | Thread lifecycle hook scripts (unchanged) |

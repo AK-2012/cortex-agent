@@ -6,6 +6,8 @@
     "moduleResolution": "NodeNext",
     "strict": false,
     "noImplicitAny": false,
+    "jsx": "react-jsx",
+    "jsxImportSource": "react",
     "esModuleInterop": true,
     "resolveJsonModule": true,
     "skipLibCheck": true,
@@ -21,5 +23,5 @@
       "@entry/*":    ["src/entry/*"]
     }
   },
-  "include": ["src/**/*.ts", "tests/**/*.ts"]
+  "include": ["src/**/*.ts", "src/**/*.tsx", "tests/**/*.ts", "tests/**/*.tsx"]
 }
