@@ -1,5 +1,5 @@
-// input:  process argv, child_process, @core/paths, @core/cli-utils, ./init, @domain/tasks/system/task-cli
-// output: CLI dispatcher: cortex {init,start,daemon,task,config}
+// input:  process argv, child_process, @core/paths, @core/cli-utils, ./init, @domain/tasks/system/task-cli, @domain/system/install-cli
+// output: CLI dispatcher: cortex {init,start,daemon,task,config,install,setup-gateway}
 // pos:    Bin entry point (`cortex`). Dispatches to:
 //           init [--home <path>]  — interactive init (async, runInit)
 //           start                 — fork app.js
@@ -11,6 +11,7 @@
 //           daemon restart --force— force: send SIGKILL immediately to app.js
 //           daemon restart-self   — stop daemon, then re-fork daemon.js
 //           task <subcommand>     — delegate to task-cli
+//           install latest        — install latest Cortex from npm
 //           config                — show resolved paths
 //         Packaged as dist/entry/cli.js, registered in package.json bin.
 // >>> If I am updated, update my header comment and the parent folder's CORTEX.md <<<
@@ -24,6 +25,7 @@ import { INSTALL_ROOT, DATA_DIR, STORE_DIR, PROJECTS_DIR, WORKSPACE_DIR, isMainM
 import { formatHelp } from '@core/cli-utils.js';
 import { createLogger } from '@core/log.js';
 import { runCli as taskRunCli } from '@domain/tasks/system/task-cli.js';
+import { runCli as installRunCli, getInstallHelp } from '@domain/system/install-cli.js';
 import {
   getResolvedPaths,
   formatConfigOutput,
@@ -97,6 +99,7 @@ export function getCliHelp(): string {
       { name: 'daemon restart-self', description: 'Stop and restart the daemon process itself' },
       { name: 'restart', description: 'Legacy alias for daemon restart (touches $STORE_DIR/.restart)' },
       { name: 'task', description: 'Task system CLI (delegate to cortex-task)' },
+      { name: 'install latest', description: 'Install the latest version of Cortex from npm' },
       { name: 'config', description: 'Show resolved paths and initialization status' },
       { name: 'setup-gateway', description: 'Auto-detect Claude/PI configs and generate gateway.yaml + profiles.json' },
     ],
@@ -519,6 +522,13 @@ export async function runCli(argv: string[]): Promise<CliResult> {
     case 'task': {
       const result = taskRunCli(rest.length > 0 ? rest : ['list']);
       return result;
+    }
+
+    case 'install': {
+      if (rest.includes('--help') || rest.includes('-h')) {
+        return { exitCode: 0, stdout: getInstallHelp(), stderr: '' };
+      }
+      return installRunCli(rest);
     }
 
     case 'start':
