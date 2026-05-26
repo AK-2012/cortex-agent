@@ -11,3 +11,4 @@ PlatformAdapter's concrete platform implementations. Each adapter is a thin brid
 | `feishu.ts` | adapter | Feishu SDK + WSClient implementation (gains `openOutputStream` + project conduit methods in S1) |
 | `feishu-output-stream.ts` | output stream | FeishuOutputStream — no messageEdit/coalescing; each emitText posts separately; openMutable is a no-op |
 | `tui/` | subdirectory | TUI gateway adapter — PlatformAdapter v2 backed by localhost WebSocket (M1: handshake, session binding, inbound dispatch, outbound translation, keepalive, M4 protocol) |
+| `composite-adapter.ts` | adapter | CompositeAdapter wrapping primary + TUI gateway behind one PlatformAdapter v2 surface; FanOutOutputStream for project-report fan-out; extractTuiAdapter |

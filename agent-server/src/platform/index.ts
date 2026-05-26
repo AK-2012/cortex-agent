@@ -47,3 +47,4 @@ export { SlackAdapter } from './adapters/slack.js';
 export type { SlackAdapterConfig } from './adapters/slack.js';
 export { FeishuAdapter } from './adapters/feishu.js';
 export type { FeishuAdapterConfig } from './adapters/feishu.js';
+export { CompositeAdapter, extractTuiAdapter } from './adapters/composite-adapter.js';
