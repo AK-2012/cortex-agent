@@ -10,7 +10,7 @@ import type {
 } from '../../platform/tui/protocol.js';
 import { isChatPost, isChatUpdate, isChatDelete, isChatMarkQueued,
   isStreamText, isStreamMutableOpen, isStreamMutableUpdate, isStreamFlush,
-  isTranscriptReplay } from '../../platform/tui/protocol.js';
+  isTranscriptReplay, isInteractivePost, isModalOpen, isModalAck, isNotification } from '../../platform/tui/protocol.js';
 
 // ── Types ──
 
@@ -133,6 +133,27 @@ export function useTranscript() {
       });
       return;
     }
+
+    // Phase 2 placeholders — render as text, never crash
+    if (isInteractivePost(frame)) {
+      setState(prev => _handlePhase2Placeholder(prev, frame.ref.messageId, '[interactive] Phase 2'));
+      return;
+    }
+
+    if (isModalOpen(frame)) {
+      setState(prev => _handlePhase2Placeholder(prev, `modal-${frame.triggerId}`, '[modal] Phase 2'));
+      return;
+    }
+
+    if (isModalAck(frame)) {
+      setState(prev => _handlePhase2Placeholder(prev, `modal-ack-${frame.id}`, '[modal.ack] Phase 2'));
+      return;
+    }
+
+    if (isNotification(frame)) {
+      setState(prev => _handlePhase2Placeholder(prev, `notif-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`, `[notification: ${frame.title}] Phase 2`));
+      return;
+    }
   }, [flushBatch, scheduleBatch]);
 
   // ── Clear ──
@@ -211,6 +232,20 @@ export function _handleChatMarkQueued(prev: TranscriptState, frame: ChatMarkQueu
   const messages = new Map(prev.messages);
   messages.set(messageId, msg);
   return { messages, ids: prev.ids };
+}
+
+export function _handlePhase2Placeholder(prev: TranscriptState, messageId: string, text: string): TranscriptState {
+  if (prev.messages.has(messageId)) return prev;
+  const msg: RenderedMessage = {
+    messageId,
+    text,
+    queued: false,
+    streams: new Map(),
+  };
+  const messages = new Map(prev.messages);
+  messages.set(messageId, msg);
+  const ids = [...prev.ids, messageId];
+  return { messages, ids };
 }
 
 export function _handleStreamText(prev: TranscriptState, frame: StreamText): TranscriptState {

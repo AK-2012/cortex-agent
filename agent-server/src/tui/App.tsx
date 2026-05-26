@@ -2,7 +2,7 @@
 // output: Top-level layout + global key handler for M5 Ink client
 // pos:    Main App component wiring all pieces together
 
-import React, { useCallback, useRef, useState } from 'react';
+import React, { useCallback, useRef, useState, useEffect } from 'react';
 import { Box } from 'ink';
 import { Header } from './components/Header.js';
 import { Transcript } from './components/Transcript.js';
@@ -26,6 +26,11 @@ export interface AppProps {
   serverVersion: string | null;
   projectId: string | null;
   sessionName: string | null;
+  /**
+   * Called when this App component is ready to receive frames for dispatch.
+   * The parent (index.tsx) calls this function for each WS frame.
+   */
+  onSetDispatch?: (dispatch: (frame: TuiFrame) => void) => void;
 }
 
 export function App({
@@ -38,31 +43,19 @@ export function App({
   serverVersion,
   projectId,
   sessionName,
+  onSetDispatch,
 }: AppProps): React.JSX.Element {
   const transcript = useTranscript();
   const [queuedCount, setQueuedCount] = useState(0);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [inputDisabled, setInputDisabled] = useState(false);
   const [notificationCount] = useState(0);
-  const scrolledUpRef = useRef(false);
+  const transcriptRef = useRef<{ scrollUp: (page?: boolean) => void; scrollDown: (page?: boolean) => void; scrollToEnd: () => void } | null>(null);
 
-  // Frame dispatch
-  const handleFrame = useCallback((frame: TuiFrame) => {
-    if (isHandshakeAck(frame)) {
-      // Connected
-      setInputDisabled(false);
-      setErrorMessage(null);
-      return;
-    }
-
-    if (isSessionSwitched(frame)) {
-      // Session ready
-      setErrorMessage(null);
-      return;
-    }
-
-    transcript.dispatch(frame);
-  }, [transcript]);
+  // Expose transcript dispatch to parent
+  useEffect(() => {
+    onSetDispatch?.(transcript.dispatch);
+  }, [transcript.dispatch, onSetDispatch]);
 
   // Submit message
   const handleSubmit = useCallback((text: string) => {
@@ -88,12 +81,11 @@ export function App({
 
   // Scroll
   const handleScrollUp = useCallback((page?: boolean) => {
-    // Transcript handles scroll internally
-    scrolledUpRef.current = true;
+    transcriptRef.current?.scrollUp(page);
   }, []);
 
   const handleScrollDown = useCallback((page?: boolean) => {
-    scrolledUpRef.current = false;
+    transcriptRef.current?.scrollDown(page);
   }, []);
 
   // Keyboard bindings
@@ -116,6 +108,7 @@ export function App({
       />
 
       <Transcript
+        ref={transcriptRef}
         messages={transcript.messages}
         ids={transcript.ids}
       />

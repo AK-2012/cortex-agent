@@ -7,8 +7,9 @@ import React from 'react';
 import { render } from 'ink';
 import { App } from './App.js';
 import { WsClient } from './ws-client.js';
-import { isHandshakeAck, isSessionSwitched } from '../platform/tui/protocol.js';
+import { isHandshakeAck, isSessionSwitched, isUiQueryResult } from '../platform/tui/protocol.js';
 import { CORTEX_VERSION } from '../core/version.js';
+import type { TuiFrame } from '../platform/tui/protocol.js';
 
 // ── Argv parsing ──
 
@@ -44,16 +45,16 @@ async function main(): Promise<void> {
   const args = parseArgs(process.argv);
 
   const client = new WsClient();
+  let dispatchFrame: ((frame: TuiFrame) => void) | null = null;
   let ackData: { conduitId: string; serverVersion: string; defaultProjectId: string } | null = null;
   let lastSessionId: string | null = null;
   let currentProjectId: string | null = null;
   let currentSessionName: string | null = null;
-  let inputDisabled = false;
+  let resumePending = false;
 
   // Connection state
   let connectionState: 'disconnected' | 'connecting' | 'connected' | 'reconnecting' = 'disconnected';
   let errorMessage: string | null = null;
-  let capExceeded = false;
 
   // Track rerender
   let rerender: ((node: React.ReactElement) => void) | null = null;
@@ -65,7 +66,6 @@ async function main(): Promise<void> {
       connectionState,
       ack: ackData as any,
       onReconnect: () => {
-        capExceeded = false;
         errorMessage = null;
         connectionState = 'disconnected';
         client.close();
@@ -81,6 +81,7 @@ async function main(): Promise<void> {
       serverVersion: ackData?.serverVersion ?? null,
       projectId: currentProjectId ?? ackData?.defaultProjectId ?? null,
       sessionName: currentSessionName,
+      onSetDispatch: (dispatch) => { dispatchFrame = dispatch; },
     });
     if (rerender) {
       rerender(app);
@@ -125,7 +126,7 @@ async function main(): Promise<void> {
           currentProjectId = project;
 
           if (args.resume) {
-            // Send sessions.list query (will be processed when ui.queryResult arrives)
+            resumePending = true;
             client.send({
               type: 'ui.query',
               id: 'sess-list',
@@ -152,12 +153,38 @@ async function main(): Promise<void> {
           client.markSessionId(frame.sessionId);
           currentProjectId = frame.projectId;
           currentSessionName = frame.sessionName;
-          inputDisabled = false;
+          resumePending = false;
           doRender();
           return;
         }
 
-        // Re-render on relevant frames
+        // Handle resume: ui.queryResult for sessions.list
+        if (isUiQueryResult(frame) && frame.id === 'sess-list' && resumePending) {
+          resumePending = false;
+          if (frame.ok && Array.isArray(frame.data) && frame.data.length > 0) {
+            // Switch to first resumable session
+            const sessionId = (frame.data[0] as any).sessionId ?? (frame.data[0] as any).id;
+            client.send({
+              type: 'session.switch',
+              id: 'sess-resume',
+              projectId: currentProjectId ?? ackData?.defaultProjectId ?? 'general',
+              sessionId,
+            });
+          } else {
+            // No resumable sessions — fall back to fresh
+            client.send({
+              type: 'session.switch',
+              id: 'sess-fallback',
+              projectId: currentProjectId ?? ackData?.defaultProjectId ?? 'general',
+              sessionId: null,
+            });
+          }
+          doRender();
+          return;
+        }
+
+        // Dispatch frame to transcript
+        dispatchFrame?.(frame);
         doRender();
       },
       onClose: (reason) => {
@@ -165,7 +192,6 @@ async function main(): Promise<void> {
         doRender();
       },
       onCapExceeded: () => {
-        capExceeded = true;
         errorMessage = 'Connection failed — press R to retry, Ctrl+C to exit';
         doRender();
       },
