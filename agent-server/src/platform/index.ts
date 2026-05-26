@@ -1,4 +1,4 @@
-// input:  adapter + types + output-stream + adapters/*
+// input:  adapter + types + output-stream + adapters/* + composite-adapter
 // output: Re-export full family of PlatformAdapter public APIs
 // pos:    Public API export of the Platform abstraction
 // >>> If I am updated, update my header comment and the parent folder's CORTEX.md <<<
