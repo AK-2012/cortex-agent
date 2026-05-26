@@ -3,7 +3,7 @@
 // pos:    Thin React wrapper so components don't manage WS lifecycle directly
 
 import { useEffect, useRef, useState, useCallback } from 'react';
-import { WsClient, createHandshakeHello } from '../ws-client.js';
+import { WsClient } from '../ws-client.js';
 import type { WsState } from '../ws-client.js';
 import type { TuiFrame, HandshakeAck } from '../../platform/tui/protocol.js';
 import { CORTEX_VERSION } from '../../core/version.js';
@@ -53,7 +53,14 @@ export function useWsClient(opts: UseWsClientOpts): UseWsClientResult {
     const client = new WsClient();
     clientRef.current = client;
 
+    // Set resume session before connecting so auto-hello includes it
+    if (opts.resumeSessionId) {
+      client.markSessionId(opts.resumeSessionId);
+    }
+
     client.connect(opts.address, {
+      clientVersion: CORTEX_VERSION,
+      project: opts.project ?? null,
       onStateChange: (s) => {
         setState(s);
         if (s === 'connected') {
@@ -72,14 +79,6 @@ export function useWsClient(opts: UseWsClientOpts): UseWsClientResult {
         onCapExceededRef.current?.();
       },
     });
-
-    // Send handshake.hello
-    const hello = createHandshakeHello(
-      CORTEX_VERSION,
-      opts.resumeSessionId ?? undefined,
-      opts.project ?? undefined,
-    );
-    client.send(hello);
   }, [opts.address, opts.resumeSessionId, opts.project]);
 
   useEffect(() => {
@@ -89,22 +88,6 @@ export function useWsClient(opts: UseWsClientOpts): UseWsClientResult {
       clientRef.current = null;
     };
   }, [connect]);
-
-  // When client connects, overwrite onFrame to detect handshake.ack
-  useEffect(() => {
-    const client = clientRef.current;
-    if (!client || state !== 'connecting') return;
-
-    // Poll for handshake.ack once connected
-    const checkConnected = setInterval(() => {
-      const c = clientRef.current;
-      if (c && c.state === 'connected' && c.ack) {
-        clearInterval(checkConnected);
-      }
-    }, 50);
-
-    return () => clearInterval(checkConnected);
-  }, [state]);
 
   const sendFrame = useCallback((frame: TuiFrame) => {
     clientRef.current?.send(frame);

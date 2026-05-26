@@ -70,6 +70,8 @@ TEST_FILES=(
   tests/threads/*.test.ts
   tests/domain/**/*.test.ts
   tests/platform/*.test.ts
+  tests/tui/*.test.ts
+  tests/tui/*.test.tsx
 )
 shopt -u nullglob
 

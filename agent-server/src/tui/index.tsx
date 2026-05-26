@@ -6,7 +6,7 @@
 import React from 'react';
 import { render } from 'ink';
 import { App } from './App.js';
-import { WsClient, createHandshakeHello } from './ws-client.js';
+import { WsClient } from './ws-client.js';
 import { isHandshakeAck, isSessionSwitched } from '../platform/tui/protocol.js';
 import { CORTEX_VERSION } from '../core/version.js';
 
@@ -95,7 +95,14 @@ async function main(): Promise<void> {
     connectionState = 'connecting';
     doRender();
 
+    // Set resume session before connect so auto-hello includes it
+    if (lastSessionId) {
+      client.markSessionId(lastSessionId);
+    }
+
     client.connect(`ws://127.0.0.1:${args.port}`, {
+      clientVersion: CORTEX_VERSION,
+      project: args.project,
       onStateChange: (s) => {
         connectionState = s;
         if (s === 'connected') {
@@ -163,14 +170,6 @@ async function main(): Promise<void> {
         doRender();
       },
     });
-
-    // Send handshake
-    const hello = createHandshakeHello(
-      CORTEX_VERSION,
-      lastSessionId,
-      args.project ?? undefined,
-    );
-    client.send(hello);
   };
 
   doConnect();

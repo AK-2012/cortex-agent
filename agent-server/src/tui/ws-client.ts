@@ -16,6 +16,10 @@ const BACKOFF_CAP_MS = 30_000;
 export type WsState = 'disconnected' | 'connecting' | 'connected' | 'reconnecting';
 
 export interface WsClientOpts {
+  /** Client version string sent in handshake.hello */
+  clientVersion: string;
+  /** Optional project for initial handshake */
+  project?: string | null;
   /** Called on successful connection after handshake.ack */
   onConnected?: (ack: HandshakeAck) => void;
   /** Called for every parsed frame received */
@@ -33,12 +37,13 @@ export interface WsClientOpts {
 export class WsClient {
   private _ws: WebSocket | null = null;
   private _address = '';
-  private _opts: WsClientOpts = {};
+  private _opts: WsClientOpts = { clientVersion: 'unknown' };
   private _state: WsState = 'disconnected';
   private _lastSessionId: string | null = null;
   private _retryCount = 0;
   private _retryTimer: ReturnType<typeof setTimeout> | null = null;
   private _closed = false; // intentional close — don't reconnect
+  private _sendBuffer: TuiFrame[] = []; // queued frames while connecting
 
   /** Latest handshake ack data */
   private _ack: HandshakeAck | null = null;
@@ -49,7 +54,7 @@ export class WsClient {
 
   // ── Connection ──
 
-  connect(address: string, opts: WsClientOpts = {}): void {
+  connect(address: string, opts: WsClientOpts = { clientVersion: 'unknown' }): void {
     this._address = address;
     this._opts = opts;
     this._closed = false;
@@ -64,7 +69,24 @@ export class WsClient {
 
     this._ws.on('open', () => {
       this._retryCount = 0;
-      // Connection is established; handshake.hello will be sent by the consumer
+
+      // Send handshake.hello on every connection (initial + reconnect)
+      const hello: HandshakeHello = {
+        type: 'handshake.hello',
+        protocolVersion: 1,
+        clientName: 'cortex-tui',
+        clientVersion: this._opts.clientVersion,
+      };
+      if (this._lastSessionId) hello.resume = { sessionId: this._lastSessionId };
+      if (this._opts.project) hello.project = this._opts.project;
+      this._ws!.send(encodeFrame(hello));
+
+      // Flush buffered frames
+      const buf = this._sendBuffer;
+      this._sendBuffer = [];
+      for (const frame of buf) {
+        this._ws!.send(encodeFrame(frame));
+      }
     });
 
     this._ws.on('message', (data: Buffer) => {
@@ -97,6 +119,9 @@ export class WsClient {
   send(frame: TuiFrame): void {
     if (this._ws && this._ws.readyState === WebSocket.OPEN) {
       this._ws.send(encodeFrame(frame));
+    } else {
+      // Buffer for sending once connection opens
+      this._sendBuffer.push(frame);
     }
   }
 
