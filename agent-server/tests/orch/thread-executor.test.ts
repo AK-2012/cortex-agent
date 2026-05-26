@@ -9,7 +9,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { ThreadExecutor, threadExecutor } from '../../src/orchestration/thread-executor.js';
-import { enqueue, channelQueues } from '../../src/orchestration/channel-queue.js';
+import { enqueue, conduitQueues } from '../../src/orchestration/conduit-queue.js';
 import { MockAdapter } from '../../src/platform/testing.js';
 
 // ── helpers ──────────────────────────────────────────────────────────────────
@@ -101,7 +101,7 @@ test('(c) route() calls addReaction(hourglass) when channel already has a runnin
   assert.equal(enqueueCalls.length, 1, 'enqueue was called');
 
   unlockPrior();
-  const tail = channelQueues.get(channel);
+  const tail = conduitQueues.get(channel);
   if (tail) await tail;
 });
 
@@ -128,7 +128,7 @@ test('(e) route() on fresh channel skips addReaction (no prior queue)', async ()
   await executor.route(ctx as any);
 
   assert.equal(enqueueCalls.length, 1, 'enqueue was called');
-  // No prior queue → markQueued was NOT called (channelQueues.has returned false)
+  // No prior queue → markQueued was NOT called (conduitQueues.has returned false)
   assert.equal(adapter.marksQueued.length, 0, 'markQueued was not called when no prior queue');
   assert.ok(true, 'route() completed synchronously without throwing');
 });

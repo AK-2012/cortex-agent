@@ -8,13 +8,13 @@ import { buildPlanFeedbackModal } from '@platform/index.js';
 
 import type { EventBus } from '@events/index.js';
 import { trackPendingTask } from '../busy-tracker.js';
-import { enqueue } from '../channel-queue.js';
+import { enqueue } from '../conduit-queue.js';
 import * as askUserQuestion from './ask-user-question.js';
 import { resolveRequest as resolveHookRequest, getStreamingCallback } from '../routing/hook-bridge.js';
 import { resumeAskUserQuestionGroup } from '../lifecycle.js';
 import { planApprovals } from './plan-approvals.js';
 import { runningExecutions } from '../../core/running-executions.js';
-import { channelQueues } from '../channel-queue.js';
+import { conduitQueues } from '../conduit-queue.js';
 import { setSessionAsync, deleteSessionAsync } from '@domain/sessions/session.js';
 import { sessionStore } from '@store/session-registry-repo.js';
 import { conversationLedger } from '@store/conversation-ledger-repo.js';
@@ -261,7 +261,7 @@ async function handleStatusCancel(ctx: ActionContext): Promise<void> {
   await cancelThreadById(threadId).catch(() => {});
   if (exec.sessionId) await setSessionAsync(exec.channel ?? channel, exec.sessionId, getActiveBackend()).catch(() => {});
   runningExecutions.killByThreadId(threadId);
-  channelQueues.delete(exec.channel ?? channel);
+  conduitQueues.delete(exec.channel ?? channel);
   if (ctx.messageRef) {
     await _adapter.updateMessage(ctx.messageRef, {
       text: `${Icons.stopped} Cancelled. Session preserved — next message will resume.`,

@@ -8,7 +8,7 @@ import type { Destination, PlatformAdapter, MessageRef } from '@platform/index.j
 import type { AgentResult } from '@core/types/agent-types.js';
 import type { ExecutionRecord } from '@domain/executions/registry.js';
 import { trackPendingTask } from './busy-tracker.js';
-import { enqueue } from './channel-queue.js';
+import { enqueue } from './conduit-queue.js';
 import { supersededEdits } from './superseded-edits.js';
 import { runningExecutions } from '../core/running-executions.js';
 

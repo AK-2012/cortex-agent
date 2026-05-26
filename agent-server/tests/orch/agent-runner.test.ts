@@ -8,7 +8,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { AgentRunner, agentRunner, resolveDefaultAgent } from '../../src/orchestration/agent-runner.js';
-import { channelQueues, enqueue } from '../../src/orchestration/channel-queue.js';
+import { conduitQueues, enqueue } from '../../src/orchestration/conduit-queue.js';
 import { MockAdapter } from '../../src/platform/testing.js';
 import { loadConfig } from '../../src/domain/threads/template-loader.js';
 
@@ -41,7 +41,7 @@ test('(a) route() calls addReaction(hourglass) when channel already has a queue'
     const p = new Promise<void>(r => { res = r; });
     return { promise: p, resolve: res };
   })();
-  // Pre-seed channelQueues for the channel by enqueuing a blocking task
+  // Pre-seed conduitQueues for the channel by enqueuing a blocking task
   enqueue(channel, () => promise);
 
   const enqueueCalls: string[] = [];
@@ -66,7 +66,7 @@ test('(a) route() calls addReaction(hourglass) when channel already has a queue'
 
   // Clean up: unblock the prior queue and drain
   unlockPrior();
-  const tail = channelQueues.get(channel);
+  const tail = conduitQueues.get(channel);
   if (tail) await tail;
 });
 

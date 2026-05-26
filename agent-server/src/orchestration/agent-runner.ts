@@ -8,7 +8,7 @@ import type { Destination, PlatformAdapter, MessageRef, DownloadedFile, Incoming
 import { resolveDestinationConduit } from '@platform/types.js';
 import type { AgentResult } from '@core/types/agent-types.js';
 import type { ThreadRunResult } from '@domain/threads/runner.js';
-import { channelQueues, enqueue } from './channel-queue.js';
+import { conduitQueues, enqueue } from './conduit-queue.js';
 import { trackPendingTask } from './busy-tracker.js';
 import { getSessionAsync } from '@domain/sessions/session.js';
 import { sessionStore } from '@store/session-registry-repo.js';
@@ -79,7 +79,7 @@ export class AgentRunner {
 
   async route(ctx: AgentRunnerCtx): Promise<void> {
     const { message, channel, adapter } = ctx;
-    if (channelQueues.has(channel)) {
+    if (conduitQueues.has(channel)) {
       await adapter.markQueued({ conduit: channel, messageId: message.ref.messageId }).catch(() => {});
     }
     this._track(+1);

@@ -11,7 +11,7 @@ import * as sessionBackup from '@domain/sessions/session-backup.js';
 import { deleteSessionAsync } from '@domain/sessions/session.js';
 import { resolveBackendForChannel } from '@domain/agents/index.js';
 import type { RunningExecutions } from '../../core/running-executions.js';
-import { channelQueues } from '../channel-queue.js';
+import { conduitQueues } from '../conduit-queue.js';
 import { supersededEdits } from '../superseded-edits.js';
 
 const log = createLogger('edit-handler');
@@ -96,7 +96,7 @@ async function processEdit({ channel, adapter, originalTs, newText, turnIndex, c
   if (activeAgents.has(channel)) {
     supersededEdits.mark(channel);
     activeAgents.supersede(channel, 'edit');
-    channelQueues.delete(channel);
+    conduitQueues.delete(channel);
     log.info('Killed active process for edit retry');
   }
 

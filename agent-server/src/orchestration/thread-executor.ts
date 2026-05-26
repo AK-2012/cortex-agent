@@ -6,7 +6,7 @@
 import * as path from 'path';
 import type { Destination, PlatformAdapter, MessageRef, DownloadedFile, IncomingMessage, PlatformFileRef } from '@platform/index.js';
 import { Icons } from '../core/icons.js';
-import { channelQueues, enqueue } from './channel-queue.js';
+import { conduitQueues, enqueue } from './conduit-queue.js';
 import { trackPendingTask } from './busy-tracker.js';
 import { addAgentToThread, createThread, getTemplate, getAgent } from '@domain/threads/index.js';
 import { runThread, continueThread, buildThreadSummary, getActiveHandle } from '@domain/threads/runner.js';
@@ -58,7 +58,7 @@ export class ThreadExecutor {
       return;
     }
 
-    if (channelQueues.has(channel)) {
+    if (conduitQueues.has(channel)) {
       await adapter.markQueued({ conduit: channel, messageId: message.ref.messageId }).catch(() => {});
     }
     this._track(+1);

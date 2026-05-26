@@ -16,7 +16,7 @@ import { MockAdapter } from '../src/platform/testing.js';
 import { PROJECTS_DIR } from '../src/core/paths.js';
 import { _testSetRegistry } from '../src/domain/tasks/dispatch-utils.js';
 import { runningExecutions } from '../src/core/running-executions.js';
-import { channelQueues } from '../src/orchestration/channel-queue.js';
+import { conduitQueues } from '../src/orchestration/conduit-queue.js';
 import { threadStore } from '../src/store/thread-repo.js';
 
 before(() => {
@@ -285,8 +285,8 @@ test('plain !cancel still cancels the current active process', async (t) => {
   let killed = false;
   runningExecutions.register('C123', { threadId: null, channel: 'C123', agentSlotId: null, executionId: null, kill: () => { killed = true; return true; }, backend: 'test' });
   // Simulate a running queue entry so cancel can clear it
-  channelQueues.set('C123', Promise.resolve());
-  t.after(() => { runningExecutions.remove('C123'); channelQueues.delete('C123'); });
+  conduitQueues.set('C123', Promise.resolve());
+  t.after(() => { runningExecutions.remove('C123'); conduitQueues.delete('C123'); });
   const dispatchCommand = createCommandDispatcher({
     scheduler: null,
     cancelDispatchedTask: async () => ({ ok: false, message: 'should not be called' }),
@@ -297,7 +297,7 @@ test('plain !cancel still cancels the current active process', async (t) => {
   await new Promise(resolve => setImmediate(resolve));
 
   assert.equal(killed, true);
-  assert.equal(channelQueues.has('C123'), false);
+  assert.equal(conduitQueues.has('C123'), false);
   assert.equal(adapter.posted[0].destination.conduit, 'C123');
   assert.equal(adapter.posted[0].content.text, '🛑 Cancelled. Session preserved — next message will resume.');
 });
@@ -311,8 +311,8 @@ test('!cancel --all kills all running executions for current channel, spares oth
 
   runningExecutions.register('key-C1', { threadId: 'thr_11111111', channel: 'C1', agentSlotId: null, executionId: 'exec-1', kill: () => { killedC1 = true; return true; }, backend: 'test' });
   runningExecutions.register('key-C2', { threadId: 'thr_22222222', channel: 'C2', agentSlotId: null, executionId: 'exec-2', kill: () => { killedC2 = true; return true; }, backend: 'test' });
-  channelQueues.set('C1', Promise.resolve());
-  t.after(() => { runningExecutions.remove('key-C1'); runningExecutions.remove('key-C2'); channelQueues.delete('C1'); });
+  conduitQueues.set('C1', Promise.resolve());
+  t.after(() => { runningExecutions.remove('key-C1'); runningExecutions.remove('key-C2'); conduitQueues.delete('C1'); });
 
   const dispatchCommand = createCommandDispatcher({ scheduler: null });
   const handled = dispatchCommand('!cancel --all', 'C1', adapter);
@@ -321,7 +321,7 @@ test('!cancel --all kills all running executions for current channel, spares oth
 
   assert.equal(killedC1, true, 'execution in current channel should be killed');
   assert.equal(killedC2, false, 'execution in different channel should NOT be killed');
-  assert.equal(channelQueues.has('C1'), false);
+  assert.equal(conduitQueues.has('C1'), false);
   assert.match(adapter.posted[0].content.text, /Cancelled 1 execution/);
 });
 
@@ -384,8 +384,8 @@ test('!thread cancel is alias for !cancel (kills by channel)', async (t) => {
   const adapter = new MockAdapter();
   let killed = false;
   runningExecutions.register('C123', { threadId: null, channel: 'C123', agentSlotId: null, executionId: null, kill: () => { killed = true; return true; }, backend: 'test' });
-  channelQueues.set('C123', Promise.resolve());
-  t.after(() => { runningExecutions.remove('C123'); channelQueues.delete('C123'); });
+  conduitQueues.set('C123', Promise.resolve());
+  t.after(() => { runningExecutions.remove('C123'); conduitQueues.delete('C123'); });
 
   const dispatchCommand = createCommandDispatcher({ scheduler: null });
   const handled = dispatchCommand('!thread cancel', 'C123', adapter);
@@ -393,7 +393,7 @@ test('!thread cancel is alias for !cancel (kills by channel)', async (t) => {
   for (let i = 0; i < 5; i++) await new Promise(r => setImmediate(r));
 
   assert.equal(killed, true);
-  assert.equal(channelQueues.has('C123'), false);
+  assert.equal(conduitQueues.has('C123'), false);
   assert.match(adapter.posted[0].content.text, /Cancelled|cancel/i);
 });
 

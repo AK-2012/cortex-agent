@@ -4,7 +4,7 @@ import type { Destination, PlatformAdapter } from '@platform/index.js';
 import type { CommandResult } from './command-context.js';
 import type { CommandActionRouter } from '@orch/interactions/command-action-router.js';
 import { runningExecutions } from '../../../core/running-executions.js';
-import { channelQueues } from '../../channel-queue.js';
+import { conduitQueues } from '../../conduit-queue.js';
 import { cancelThread as cancelThreadById } from '@domain/threads/index.js';
 import { setSessionAsync } from '@domain/sessions/session.js';
 import { getActiveBackend } from '@domain/agents/index.js';
@@ -37,7 +37,7 @@ export function createCancelHandler(cancelDispatchedTask: ((opts: { taskId: stri
         }
         runningExecutions.killByKey(registryKey);
       }
-      channelQueues.delete(registryKey || threadId || ctx.channelId);
+      conduitQueues.delete(registryKey || threadId || ctx.channelId);
 
       if (ctx.messageRef) {
         await adapter.updateMessage(ctx.messageRef, {
@@ -75,7 +75,7 @@ export function createCancelHandler(cancelDispatchedTask: ((opts: { taskId: stri
           }
           runningExecutions.killByKey(exec.registryKey);
         }
-        channelQueues.delete(channel);
+        conduitQueues.delete(channel);
         await adapter.postMessage(dest, { text: `${Icons.stopped} Cancelled ${executions.length} execution(s).` });
         return;
       }
@@ -125,7 +125,7 @@ export function createCancelHandler(cancelDispatchedTask: ((opts: { taskId: stri
       if (exec.sessionId) {
         await setSessionAsync(channel, exec.sessionId, getActiveBackend()).catch(() => {});
       }
-      channelQueues.delete(channel);
+      conduitQueues.delete(channel);
       await adapter.postMessage(dest, { text: `${Icons.stopped} Cancelled. Session preserved — next message will resume.` });
       return;
     }

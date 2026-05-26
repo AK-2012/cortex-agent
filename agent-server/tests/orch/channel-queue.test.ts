@@ -4,7 +4,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { channelQueues, enqueue } from '../../src/orchestration/channel-queue.js';
+import { conduitQueues, enqueue } from '../../src/orchestration/conduit-queue.js';
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -50,7 +50,7 @@ test('serialization — second fn starts only after first resolves', async () =>
 
   // Unblock first task and drain
   d1.resolve();
-  const tail = channelQueues.get(channel);
+  const tail = conduitQueues.get(channel);
   if (tail) await tail;
 
   assert.deepEqual(log, ['start-1', 'end-1', 'start-2'], 'second fn runs after first completes');
@@ -62,7 +62,7 @@ test('enqueue returns false on first call for a channel (no prior queue)', async
   const channel = freshChannel();
   const result = enqueue(channel, async () => {});
   assert.equal(result, false, 'first enqueue returns false (no prior queue)');
-  const tail = channelQueues.get(channel);
+  const tail = conduitQueues.get(channel);
   if (tail) await tail;
 });
 
@@ -73,17 +73,17 @@ test('queue cleanup — Map entry is deleted after fn resolves (no memory leak)'
 
   enqueue(channel, async () => {
     // While fn is running, the Map entry must be present
-    assert.ok(channelQueues.has(channel), 'Map entry exists while fn is running');
+    assert.ok(conduitQueues.has(channel), 'Map entry exists while fn is running');
   });
 
   // Wait for the tail promise to settle
-  const tail = channelQueues.get(channel);
+  const tail = conduitQueues.get(channel);
   if (tail) await tail;
 
   // Allow the .finally() callback to fire
   await tick();
 
-  assert.equal(channelQueues.has(channel), false, 'Map entry removed after fn resolves');
+  assert.equal(conduitQueues.has(channel), false, 'Map entry removed after fn resolves');
 });
 
 // ── (d) serialization with multiple channels — no cross-channel interference ──
@@ -116,7 +116,7 @@ test('two channels run independently (no cross-channel serialization)', async ()
 
   // Unblock ch1
   d1.resolve();
-  const tail = channelQueues.get(ch1);
+  const tail = conduitQueues.get(ch1);
   if (tail) await tail;
 
   assert.ok(log.includes('ch1-end'), 'ch1 completes after unblock');

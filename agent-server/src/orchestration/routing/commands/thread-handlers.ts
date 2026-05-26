@@ -9,7 +9,7 @@ import type { Destination, PlatformAdapter } from '@platform/index.js';
 import { threadStore } from '@store/thread-repo.js';
 import { listTemplates, listAgents } from '@domain/threads/index.js';
 import { runningExecutions } from '../../../core/running-executions.js';
-import { channelQueues } from '../../channel-queue.js';
+import { conduitQueues } from '../../conduit-queue.js';
 
 const log = createLogger('thread-handlers');
 
@@ -79,7 +79,7 @@ async function handleThreadCancelAlias(channel: string, adapter: PlatformAdapter
   // Alias for !cancel — delegate to the same killByKey behavior
   if (runningExecutions.killByKey(channel)) {
     log.info('Cancel requested for channel:', channel);
-    channelQueues.delete(channel);
+    conduitQueues.delete(channel);
     await adapter.postMessage(dest, { text: `${Icons.stopped} Cancelled. Session preserved — next message will resume.` });
   } else {
     await adapter.postMessage(dest, { text: 'Nothing running to cancel.' });
