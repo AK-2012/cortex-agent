@@ -4,7 +4,7 @@ Updated: 2026-05-27
 
 ## 当前 phase
 
-**TUI Phase 2 已完成**（dashboard side panel + notifications + status line + interactive resume picker）。五个 smoke 场景已执行（EXP-068）：3 PASS, 2 PASS partial, 0 FAIL。Carry f79c（--resume picker）已关闭。待 gate 74e5 评审通过后授权 Phase 3。
+**TUI Phase 2 已完成**（dashboard side panel + notifications + status line + interactive resume picker）。五个 smoke 场景已全部通过（EXP-068）：5 PASS, 0 FAIL。Carry f79c（--resume picker）已关闭。S2 E2E event delivery resolved (task c39d)。S3 notification fan-out resolved (task b0e7)。待 gate 74e5 评审通过后授权 Phase 3。
 
 ## 最近推进
 
@@ -12,13 +12,13 @@ Updated: 2026-05-27
 
 - **M5 Phase 2 实施完成**（2026-05-26, task 8a5e）：实现了 Ctrl+D side panel (5-tab dashboard: threads/tasks/schedules/executions/cost)，corner notification badge + 通知 modal，Ctrl+P project switcher，interactive --resume session picker。替换了 StatusLine 中的 Phase 2 stubs。Header 增加了 notification count + cost summary。所有 dashboard tab 使用 M3 `ui.query` + `ui.subscribe` 获取实时数据。Mutation buttons 在 Phase 2 中禁用以 `Phase 3` 标记。127 个 TUI/platform 测试全绿，tsc --noEmit 零新错误。
 - Server 端：修复 `tui-gateway.ts` 中的 `_handleUiQuery`/`_handleUiSubscribe`，使其实际调用 M3 UiService 而非返回 stub 结果。`TuiConnection` 新增 `activeSubscriptions` 字段管理订阅生命周期。
-- **EXP-068: TUI Phase 2 smoke 1-5 完成**（2026-05-27, task 1439, commit `281d3dbd`）：在真 daemon + WS 协议上执行了 5 个 Phase 2 smoke 场景。结果：3 PASS (S1 dashboard 加载, S4 --resume picker, S5 project switcher), 2 PASS partial (S2 live subscribe, S3 notification — 需要活跃 agent pipeline)。MTH-1 cost tab fix 验证通过。S4 `sessions.list resumable:true` 不再返回 `ui-service-unavailable` —— carry f79c 已关闭。12/12 协议断言通过。Re-run 验证（2026-05-27T09:12）同样全部通过。Follow-ups：c39d（S2 E2E event delivery）、b0e7（S3 E2E notification fan-out）。
+- **EXP-068: TUI Phase 2 smoke 1-5 完成**（2026-05-27, task 1439, commit `281d3dbd`）：在真 daemon + WS 协议上执行了 5 个 Phase 2 smoke 场景。结果：3 PASS (S1 dashboard 加载, S4 --resume picker, S5 project switcher), 2 PASS partial (S2 live subscribe, S3 notification — 需要活跃 agent pipeline)。MTH-1 cost tab fix 验证通过。S4 `sessions.list resumable:true` 不再返回 `ui-service-unavailable` —— carry f79c 已关闭。12/12 协议断言通过。
+- **c39d: TUI Phase 2 S2 E2E live event delivery 完成**（2026-05-27, task c39d）：修复了三处代码 gap（`mutator.ts` EventBus 事件发布、`tui-gateway.ts` _handleUiMutate stub→真实实现、`task-dispatch.ts` 调度管线事件发布），新增 `scripts/smoke-tui-s2-e2e.mjs` E2E smoke 脚本。10/10 断言通过，事件延迟 ~100-140ms（< 1s），227 测试全绿。EXP-068 S2 从 PASS (partial) 升级为 PASS。b0e7（S3 notification fan-out）也已关闭。
 
 ## 下一步
 
-- **Phase 2 gate (74e5)** 重新提交审核：EXP-068 作为核心证据。3 PASS (S1/S4/S5) + 2 PASS partial (S2/S3 → follow-ups c39d/b0e7)。
+- **Phase 2 gate (74e5)** 重新提交审核：EXP-068 作为核心证据。**5 PASS, 0 FAIL**（S2/S3 已通过 tasks c39d/b0e7 解决）。
   - 如果 gate 通过：Phase 3 (mutation 按钮) + AskUserModal/PlanFeedbackModal 实现创建任务。
-  - S2/S3 E2E 深入测试待 agent pipeline 就绪后执行（tasks c39d/b0e7）。
 - **TUI Phase 1 Gate (640e) 闭合**：EXP-067 就绪，carries: 299e **已关闭**（2026-05-27 S2 Slack-coexist PASS），5f51 已关闭（S7 AskUserQuestion PASS via smoke-tui-askuser.mjs），f79c 已关闭（--resume picker via M3）。所有 Phase 1 carry 已闭合。
 - **Carry f79c 已关闭**（2026-05-27）：--resume picker 通过 M3 UiService 可用，EXP-068 S4 验证。
 - Phase 5 触发条件待 `/scan` 或 `/evolve` 给出新候选；不主动开新方向。

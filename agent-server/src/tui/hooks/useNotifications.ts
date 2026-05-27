@@ -15,6 +15,7 @@ export interface NotificationEntry {
   id: string;
   kind: 'project-report' | 'system-notice' | 'thread-report';
   projectId: string;
+  sessionId?: string | null;
   title: string;
   body: string;
   ts: number;
@@ -41,6 +42,7 @@ export function _addNotification(prev: NotifState, frame: Notification): NotifSt
     id,
     kind: frame.kind,
     projectId: frame.projectId,
+    sessionId: frame.sessionId ?? null,
     title: frame.title,
     body: frame.body,
     ts: Date.now(),

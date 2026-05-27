@@ -67,6 +67,7 @@ const log = createLogger('tui-gateway');
 
 interface UiServiceHandle {
   query(scope: string, params: Record<string, unknown>): Promise<{ ok: boolean; data?: unknown; code?: string; message?: string }>;
+  mutate(op: string, args: Record<string, unknown>): Promise<{ ok: boolean; data?: unknown; code?: string; message?: string }>;
   subscribe(filter: { events: string[]; projectId?: string | null }): AsyncIterable<{ type: string; ts: string; payload: unknown }> & { close(): void };
 }
 
@@ -955,7 +956,7 @@ export class TuiGatewayAdapter implements PlatformAdapter, TuiAdapterControls {
     }
   }
 
-  private _handleUiMutate(conn: TuiConnection, frame: TuiFrame): void {
+  private async _handleUiMutate(conn: TuiConnection, frame: TuiFrame): Promise<void> {
     if (!isUiMutate(frame)) return;
     if (!this._uiService) {
       conn.send({
@@ -966,11 +967,27 @@ export class TuiGatewayAdapter implements PlatformAdapter, TuiAdapterControls {
       });
       return;
     }
-    conn.send({
-      type: 'ui.mutateResult',
-      id: frame.id,
-      ok: true,
-    });
+    try {
+      const uiService = this._uiService as UiServiceHandle;
+      const result = await uiService.mutate(frame.op, frame.args ?? {});
+      if (result.ok) {
+        conn.send({ type: 'ui.mutateResult', id: frame.id, ok: true });
+      } else {
+        conn.send({
+          type: 'ui.mutateResult',
+          id: frame.id,
+          ok: false,
+          error: { code: result.code ?? 'unknown', message: result.message ?? '' },
+        });
+      }
+    } catch (err: any) {
+      conn.send({
+        type: 'ui.mutateResult',
+        id: frame.id,
+        ok: false,
+        error: { code: 'internal', message: err?.message || String(err) },
+      });
+    }
   }
 
   private _handleUiSubscribe(conn: TuiConnection, frame: TuiFrame): void {

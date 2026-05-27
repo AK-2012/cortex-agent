@@ -1,4 +1,5 @@
 import { taskStore, TaskRepo } from '@store/task-repo.js';
+import type { EventBus } from '@events/index.js';
 import {
   approveTask as lifecycleApproveTask,
   blockTask as lifecycleBlockTask,
@@ -23,14 +24,24 @@ import { editTask as lifecycleEditTask } from './system/task-lifecycle-edit.js';
 import { assertLockHeld, getOwnerIdentity } from './system/task-lock.js';
 
 export class TaskMutator {
-  constructor(private store: TaskRepo = taskStore) {}
+  constructor(
+    private store: TaskRepo = taskStore,
+    private bus?: EventBus,
+  ) {}
+
+  setBus(bus: EventBus): void {
+    this.bus = bus;
+  }
 
   async claim(taskId: string, agent: string): Promise<any> {
     return this.store.runExclusive(() => {
       const task = this.store.getById(taskId);
       if (!task) return { success: false, message: `Task not found: ${taskId}` };
       const result = lifecycleClaimTask(task.text, task.project, agent, taskId);
-      if (result.success) { this.store.refresh(); this.store.commitAndPush(`task-store: claim ${taskId} by ${agent}`); }
+      if (result.success) {
+        this.store.refresh(); this.store.commitAndPush(`task-store: claim ${taskId} by ${agent}`);
+        this.bus?.publish({ type: 'task.claimed', taskId, by: agent });
+      }
       return result;
     });
   }
@@ -50,7 +61,10 @@ export class TaskMutator {
       const task = this.store.getById(taskId);
       if (!task) return { success: false, message: `Task not found: ${taskId}` };
       const result = lifecycleCompleteTask(task.text, task.project, note || '', taskId);
-      if (result.success) { this.store.refresh(); this.store.commitAndPush(`task-store: complete ${taskId}`); }
+      if (result.success) {
+        this.store.refresh(); this.store.commitAndPush(`task-store: complete ${taskId}`);
+        this.bus?.publish({ type: 'task.completed', taskId });
+      }
       return result;
     });
   }

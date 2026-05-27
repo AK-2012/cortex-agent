@@ -84,6 +84,8 @@ async function runDispatchAsync({ channel, scheduleTaskId, profileName }: { chan
       return;
     }
     selectedTask = selected.task;
+    ctx.bus!.publish({ type: 'task.claimed', taskId: selectedTask.id, by: 'task-dispatcher' });
+    ctx.bus!.publish({ type: 'task.dispatched', taskId: selectedTask.id, machine: 'local' });
     outcome = await executeDispatchTask({ selected, selectedTask: selectedTask!, channel, scheduleTaskId, profileName, startTime });
   } catch (error) {
     outcome = await handleDispatchError(error as Error, selectedTask, channel);
@@ -152,7 +154,10 @@ async function executeDispatchTask({ selected, selectedTask, channel, scheduleTa
     label: selectedTask.text?.substring(0, 60) || null, sessionKind: 'scheduled' as 'scheduled' | 'local',
     statusPrefix: `Done: [${selectedTask.project}] ${selectedTask.text.substring(0, 80)}`,
   });
-  if (selectedTask.id) dispatchFailureCounts.delete(selectedTask.id);
+  if (selectedTask.id) {
+    dispatchFailureCounts.delete(selectedTask.id);
+    ctx.bus!.publish({ type: 'task.completed', taskId: selectedTask.id });
+  }
   return { success: true, skipped: false, note: `Completed [${selectedTask.project}] ${selectedTask.text.substring(0, 60)}` };
 }
 

@@ -607,11 +607,100 @@ test('decompose — fails for nonexistent task', async () => {
   }
 });
 
-// --- 16. Lock-required: add ---
+// ─── 16. EventBus publication — claim ─────────────────────────────
 
+test('claim — publishes task.claimed event when bus is wired', async () => {
+  const fx = makeFixtureRepo();
+  try {
+    const repo = createRepo();
+    const published: any[] = [];
+    const mockBus = { publish: (e: any) => { published.push(e); }, subscribe: () => ({ unsubscribe: () => {} }) };
+    const mutator = new TaskMutator(repo, mockBus as any);
+    const result = await mutator.claim(fx.seedTaskId, 'test-agent');
+    assert.equal(result.success, true);
 
+    assert.equal(published.length, 1);
+    assert.equal(published[0].type, 'task.claimed');
+    assert.equal(published[0].taskId, fx.seedTaskId);
+    assert.equal(published[0].by, 'test-agent');
+    // ts is injected by EventBus.publish() — not the mutator's job
+    assert.equal('ts' in published[0], false);
+  } finally {
+    fx.cleanup();
+  }
+});
 
-// --- 16. Lock-required: add ---
+test('claim — does not publish when bus is not wired', async () => {
+  const fx = makeFixtureRepo();
+  try {
+    const repo = createRepo();
+    const mutator = new TaskMutator(repo);
+    // Backward compat: mutator works without a bus
+    const result = await mutator.claim(fx.seedTaskId, 'test-agent');
+    assert.equal(result.success, true);
+  } finally {
+    fx.cleanup();
+  }
+});
+
+// ─── 17. EventBus publication — complete ──────────────────────────
+
+test('complete — publishes task.completed event when bus is wired', async () => {
+  const fx = makeFixtureRepo();
+  try {
+    const repo = createRepo();
+    const published: any[] = [];
+    const mockBus = { publish: (e: any) => { published.push(e); }, subscribe: () => ({ unsubscribe: () => {} }) };
+    const mutator = new TaskMutator(repo, mockBus as any);
+    await mutator.claim(fx.seedTaskId, 'agent');
+    published.length = 0; // clear claim event
+
+    const result = await mutator.complete(fx.seedTaskId, 'test-note');
+    assert.equal(result.success, true);
+
+    assert.equal(published.length, 1);
+    assert.equal(published[0].type, 'task.completed');
+    assert.equal(published[0].taskId, fx.seedTaskId);
+    assert.equal('ts' in published[0], false);
+  } finally {
+    fx.cleanup();
+  }
+});
+
+test('complete — does not publish when bus is not wired', async () => {
+  const fx = makeFixtureRepo();
+  try {
+    const repo = createRepo();
+    const mutator = new TaskMutator(repo);
+    await mutator.claim(fx.seedTaskId, 'agent');
+    const result = await mutator.complete(fx.seedTaskId, 'test-note');
+    assert.equal(result.success, true);
+    // No crash — backward compat
+  } finally {
+    fx.cleanup();
+  }
+});
+
+// ─── 18. EventBus publication — setBus wiring ─────────────────────
+
+test('setBus — wires event bus after construction', async () => {
+  const fx = makeFixtureRepo();
+  try {
+    const repo = createRepo();
+    const published: any[] = [];
+    const mockBus = { publish: (e: any) => { published.push(e); }, subscribe: () => ({ unsubscribe: () => {} }) };
+    const mutator = new TaskMutator(repo);
+    mutator.setBus(mockBus as any);
+
+    await mutator.claim(fx.seedTaskId, 'test-agent');
+    assert.equal(published.length, 1);
+    assert.equal(published[0].type, 'task.claimed');
+  } finally {
+    fx.cleanup();
+  }
+});
+
+// --- 19. Lock-required: add ---
 
 test('add \xe2\x80\x94 fails without lock held', async () => {
   const fx = makeFixtureRepo();

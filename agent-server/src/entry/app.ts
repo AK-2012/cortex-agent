@@ -17,6 +17,7 @@ import * as executionRegistry from '@domain/executions/registry.js';
 import { initHookBridge } from '@orch/routing/hook-bridge.js';
 import { registerCommands } from '@orch/routing/commands/index.js';
 import { taskStore } from '@domain/tasks/store.js';
+import { taskMutator } from '@domain/tasks/mutator.js';
 import { projectDirRepo } from '@store/project-dir-repo.js';
 import { projectStore } from '@domain/projects/index.js';
 import { sendStartupDmIfConfigured } from './startup-notify.js';
@@ -75,6 +76,7 @@ initHookBridge(bus); // S5: wire hook-bridge to publish ask-user.requested / pla
 runningExecutions.setBus(bus);   // S6-A: wire lifecycle events
 planApprovals.setBus(bus);  // S6-A: wire plan.approved events
 busyTracker.setBus(bus);    // S6-C: wire busy/idle IPC through event bus
+taskMutator.setBus(bus);    // c39d: wire task lifecycle events
 initInteractionHandlers(bus); // BLK-1: wire ask-user.answered publisher
 
 const TEMP_DIR = WORKSPACE_DIR;
