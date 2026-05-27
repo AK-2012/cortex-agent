@@ -63,6 +63,15 @@ import type { EventBus, Subscription } from '@events/index.js';
 
 const log = createLogger('tui-gateway');
 
+// ── Minimal UiService interface (avoids coupling to domain type) ──────
+
+interface UiServiceHandle {
+  query(scope: string, params: Record<string, unknown>): Promise<{ ok: boolean; data?: unknown; code?: string; message?: string }>;
+  subscribe(filter: { events: string[]; projectId?: string | null }): AsyncIterable<{ type: string; ts: string; payload: unknown }> & { close(): void };
+}
+
+// ── Constants ─────
+
 const KEEPALIVE_TIMEOUT_MS = 90_000;
 const KEEPALIVE_CHECK_INTERVAL = 30_000;
 const HANDSHAKE_TIMEOUT_MS = 5_000;
@@ -867,7 +876,7 @@ export class TuiGatewayAdapter implements PlatformAdapter, TuiAdapterControls {
 
   // ── Private: UI side-channel ────────────────────────────────────
 
-  private _handleUiQuery(conn: TuiConnection, frame: TuiFrame): void {
+  private async _handleUiQuery(conn: TuiConnection, frame: TuiFrame): Promise<void> {
     if (!isUiQuery(frame)) return;
     if (!this._uiService) {
       conn.send({
@@ -878,13 +887,32 @@ export class TuiGatewayAdapter implements PlatformAdapter, TuiAdapterControls {
       });
       return;
     }
-    // Route to UI service (M3 — stub for now)
-    conn.send({
-      type: 'ui.queryResult',
-      id: frame.id,
-      ok: true,
-      data: null,
-    });
+    try {
+      const uiService = this._uiService as UiServiceHandle;
+      const result = await uiService.query(frame.scope, frame.params ?? {});
+      if (result.ok) {
+        conn.send({
+          type: 'ui.queryResult',
+          id: frame.id,
+          ok: true,
+          data: result.data,
+        });
+      } else {
+        conn.send({
+          type: 'ui.queryResult',
+          id: frame.id,
+          ok: false,
+          error: { code: result.code ?? 'unknown', message: result.message ?? '' },
+        });
+      }
+    } catch (err: any) {
+      conn.send({
+        type: 'ui.queryResult',
+        id: frame.id,
+        ok: false,
+        error: { code: 'internal', message: err?.message || String(err) },
+      });
+    }
   }
 
   private _handleUiMutate(conn: TuiConnection, frame: TuiFrame): void {
@@ -916,12 +944,55 @@ export class TuiGatewayAdapter implements PlatformAdapter, TuiAdapterControls {
       });
       return;
     }
+    const uiService = this._uiService as UiServiceHandle;
+
+    // Close existing subscription with same id if any
+    const existing = conn.activeSubscriptions.get(frame.id);
+    if (existing) {
+      existing.close();
+      conn.activeSubscriptions.delete(frame.id);
+    }
+
     conn.uiSubscriptions.add(frame.id);
+
+    const subscription = uiService.subscribe(frame.filter);
+    conn.activeSubscriptions.set(frame.id, subscription);
+
+    // Forward subscription events to connection in background
+    this._forwardSubscriptionEvents(conn, frame.id, subscription);
+  }
+
+  private async _forwardSubscriptionEvents(
+    conn: TuiConnection,
+    subscribeId: string,
+    subscription: AsyncIterable<{ type: string; ts: string; payload: unknown }> & { close(): void },
+  ): Promise<void> {
+    try {
+      for await (const event of subscription) {
+        if (conn.closed) break;
+        conn.send({
+          type: 'ui.event',
+          id: subscribeId,
+          event,
+          seq: 0,
+        });
+      }
+    } catch (err) {
+      log.warn(`Subscription ${subscribeId} error:`, (err as Error)?.message || err);
+    } finally {
+      conn.activeSubscriptions.delete(subscribeId);
+    }
   }
 
   private _handleUiUnsubscribe(conn: TuiConnection, frame: TuiFrame): void {
     if (!isUiUnsubscribe(frame)) return;
     conn.uiSubscriptions.delete(frame.id);
+
+    const sub = conn.activeSubscriptions.get(frame.id);
+    if (sub) {
+      sub.close();
+      conn.activeSubscriptions.delete(frame.id);
+    }
   }
 
   // ── Private: target resolution ──────────────────────────────────
@@ -976,7 +1047,11 @@ export class TuiGatewayAdapter implements PlatformAdapter, TuiAdapterControls {
     const conn = this._connections.get(conduitId);
     if (!conn) return;
 
-    // Unsubscribe all UI subscriptions
+    // Unsubscribe all UI subscriptions — close active subscription handles first
+    for (const [, sub] of conn.activeSubscriptions) {
+      sub.close();
+    }
+    conn.activeSubscriptions.clear();
     conn.uiSubscriptions.clear();
     conn.pendingActions.clear();
     conn.pendingModalAcks.clear();

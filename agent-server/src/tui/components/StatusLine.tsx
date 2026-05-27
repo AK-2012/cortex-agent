@@ -27,7 +27,7 @@ export function StatusLine({
       {statusText}
       {notificationCount > 0 ? ` | 🔔 ${notificationCount}` : ''}
       {' — '}
-      <Text dimColor>Ctrl+D Phase 2 | Ctrl+N Phase 2 | Ctrl+R Phase 2 | Ctrl+P Phase 2</Text>
+      <Text dimColor>Ctrl+D Dashboard | Ctrl+N Notifications | Ctrl+P Projects</Text>
     </Text>
   );
 }

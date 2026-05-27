@@ -7,9 +7,10 @@ import React from 'react';
 import { render } from 'ink';
 import { App } from './App.js';
 import { WsClient } from './ws-client.js';
-import { isHandshakeAck, isSessionSwitched, isUiQueryResult } from '../platform/tui/protocol.js';
+import { isHandshakeAck, isSessionSwitched, isUiQueryResult, isUiEvent, isNotification } from '../platform/tui/protocol.js';
 import { CORTEX_VERSION } from '../core/version.js';
 import type { TuiFrame } from '../platform/tui/protocol.js';
+import type { ResumableSession } from './components/SessionPicker.js';
 
 // ── Argv parsing ──
 
@@ -50,6 +51,9 @@ async function main(): Promise<void> {
   let lastSessionId: string | null = null;
   let currentProjectId: string | null = null;
   let currentSessionName: string | null = null;
+
+  // Resume state: store sessions for interactive picker
+  let resumableSessions: ResumableSession[] | null = null;
   let resumePending = false;
 
   // Connection state
@@ -76,12 +80,36 @@ async function main(): Promise<void> {
       },
       onSendCancel: () => {
         const id = `msg-${Date.now()}`;
-        client.send({ type: 'msg.user', id, text: '!cancel' });
+        client.send({ type: 'msg.user', id, text: '!cancel' } as any);
       },
       serverVersion: ackData?.serverVersion ?? null,
       projectId: currentProjectId ?? ackData?.defaultProjectId ?? null,
       sessionName: currentSessionName,
       onSetDispatch: (dispatch) => { dispatchFrame = dispatch; },
+      resumableSessions,
+      resumePending,
+      onResumeSelect: (sessionId: string, _projectId: string) => {
+        resumableSessions = null;
+        resumePending = false;
+        client.send({
+          type: 'session.switch',
+          id: 'sess-resume',
+          projectId: currentProjectId ?? ackData?.defaultProjectId ?? 'general',
+          sessionId,
+        } as any);
+        doRender();
+      },
+      onResumeCancel: () => {
+        resumableSessions = null;
+        resumePending = false;
+        client.send({
+          type: 'session.switch',
+          id: 'sess-fallback',
+          projectId: currentProjectId ?? ackData?.defaultProjectId ?? 'general',
+          sessionId: null,
+        } as any);
+        doRender();
+      },
     });
     if (rerender) {
       rerender(app);
@@ -132,7 +160,7 @@ async function main(): Promise<void> {
               id: 'sess-list',
               scope: 'sessions.list',
               params: { resumable: true },
-            });
+            } as any);
           } else {
             // Fresh session
             client.send({
@@ -140,7 +168,7 @@ async function main(): Promise<void> {
               id: 'sess-init',
               projectId: project,
               sessionId: null,
-            });
+            } as any);
           }
 
           connectionState = 'connected';
@@ -154,36 +182,38 @@ async function main(): Promise<void> {
           currentProjectId = frame.projectId;
           currentSessionName = frame.sessionName;
           resumePending = false;
+          resumableSessions = null;
           doRender();
           return;
         }
 
         // Handle resume: ui.queryResult for sessions.list
         if (isUiQueryResult(frame) && frame.id === 'sess-list' && resumePending) {
-          resumePending = false;
           if (frame.ok && Array.isArray(frame.data) && frame.data.length > 0) {
-            // Switch to first resumable session
-            const sessionId = (frame.data[0] as any).sessionId ?? (frame.data[0] as any).id;
-            client.send({
-              type: 'session.switch',
-              id: 'sess-resume',
-              projectId: currentProjectId ?? ackData?.defaultProjectId ?? 'general',
-              sessionId,
-            });
-          } else {
-            // No resumable sessions — fall back to fresh
+            // Store sessions for interactive picker
+            resumableSessions = (frame.data as any[]).map((s: any) => ({
+              sessionId: s.sessionId ?? s.id,
+              name: s.name,
+              projectId: s.projectId,
+              label: s.label ?? null,
+            }));
+          }
+          // If no sessions, leave resumableSessions as empty array — App renders "no sessions" state
+          // Then auto-fallback to fresh session
+          if (!frame.ok || !Array.isArray(frame.data) || frame.data.length === 0) {
+            resumePending = false;
             client.send({
               type: 'session.switch',
               id: 'sess-fallback',
               projectId: currentProjectId ?? ackData?.defaultProjectId ?? 'general',
               sessionId: null,
-            });
+            } as any);
           }
           doRender();
           return;
         }
 
-        // Dispatch frame to transcript
+        // Dispatch frame to App for routing (transcript, dashboard, notifications)
         dispatchFrame?.(frame);
         doRender();
       },

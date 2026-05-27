@@ -16,6 +16,8 @@ export class TuiConnection {
   activeSessionId: string | null = null;
   activeProjectId: string;
   uiSubscriptions = new Set<string>();
+  /** Active UiService subscription handles — closed on cleanup */
+  activeSubscriptions = new Map<string, { close(): void }>();
   /** pending actions keyed by action id (triggerId suffix) */
   pendingActions = new Map<string, { actionId: string; value: string }>();
   /** pending modal acks keyed by modal submit id */

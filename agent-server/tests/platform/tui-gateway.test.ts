@@ -503,6 +503,205 @@ test('ui.mutate without uiService returns error result', async (t) => {
   assert.equal(result.error.code, 'ui-service-unavailable');
 });
 
+// ── UI query with UiService ────────────────────────────────────────
+
+test('ui.query with UiService returns real data', async (t) => {
+  const { adapter, port, stop } = await startEphemeralGateway();
+  t.after(() => stop());
+
+  const mockUiService = {
+    query: async (_scope: string, _params: any) => ({ ok: true, data: [{ id: '1', name: 'test-project' }] }),
+    mutate: async () => ({ ok: true }),
+    subscribe: () => { throw new Error('not implemented'); },
+  };
+  (adapter as any).setUiService(mockUiService);
+
+  const ws = await wsConnect(port);
+  const coll = makeFrameCollector(ws);
+  t.after(() => ws.close());
+
+  await handshake(ws, coll);
+
+  sendFrame(ws, { type: 'ui.query', id: 'q1', scope: 'projects.list', params: {} });
+
+  const result: any = await coll.read();
+  assert.equal(result.type, 'ui.queryResult');
+  assert.equal(result.id, 'q1');
+  assert.equal(result.ok, true);
+  assert.ok(Array.isArray(result.data));
+  assert.equal(result.data[0].id, '1');
+  assert.equal(result.data[0].name, 'test-project');
+});
+
+test('ui.query with UiService returning error forwards error code', async (t) => {
+  const { adapter, port, stop } = await startEphemeralGateway();
+  t.after(() => stop());
+
+  const mockUiService = {
+    query: async () => ({ ok: false, code: 'invalid-args', message: 'bad scope' }),
+    mutate: async () => ({ ok: true }),
+    subscribe: () => { throw new Error('not implemented'); },
+  };
+  (adapter as any).setUiService(mockUiService);
+
+  const ws = await wsConnect(port);
+  const coll = makeFrameCollector(ws);
+  t.after(() => ws.close());
+
+  await handshake(ws, coll);
+
+  sendFrame(ws, { type: 'ui.query', id: 'q2', scope: 'invalid.scope', params: {} });
+
+  const result: any = await coll.read();
+  assert.equal(result.type, 'ui.queryResult');
+  assert.equal(result.id, 'q2');
+  assert.equal(result.ok, false);
+  assert.equal(result.error.code, 'invalid-args');
+});
+
+test('ui.query with UiService that throws returns internal error', async (t) => {
+  const { adapter, port, stop } = await startEphemeralGateway();
+  t.after(() => stop());
+
+  const mockUiService = {
+    query: async () => { throw new Error('db connection failed'); },
+    mutate: async () => ({ ok: true }),
+    subscribe: () => { throw new Error('not implemented'); },
+  };
+  (adapter as any).setUiService(mockUiService);
+
+  const ws = await wsConnect(port);
+  const coll = makeFrameCollector(ws);
+  t.after(() => ws.close());
+
+  await handshake(ws, coll);
+
+  sendFrame(ws, { type: 'ui.query', id: 'q3', scope: 'projects.list', params: {} });
+
+  const result: any = await coll.read();
+  assert.equal(result.type, 'ui.queryResult');
+  assert.equal(result.ok, false);
+  assert.equal(result.error.code, 'internal');
+});
+
+// ── UI subscribe with UiService ────────────────────────────────────
+
+test('ui.subscribe with UiService forwards events to connection', async (t) => {
+  const { adapter, port, stop } = await startEphemeralGateway();
+  t.after(() => stop());
+
+  const events: Array<{ type: string; ts: string; payload: unknown }> = [
+    { type: 'thread.created', ts: '2024-01-01T00:00:00Z', payload: { threadId: 't1' } },
+    { type: 'thread.completed', ts: '2024-01-01T01:00:00Z', payload: { threadId: 't1' } },
+  ];
+  let subscriptionClosed = false;
+
+  const mockSubscription = {
+    close: () => { subscriptionClosed = true; },
+    [Symbol.asyncIterator]: () => {
+      let idx = 0;
+      return {
+        next: async (): Promise<IteratorResult<any>> => {
+          if (idx < events.length) return { value: events[idx++], done: false };
+          // Hang — subscription stays alive
+          return new Promise(() => {});
+        },
+      };
+    },
+  };
+
+  const mockUiService = {
+    query: async () => ({ ok: true, data: [] }),
+    mutate: async () => ({ ok: true }),
+    subscribe: () => mockSubscription,
+  };
+  (adapter as any).setUiService(mockUiService);
+
+  const ws = await wsConnect(port);
+  const coll = makeFrameCollector(ws);
+  t.after(() => ws.close());
+
+  await handshake(ws, coll);
+
+  sendFrame(ws, {
+    type: 'ui.subscribe',
+    id: 'sub1',
+    filter: { events: ['thread.created', 'thread.completed'] },
+  });
+
+  // Read first event
+  const ev1: any = await coll.read();
+  assert.equal(ev1.type, 'ui.event');
+  assert.equal(ev1.id, 'sub1');
+  assert.equal(ev1.event.type, 'thread.created');
+
+  // Read second event
+  const ev2: any = await coll.read();
+  assert.equal(ev2.type, 'ui.event');
+  assert.equal(ev2.id, 'sub1');
+  assert.equal(ev2.event.type, 'thread.completed');
+});
+
+test('ui.unsubscribe closes subscription', async (t) => {
+  const { adapter, port, stop } = await startEphemeralGateway();
+  t.after(() => stop());
+
+  let subscriptionClosed = false;
+  const mockSubscription = {
+    close: () => { subscriptionClosed = true; },
+    [Symbol.asyncIterator]: () => ({
+      next: async () => new Promise(() => {}), // hangs
+    }),
+  };
+
+  const mockUiService = {
+    query: async () => ({ ok: true, data: [] }),
+    mutate: async () => ({ ok: true }),
+    subscribe: () => mockSubscription,
+  };
+  (adapter as any).setUiService(mockUiService);
+
+  const ws = await wsConnect(port);
+  const coll = makeFrameCollector(ws);
+  t.after(() => ws.close());
+
+  await handshake(ws, coll);
+
+  sendFrame(ws, {
+    type: 'ui.subscribe',
+    id: 'sub2',
+    filter: { events: ['thread.created'] },
+  });
+
+  await delay(50);
+
+  sendFrame(ws, { type: 'ui.unsubscribe', id: 'sub2' });
+
+  await delay(50);
+  assert.equal(subscriptionClosed, true);
+});
+
+test('ui.subscribe without UiService returns error', async (t) => {
+  const { adapter, port, stop } = await startEphemeralGateway();
+  t.after(() => stop());
+
+  const ws = await wsConnect(port);
+  const coll = makeFrameCollector(ws);
+  t.after(() => ws.close());
+
+  await handshake(ws, coll);
+
+  sendFrame(ws, {
+    type: 'ui.subscribe',
+    id: 'sub3',
+    filter: { events: ['thread.created'] },
+  });
+
+  const result: any = await coll.read();
+  assert.equal(result.type, 'error');
+  assert.equal(result.code, 4100);
+});
+
 // ── Notification routing (unit-level, no WS) ─────────────────────────
 
 test('sendProjectReport routes per activeSession equality', async (t) => {

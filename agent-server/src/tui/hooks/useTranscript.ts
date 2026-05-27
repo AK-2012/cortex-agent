@@ -10,7 +10,7 @@ import type {
 } from '../../platform/tui/protocol.js';
 import { isChatPost, isChatUpdate, isChatDelete, isChatMarkQueued,
   isStreamText, isStreamMutableOpen, isStreamMutableUpdate, isStreamFlush,
-  isTranscriptReplay, isInteractivePost, isModalOpen, isModalAck, isNotification } from '../../platform/tui/protocol.js';
+  isTranscriptReplay, isInteractivePost, isModalOpen, isModalAck } from '../../platform/tui/protocol.js';
 
 // ── Types ──
 
@@ -147,11 +147,6 @@ export function useTranscript() {
 
     if (isModalAck(frame)) {
       setState(prev => _handlePhase2Placeholder(prev, `modal-ack-${frame.id}`, '[modal.ack] Phase 2'));
-      return;
-    }
-
-    if (isNotification(frame)) {
-      setState(prev => _handlePhase2Placeholder(prev, `notif-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`, `[notification: ${frame.title}] Phase 2`));
       return;
     }
   }, [flushBatch, scheduleBatch]);

@@ -4,7 +4,19 @@ Updated: 2026-05-26
 
 ## 当前 phase
 
-**Phase 4 实质完成**（roadmap 三个里程碑通过）。Phase 5（知识体系）无明确触发条件，EXP-029 评估为话题错配。当前活跃工作集中在两条工程线：(1) `plan/groovy-strolling-fox.md` OutputStream refactor S2–S4；(2) DR-0008 PI adapter Phase 2 实施。
+**M5 Phase 2 实施中**（dashboard side panel + notifications + status line + interactive resume picker）。Phase 2 将 Phase 1 的 chat-only TUI 扩展为 chat+dashboard 客户端。
+
+## 最近推进
+
+- **M5 Phase 2 实施完成**（2026-05-26, task 8a5e）：实现了 Ctrl+D side panel (5-tab dashboard: threads/tasks/schedules/executions/cost)，corner notification badge + 通知 modal，Ctrl+P project switcher，interactive --resume session picker。替换了 StatusLine 中的 Phase 2 stubs。Header 增加了 notification count + cost summary。所有 dashboard tab 使用 M3 `ui.query` + `ui.subscribe` 获取实时数据。Mutation buttons 在 Phase 2 中禁用以 `Phase 3` 标记。127 个 TUI/platform 测试全绿，tsc --noEmit 零新错误。
+- Server 端：修复 `tui-gateway.ts` 中的 `_handleUiQuery`/`_handleUiSubscribe`，使其实际调用 M3 UiService 而非返回 stub 结果。`TuiConnection` 新增 `activeSubscriptions` 字段管理订阅生命周期。
+
+## 下一步
+
+- 等待 Phase 2 gate 审核。如果通过：
+  - Phase 3: mutation (cancel/pause/claim/complete) 按钮实现
+  - AskUserModal/PlanFeedbackModal 实现（当前仍是 Phase 2 placeholder）
+  - 跟进 task f79c (--resume picker 的后续优化)
 
 ## 最近推进
 

@@ -47,6 +47,93 @@ test('useKeybindings calls onClearView on Ctrl+L', async (t) => {
   instance.cleanup();
 });
 
+test('useKeybindings calls onToggleSidePanel on Ctrl+D', async (t) => {
+  const events: string[] = [];
+
+  function TestApp2() {
+    useKeybindings({
+      onSubmit: () => {},
+      onCancel: () => {},
+      onScrollUp: () => {},
+      onScrollDown: () => {},
+      onClearView: () => {},
+      onExit: () => {},
+      onToggleSidePanel: () => events.push('toggleSidePanel'),
+    });
+    return React.createElement(Text, null, 'test');
+  }
+
+  const app = React.createElement(TestApp2);
+  const instance = render(app);
+  await delay(200);
+
+  instance.stdin.write('\x04'); // Ctrl+D
+  await delay(200);
+
+  assert.ok(events.includes('toggleSidePanel'), `expected toggleSidePanel in events: ${JSON.stringify(events)}`);
+
+  instance.unmount();
+  instance.cleanup();
+});
+
+test('useKeybindings calls onToggleNotifications on Ctrl+N', async (t) => {
+  const events: string[] = [];
+
+  function TestApp3() {
+    useKeybindings({
+      onSubmit: () => {},
+      onCancel: () => {},
+      onScrollUp: () => {},
+      onScrollDown: () => {},
+      onClearView: () => {},
+      onExit: () => {},
+      onToggleNotifications: () => events.push('toggleNotifications'),
+    });
+    return React.createElement(Text, null, 'test');
+  }
+
+  const app = React.createElement(TestApp3);
+  const instance = render(app);
+  await delay(200);
+
+  instance.stdin.write('\x0e'); // Ctrl+N
+  await delay(200);
+
+  assert.ok(events.includes('toggleNotifications'), `expected toggleNotifications in events: ${JSON.stringify(events)}`);
+
+  instance.unmount();
+  instance.cleanup();
+});
+
+test('useKeybindings calls onToggleProjectSwitcher on Ctrl+P', async (t) => {
+  const events: string[] = [];
+
+  function TestApp4() {
+    useKeybindings({
+      onSubmit: () => {},
+      onCancel: () => {},
+      onScrollUp: () => {},
+      onScrollDown: () => {},
+      onClearView: () => {},
+      onExit: () => {},
+      onToggleProjectSwitcher: () => events.push('toggleProjectSwitcher'),
+    });
+    return React.createElement(Text, null, 'test');
+  }
+
+  const app = React.createElement(TestApp4);
+  const instance = render(app);
+  await delay(200);
+
+  instance.stdin.write('\x10'); // Ctrl+P
+  await delay(200);
+
+  assert.ok(events.includes('toggleProjectSwitcher'), `expected toggleProjectSwitcher in events: ${JSON.stringify(events)}`);
+
+  instance.unmount();
+  instance.cleanup();
+});
+
 test('useKeybindings calls onCancel on Escape', async (t) => {
   const events: string[] = [];
 

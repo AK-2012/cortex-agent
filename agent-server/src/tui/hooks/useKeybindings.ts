@@ -12,7 +12,9 @@ export interface KeybindingHandlers {
   onScrollDown: (page?: boolean) => void;
   onClearView: () => void;
   onExit: () => void;
-  onShowResumePicker?: () => void; // Phase 2
+  onToggleSidePanel?: () => void; // Ctrl+D
+  onToggleNotifications?: () => void; // Ctrl+N
+  onToggleProjectSwitcher?: () => void; // Ctrl+P
 }
 
 export function useKeybindings(handlers: KeybindingHandlers): void {
@@ -37,7 +39,6 @@ export function useKeybindings(handlers: KeybindingHandlers): void {
 
     // Enter: submit
     if (key.return) {
-      // Handled by ink-text-input's onSubmit — this is a fallback
       return;
     }
 
@@ -50,6 +51,24 @@ export function useKeybindings(handlers: KeybindingHandlers): void {
     // Ctrl+L: clear transcript view
     if (input === 'l' && key.ctrl) {
       h.onClearView();
+      return;
+    }
+
+    // Ctrl+D: toggle side panel
+    if (input === 'd' && key.ctrl) {
+      h.onToggleSidePanel?.();
+      return;
+    }
+
+    // Ctrl+N: open notifications
+    if (input === 'n' && key.ctrl) {
+      h.onToggleNotifications?.();
+      return;
+    }
+
+    // Ctrl+P: open project switcher
+    if (input === 'p' && key.ctrl) {
+      h.onToggleProjectSwitcher?.();
       return;
     }
 
