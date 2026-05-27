@@ -452,6 +452,9 @@ function validateCommand(command: string, values: ParsedValues): void {
   if (command === 'add' && !values.text) {
     throw cliError('--text is required for add');
   }
+  if (command === 'add' && values.template && (values.template === 'default' || values.template === 'scheduler')) {
+    throw cliError(`Template '${values.template}' is forbidden. The 'default' and 'scheduler' templates are single-agent templates with no review pipeline and are not allowed for task dispatch. Use a multi-agent review template instead (run 'cortex-task --help' to see available templates).`);
+  }
   if (command === 'bulk-add' && !values.bulkFile) {
     throw cliError('--file is required for bulk-add (use - for stdin)');
   }

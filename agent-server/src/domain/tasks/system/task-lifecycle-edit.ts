@@ -47,10 +47,13 @@ const VALID_PRIORITIES = new Set(['high', 'medium', 'low']);
 
 let cachedTemplateNames: Set<string> | null = null;
 
+const FORBIDDEN_TEMPLATES = new Set(['default', 'scheduler']);
+
 function getValidTemplateNames(): Set<string> {
   if (cachedTemplateNames !== null) return cachedTemplateNames;
   try { loadConfig(); } catch { /* suppress loadConfig output */ }
-  cachedTemplateNames = new Set(listTemplateNames());
+  const allNames = listTemplateNames();
+  cachedTemplateNames = new Set(allNames.filter((n) => !FORBIDDEN_TEMPLATES.has(n)));
   return cachedTemplateNames;
 }
 
@@ -59,6 +62,9 @@ function _resetTemplateNameCacheForTests(): void {
 }
 
 function validateTemplateName(name: string): string | null {
+  if (FORBIDDEN_TEMPLATES.has(name)) {
+    return `Template '${name}' is forbidden. The 'default' and 'scheduler' templates are single-agent templates with no review pipeline and are not allowed for task dispatch. Use a multi-agent review template instead (e.g. stage-gate, coder-review, analyst-review).`;
+  }
   const valid = getValidTemplateNames();
   if (valid.size === 0) return null;
   if (!valid.has(name)) {
