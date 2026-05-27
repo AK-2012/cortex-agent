@@ -69,6 +69,34 @@ test('_handleQueryResult with error sets error state', () => {
   assert.equal(state.tabs.threads.data.length, 0);
 });
 
+test('_handleQueryResult with non-array (object) data wraps in array', () => {
+  const costSummary = { totalCost: 42.5, monthlyCost: 100.0, dailyCost: 5.0, models: { 'gpt-4': 30.0 }, budgetRemaining: 957.5 };
+  const state = _handleQueryResult(
+    EMPTY_DASH_STATE,
+    'dash-cost',
+    TAB_SCOPES,
+    makeQueryResult('cost', 'dash-cost', costSummary),
+  );
+
+  assert.equal(Array.isArray(state.tabs.cost.data), true);
+  assert.equal(state.tabs.cost.data.length, 1);
+  assert.equal(state.tabs.cost.data[0].totalCost, 42.5);
+  assert.equal(state.tabs.cost.loading, false);
+  assert.equal(state.tabs.cost.error, null);
+});
+
+test('_handleQueryResult with null data produces empty array', () => {
+  const state = _handleQueryResult(
+    EMPTY_DASH_STATE,
+    'dash-threads',
+    TAB_SCOPES,
+    makeQueryResult('threads', 'dash-threads', null),
+  );
+
+  assert.equal(Array.isArray(state.tabs.threads.data), true);
+  assert.equal(state.tabs.threads.data.length, 0);
+});
+
 test('_handleQueryResult with unknown id is no-op', () => {
   const state = _handleQueryResult(
     EMPTY_DASH_STATE,

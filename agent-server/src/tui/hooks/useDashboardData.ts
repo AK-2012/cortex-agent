@@ -72,7 +72,7 @@ export function _handleQueryResult(
   const tab = tabEntry[0] as TabName;
 
   if (frame.ok) {
-    const data = Array.isArray(frame.data) ? frame.data : [];
+    const data = Array.isArray(frame.data) ? frame.data : (frame.data != null ? [frame.data] : []);
     const tabs = {
       ...prev.tabs,
       [tab]: { data, loading: false, error: null, lastUpdated: Date.now() },
