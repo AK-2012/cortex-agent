@@ -1,23 +1,27 @@
 # Cortex Self-Research Status
 
-Updated: 2026-05-26
+Updated: 2026-05-27
 
 ## 当前 phase
 
-**M5 Phase 2 实施中**（dashboard side panel + notifications + status line + interactive resume picker）。Phase 2 将 Phase 1 的 chat-only TUI 扩展为 chat+dashboard 客户端。
+**TUI Phase 2 已完成**（dashboard side panel + notifications + status line + interactive resume picker）。五个 smoke 场景已执行（EXP-068）：3 PASS, 2 PASS partial, 0 FAIL。Carry f79c（--resume picker）已关闭。待 gate 74e5 评审通过后授权 Phase 3。
 
 ## 最近推进
 
 - **M5 Phase 2 实施完成**（2026-05-26, task 8a5e）：实现了 Ctrl+D side panel (5-tab dashboard: threads/tasks/schedules/executions/cost)，corner notification badge + 通知 modal，Ctrl+P project switcher，interactive --resume session picker。替换了 StatusLine 中的 Phase 2 stubs。Header 增加了 notification count + cost summary。所有 dashboard tab 使用 M3 `ui.query` + `ui.subscribe` 获取实时数据。Mutation buttons 在 Phase 2 中禁用以 `Phase 3` 标记。127 个 TUI/platform 测试全绿，tsc --noEmit 零新错误。
 - Server 端：修复 `tui-gateway.ts` 中的 `_handleUiQuery`/`_handleUiSubscribe`，使其实际调用 M3 UiService 而非返回 stub 结果。`TuiConnection` 新增 `activeSubscriptions` 字段管理订阅生命周期。
-- **EXP-068: TUI Phase 2 smoke 1-5 完成**（2026-05-27, task 1439）：在真 daemon + WS 协议上执行了 5 个 Phase 2 smoke 场景。结果：3 PASS (S1 dashboard 加载, S4 --resume picker, S5 project switcher), 2 PASS partial (S2 live subscribe, S3 notification — 需要活跃 agent pipeline)。MTH-1 cost tab fix 验证通过。S4 `sessions.list resumable:true` 不再返回 `ui-service-unavailable` —— carry f79c 可关闭。12/12 协议断言通过。Commit `f62ddf7c`。EXP-068 已写入，experiments/index.md 已重建。
+- **EXP-068: TUI Phase 2 smoke 1-5 完成**（2026-05-27, task 1439, commit `281d3dbd`）：在真 daemon + WS 协议上执行了 5 个 Phase 2 smoke 场景。结果：3 PASS (S1 dashboard 加载, S4 --resume picker, S5 project switcher), 2 PASS partial (S2 live subscribe, S3 notification — 需要活跃 agent pipeline)。MTH-1 cost tab fix 验证通过。S4 `sessions.list resumable:true` 不再返回 `ui-service-unavailable` —— carry f79c 已关闭。12/12 协议断言通过。Re-run 验证（2026-05-27T09:12）同样全部通过。Follow-ups：c39d（S2 E2E event delivery）、b0e7（S3 E2E notification fan-out）。
 
 ## 下一步
 
-- Phase 2 gate (74e5) 重新提交审核：EXP-068 作为核心证据。3/5 全 PASS + 2/5 partial。
-  - 如果 gate 通过：Phase 3 (mutation 按钮实现), AskUserModal/PlanFeedbackModal 实现
-  - S2/S3 深入 E2E 测试待 agent pipeline 就绪后执行
-- 关闭 carry f79c (--resume picker 已验证通过)
+- **Phase 2 gate (74e5)** 重新提交审核：EXP-068 作为核心证据。3 PASS (S1/S4/S5) + 2 PASS partial (S2/S3 → follow-ups c39d/b0e7)。
+  - 如果 gate 通过：Phase 3 (mutation 按钮) + AskUserModal/PlanFeedbackModal 实现创建任务。
+  - S2/S3 E2E 深入测试待 agent pipeline 就绪后执行（tasks c39d/b0e7）。
+- TUI Phase 1 gate (640e) 闭合：EXP-067 就绪，carries (299e/5f51) paused（f79c 已关闭）。Phase 2 已完成。
+- **Carry f79c 已关闭**（2026-05-27）：--resume picker 通过 M3 UiService 可用，EXP-068 S4 验证。
+- Phase 5 触发条件待 `/scan` 或 `/evolve` 给出新候选；不主动开新方向。
+- `c2ab`（重写 cortex-run CLI → sendCommand）和 `ec32`（测试重命名）就绪可做。
+- `7629`（DR-0011 清理）和 `5737`（部署 + smoke）待上游完成后接力。
 
 ## 最近推进
 
@@ -49,14 +53,6 @@ Updated: 2026-05-26
 
 - **3 个 infra 任务等待用户审批**：a91c / f8e3 / 9500（per OVERVIEW.md 2026-03-28 评估）。
 - **TUI Phase 1 Gate (task 640e) iterate 完成**：EXP-067 记录了七场景 + EADDRINUSE 的执行结果（4 PASS, 1 BLOCKED, 1 PASS, 1 DEFERRED）。`tsconfig.build.json` 补了缺的 `jsx` flag。126 TUI 单元测试 0 fail。待 gate reviewer 重新评估后决定是否关闭 gate。
-
-## 下一步
-
-- TUI Phase 1 gate (640e) 闭合：EXP-067 就绪，three carries (299e/5f51/f79c) paused，Phase 2 已授权。
-- TUI Phase 2 gate (6fef) evaluated 2026-05-27 → Verdict: Iterate. Path: fix MTH-1 → 5 smoke scenarios → EXP-068 → re-gate.
-- Phase 5 触发条件待 `/scan` 或 `/evolve` 给出新候选；不主动开新方向。
-- `c2ab`（重写 cortex-run CLI → sendCommand）和 `ec32`（测试重命名）就绪可做。
-- `7629`（DR-0011 清理）和 `5737`（部署 + smoke）待上游完成后接力。
 
 ## Gate Dispatch (2026-05-27, Stage TUI Phase 2: Dashboard + UI Service)
 Verdict: Iterate
