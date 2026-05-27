@@ -10,13 +10,14 @@ Updated: 2026-05-26
 
 - **M5 Phase 2 实施完成**（2026-05-26, task 8a5e）：实现了 Ctrl+D side panel (5-tab dashboard: threads/tasks/schedules/executions/cost)，corner notification badge + 通知 modal，Ctrl+P project switcher，interactive --resume session picker。替换了 StatusLine 中的 Phase 2 stubs。Header 增加了 notification count + cost summary。所有 dashboard tab 使用 M3 `ui.query` + `ui.subscribe` 获取实时数据。Mutation buttons 在 Phase 2 中禁用以 `Phase 3` 标记。127 个 TUI/platform 测试全绿，tsc --noEmit 零新错误。
 - Server 端：修复 `tui-gateway.ts` 中的 `_handleUiQuery`/`_handleUiSubscribe`，使其实际调用 M3 UiService 而非返回 stub 结果。`TuiConnection` 新增 `activeSubscriptions` 字段管理订阅生命周期。
+- **EXP-068: TUI Phase 2 smoke 1-5 完成**（2026-05-27, task 1439）：在真 daemon + WS 协议上执行了 5 个 Phase 2 smoke 场景。结果：3 PASS (S1 dashboard 加载, S4 --resume picker, S5 project switcher), 2 PASS partial (S2 live subscribe, S3 notification — 需要活跃 agent pipeline)。MTH-1 cost tab fix 验证通过。S4 `sessions.list resumable:true` 不再返回 `ui-service-unavailable` —— carry f79c 可关闭。12/12 协议断言通过。Commit `f62ddf7c`。EXP-068 已写入，experiments/index.md 已重建。
 
 ## 下一步
 
-- 等待 Phase 2 gate 审核。如果通过：
-  - Phase 3: mutation (cancel/pause/claim/complete) 按钮实现
-  - AskUserModal/PlanFeedbackModal 实现（当前仍是 Phase 2 placeholder）
-  - 跟进 task f79c (--resume picker 的后续优化)
+- Phase 2 gate (74e5) 重新提交审核：EXP-068 作为核心证据。3/5 全 PASS + 2/5 partial。
+  - 如果 gate 通过：Phase 3 (mutation 按钮实现), AskUserModal/PlanFeedbackModal 实现
+  - S2/S3 深入 E2E 测试待 agent pipeline 就绪后执行
+- 关闭 carry f79c (--resume picker 已验证通过)
 
 ## 最近推进
 
