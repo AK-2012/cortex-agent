@@ -70,7 +70,7 @@ function TabContent({
       initialQuerySent.current = true;
 
       // Send query for initial data
-      sendFrame({ type: 'ui.query', id: queryId, scope: `${tab}.list`, params: projectId ? { projectId } : {} });
+      sendFrame({ type: 'ui.query', id: queryId, scope: tab === 'cost' ? 'cost.summary' : `${tab}.list`, params: projectId ? { projectId } : {} });
       onMarkPending(tab);
 
       // Subscribe to events
@@ -92,7 +92,7 @@ function TabContent({
     if (!scope || !initialQuerySent.current) return;
 
     if (dashState.tabs[tab].loading) {
-      sendFrame({ type: 'ui.query', id: scope.queryId, scope: `${tab}.list`, params: projectId ? { projectId } : {} });
+      sendFrame({ type: 'ui.query', id: scope.queryId, scope: tab === 'cost' ? 'cost.summary' : `${tab}.list`, params: projectId ? { projectId } : {} });
       onMarkPending(tab);
     }
   }, [dashState.tabs[tab].loading, tab, projectId, sendFrame, onMarkPending]);
