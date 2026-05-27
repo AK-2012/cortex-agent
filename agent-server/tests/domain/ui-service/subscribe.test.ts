@@ -2,27 +2,10 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { EventBus } from '../../../src/events/event-bus.js';
 import { createSubscription } from '../../../src/domain/ui-service/subscribe.js';
-import type { UiServiceDeps } from '../../../src/domain/ui-service/types.js';
-import type { Subscription } from '../../../src/events/event-bus.js';
-
-function makeDeps(bus: EventBus): UiServiceDeps {
-  return {
-    projectStore: { list: () => [], get: () => undefined, exists: () => false, getDefault: () => ({ id: 'general', name: 'general', kind: 'general' as const, contextDir: '/g' }) },
-    sessionStore: { listByProject: async () => [], listResumable: async () => [], getById: async () => null },
-    threadStore: { getAll: () => [], get: () => null },
-    taskStore: { getAll: () => [], getById: () => null, load: () => {} },
-    scheduler: { list: async () => [], get: async () => null, pause: async () => null, resume: async () => null, remove: async () => false },
-    executionRegistry: { getExecution: () => null, getAll: () => [], cancelExecution: () => null },
-    runningExecutions: { getAll: () => [] } as any,
-    costSummary: async () => ({ today: 0, week: 0, month: 0, total: 0, byMode: {} as any, byProject: {}, byTrigger: {}, bySource: {}, byBackend: {}, tokens: {} as any, entryCount: 0 }),
-    bus: bus as any,
-    adapter: {} as any,
-  };
-}
 
 test('subscribe receives published events matching filter', async () => {
   const bus = new EventBus();
-  const sub = createSubscription(makeDeps(bus), {
+  const sub = createSubscription(bus, {
     events: ['thread.created', 'task.claimed'],
   });
 
@@ -44,7 +27,7 @@ test('subscribe receives published events matching filter', async () => {
 
 test('subscribe filters out non-matching event types', async () => {
   const bus = new EventBus();
-  const sub = createSubscription(makeDeps(bus), {
+  const sub = createSubscription(bus, {
     events: ['agent.started'],
   });
 
@@ -65,7 +48,7 @@ test('subscribe close() unsubscribes all bus handlers', async () => {
 
   // Subscribe normally to verify handler is registered
   const sub1 = bus.subscribe('thread.created', () => { called = true; });
-  const sub = createSubscription(makeDeps(bus), {
+  const sub = createSubscription(bus, {
     events: ['thread.created'],
   });
 
@@ -83,7 +66,7 @@ test('subscribe close() unsubscribes all bus handlers', async () => {
 
 test('subscribe provides UiEvent shape with type, ts, payload', async () => {
   const bus = new EventBus();
-  const sub = createSubscription(makeDeps(bus), {
+  const sub = createSubscription(bus, {
     events: ['task.claimed'],
   });
 
@@ -104,7 +87,7 @@ test('subscribe provides UiEvent shape with type, ts, payload', async () => {
 
 test('subscribe handles close() called multiple times', () => {
   const bus = new EventBus();
-  const sub = createSubscription(makeDeps(bus), {
+  const sub = createSubscription(bus, {
     events: ['thread.created'],
   });
 
@@ -115,7 +98,7 @@ test('subscribe handles close() called multiple times', () => {
 
 test('subscribe close() signals iterator done', async () => {
   const bus = new EventBus();
-  const sub = createSubscription(makeDeps(bus), {
+  const sub = createSubscription(bus, {
     events: ['thread.created'],
   });
 
@@ -129,7 +112,7 @@ test('subscribe close() signals iterator done', async () => {
 
 test('subscribe close() unblocks pending iterator next()', async () => {
   const bus = new EventBus();
-  const sub = createSubscription(makeDeps(bus), {
+  const sub = createSubscription(bus, {
     events: ['thread.created'],
   });
 

@@ -2,7 +2,8 @@
 // output: AsyncIterable<UiEvent> & { close() } — bounded queue, overflow emits synthetic dropped event
 // pos:    subscribe primitive for UiService
 
-import type { UiServiceDeps, SubscribeFilter, UiEvent } from './types.js';
+import type { EventBus } from '@events/index.js';
+import type { SubscribeFilter, UiEvent } from './types.js';
 
 const QUEUE_CAP = 256;
 
@@ -73,7 +74,7 @@ function createAsyncQueue<T>(
 }
 
 export function createSubscription(
-  deps: UiServiceDeps,
+  bus: EventBus,
   filter: SubscribeFilter,
 ): AsyncIterable<UiEvent> & { close(): void } {
   const eventTypes = filter.events;
@@ -95,7 +96,7 @@ export function createSubscription(
   });
 
   const subscriptions = eventTypes.map((type) => {
-    const sub = deps.bus.subscribe(type as any, (event: any) => {
+    const sub = bus.subscribe(type as any, (event: any) => {
       // Post-filter by projectId if specified
       if (projectId && event.projectId && event.projectId !== projectId) {
         return;

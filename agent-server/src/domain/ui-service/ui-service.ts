@@ -95,7 +95,7 @@ export function createUiService(deps: UiServiceDeps): UiService {
     },
 
     subscribe(filter) {
-      return createSubscription(deps, filter);
+      return createSubscription(deps.bus, filter);
     },
   };
 }

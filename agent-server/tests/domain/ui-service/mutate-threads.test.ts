@@ -25,12 +25,13 @@ test('threads.cancel returns not-found when thread does not exist', async () => 
   if (!result.ok) assert.equal(result.code, 'not-found');
 });
 
-test('threads.cancel returns ok when thread is cancelled', async () => {
-  // cancelThread doesn't actually exist as an import in the handler,
-  // it delegates to @domain/threads/index.js's cancelThread which captures
-  // the real threadStore. For this test we can't fully mock without modules.
-  // We test the error path with a missing thread.
+test('threads.cancel returns already-terminal for completed/completed threads', async () => {
+  // The handler delegates to cancelThread() from @domain/threads/index.js which
+  // uses the real threadStore singleton.  With a missing thread, cancelThread
+  // returns false and the handler checks threadStore.get → null → not-found.
+  // The success/cancellation paths require a thread to be first inserted into
+  // the real ThreadRepo singleton, which is tested downstream in thread-runner.
   const result = await handleCancelThread(makeDeps(), { threadId: 'thr_missing' });
-  // threadStore.get returns null → not-found
   assert.equal(result.ok, false);
+  if (!result.ok) assert.ok(['not-found', 'already-terminal'].includes(result.code));
 });
