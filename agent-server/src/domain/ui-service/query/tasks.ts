@@ -1,0 +1,38 @@
+// input:  UiServiceDeps + TasksListParams
+// output: handleTasksList → TaskInfo[]
+// pos:    query handler for 'tasks.list'
+
+import type { UiServiceDeps, TaskInfo, TasksListParams } from '../types.js';
+
+export async function handleTasksList(
+  deps: UiServiceDeps,
+  params: TasksListParams,
+): Promise<TaskInfo[]> {
+  const { projectId, status, actionable } = params;
+
+  let tasks = deps.taskStore.getAll(projectId || undefined);
+
+  if (status) {
+    tasks = tasks.filter((t: any) => t.status === status);
+  }
+  if (actionable !== undefined) {
+    tasks = tasks.filter((t: any) => {
+      const isActionable = t.status === 'open' && !t.claimed_by && !t.blocked_by && !t.paused;
+      return actionable ? isActionable : !isActionable;
+    });
+  }
+
+  return tasks.map((t: any): TaskInfo => ({
+    id: t.id,
+    text: t.text,
+    project: t.project,
+    status: t.status === 'done' ? 'done' : 'open',
+    priority: t.priority || 'medium',
+    actionable: !!(t.status === 'open' && !t.claimed_by && !t.blocked_by && !t.paused),
+    claimedBy: t.claimed_by ?? null,
+    blockedBy: t.blocked_by ?? null,
+    dependsOn: t.depends_on || [],
+    plan: t.plan ?? null,
+    template: t.template || 'coder-review',
+  }));
+}

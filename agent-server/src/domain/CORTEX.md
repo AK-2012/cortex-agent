@@ -12,3 +12,4 @@ Currently only has threads/ subdirectory; subsequent S8-S11 will gradually add a
 | `executions/` | [S14] DONE | Execution registry re-export layer (registry.ts) — wraps ExecutionRepo terminal transitions with lock-release side effect |
 | `scheduling/` | [S9] DONE | Scheduled task scheduling: job-registry + 4 job runners (scheduled-task / task-dispatch / memory-index-regen / task-archive) + jobs/target-dispatch.ts (4-way decision tree) |
 | `projects/` | [M1] DONE | Project domain: types + ProjectStore (list/get/exists/getDefault/resolveFromMessage, auto-scaffold general/, fs.watch cache invalidation) |
+| `ui-service/` | [M3] DONE | Transport-agnostic facade: query/mutate/subscribe over all domain stores and managers |

@@ -1,0 +1,55 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { handleCostSummary } from '../../../src/domain/ui-service/query/cost.js';
+import type { UiServiceDeps } from '../../../src/domain/ui-service/types.js';
+
+test('cost.summary delegates to costSummary and returns CostSummary', async () => {
+  const expected: any = {
+    today: 10, week: 50, month: 200, total: 1000,
+    byMode: {},
+    byProject: {}, byTrigger: {}, bySource: {}, byBackend: {},
+    tokens: { today: { input: 100, output: 50 }, month: { input: 500, output: 250 }, total: { input: 5000, output: 2500 } },
+    entryCount: 42,
+  };
+
+  const deps: UiServiceDeps = {
+    projectStore: { list: () => [], get: () => undefined, exists: () => false, getDefault: () => ({ id: 'general', name: 'general', kind: 'general' as const, contextDir: '/g' }) },
+    sessionStore: { listByProject: async () => [], listResumable: async () => [], getById: async () => null },
+    threadStore: { getAll: () => [], get: () => null },
+    taskStore: { getAll: () => [], getById: () => null, load: () => {} },
+    scheduler: { list: async () => [], get: async () => null, pause: async () => null, resume: async () => null, remove: async () => false },
+    executionRegistry: { getExecution: () => null, getAll: () => [], cancelExecution: () => null },
+    runningExecutions: { getAll: () => [] } as any,
+    costSummary: async (projectId?: string | null) => {
+      assert.equal(projectId, null);
+      return expected;
+    },
+    bus: { subscribe: () => ({ unsubscribe: () => {} }), publish: () => {} } as any,
+    adapter: {} as any,
+  };
+
+  const result = await handleCostSummary(deps, { projectId: null });
+  assert.deepEqual(result, expected);
+});
+
+test('cost.summary passes projectId filter', async () => {
+  let capturedProjectId: string | null | undefined = undefined;
+  const deps: UiServiceDeps = {
+    projectStore: { list: () => [], get: () => undefined, exists: () => false, getDefault: () => ({ id: 'general', name: 'general', kind: 'general' as const, contextDir: '/g' }) },
+    sessionStore: { listByProject: async () => [], listResumable: async () => [], getById: async () => null },
+    threadStore: { getAll: () => [], get: () => null },
+    taskStore: { getAll: () => [], getById: () => null, load: () => {} },
+    scheduler: { list: async () => [], get: async () => null, pause: async () => null, resume: async () => null, remove: async () => false },
+    executionRegistry: { getExecution: () => null, getAll: () => [], cancelExecution: () => null },
+    runningExecutions: { getAll: () => [] } as any,
+    costSummary: async (projectId?: string | null) => {
+      capturedProjectId = projectId;
+      return { today: 0, week: 0, month: 0, total: 0, byMode: {} as any, byProject: {}, byTrigger: {}, bySource: {}, byBackend: {}, tokens: {} as any, entryCount: 0 };
+    },
+    bus: { subscribe: () => ({ unsubscribe: () => {} }), publish: () => {} } as any,
+    adapter: {} as any,
+  };
+
+  await handleCostSummary(deps, { projectId: 'proj1' });
+  assert.equal(capturedProjectId, 'proj1');
+});

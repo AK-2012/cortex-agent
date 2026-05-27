@@ -61,6 +61,8 @@ import { registerHookBridgeSubscribers } from '@orch/routing/hook-bridge-subscri
 import { startDispatchReconciler } from '@orch/dispatch-reconciler.js';
 import { ensurePIAgentDirs } from '../agent-adapter/pi/agent-dir.js';
 import { initOutboundQueue, getOutboundQueue } from '@store/outbound-queue.js';
+import { createUiService } from '@domain/ui-service/index.js';
+import { getCostSummary } from '@domain/costs/cost-tracker.js';
 
 dotenv.config({ path: path.join(CONFIG_DIR, '.env') });
 
@@ -191,30 +193,22 @@ process.on('SIGTERM', async () => {
   executionRepo.load();
   await executionRegistry.markMissingRunningExecutionsStale((record) => record.kind === 'dispatch');
 
-  // ── NEW: Wire UI service into the TUI gateway ─────────────────────────────
+  // ── Wire UI service into the TUI gateway ────────────────────────────────
   //
-  // UI service (M3) injects store-backed query/mutate capabilities into the
-  // TUI gateway. When M3 has not yet landed, the dynamic import fails and the
-  // gateway responds with "ui-service-unavailable" errors for UI side-channel
-  // frames — daemon boots without it.
-  let uiService: unknown = null;
-  try {
-    const { createUiService }: { createUiService: (opts: any) => unknown } =
-      await import('@domain/ui/index.js' as string);
-    uiService = createUiService({
-      projectStore,
-      sessionStore,
-      threadStore,
-      taskStore,
-      scheduler,
-      executionRegistry,
-      runningExecutions,
-      bus,
-      adapter,
-    });
-  } catch (e) {
-    log.warn(`UI service not available (M3 not yet landed): ${(e as Error).message}`);
-  }
+  // UI service (M3) provides store-backed query/mutate/subscribe capabilities
+  // to the TUI gateway via a transport-agnostic facade.
+  const uiService = createUiService({
+    projectStore,
+    sessionStore,
+    threadStore,
+    taskStore,
+    scheduler,
+    executionRegistry,
+    runningExecutions,
+    costSummary: getCostSummary,
+    bus,
+    adapter,
+  });
   extractTuiAdapter(adapter)?.setUiService(uiService);
 
   await adapter.start();

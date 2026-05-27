@@ -53,6 +53,10 @@ export function getExecutionByTaskId(taskId: string | null | undefined) {
   return executionRepo.getExecutionByTaskId(taskId);
 }
 
+export function getAll() {
+  return executionRepo.getAll();
+}
+
 export function getRunningExecutions() {
   return executionRepo.getRunningExecutions();
 }

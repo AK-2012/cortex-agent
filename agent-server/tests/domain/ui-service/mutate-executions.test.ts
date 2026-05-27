@@ -1,0 +1,48 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { handleCancelExecution } from '../../../src/domain/ui-service/mutate/executions.js';
+import type { UiServiceDeps } from '../../../src/domain/ui-service/types.js';
+
+test('executions.cancel returns not-found when execution does not exist', async () => {
+  const deps: UiServiceDeps = {
+    projectStore: { list: () => [], get: () => undefined, exists: () => false, getDefault: () => ({ id: 'general', name: 'general', kind: 'general' as const, contextDir: '/g' }) },
+    sessionStore: { listByProject: async () => [], listResumable: async () => [], getById: async () => null },
+    threadStore: { getAll: () => [], get: () => null },
+    taskStore: { getAll: () => [], getById: () => null, load: () => {} },
+    scheduler: { list: async () => [], get: async () => null, pause: async () => null, resume: async () => null, remove: async () => false },
+    executionRegistry: { getExecution: () => null, getAll: () => [], cancelExecution: () => null },
+    runningExecutions: { getAll: () => [] } as any,
+    costSummary: async () => ({ today: 0, week: 0, month: 0, total: 0, byMode: {} as any, byProject: {}, byTrigger: {}, bySource: {}, byBackend: {}, tokens: {} as any, entryCount: 0 }),
+    bus: { subscribe: () => ({ unsubscribe: () => {} }), publish: () => {} } as any,
+    adapter: {} as any,
+  };
+
+  const result = await handleCancelExecution(deps, { executionId: 'exec_nonexist' });
+  assert.equal(result.ok, false);
+  if (!result.ok) assert.equal(result.code, 'not-found');
+});
+
+test('executions.cancel returns ok when cancellation succeeds', async () => {
+  const deps: UiServiceDeps = {
+    projectStore: { list: () => [], get: () => undefined, exists: () => false, getDefault: () => ({ id: 'general', name: 'general', kind: 'general' as const, contextDir: '/g' }) },
+    sessionStore: { listByProject: async () => [], listResumable: async () => [], getById: async () => null },
+    threadStore: { getAll: () => [], get: () => null },
+    taskStore: { getAll: () => [], getById: () => null, load: () => {} },
+    scheduler: { list: async () => [], get: async () => null, pause: async () => null, resume: async () => null, remove: async () => false },
+    executionRegistry: {
+      getExecution: () => null,
+      getAll: () => [],
+      cancelExecution: (id: string) => ({ id, status: 'cancelled' }),
+    },
+    runningExecutions: { getAll: () => [] } as any,
+    costSummary: async () => ({ today: 0, week: 0, month: 0, total: 0, byMode: {} as any, byProject: {}, byTrigger: {}, bySource: {}, byBackend: {}, tokens: {} as any, entryCount: 0 }),
+    bus: { subscribe: () => ({ unsubscribe: () => {} }), publish: () => {} } as any,
+    adapter: {} as any,
+  };
+
+  const result = await handleCancelExecution(deps, { executionId: 'exec_1' });
+  assert.equal(result.ok, true);
+  if (result.ok) {
+    assert.equal(result.data.cancelled, true);
+  }
+});

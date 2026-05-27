@@ -1,0 +1,69 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { handleSessionsList } from '../../../src/domain/ui-service/query/sessions.js';
+import type { UiServiceDeps } from '../../../src/domain/ui-service/types.js';
+
+const mockSessions = [
+  { sessionId: 's1', name: 'cortex-abc', projectId: 'proj1', channel: 'C1', backend: 'claude', kind: 'local' as const, createdAt: '2026-01-01T00:00:00Z', lastUsedAt: '2026-05-01T00:00:00Z', label: 'dev', profileName: 'default' },
+  { sessionId: 's2', name: 'cortex-def', projectId: 'proj2', channel: 'C2', backend: 'codex', kind: 'scheduled' as const, createdAt: '2026-02-01T00:00:00Z', lastUsedAt: '2026-04-01T00:00:00Z', label: null as string | null, profileName: null },
+  { sessionId: 's3', name: 'cortex-ghi', projectId: 'proj1', channel: 'C3', backend: 'claude', kind: 'local' as const, createdAt: '2026-03-01T00:00:00Z', lastUsedAt: '2026-05-15T00:00:00Z', label: 'test', profileName: 'pi' },
+];
+
+function makeDeps(overrides: Partial<UiServiceDeps> = {}): UiServiceDeps {
+  return {
+    projectStore: {
+      list: () => [
+        { id: 'proj1', name: 'proj1', kind: 'user' as const, contextDir: '/p1' },
+        { id: 'proj2', name: 'proj2', kind: 'user' as const, contextDir: '/p2' },
+      ],
+      get: () => undefined, exists: () => false,
+      getDefault: () => ({ id: 'general', name: 'general', kind: 'general' as const, contextDir: '/g' }),
+    },
+    sessionStore: {
+      listByProject: async (pid: string) => mockSessions.filter(s => s.projectId === pid),
+      listResumable: async (pid?: string) => mockSessions.filter(s => s.kind !== 'scheduled' && (!pid || s.projectId === pid)),
+      getById: async () => null,
+    },
+    threadStore: { getAll: () => [], get: () => null },
+    taskStore: { getAll: () => [], getById: () => null, load: () => {} },
+    scheduler: { list: async () => [], get: async () => null, pause: async () => null, resume: async () => null, remove: async () => false },
+    executionRegistry: { getExecution: () => null, getAll: () => [], cancelExecution: () => null },
+    runningExecutions: { getAll: () => [] } as any,
+    costSummary: async () => ({ today: 0, week: 0, month: 0, total: 0, byMode: {} as any, byProject: {}, byTrigger: {}, bySource: {}, byBackend: {}, tokens: {} as any, entryCount: 0 }),
+    bus: { subscribe: () => ({ unsubscribe: () => {} }), publish: () => {} } as any,
+    adapter: { getProjectConduits: async () => ({}) } as any,
+    ...overrides,
+  };
+}
+
+test('sessions.list with projectId returns filtered sessions', async () => {
+  const result = await handleSessionsList(makeDeps(), { projectId: 'proj1' });
+  assert.equal(result.length, 2);
+  assert.equal(result[0].sessionId, 's1');
+  assert.equal(result[0].projectId, 'proj1');
+  assert.equal(result[0].resumable, true);
+  assert.equal(result[1].sessionId, 's3');
+  assert.equal(result[1].resumable, true);
+});
+
+test('sessions.list with resumable=true returns only non-scheduled sessions', async () => {
+  const result = await handleSessionsList(makeDeps(), { resumable: true });
+  assert.equal(result.length, 2);
+  assert.ok(result.every(s => s.resumable === true));
+});
+
+test('sessions.list with projectId + resumable', async () => {
+  const result = await handleSessionsList(makeDeps(), { projectId: 'proj2', resumable: true });
+  assert.equal(result.length, 0); // proj2 only has scheduled session
+});
+
+test('sessions.list without filter returns all sessions grouped by project', async () => {
+  const result = await handleSessionsList(makeDeps(), {});
+  assert.equal(result.length, 3);
+});
+
+test('sessions.list sets resumable correctly for scheduled sessions', async () => {
+  const result = await handleSessionsList(makeDeps(), { projectId: 'proj2' });
+  assert.equal(result.length, 1);
+  assert.equal(result[0].resumable, false);
+});

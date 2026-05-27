@@ -40,6 +40,10 @@ export type CortexEvent =
   | { type: 'rate-limit.breach';      ts: string; provider: string; percent: number }
 
     // ── Meta-events (EventBus / EventLogger infrastructure) ───────────────────
+  // Audit
+  | { type: 'ui.mutate-invoked';        ts: string; op: string; args: unknown; result: { ok: boolean; code?: string } | null }
+
+    // ── Meta-events (EventBus / EventLogger infrastructure) ───────────────────
   | { type: 'event-bus.handler-failed'; ts: string; handlerType: string; error: string }
   | { type: 'event-logger.dropped';     ts: string; droppedSeq: number; droppedType: string };
 
