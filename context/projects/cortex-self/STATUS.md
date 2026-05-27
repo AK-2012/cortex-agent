@@ -51,9 +51,23 @@ Updated: 2026-05-26
 
 ## 下一步
 
-- TUI Phase 1 gate (640e) 重新评估：EXP-067 已就绪，待 gate reviewer 判断是否满足 done-when。三个 follow-up (299e/5f51/f79c) 跟踪 blocked/deferred 场景。如果 gate 关闭：
-  - 授权 Phase 2 (M3 UI Service + dashboard) 任务创建
-  - 关闭 gate task (640e)
+- TUI Phase 1 gate (640e) 闭合：EXP-067 就绪，three carries (299e/5f51/f79c) paused，Phase 2 已授权。
+- TUI Phase 2 gate (6fef) evaluated 2026-05-27 → Verdict: Iterate. Path: fix MTH-1 → 5 smoke scenarios → EXP-068 → re-gate.
 - Phase 5 触发条件待 `/scan` 或 `/evolve` 给出新候选；不主动开新方向。
 - `c2ab`（重写 cortex-run CLI → sendCommand）和 `ec32`（测试重命名）就绪可做。
 - `7629`（DR-0011 清理）和 `5737`（部署 + smoke）待上游完成后接力。
+
+## Gate Dispatch (2026-05-27, Stage TUI Phase 2: Dashboard + UI Service)
+Verdict: Iterate
+Director artifact: tmp/threads/thr_c66c9be5/artifact.md
+Operations performed:
+  - Blocked current gate task 6fef (gate evaluated, needs re-work)
+  - Created patch task 71fe (Fix MTH-1: Dashboard cost tab scope cost.list → cost.summary)
+  - Created patch task 1439 (Execute Phase 2 5 smoke scenarios + record EXP-068)
+  - Created new gate task 74e5 (GATE: TUI Phase 2 iter 1), depends on 71fe + 1439
+  - Added Iteration 1 note to roadmap.md TUI Phase 2 section
+Tasks created:
+  - 71fe — Fix MTH-1: Dashboard cost tab scope bug
+  - 1439 — Execute TUI Phase 2 smoke scenarios + EXP-068
+  - 74e5 — GATE: TUI Phase 2 (iter 1), depends on 71fe + 1439
+Roadmap changes: Iteration 1 note under TUI Phase 2 (roadmap.md:93)
