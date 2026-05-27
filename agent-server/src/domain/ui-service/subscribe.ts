@@ -8,20 +8,34 @@ const QUEUE_CAP = 256;
 
 interface AsyncQueue<T> {
   push(item: T): void;
+  close(): void;
   [Symbol.asyncIterator](): AsyncIterator<T>;
 }
 
-function createAsyncQueue<T>(cap: number): AsyncQueue<T> {
+/**
+ * Create an async queue with bounded capacity. When `onOverflow` is set, it
+ * is called from within a re-entrant guard so that push() calls from the
+ * callback do not recursively trigger overflow — guaranteeing that exactly
+ * one oldest item is dropped per real overflow.
+ */
+function createAsyncQueue<T>(
+  cap: number,
+  onOverflow?: () => void,
+): AsyncQueue<T> {
   const buffer: T[] = [];
   let resolve: ((value: IteratorResult<T>) => void) | null = null;
-  let closed = false;
+  let _closed = false;
+  let _inOverflow = false;
 
   return {
     push(item: T): void {
-      if (closed) return;
-      if (buffer.length >= cap) {
-        // Drop oldest and emit synthetic event
+      if (_closed) return;
+      if (!_inOverflow && buffer.length >= cap) {
         buffer.shift();
+        if (onOverflow) {
+          _inOverflow = true;
+          try { onOverflow(); } finally { _inOverflow = false; }
+        }
       }
       if (resolve) {
         const r = resolve;
@@ -31,6 +45,14 @@ function createAsyncQueue<T>(cap: number): AsyncQueue<T> {
         buffer.push(item);
       }
     },
+    close(): void {
+      _closed = true;
+      if (resolve) {
+        const r = resolve;
+        resolve = null;
+        r({ value: undefined as any, done: true });
+      }
+    },
     [Symbol.asyncIterator](): AsyncIterator<T> {
       return {
         next: (): Promise<IteratorResult<T>> => {
@@ -38,7 +60,7 @@ function createAsyncQueue<T>(cap: number): AsyncQueue<T> {
             const value = buffer.shift()!;
             return Promise.resolve({ value, done: false });
           }
-          if (closed) {
+          if (_closed) {
             return Promise.resolve({ value: undefined as any, done: true });
           }
           return new Promise((res) => {
@@ -56,7 +78,21 @@ export function createSubscription(
 ): AsyncIterable<UiEvent> & { close(): void } {
   const eventTypes = filter.events;
   const projectId = filter.projectId ?? null;
-  const queue = createAsyncQueue<UiEvent>(QUEUE_CAP);
+  let droppedCount = 0;
+
+  // Wire overflow handler: push a synthetic UiEvent onto the queue.
+  // The queue's _inOverflow guard ensures push() from this callback does
+  // NOT re-trigger overflow, so the synthetic always lands safely.
+  const queue = createAsyncQueue<UiEvent>(QUEUE_CAP, () => {
+    droppedCount++;
+    const synthetic: UiEvent = {
+      type: 'ui-subscribe.dropped',
+      ts: new Date().toISOString(),
+      payload: { droppedCount },
+    };
+    // push() from within the guard: no overflow shift, item always appended.
+    queue.push(synthetic);
+  });
 
   const subscriptions = eventTypes.map((type) => {
     const sub = deps.bus.subscribe(type as any, (event: any) => {
@@ -64,10 +100,10 @@ export function createSubscription(
       if (projectId && event.projectId && event.projectId !== projectId) {
         return;
       }
-      // Post-filter by payload projectId if not already on the event
       if (projectId && event.payload?.projectId && event.payload.projectId !== projectId) {
         return;
       }
+
       const uiEvent: UiEvent = {
         type: event.type,
         ts: event.ts,
@@ -86,6 +122,7 @@ export function createSubscription(
     for (const sub of subscriptions) {
       sub.unsubscribe();
     }
+    queue.close();
   };
 
   return {

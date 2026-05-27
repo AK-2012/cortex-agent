@@ -140,7 +140,7 @@ export interface ThreadInfo {
   id: string;
   templateName: string;
   currentStep: { index: number; name: string } | null;
-  status: 'running' | 'waiting' | 'paused' | 'completed' | 'failed' | 'cancelled';
+  status: 'running' | 'waiting' | 'completed' | 'failed' | 'cancelled' | 'aborted';
   projectId: string;
   createdAt: string;
   updatedAt: string;

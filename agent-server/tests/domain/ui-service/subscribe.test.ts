@@ -112,3 +112,35 @@ test('subscribe handles close() called multiple times', () => {
   sub.close(); // second close should not throw
   assert.ok(true, 'multiple close() calls ok');
 });
+
+test('subscribe close() signals iterator done', async () => {
+  const bus = new EventBus();
+  const sub = createSubscription(makeDeps(bus), {
+    events: ['thread.created'],
+  });
+
+  // Close before consuming
+  sub.close();
+
+  const iter = sub[Symbol.asyncIterator]();
+  const result = await iter.next();
+  assert.equal(result.done, true);
+});
+
+test('subscribe close() unblocks pending iterator next()', async () => {
+  const bus = new EventBus();
+  const sub = createSubscription(makeDeps(bus), {
+    events: ['thread.created'],
+  });
+
+  const iter = sub[Symbol.asyncIterator]();
+
+  // Start a pending next() that will block (no events published)
+  const nextPromise = iter.next();
+
+  // Close the subscription — should unblock the pending next()
+  sub.close();
+
+  const result = await nextPromise;
+  assert.equal(result.done, true);
+});
