@@ -10,8 +10,9 @@ import type { MessageRef } from '../../types.js';
 const log = createLogger('tui-notif');
 
 /**
- * Send a project-report notification. If the connection's active session matches
- * the source session, send as chat.post; otherwise send as notification frame.
+ * Send a project-report notification to all connections. Connections whose active
+ * session matches the source session get chat.post (inline); all others get a
+ * notification frame (including cross-project connections).
  */
 export function sendProjectReport(
   connections: TuiConnection[],
@@ -23,7 +24,6 @@ export function sendProjectReport(
 ): void {
   let sent = 0;
   for (const conn of connections) {
-    if (conn.activeProjectId !== projectId) continue;
     if (conn.activeSessionId === sourceSessionId) {
       // Render as chat.post in the active session
       const seq = 0;

@@ -182,7 +182,13 @@ export class CompositeAdapter implements PlatformAdapter {
       this._gateway.getProjectConduits(),
     ]);
     if (primaryConduits[projectId]) result.push(this._primary);
-    if (gatewayConduits[projectId]) result.push(this._gateway);
+    if (gatewayConduits[projectId]) {
+      result.push(this._gateway);
+    } else if (Object.keys(gatewayConduits).length > 0) {
+      // Include gateway for cross-project notification fan-out even when
+      // no TUI conduit matches the target projectId
+      result.push(this._gateway);
+    }
     return result;
   }
 

@@ -100,6 +100,48 @@ test('CompositeAdapter: project-report fan-out to primary and gateway', async ()
   assert.ok(ref.messageId !== '');
 });
 
+test('CompositeAdapter: project-report fans out to gateway with cross-project TUI connection', async () => {
+  const primary = new MockAdapter({ adminChannel: 'C-admin' });
+  const gateway = new TuiGatewayAdapter({ port: 0, host: '127.0.0.1' });
+  const composite = new CompositeAdapter(primary, gateway);
+
+  // TUI connection in project-a only
+  const sentFrames: any[] = [];
+  const mockWs = {
+    send: (data: string) => { sentFrames.push(JSON.parse(data)); },
+    close: () => {},
+    on: () => {},
+  } as unknown as WebSocket;
+  const conn = new TuiConnection('tui-cross-1', mockWs, 'project-a');
+  gateway.connections.set('tui-cross-1', conn);
+  setConduitState('tui-cross-1', { sessionId: null, projectId: 'project-a', backend: 'tui' });
+
+  // Primary conduit in project-b
+  await primary.bindProjectConduit('project-b', 'C12345');
+
+  // Post project-report for project-b (no direct TUI conduit for project-b)
+  const ref = await composite.postMessage(
+    { type: 'project-report', projectId: 'project-b', trigger: 'test', sessionId: '' },
+    { text: 'cross-project report' },
+  );
+
+  // Primary should have received the message
+  assert.equal(primary.posted.length, 1);
+  assert.equal(primary.posted[0].content.text, 'cross-project report');
+  assert.equal(primary.posted[0].destination.type, 'project-report');
+
+  // Gateway should ALSO have received it (cross-project notification fan-out)
+  assert.equal(sentFrames.length, 1, 'gateway delivered a notification frame');
+  const notifFrame = sentFrames[0];
+  assert.equal(notifFrame.type, 'notification');
+  assert.equal(notifFrame.kind, 'project-report');
+  assert.equal(notifFrame.projectId, 'project-b');
+
+  // Ref should be from primary
+  assert.ok(ref.conduit !== '');
+  assert.ok(ref.messageId !== '');
+});
+
 // ── Test: interactive-reply routing ───────────────────────────────
 
 test('CompositeAdapter: interactive-reply to Slack conduit does NOT hit gateway', async () => {

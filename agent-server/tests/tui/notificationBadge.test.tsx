@@ -8,6 +8,7 @@ import React from 'react';
 import { Text } from 'ink';
 import { render } from 'ink-testing-library';
 import { NotificationsBadge, NotificationsModal } from '../../src/tui/components/Notifications.js';
+import type { NotificationEntry } from '../../src/tui/hooks/useNotifications.js';
 
 function delay(ms: number): Promise<void> {
   return new Promise(r => setTimeout(r, ms));
@@ -53,6 +54,48 @@ test('NotificationsModal shows empty state', async (t) => {
 
   const output = instance.lastFrame();
   assert.ok(output.includes('No notifications'), 'shows empty state');
+
+  instance.unmount();
+  instance.cleanup();
+});
+
+test('NotificationsModal onSelect fires when Enter pressed in detail view', async (t) => {
+  const notif: NotificationEntry = {
+    id: 'n1',
+    kind: 'project-report',
+    projectId: 'project-x',
+    title: 'Test Report',
+    body: 'Report body',
+    ts: Date.now(),
+    read: false,
+  };
+  const notifications = new Map<string, NotificationEntry>([['n1', notif]]);
+  const ids = ['n1'];
+  let selectedNotif: NotificationEntry | null = null;
+
+  const app = React.createElement(NotificationsModal, {
+    open: true,
+    notifications,
+    ids,
+    onMarkRead: () => {},
+    onClose: () => {},
+    onSelect: (n: NotificationEntry) => { selectedNotif = n; },
+  });
+  const instance = render(app);
+  await delay(200);
+
+  // First Enter: opens detail view
+  instance.stdin.write('\r');
+  await delay(200);
+
+  // Second Enter: triggers onSelect
+  instance.stdin.write('\r');
+  await delay(200);
+
+  assert.ok(selectedNotif !== null, 'onSelect was called');
+  assert.equal(selectedNotif!.id, 'n1');
+  assert.equal(selectedNotif!.projectId, 'project-x');
+  assert.equal(selectedNotif!.title, 'Test Report');
 
   instance.unmount();
   instance.cleanup();

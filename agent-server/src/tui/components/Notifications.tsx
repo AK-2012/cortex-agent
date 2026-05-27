@@ -13,6 +13,8 @@ interface NotificationsProps {
   ids: string[];
   onMarkRead: (id: string) => void;
   onClose: () => void;
+  /** Called when user selects a notification from detail view. Triggers session switch. */
+  onSelect?: (notif: NotificationEntry) => void;
 }
 
 export function NotificationsBadge({ unreadCount }: { unreadCount: number }): React.JSX.Element | null {
@@ -26,6 +28,7 @@ export function NotificationsModal({
   ids,
   onMarkRead,
   onClose,
+  onSelect,
 }: Omit<NotificationsProps, 'unreadCount'> & { open: boolean }): React.JSX.Element | null {
   const [selectedIdx, setSelectedIdx] = React.useState(0);
   const [focusedId, setFocusedId] = React.useState<string | null>(null);
@@ -62,6 +65,10 @@ export function NotificationsModal({
 
     if (key.return) {
       if (focusedId) {
+        const selected = notifications.get(focusedId);
+        if (selected && onSelect) {
+          onSelect(selected);
+        }
         onMarkRead(focusedId);
         setFocusedId(null);
       } else if (ids.length > 0) {

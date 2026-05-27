@@ -226,6 +226,46 @@ export class TuiGatewayAdapter implements PlatformAdapter, TuiAdapterControls {
     if (this._noopOutbound) {
       return { conduit: '', messageId: '' };
     }
+
+    if (destination.type === 'project-report') {
+      // 1. chat.post to matching project connections (preserves ref for updates)
+      const matchingConns = this._resolveTargetConnections(destination);
+      let primaryRef: MessageRef = { conduit: '', messageId: '' };
+      if (matchingConns.length > 0) {
+        const conn = matchingConns[0];
+        primaryRef = {
+          conduit: conn.conduitId,
+          messageId: makeMessageId(),
+          threadId: opts?.threadId || null,
+        };
+        conn.send({
+          type: 'chat.post',
+          ref: primaryRef,
+          content,
+          seq: 0,
+        });
+      } else {
+        log.warn('postMessage: no matching connection for project-report destination', destination);
+      }
+
+      // 2. Notification frames to ALL connections (cross-project fan-out)
+      const matchingIds = new Set(matchingConns.map(c => c.conduitId));
+      for (const conn of this._connections.values()) {
+        if (matchingIds.has(conn.conduitId)) continue;
+        conn.send({
+          type: 'notification',
+          kind: 'project-report',
+          projectId: destination.projectId,
+          sessionId: destination.sessionId ?? '',
+          title: `Report: ${destination.projectId}`,
+          body: content.text,
+          seq: 0,
+        });
+      }
+
+      return primaryRef;
+    }
+
     const conns = this._resolveTargetConnections(destination);
     if (conns.length === 0) {
       log.warn('postMessage: no matching connection for destination', destination);

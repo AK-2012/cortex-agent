@@ -749,6 +749,52 @@ test('sendProjectReport routes per activeSession equality', async (t) => {
   assert.equal(notifFrames[0].kind, 'project-report');
 });
 
+test('sendProjectReport delivers cross-project notification frames', async (t) => {
+  const adapter = new TuiGatewayAdapter({ port: 0, host: '127.0.0.1' });
+  await adapter.start();
+  const actualPort = (adapter as any)._wss.address().port;
+  t.after(() => adapter.stop());
+
+  // Connection in project-a
+  const ws1 = await wsConnect(actualPort);
+  const coll1 = makeFrameCollector(ws1);
+  t.after(() => ws1.close());
+  await handshake(ws1, coll1, { project: 'project-a' });
+
+  // Connection in project-b
+  const ws2 = await wsConnect(actualPort);
+  const coll2 = makeFrameCollector(ws2);
+  t.after(() => ws2.close());
+  await handshake(ws2, coll2, { project: 'project-b' });
+
+  // Drain handshake leftover frames
+  coll1.drain();
+  coll2.drain();
+
+  const conns = Array.from(adapter.connections.values());
+  assert.equal(conns.length, 2);
+  assert.notEqual(conns[0].activeProjectId, conns[1].activeProjectId);
+
+  // Send project-report for project-a
+  const sourceSessionId = conns[0].activeSessionId!;
+  sendProjectReport(conns, 'project-a', sourceSessionId, 'Report', 'Body');
+
+  // Collect frames from both WS connections
+  const ws1Frame = await coll1.read(2000);
+  const ws2Frame = await coll2.read(2000);
+
+  // ws1 (project-a, matching session) gets chat.post
+  assert.equal(ws1Frame.type, 'chat.post');
+  assert.equal(ws1Frame.content.text, 'Report\nBody');
+
+  // ws2 (project-b, cross-project) gets notification
+  assert.equal(ws2Frame.type, 'notification');
+  assert.equal(ws2Frame.kind, 'project-report');
+  assert.equal(ws2Frame.projectId, 'project-a');
+  assert.equal(ws2Frame.title, 'Report');
+  assert.equal(ws2Frame.body, 'Body');
+});
+
 test('sendSystemNotice fans out to all connections', async (t) => {
   const adapter = new TuiGatewayAdapter({ port: 0, host: '127.0.0.1' });
   await adapter.start();
@@ -868,6 +914,52 @@ test('postMessage on noop adapter returns empty ref', async () => {
 
   assert.equal(ref.conduit, '');
   assert.equal(ref.messageId, '');
+});
+
+test('postMessage sends chat.post to matching project and notification to cross-project connections', async (t) => {
+  const adapter = new TuiGatewayAdapter({ port: 0, host: '127.0.0.1' });
+  await adapter.start();
+  const actualPort = (adapter as any)._wss.address().port;
+  t.after(() => adapter.stop());
+
+  // Connection in project-a
+  const ws1 = await wsConnect(actualPort);
+  const coll1 = makeFrameCollector(ws1);
+  t.after(() => ws1.close());
+  await handshake(ws1, coll1, { project: 'project-a' });
+
+  // Connection in project-b
+  const ws2 = await wsConnect(actualPort);
+  const coll2 = makeFrameCollector(ws2);
+  t.after(() => ws2.close());
+  await handshake(ws2, coll2, { project: 'project-b' });
+
+  // Drain handshake leftover frames
+  coll1.drain();
+  coll2.drain();
+
+  // Post project-report for project-a
+  const ref = await adapter.postMessage(
+    { type: 'project-report', projectId: 'project-a', trigger: 'test', sessionId: '' },
+    { text: 'report text' },
+  );
+
+  // ws1 (project-a matching) gets chat.post with a valid ref
+  const ws1Frame = await coll1.read(2000);
+  assert.equal(ws1Frame.type, 'chat.post');
+  assert.equal(ws1Frame.content.text, 'report text');
+  assert.equal(ws1Frame.ref.conduit.length > 0, true);
+
+  // ws2 (project-b cross-project) gets notification
+  const ws2Frame = await coll2.read(2000);
+  assert.equal(ws2Frame.type, 'notification');
+  assert.equal(ws2Frame.kind, 'project-report');
+  assert.equal(ws2Frame.projectId, 'project-a');
+  assert.equal(ws2Frame.body, 'report text');
+
+  // Ref should be from the matching connection
+  assert.equal(ref.conduit, ws1Frame.ref.conduit);
+  assert.equal(ref.messageId, ws1Frame.ref.messageId);
 });
 
 // ── OpenOutputStream ──────────────────────────────────────────────────

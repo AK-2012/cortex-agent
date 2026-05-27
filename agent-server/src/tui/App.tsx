@@ -14,6 +14,7 @@ import { ProjectSwitcher } from './components/ProjectSwitcher.js';
 import { useTranscript } from './hooks/useTranscript.js';
 import { useKeybindings } from './hooks/useKeybindings.js';
 import { useNotifications } from './hooks/useNotifications.js';
+import type { NotificationEntry } from './hooks/useNotifications.js';
 import { useDashboardData } from './hooks/useDashboardData.js';
 import { SessionPicker } from './components/SessionPicker.js';
 import type { ResumableSession } from './components/SessionPicker.js';
@@ -182,6 +183,17 @@ export function App({
     } as any);
   }, [sendFrame]);
 
+  // Notification select — switches to notification's project
+  const handleNotificationSelect = useCallback((notif: NotificationEntry) => {
+    sendFrame({
+      type: 'session.switch',
+      id: 'notif-switch',
+      projectId: notif.projectId,
+      sessionId: notif.sessionId ?? null,
+    } as any);
+    setNotificationsOpen(false);
+  }, [sendFrame]);
+
   // Project switcher refresh
   const handleProjectsRefresh = useCallback(() => {
     setProjectsLoading(true);
@@ -288,6 +300,7 @@ export function App({
               ids={notif.ids}
               onMarkRead={notif.markRead}
               onClose={() => setNotificationsOpen(false)}
+              onSelect={handleNotificationSelect}
             />
           ) : null}
           {projectSwitcherOpen ? (
