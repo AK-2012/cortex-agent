@@ -2,7 +2,7 @@
 // output: Tab-cycled dashboard panel — Tab key cycles, ↑/↓ navigates rows
 // pos:    Dashboard tab container for M5 side panel
 
-import React, { useCallback } from 'react';
+import React, { useCallback, useRef } from 'react';
 import { Box, Text, useInput } from 'ink';
 import { TAB_SCOPES } from '../hooks/useDashboardData.js';
 import type { TabName, DashState } from '../hooks/useDashboardData.js';
@@ -57,26 +57,45 @@ function TabContent({
   onRegisterSubscription: (queryId: string, tab: string) => void;
   onUnregisterSubscription: (queryId: string) => void;
 }): React.JSX.Element {
+  const initialQuerySent = useRef(false);
+
+  // Initial query + subscribe (runs once per tab mount)
   React.useEffect(() => {
     const scope = TAB_SCOPES[tab];
     if (!scope) return;
 
     const queryId = scope.queryId;
 
-    // Send query for initial data
-    sendFrame({ type: 'ui.query', id: queryId, scope: `${tab}.list`, params: projectId ? { projectId } : {} });
-    onMarkPending(tab);
+    if (!initialQuerySent.current) {
+      initialQuerySent.current = true;
 
-    // Subscribe to events
-    sendFrame({ type: 'ui.subscribe', id: queryId, filter: { events: scope.events, projectId } });
-    onRegisterSubscription(queryId, tab);
+      // Send query for initial data
+      sendFrame({ type: 'ui.query', id: queryId, scope: `${tab}.list`, params: projectId ? { projectId } : {} });
+      onMarkPending(tab);
+
+      // Subscribe to events
+      sendFrame({ type: 'ui.subscribe', id: queryId, filter: { events: scope.events, projectId } });
+      onRegisterSubscription(queryId, tab);
+    }
 
     // Cleanup on unmount
     return () => {
       sendFrame({ type: 'ui.unsubscribe', id: queryId });
       onUnregisterSubscription(queryId);
+      initialQuerySent.current = false;
     };
   }, [tab, projectId, sendFrame, onMarkPending, onRegisterSubscription, onUnregisterSubscription]);
+
+  // Re-fetch when loading is triggered by a subscription event
+  React.useEffect(() => {
+    const scope = TAB_SCOPES[tab];
+    if (!scope || !initialQuerySent.current) return;
+
+    if (dashState.tabs[tab].loading) {
+      sendFrame({ type: 'ui.query', id: scope.queryId, scope: `${tab}.list`, params: projectId ? { projectId } : {} });
+      onMarkPending(tab);
+    }
+  }, [dashState.tabs[tab].loading, tab, projectId, sendFrame, onMarkPending]);
 
   switch (tab) {
     case 'threads':

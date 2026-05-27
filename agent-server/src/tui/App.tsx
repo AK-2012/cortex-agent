@@ -306,7 +306,7 @@ export function App({
         <InputBox
           onSubmit={handleSubmit}
           onCancel={handleCancel}
-          disabled={inputDisabled || sidePanelVisible}
+          disabled={inputDisabled}
         />
       )}
 
