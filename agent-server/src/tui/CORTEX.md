@@ -28,5 +28,6 @@ M5 Ink TUI client — chat+dashboard terminal client speaking M4 protocol. Zero 
 | `hooks/useKeybindings.ts` | key handler | Global key handler via `useInput`. Ctrl+C (dual exits), Ctrl+L clear, ↑/↓/PgUp/PgDn scroll. Ctrl+D side panel, Ctrl+N notifications, Ctrl+P projects. |
 | `hooks/useNotifications.ts` | notif hook | Map<id, NotificationEntry> ring buffer cap 50. Pure helpers `_addNotification`/`_markRead`/`_clearNotifications`. Exposes unreadCount. |
 | `hooks/useDashboardData.ts` | dashboard hook | Per-tab state: ui.query on focus, subscribe to events, re-render on ui.event. Pure helpers: `_handleQueryResult`/`_handleEvent`/`_createPendingQuery`/`_clearPendingQuery`. |
+| `hooks/useMutate.ts` | mutate hook | Async action hook for ui.mutate request/response — sends mutate frames, matches results by crypto.randomUUID() id, 10s timeout, cleanup on unmount. Returns `{mutate, handleFrame}`. |
 | `render/markdown.ts` | md parser | Minimal inline markdown: `**bold**`, `*italic*`, `` `code` ``, `[text](url)`. |
 | `render/rich-blocks.tsx` | block renderer | RichBlock[] discriminated union → `<Box>`/`<Text>` elements. Actions → placeholder 'Phase 2'. |

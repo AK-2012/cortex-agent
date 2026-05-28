@@ -8,6 +8,8 @@ Updated: 2026-05-27
 
 ## 最近推进
 
+- **6e64 useMutate hook 实现完成**（`edb28b34`）：`useMutate({sendFrame, onFrame})` → `{mutate, handleFrame}` — 发 `ui.mutate` 帧 + `crypto.randomUUID()` id，Map 跟踪，匹配 `ui.mutateResult` 根据 id 解析，10s 超时，unmount 清理。4 TDD 全绿，零新 tsc 错误。
+
 - **e278 ConfirmModal 实现完成**（`b0edb3dd`）：`<ConfirmModal title body onConfirm onCancel reasonInput?/>` — y/Enter 确认、n/Esc 取消、可选 reasonInput 显示 TextInput 后 onConfirm(reason)。5 TDD 全绿，零新 tsc 错误。
 
 - **Phase 2 gate iter 2（task de19）已闭合**（2026-05-27）：EXP-068 录入 S2 E2E 实时事件投递（~100-140ms < 1s）+ S3 跨项目通知 fan-out 全链路通过。c39d 修了 mutator.ts/tui-gateway.ts/task-dispatch.ts 三处事件发布 gap；b0e7 修了 tui-notifications/tui-gateway/composite-adapter 三处 server-side + Notifications onSelect client-side。149/149 TUI 测试通过。
@@ -26,7 +28,7 @@ Updated: 2026-05-27
 ## 下一步
 
 - **TUI Phase 3 实施**（10 个新 task，2026-05-27 创建）：
-  - 三个 high-prio foundation：`6e64` useMutate hook、`e278` ConfirmModal ✅（`b0edb3dd`）、`6911` AskUserModal
+  - 三个 high-prio foundation：`6e64` useMutate hook ✅（`edb28b34`）、`e278` ConfirmModal ✅（`b0edb3dd`）、`6911` AskUserModal
   - `3919` PlanFeedbackModal 依赖 6911
   - 四个 dashboard tab 写操作并行（依赖 6e64 + e278）：`d12f` Schedules（pause/resume/remove）、`cb70` Threads（cancel）、`b271` Executions（cancel）、`a8c9` Tasks（claim/unclaim/complete/block-with-reason/unblock）
   - `fae7` E2E smoke EXP-069（6 场景：4 tab + AskUserModal round-trip + tasks block-with-reason）依赖五个实施 task
