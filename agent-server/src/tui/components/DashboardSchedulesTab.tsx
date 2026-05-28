@@ -82,7 +82,7 @@ function SchedulesList({ data, mutate }: DashboardSchedulesTabProps): React.JSX.
 
   const isInputActive = removingScheduleId === null && schedules.length > 0;
 
-  useInput((_input, key) => {
+  useInput((input, key) => {
     if (removingScheduleIdRef.current !== null) return;
 
     if (key.upArrow) {
@@ -97,25 +97,61 @@ function SchedulesList({ data, mutate }: DashboardSchedulesTabProps): React.JSX.
     const sched = schedules[focusedRowIndexRef.current];
     if (!sched) return;
 
-    if (_input === 'p') {
+    if (input === 'p') {
       mutateRef.current('schedules.pause', { scheduleId: sched.id }).then(handleResult(sched.id));
-    } else if (_input === 'r') {
+    } else if (input === 'r') {
       mutateRef.current('schedules.resume', { scheduleId: sched.id }).then(handleResult(sched.id));
-    } else if (_input === 'x') {
+    } else if (input === 'x') {
       setRemovingScheduleId(sched.id);
       removingScheduleIdRef.current = sched.id;
     }
   }, { isActive: isInputActive });
 
-  // ── Remove confirmation modal ──
+  // ── Build schedule rows ──
 
+  const rows = schedules.map((sched: any, i: number) => {
+    const isFocused = i === focusedRowIndex;
+    return (
+      <Box key={sched.id ?? i} flexDirection="column" marginBottom={1}>
+        <Box>
+          {isFocused ? <Text bold>{'> '}</Text> : <Text>  </Text>}
+          <ScheduleTypeBadge type={sched.type} paused={sched.paused} focused={isFocused} />
+          <Text> </Text>
+          <Text bold={isFocused} dimColor={!isFocused}>
+            {String(sched.message ?? '').slice(0, 25)}{(sched.message ?? '').length > 25 ? '…' : ''}
+          </Text>
+        </Box>
+        <Box marginLeft={2}>
+          <Text dimColor>
+            {sched.paused
+              ? `paused by ${sched.pausedBy ?? '?'}`
+              : `next: ${sched.nextRun ? new Date(sched.nextRun).toLocaleString() : 'never'}`}
+          </Text>
+        </Box>
+        {isFocused ? (
+          <Box marginLeft={2}>
+            <Text>[p] Pause [r] Resume [x] Remove</Text>
+          </Box>
+        ) : null}
+        {errorState?.scheduleId === sched.id ? (
+          <Box marginLeft={2}>
+            <Text color="red">{errorState.code}: {errorState.message}</Text>
+          </Box>
+        ) : null}
+      </Box>
+    );
+  });
+
+  // ── Remove confirmation modal (inline, consistent with ExecutionsTab pattern) ──
+
+  let confirmModal: React.JSX.Element | null = null;
   if (removingScheduleId !== null) {
     const sched = schedules.find(s => s.id === removingScheduleId);
     const body = sched
       ? `${sched.type}: ${sched.message ?? ''} | next: ${sched.nextRun ? new Date(sched.nextRun).toLocaleString() : 'never'}`
       : '';
 
-    return (
+    confirmModal = (
       <ConfirmModal
         title="Remove schedule?"
         body={body}
@@ -135,42 +171,10 @@ function SchedulesList({ data, mutate }: DashboardSchedulesTabProps): React.JSX.
     );
   }
 
-  // ── Schedule list ──
-
   return (
     <Box flexDirection="column">
-      {schedules.map((sched: any, i: number) => {
-        const isFocused = i === focusedRowIndex;
-        return (
-          <Box key={sched.id ?? i} flexDirection="column" marginBottom={1}>
-            <Box>
-              {isFocused ? <Text bold>{'> '}</Text> : <Text>  </Text>}
-              <ScheduleTypeBadge type={sched.type} paused={sched.paused} focused={isFocused} />
-              <Text> </Text>
-              <Text bold={isFocused} dimColor={!isFocused}>
-                {String(sched.message ?? '').slice(0, 25)}{(sched.message ?? '').length > 25 ? '…' : ''}
-              </Text>
-            </Box>
-            <Box marginLeft={2}>
-              <Text dimColor>
-                {sched.paused
-                  ? `paused by ${sched.pausedBy ?? '?'}`
-                  : `next: ${sched.nextRun ? new Date(sched.nextRun).toLocaleString() : 'never'}`}
-              </Text>
-            </Box>
-            {isFocused ? (
-              <Box marginLeft={2}>
-                <Text>[p] Pause [r] Resume [x] Remove</Text>
-              </Box>
-            ) : null}
-            {errorState?.scheduleId === sched.id ? (
-              <Box marginLeft={2}>
-                <Text color="red">{errorState.code}: {errorState.message}</Text>
-              </Box>
-            ) : null}
-          </Box>
-        );
-      })}
+      {rows}
+      {confirmModal}
     </Box>
   );
 }
