@@ -27,7 +27,7 @@ Tasks created:
   - 7aa8 — Update src/tui/CORTEX.md stale 'disabled mutation buttons' references (NTH-1) ✅ (`ef7ee494`)
   - f53d — Clean up Phase 2 placeholder strings in rich-blocks.tsx and useTranscript.ts (NTH-2)
   - 255e — Document smoke-tui-phase3.mjs usage and cache warm trick (NTH-3) ✅ (`84416a9d`)
-  - 0273 — Address task cache freshness architectural note RISK-1 (NTH-4)
+  - 0273 — Address task cache freshness architectural note RISK-1 (NTH-4) ✅ (DR-0001)
 Roadmap changes: plan/cortex-tui.md Phase 3 marked ✅ complete (2026-05-27); no Phase 4 planned — TUI engineering line closed.
 
 ## 未解决问题
@@ -37,5 +37,5 @@ Roadmap changes: plan/cortex-tui.md Phase 3 marked ✅ complete (2026-05-27); no
 
 ## 下一步
 
-- **2 个 NTH 后续任务 remaining**（来自 Phase 3 gate，全部 low-prio）：f53d Phase 2 placeholder 清理、0273 task cache 架构记录。7aa8 CORTEX.md 更新 ✅ done. 255e smoke script 文档 ✅ done.
+- **1 个 NTH 后续任务 remaining**（来自 Phase 3 gate，全部 low-prio）：f53d Phase 2 placeholder 清理。7aa8 CORTEX.md 更新 ✅ done. 255e smoke script 文档 ✅ done. 0273 task cache 架构记录 ✅ done.
 - 其它就绪 task：`c2ab`（重写 cortex-run CLI → sendCommand）、`ec32`（测试重命名）；`7629` + `5737`（DR-0011 收尾）等上游完成。

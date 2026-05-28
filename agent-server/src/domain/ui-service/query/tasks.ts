@@ -10,6 +10,7 @@ export async function handleTasksList(
 ): Promise<TaskInfo[]> {
   const { projectId, status, actionable } = params;
 
+  deps.taskStore.refresh();
   let tasks = deps.taskStore.getAll(projectId || undefined);
 
   if (status) {
