@@ -20,6 +20,7 @@ import type { NotificationEntry } from './hooks/useNotifications.js';
 import { useDashboardData } from './hooks/useDashboardData.js';
 import { SessionPicker } from './components/SessionPicker.js';
 import { AskUserModal } from './components/AskUserModal.js';
+import { PlanFeedbackModal } from './components/PlanFeedbackModal.js';
 import type { ResumableSession } from './components/SessionPicker.js';
 import { isNotification, isUiQueryResult, isUiEvent, isModalOpen, isModalAck } from '../platform/tui/protocol.js';
 import type { WsState } from './ws-client.js';
@@ -319,13 +320,21 @@ export function App({
       {/* Input area */}
       {/* AskUserModal — pre-empts all other modals */}
       {activeModal ? (
-        <AskUserModal
-          modal={activeModal.modal}
-          triggerId={activeModal.triggerId}
-          sendFrame={sendFrame}
-          ackErrors={modalAckErrors}
-          onClose={() => { setActiveModal(null); setModalAckErrors({}); }}
-        />
+        activeModal.modal.callbackId.startsWith('plan')
+          ? <PlanFeedbackModal
+              modal={activeModal.modal}
+              triggerId={activeModal.triggerId}
+              sendFrame={sendFrame}
+              ackErrors={modalAckErrors}
+              onClose={() => { setActiveModal(null); setModalAckErrors({}); }}
+            />
+          : <AskUserModal
+              modal={activeModal.modal}
+              triggerId={activeModal.triggerId}
+              sendFrame={sendFrame}
+              ackErrors={modalAckErrors}
+              onClose={() => { setActiveModal(null); setModalAckErrors({}); }}
+            />
       ) : modalOpen ? (
         <Box borderStyle="single" borderDimColor paddingX={1} marginTop={1}>
           {notificationsOpen ? (
