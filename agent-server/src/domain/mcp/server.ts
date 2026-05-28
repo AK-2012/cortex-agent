@@ -11,6 +11,7 @@ import { registerCostTools } from './tools/cost.js';
 import { registerExecutionTools } from './tools/executions.js';
 import { registerContextTools, type ContextToolDeps } from './tools/context.js';
 import { registerScheduleTools } from './tools/schedule.js';
+import { executionRepo } from '@store/execution-repo.js';
 import { isMainModule } from '@core/utils.js';
 import { createLogger } from '@core/log.js';
 import { CORTEX_VERSION } from '@core/version.js';
@@ -79,6 +80,7 @@ export const TOOL_NAMES: readonly string[] = [
 // --- Start (called by barrel when run as standalone) ---
 
 export async function startServer(): Promise<void> {
+  executionRepo.load();
   if (!token || !fallbackChannel) {
     log.warn('SLACK_BOT_TOKEN or SLACK_CHANNEL not set — slack_send_file will be unavailable');
   }

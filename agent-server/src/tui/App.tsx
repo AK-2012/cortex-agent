@@ -11,6 +11,8 @@ import { StatusLine } from './components/StatusLine.js';
 import { SidePanel } from './components/SidePanel.js';
 import { NotificationsBadge, NotificationsModal } from './components/Notifications.js';
 import { ProjectSwitcher } from './components/ProjectSwitcher.js';
+import { useMutate } from './hooks/useMutate.js';
+import type { MutateResult } from './hooks/useMutate.js';
 import { useTranscript } from './hooks/useTranscript.js';
 import { useKeybindings } from './hooks/useKeybindings.js';
 import { useNotifications } from './hooks/useNotifications.js';
@@ -111,33 +113,39 @@ export function App({
   // Active tab for dashboard
   const [activeTab, setActiveTab] = useState('threads');
 
-  // Combined dispatch: routes frames to transcript, dashboard, or notifications
-  useEffect(() => {
-    onSetDispatch?.((frame: TuiFrame) => {
-      if (isNotification(frame)) {
-        notif.add(frame);
-        return;
-      }
-      if (isUiQueryResult(frame) || isUiEvent(frame)) {
-        // Handle project switcher responses
-        if (isUiQueryResult(frame) && frame.id === 'proj-switcher-list') {
-          if (frame.ok) {
-            setProjects(Array.isArray(frame.data) ? frame.data as ProjectEntry[] : []);
-            setProjectsLoading(false);
-            setProjectsError(null);
-          } else {
-            setProjects([]);
-            setProjectsLoading(false);
-            setProjectsError((frame as any).error?.message ?? 'Failed to load projects');
-          }
-          return;
+  // Route non-mutate frames to the appropriate handler
+  const routeFrame = useCallback((frame: TuiFrame) => {
+    if (isNotification(frame)) {
+      notif.add(frame);
+      return;
+    }
+    if (isUiQueryResult(frame) || isUiEvent(frame)) {
+      // Handle project switcher responses
+      if (isUiQueryResult(frame) && frame.id === 'proj-switcher-list') {
+        if (frame.ok) {
+          setProjects(Array.isArray(frame.data) ? frame.data as ProjectEntry[] : []);
+          setProjectsLoading(false);
+          setProjectsError(null);
+        } else {
+          setProjects([]);
+          setProjectsLoading(false);
+          setProjectsError((frame as any).error?.message ?? 'Failed to load projects');
         }
-        dashboard.dispatch(frame);
         return;
       }
-      transcript.dispatch(frame);
-    });
-  }, [transcript.dispatch, dashboard.dispatch, notif.add, onSetDispatch]);
+      dashboard.dispatch(frame);
+      return;
+    }
+    transcript.dispatch(frame);
+  }, [transcript.dispatch, dashboard.dispatch, notif.add]);
+
+  // Mutate hook: sends ui.mutate frames, correlates results by id, 10s timeout
+  const { mutate, handleFrame } = useMutate({ sendFrame, onFrame: routeFrame });
+
+  // Combined dispatch: mutate intercepts mutateResult; rest routes normally
+  useEffect(() => {
+    onSetDispatch?.((frame: TuiFrame) => { handleFrame(frame); });
+  }, [onSetDispatch, handleFrame]);
 
   // Send initial cost query for header summary
   useEffect(() => {
@@ -297,6 +305,7 @@ export function App({
           onUnregisterSubscription={handleUnregisterSubscription}
           activeTab={activeTab}
           onSetActiveTab={setActiveTab}
+          onMutate={mutate}
         />
       </Box>
 
