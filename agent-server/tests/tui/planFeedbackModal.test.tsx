@@ -243,7 +243,7 @@ test('PlanFeedbackModal Escape closes without submitting', async () => {
   instance.cleanup();
 });
 
-test('PlanFeedbackModal up/down arrows navigate options', async () => {
+test('PlanFeedbackModal up/down arrows move focus (▶) without changing selection (●)', async () => {
   const app = React.createElement(PlanFeedbackModal, {
     modal: PLAN_APPROVAL_MODAL,
     triggerId: 'tr-plan-6',
@@ -255,30 +255,38 @@ test('PlanFeedbackModal up/down arrows navigate options', async () => {
   const instance = render(app);
   await delay(100);
 
-  // Initial: approve should be focused (first option)
+  // Initial: approve should be focused (first option) and selected by default
   const output0 = instance.lastFrame();
-  assert.ok(output0.includes('▶'), 'focus indicator visible');
+  assert.ok(output0.includes('▶ ● 1. Approve'), 'approve is focused and selected initially');
 
-  // Down arrow: move to feedback
+  // Down arrow: ▶ moves to feedback, ● stays on approve
   instance.stdin.write('\x1b[B');
   await delay(100);
 
   const output1 = instance.lastFrame();
-  assert.ok(output1.includes('● 2. Provide Feedback'), 'down arrow moves focus to feedback');
+  assert.ok(output1.includes('▶ ○ 2. Provide Feedback'), '▶ moves to feedback option');
+  assert.ok(output1.includes('  ● 1. Approve'), '● stays on approve (selection unchanged by arrows)');
 
-  // Down arrow: move to cancel
+  // Down arrow: ▶ moves to cancel
   instance.stdin.write('\x1b[B');
   await delay(100);
 
   const output2 = instance.lastFrame();
-  assert.ok(output2.includes('● 3. Cancel'), 'down arrow moves focus to cancel');
+  assert.ok(output2.includes('▶ ○ 3. Cancel'), '▶ moves to cancel option');
 
-  // Up arrow: move back to feedback
+  // Up arrow: ▶ moves back to feedback
   instance.stdin.write('\x1b[A');
   await delay(100);
 
   const output3 = instance.lastFrame();
-  assert.ok(output3.includes('● 2. Provide Feedback'), 'up arrow moves focus back to feedback');
+  assert.ok(output3.includes('▶ ○ 2. Provide Feedback'), '▶ moves back to feedback');
+
+  // Hotkey 2 changes selection (●) AND moves focus (▶)
+  instance.stdin.write('2');
+  await delay(100);
+
+  const output4 = instance.lastFrame();
+  assert.ok(output4.includes('▶ ● 2. Provide Feedback'), 'hotkey 2 selects and focuses feedback');
 
   instance.unmount();
   instance.cleanup();
@@ -298,21 +306,23 @@ test('PlanFeedbackModal submit button submits selected option', async () => {
   const instance = render(app);
   await delay(100);
 
-  // Default selection is approve. Navigate to submit button (3 down arrows from approve through feedback, cancel to submit)
-  instance.stdin.write('\x1b[B'); // feedback
+  // Default selection is approve. Navigate to submit via arrows (arrows don't change selection).
+  // After 3 down arrows: ▶ is on submit, ● is still on approve (default).
+  instance.stdin.write('\x1b[B'); // ▶ feedback
   await delay(50);
-  instance.stdin.write('\x1b[B'); // cancel
+  instance.stdin.write('\x1b[B'); // ▶ cancel
   await delay(50);
-  instance.stdin.write('\x1b[B'); // submit
+  instance.stdin.write('\x1b[B'); // ▶ submit
   await delay(50);
 
-  // Enter on submit
+  // Enter on submit — submits with active selection (approve, unchanged by arrows)
   instance.stdin.write('\r');
   await delay(100);
 
   assert.equal(frames.length, 1, 'submit button sends frame');
   const submitFrame = frames[0] as any;
   assert.equal(submitFrame.type, 'modal.submit');
+  assert.equal(submitFrame.values.decision?.decision?.value, 'approve', 'submits with approve (default selection)');
 
   instance.unmount();
   instance.cleanup();

@@ -12,7 +12,7 @@
 
 import React, { useState, useCallback, useRef, useEffect } from 'react';
 import { Box, Text, useInput } from 'ink';
-import type { ModalDefinition, TuiFrame, ModalField } from '../../platform/tui/protocol.js';
+import type { ModalDefinition, TuiFrame } from '../../platform/tui/protocol.js';
 
 // ── Props (same contract as AskUserModal) ──
 
@@ -150,26 +150,23 @@ export function PlanFeedbackModal({
       } else if (focusSlot === 2) {
         onClose();
       } else if (focusSlot === 3) {
-        // Submit with the currently active option
-        handleSubmit(activeOption, activeOption === 'feedback' ? feedbackText : '');
+        // Submit with the currently active option; cancel means close
+        if (activeOption === 'cancel') {
+          onClose();
+        } else {
+          handleSubmit(activeOption, activeOption === 'feedback' ? feedbackText : '');
+        }
       }
       return;
     }
 
-    // Arrow navigation
+    // Arrow navigation — move focus (▶) only.
+    // Selection (●) is changed only by numbered hot-keys, matching AskUserModal pattern.
     if (key.upArrow || key.downArrow) {
       if (key.downArrow && focusSlot < SLOT_COUNT - 1) {
-        const next = focusSlot + 1;
-        setFocusSlot(next);
-        if (next < 3) {
-          setActiveOption(OPTIONS[next].id);
-        }
+        setFocusSlot(focusSlot + 1);
       } else if (key.upArrow && focusSlot > 0) {
-        const next = focusSlot - 1;
-        setFocusSlot(next);
-        if (next < 3) {
-          setActiveOption(OPTIONS[next].id);
-        }
+        setFocusSlot(focusSlot - 1);
       }
       return;
     }
@@ -213,11 +210,10 @@ export function PlanFeedbackModal({
         {OPTIONS.map((opt, idx) => {
           const isFocused = focusSlot === idx;
           const isSelected = activeOption === opt.id;
-          const prefix = isFocused ? '▶' : ' ';
           return (
             <Box key={opt.id}>
               <Text bold={isFocused}>
-                {prefix} {isSelected ? '●' : '○'} {idx + 1}. {opt.label}
+                {isFocused ? '▶' : ' '} {isSelected ? '●' : '○'} {idx + 1}. {opt.label}
               </Text>
             </Box>
           );
