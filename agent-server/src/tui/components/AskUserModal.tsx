@@ -75,6 +75,14 @@ export function AskUserModal({
   });
 
   const [submitted, setSubmitted] = useState(false);
+
+  // Reset submitted when ack errors arrive — user can fix and resubmit
+  useEffect(() => {
+    if (Object.keys(ackErrors).length > 0) {
+      setSubmitted(false);
+    }
+  }, [ackErrors]);
+
   const optionFocusRef = useRef(optionFocus);
   optionFocusRef.current = optionFocus;
 
@@ -452,13 +460,6 @@ export function AskUserModal({
     <Box flexDirection="column" paddingX={1} paddingY={1} borderStyle="single">
       {/* Title */}
       <Text bold>{modal.title}</Text>
-
-      {/* Description / instructions */}
-      {modal.closeLabel ? (
-        <Text dimColor>Esc to cancel · </Text>
-      ) : null}
-
-      {/* Fields */}
       {modal.fields.map((field, idx) => renderField(field, idx))}
 
       {/* Ack errors */}

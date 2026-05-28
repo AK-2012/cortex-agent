@@ -114,9 +114,10 @@ test('AskUserModal select: number key selects option', async (t) => {
   await delay(100);
 
   const output = instance.lastFrame();
-  // Option B should show selected indicator (● or green)
-  assert.ok(output.includes('Option B'), 'option B still visible');
-  // The output should show ● for Option B selection after number key
+  // Option B should show focus indicator (▶) and number
+  assert.ok(output.includes('▶ 2. Option B'), 'focus on Option B after number key press');
+  // Option A should show ○ (deselected)
+  assert.ok(output.includes('○ 1. Option A'), 'Option A shows deselected indicator');
 
   instance.unmount();
   instance.cleanup();
@@ -242,22 +243,24 @@ test('AskUserModal multi_select: Space toggles options', async (t) => {
   // Initial: all checkboxes should be empty
   const output1 = instance.lastFrame();
   assert.ok(output1.includes('[ ]'), 'initial checkboxes empty');
+  const countX1 = (output1.match(/\[x\]/g) || []).length;
+  assert.equal(countX1, 0, 'no toggled options initially');
 
   // Space on first option toggles it
   instance.stdin.write(' ');
   await delay(100);
 
-  // First option should now be toggled
   const output2 = instance.lastFrame();
-  // The [ ] for option 1 should become [x]
-  // Since the output shows all three, we just verify at least one [x] appears
+  const countX2 = (output2.match(/\[x\]/g) || []).length;
+  assert.ok(countX2 >= 1, `at least one option toggled after Space (found ${countX2})`);
 
   // Toggle second option via number key '2'
   instance.stdin.write('2');
   await delay(100);
 
   const output3 = instance.lastFrame();
-  // Two options toggled now
+  const countX3 = (output3.match(/\[x\]/g) || []).length;
+  assert.ok(countX3 >= 2, `at least two options toggled after number key (found ${countX3})`);
 
   instance.unmount();
   instance.cleanup();
