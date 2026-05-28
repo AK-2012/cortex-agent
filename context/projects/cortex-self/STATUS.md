@@ -1,32 +1,34 @@
 # Cortex Self-Research Status
 
-Updated: 2026-05-27
+Updated: 2026-05-29
 
 ## 当前 phase
 
-**TUI Phase 3 启动**（management UI — 4 个 dashboard tab 的 cancel/pause/resume/remove/claim/complete/block 写操作 + AskUserModal/PlanFeedbackModal/ConfirmModal）。Phase 2 已全部完成并通过 stage-gate（task de19, 2026-05-27），EXP-068 五个 smoke 场景 5 PASS / 0 FAIL，S2 E2E（c39d）+ S3 fan-out（b0e7）+ MTH-1 cost.summary 修复（71fe）三条 carry 全部关闭。研究侧 Phase 4 实质完成，Phase 5 等触发条件。
+**TUI 工程线闭合**。Phase 1（chat）+ Phase 2（dashboard）+ Phase 3（management）全部完成，15 个 smoke 场景（4+5+6）跨三份 EXP 记录。无 Phase 4 规划。研究侧 Phase 5 等触发条件。
 
 ## 最近推进
 
-- **fae7 E2E smoke EXP-069 完成**（本 task, `1c2f77ca`）：`scripts/smoke-tui-phase3.mjs` 6 个 scenario 全 PASS / 0 FAIL（32 assertions）。S1 schedules pause→resume→remove 热重载验证；S2 threads.cancel + S3 executions.cancel 孤儿实体清理；S4 tasks claim→complete + S5 tasks block-with-reason YAML 状态变化；S6 AskUserModal round-trip 全链路。所有 sacrificial 实体清理。EXP-069 已记录，index 已更新。
+- **d340 Phase 3 stage-gate 闭合（Proceed）**（2026-05-28）：gate artifact `tmp/threads/thr_40fc5e55/artifact.md`。3 项实质性验证条件全部 MET：EXP-069 32/32 断言 PASS、Dashboard*.tsx 零 Phase 3 字符串、3 个 modal 组件 + 63 Phase 3 单元测试全绿。4 个 NTH 后续任务已创建（7aa8/f53d/255e/0273）。TUI Phases 1–3 证据链完整可复现。
 
-- **a8c9 Tasks claim/unclaim/complete/block/unblock 实现完成**（`aab6554a`）：DashboardTasksTab 新增每行 ↑/↓ 导航 + [c] claim / [u] unclaim / [d] complete（ConfirmModal）/ [b] block（ConfirmModal + reasonInput）/ [B] unblock。`task-lock-busy` 错误显示"auto-expires in 20m"内联提示（5s 自动清除）。Phase 3 placeholder 已移除。14 TDD 全绿，167/167 TUI 全绿，零新 tsc 错误。
+- **fae7 E2E smoke EXP-069 完成**（`1c2f77ca`）：`scripts/smoke-tui-phase3.mjs` 6 个 scenario 全 PASS / 0 FAIL（32 assertions）。
 
-- **3919 PlanFeedbackModal 实现完成**（`e0fa5d4e`）：新增 `<PlanFeedbackModal>` 组件 — 计划文本滚动展示 + Approve/Provide Feedback/Cancel 三个编号选项（1/2/3 热键），反馈选择后进入文本输入模式，完整 submit 帧构建。App.tsx 根据 `callbackId.startsWith('plan')` 分发 PlanFeedbackModal 或 AskUserModal。10 TDD 全绿，零新 tsc 错误。TUI 测试总量提升至 100/100。
+- **Phase 3 实施全部完成**（2026-05-27）：useMutate hook（6e64）、ConfirmModal（e278）、AskUserModal（6911）、PlanFeedbackModal（3919）、Schedules tab（d12f）、Threads tab（cb70）、Executions tab（b271）、Tasks tab（a8c9）、EXP-069 smoke（fae7）— 10 个 task 全部 done。247/247 TUI 测试通过，tsc 零错误。
 
-- **d12f Schedules pause/resume/remove + cb70 Threads cancel 实现完成**（`5e064ab6`）：DashboardSchedulesTab 新增每行 ↑/↓ 导航 + [p] pause / [r] resume / [x] remove（ConfirmModal）+ 内联错误展示（5s 自动清除）；DashboardThreadsTab 新增 [c] cancel（ConfirmModal）+ 已终止状态内联提示。Phase 3 placeholder 已移除。90/90 TUI 全绿，零新 tsc 错误。
+## Gate Dispatch (2026-05-28, Stage 3: TUI Phase 3)
 
-- **6e64 useMutate hook 实现完成**（`edb28b34`）：`useMutate({sendFrame, onFrame})` → `{mutate, handleFrame}` — 发 `ui.mutate` 帧 + `crypto.randomUUID()` id，Map 跟踪，匹配 `ui.mutateResult` 根据 id 解析，10s 超时，unmount 清理。4 TDD 全绿，零新 tsc 错误。
-
-- **e278 ConfirmModal 实现完成**（`b0edb3dd`）：`<ConfirmModal title body onConfirm onCancel reasonInput?/>` — y/Enter 确认、n/Esc 取消、可选 reasonInput 显示 TextInput 后 onConfirm(reason)。5 TDD 全绿，零新 tsc 错误。
-
-- **Phase 2 gate iter 2（task de19）已闭合**（2026-05-27）：EXP-068 录入 S2 E2E 实时事件投递（~100-140ms < 1s）+ S3 跨项目通知 fan-out 全链路通过。c39d 修了 mutator.ts/tui-gateway.ts/task-dispatch.ts 三处事件发布 gap；b0e7 修了 tui-notifications/tui-gateway/composite-adapter 三处 server-side + Notifications onSelect client-side。149/149 TUI 测试通过。
-- **M5 Phase 2 实施完成**（2026-05-26, task 8a5e, commit `5c95d05a` / `796515f1`）：Ctrl+D side panel (5-tab dashboard)、corner notification badge + modal、Ctrl+P project switcher、interactive `--resume` session picker、header live notification count + cost summary、所有 dashboard tab 走 M3 `ui.query` + `ui.subscribe`。
-- **M3 UiService 落地**（2026-05-26, task 5a62, commits `46ee715c` / `df07d253` / `690ada14`）：transport-agnostic facade — 7 query scopes + 10 mutate ops + event-bus subscribe；task-level lock acquire/release 包围 task mutates；61 测试全绿。
-- **M6 CLI integration & packaging 完成**（2026-05-26, task ddc6, commit `5ebf944c`）：`createAdapterFromEnv` 4-branch 工厂、`cortex tui` 子命令、app.ts EventBus + UiService 注入。
-- **M1 TuiGatewayAdapter 实现完成**（2026-05-26, task 1447）：绑定 127.0.0.1:CORTEX_TUI_PORT（默认 3003），M4 WS 协议，EADDRINUSE 软失败，90s keepalive，per-conduit serial queue，session-repo registerConduitProvider hook。
-- **EXP-067: Phase 1 七场景 smoke**（2026-05-26, task 760b）：4 PASS / 1 BLOCKED → 后续 PASS（299e Slack-coexist, 5f51 AskUserQuestion, f79c --resume picker 三条 carry 已全部关闭）。
-- **DR-0012 Claude TUI mode 5/5 phases**（2026-05-15）：claudeBackend='tui' opt-in path，与本工程线（Cortex TUI）正交。
+Verdict: **Proceed**
+Director artifact: `tmp/threads/thr_40fc5e55/artifact.md` (reviewer report + director analysis, lines 1-224)
+Operations performed:
+  - Marked `plan/cortex-tui.md` Phase 3 complete with gate reference
+  - Completed gate task d340
+  - Created 4 NTH follow-up tasks (see below)
+  - Updated STATUS.md to reflect TUI engineering line closure
+Tasks created:
+  - 7aa8 — Update src/tui/CORTEX.md stale 'disabled mutation buttons' references (NTH-1) ✅ (`ef7ee494`)
+  - f53d — Clean up Phase 2 placeholder strings in rich-blocks.tsx and useTranscript.ts (NTH-2)
+  - 255e — Document smoke-tui-phase3.mjs usage and cache warm trick (NTH-3)
+  - 0273 — Address task cache freshness architectural note RISK-1 (NTH-4)
+Roadmap changes: plan/cortex-tui.md Phase 3 marked ✅ complete (2026-05-27); no Phase 4 planned — TUI engineering line closed.
 
 ## 未解决问题
 
@@ -35,10 +37,5 @@ Updated: 2026-05-27
 
 ## 下一步
 
-- **TUI Phase 3 实施**（10 个新 task，2026-05-27 创建）：
-  - 三个 high-prio foundation：`6e64` useMutate hook ✅（`edb28b34`）、`e278` ConfirmModal ✅（`b0edb3dd`）、`6911` AskUserModal ✅
-  - `3919` PlanFeedbackModal ✅（`e0fa5d4e`）
-  - 四个 dashboard tab 写操作并行（依赖 6e64 + e278）：`d12f` Schedules（pause/resume/remove）✅（`5e064ab6`）、`cb70` Threads（cancel）✅（`5e064ab6`）、`b271` Executions（cancel）、`a8c9` Tasks（claim/unclaim/complete/block-with-reason/unblock）✅（`aab6554a`）
-  - `fae7` E2E smoke EXP-069 ✅（`1c2f77ca`, 本 task）
-  - `d340` Phase 3 stage-gate 依赖 3919（fae7 已完成）
+- **3 个 NTH 后续任务 remaining**（来自 Phase 3 gate，全部 low-prio）：f53d Phase 2 placeholder 清理、255e smoke script 文档、0273 task cache 架构记录。7aa8 CORTEX.md 更新 ✅ done.
 - 其它就绪 task：`c2ab`（重写 cortex-run CLI → sendCommand）、`ec32`（测试重命名）；`7629` + `5737`（DR-0011 收尾）等上游完成。
