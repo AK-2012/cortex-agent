@@ -144,9 +144,9 @@ export function useTranscript(opts?: {
       return;
     }
 
-    // Phase 2 placeholders — render as text, never crash
     if (isInteractivePost(frame)) {
-      setState(prev => _handlePhase2Placeholder(prev, frame.ref.messageId, '[interactive] Phase 2'));
+      setState(prev => _handleChatPost(prev, frame as any));
+      flushBatch();
       return;
     }
 
@@ -237,20 +237,6 @@ export function _handleChatMarkQueued(prev: TranscriptState, frame: ChatMarkQueu
   const messages = new Map(prev.messages);
   messages.set(messageId, msg);
   return { messages, ids: prev.ids };
-}
-
-export function _handlePhase2Placeholder(prev: TranscriptState, messageId: string, text: string): TranscriptState {
-  if (prev.messages.has(messageId)) return prev;
-  const msg: RenderedMessage = {
-    messageId,
-    text,
-    queued: false,
-    streams: new Map(),
-  };
-  const messages = new Map(prev.messages);
-  messages.set(messageId, msg);
-  const ids = [...prev.ids, messageId];
-  return { messages, ids };
 }
 
 export function _handleStreamText(prev: TranscriptState, frame: StreamText): TranscriptState {

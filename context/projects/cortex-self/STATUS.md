@@ -10,6 +10,8 @@ Updated: 2026-05-29
 
 - **d340 Phase 3 stage-gate 闭合（Proceed）**（2026-05-28）：gate artifact `tmp/threads/thr_40fc5e55/artifact.md`。3 项实质性验证条件全部 MET：EXP-069 32/32 断言 PASS、Dashboard*.tsx 零 Phase 3 字符串、3 个 modal 组件 + 63 Phase 3 单元测试全绿。4 个 NTH 后续任务已创建（7aa8/f53d/255e/0273）。TUI Phases 1–3 证据链完整可复现。
 
+- **f53d Phase 2 placeholder 清理完成**（2026-05-27）：替换 `rich-blocks.tsx` `case 'actions':` 中 `'[interactive] Phase 2'` 占位符为 action button text 渲染；替换 `useTranscript.ts` 中 `isInteractivePost` handler 为 `_handleChatPost` 复用；移除 `_handlePhase2Placeholder` 函数及对应测试。12/12 transcript 测试 PASS。4 NTH 任务全部闭合。
+
 - **fae7 E2E smoke EXP-069 完成**（`1c2f77ca`）：`scripts/smoke-tui-phase3.mjs` 6 个 scenario 全 PASS / 0 FAIL（32 assertions）。
 
 - **Phase 3 实施全部完成**（2026-05-27）：useMutate hook（6e64）、ConfirmModal（e278）、AskUserModal（6911）、PlanFeedbackModal（3919）、Schedules tab（d12f）、Threads tab（cb70）、Executions tab（b271）、Tasks tab（a8c9）、EXP-069 smoke（fae7）— 10 个 task 全部 done。247/247 TUI 测试通过，tsc 零错误。
@@ -37,5 +39,5 @@ Roadmap changes: plan/cortex-tui.md Phase 3 marked ✅ complete (2026-05-27); no
 
 ## 下一步
 
-- **1 个 NTH 后续任务 remaining**（来自 Phase 3 gate，全部 low-prio）：f53d Phase 2 placeholder 清理。7aa8 CORTEX.md 更新 ✅ done. 255e smoke script 文档 ✅ done. 0273 task cache 架构记录 ✅ done.
+- 所有 Phase 3 gate NTH 任务全部完成（7aa8 ✅、f53d ✅、255e ✅、0273 ✅）。TUI 工程线正式闭合。
 - 其它就绪 task：`c2ab`（重写 cortex-run CLI → sendCommand）、`ec32`（测试重命名）；`7629` + `5737`（DR-0011 收尾）等上游完成。

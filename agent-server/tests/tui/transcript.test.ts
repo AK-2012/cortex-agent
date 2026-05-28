@@ -7,7 +7,6 @@ import assert from 'node:assert/strict';
 import {
   _handleChatPost, _handleChatUpdate, _handleChatDelete, _handleChatMarkQueued,
   _handleStreamText, _handleStreamMutableOpen, _handleStreamMutableUpdate,
-  _handlePhase2Placeholder,
 } from '../../src/tui/hooks/useTranscript.js';
 
 // ── Fixtures ──
@@ -129,26 +128,3 @@ test('stream.mutableUpdate replaces region content', () => {
   assert.equal(s3.messages.get('m-001')?.streams.get('s1')?.mutable.get('r1'), 'updated');
 });
 
-// ── Phase 2 Placeholders ──
-
-test('_handlePhase2Placeholder inserts a placeholder message', () => {
-  const state = _handlePhase2Placeholder(EMPTY, 'interactive-1', '[interactive] Phase 2');
-  assert.equal(state.ids.length, 1);
-  assert.equal(state.messages.get('interactive-1')?.text, '[interactive] Phase 2');
-  assert.equal(state.messages.get('interactive-1')?.queued, false);
-});
-
-test('_handlePhase2Placeholder deduplicates by messageId', () => {
-  const s1 = _handlePhase2Placeholder(EMPTY, 'p1', '[interactive] Phase 2');
-  const s2 = _handlePhase2Placeholder(s1, 'p1', '[modal] Phase 2');
-  assert.equal(s2.ids.length, 1);
-  assert.equal(s2.messages.get('p1')?.text, '[interactive] Phase 2');
-});
-
-test('_handlePhase2Placeholder preserves existing messages', () => {
-  const s1 = _handleChatPost(EMPTY, makeChatPost('m-001', 'hello'));
-  const s2 = _handlePhase2Placeholder(s1, 'interactive-1', '[interactive] Phase 2');
-  assert.equal(s2.ids.length, 2);
-  assert.equal(s2.ids[0], 'm-001');
-  assert.equal(s2.ids[1], 'interactive-1');
-});

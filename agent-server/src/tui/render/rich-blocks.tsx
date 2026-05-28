@@ -35,8 +35,10 @@ function RichBlockItem({ block }: { block: Record<string, unknown> }): React.JSX
     case 'divider':
       return <Text dimColor>{'─'.repeat(40)}</Text>;
 
-    case 'actions':
-      return <Text dimColor>{'[interactive] Phase 2'}</Text>;
+    case 'actions': {
+      const elements = (block.elements as Array<{ text: string }> | undefined) ?? [];
+      return <Text dimColor>{elements.map(e => `[${e.text}]`).join(' ')}</Text>;
+    }
 
     default:
       return <Text>{String((block as any).text ?? '')}</Text>;
