@@ -134,11 +134,11 @@ function TasksList({ data, mutate, projectId }: DashboardTasksTabProps): React.J
     const task = tasks[focusedIndexRef.current];
     if (!task) return;
 
-    if (input === 'c') {
+    if (input === 'c' && !key.ctrl) {
       doMutate('tasks.claim', task.id);
     } else if (input === 'u') {
       doMutate('tasks.unclaim', task.id);
-    } else if (input === 'd') {
+    } else if (input === 'd' && !key.ctrl) {
       confirmingIndexRef.current = focusedIndexRef.current;
       confirmModeRef.current = 'complete';
       setConfirmingIndex(focusedIndexRef.current);
