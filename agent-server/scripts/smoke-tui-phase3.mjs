@@ -8,6 +8,19 @@
 //   S5: Tasks block with reason
 //   S6: AskUserModal round-trip
 //
+// Task cache warm trick (S4, S5):
+//   The daemon's taskStore.getAll() returns cached in-memory data. When
+//   sacrificial test tasks are written directly to TASKS.yaml (external to
+//   the daemon, not through the task mutation API), the daemon doesn't see
+//   them in tasks.list WS queries until its cache is refreshed.
+//   The warmTaskCache() helper (below) works around this by temporarily
+//   blocking then unblocking an existing done task (DONE_TASK_ID) that is
+//   already in the daemon's cache. This triggers taskStore.refresh(),
+//   causing all tasks to be re-read from disk — including the newly added
+//   sacrificial tasks.
+//   Architectural note: adding a taskStore.refresh() call to the tasks.list
+//   query handler would eliminate the need for this workaround.
+//
 // Usage: node scripts/smoke-tui-phase3.mjs
 
 import { WebSocket } from 'ws';
