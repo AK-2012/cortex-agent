@@ -18,9 +18,9 @@ M5 Ink TUI client — chat+dashboard terminal client speaking M4 protocol. Zero 
 | `components/SidePanel.tsx` | side panel | Ctrl+D toggle host. Right-side box containing Dashboard. Does not block input focus when shown. |
 | `components/Dashboard.tsx` | dashboard | Tab-cycled panel: Threads/Tasks/Schedules/Executions/Cost. Tab key cycles, per-tab query/subscribe lifecycle. |
 | `components/DashboardThreadsTab.tsx` | threads tab | Thread list with status icon, template name, step progress. ↑/↓ focus, [c] cancel → ConfirmModal → threads.cancel mutate. Inline "(already finished)" feedback on already-terminal error (5s auto-clear). |
-| `components/DashboardTasksTab.tsx` | tasks tab | Task list with status/priority/text/claimed. Disabled mutation buttons (Phase 3). |
-| `components/DashboardSchedulesTab.tsx` | schedules tab | Schedule list with type/nextRun/paused. Disabled mutation buttons (Phase 3). |
-| `components/DashboardExecutionsTab.tsx` | executions tab | Execution list with status/type/machine/duration/cost. Disabled mutation buttons (Phase 3). |
+| `components/DashboardTasksTab.tsx` | tasks tab | Task list with status/priority/text/claimed. ↑/↓ focus, [c] claim, [u] unclaim, [d] done (ConfirmModal), [b] block (ConfirmModal+reason), [B] unblock → ui.mutate tasks.*. 5s auto-clear error state. |
+| `components/DashboardSchedulesTab.tsx` | schedules tab | Schedule list with type/nextRun/paused. ↑/↓ focus, [p] pause, [r] resume, [x] remove (ConfirmModal) → ui.mutate schedules.*. |
+| `components/DashboardExecutionsTab.tsx` | executions tab | Execution list with status/type/machine/duration/cost. ↑/↓ focus, [c] cancel (ConfirmModal) → ui.mutate executions.cancel. 5s auto-clear 'not found' feedback. |
 | `components/DashboardCostTab.tsx` | cost tab | Cost summary: total/monthly/daily by model, budget remaining. |
 | `components/Notifications.tsx` | notifications | Corner badge (`🔔 N`) + Enter-to-open modal listing active notifications. ↑/↓ navigate, Enter detail, Esc close. |
 | `components/ProjectSwitcher.tsx` | project switcher | Ctrl+P modal: list projects via ui.query 'projects.list', select to send session.switch. |
