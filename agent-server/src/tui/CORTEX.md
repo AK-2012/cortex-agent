@@ -11,6 +11,7 @@ M5 Ink TUI client — chat+dashboard terminal client speaking M4 protocol. Zero 
 | `components/Transcript.tsx` | transcript | Scrollable message list anchored to bottom. Scroll-up freezes auto-scroll. Render scroll hint when scrolled up. |
 | `components/MessageRow.tsx` | message row | Renders text + RichBlock[] + stream segments + queued indicator. |
 | `components/InputBox.tsx` | input | Multi-line input via ink-text-input `UncontrolledTextInput`. Submit on Enter, cancel on Esc. |
+| `components/ConfirmModal.tsx` | confirm modal | Destructive action confirmation — y/Enter confirm, n/Esc cancel. Optional `reasonInput` renders TextInput with `onConfirm(reason)`. |
 | `components/StatusLine.tsx` | status bar | Connection state / queued count / error / reconnect / notification count. Key hints: Ctrl+D Dashboard, Ctrl+N Notifications, Ctrl+P Projects. |
 | `components/SidePanel.tsx` | side panel | Ctrl+D toggle host. Right-side box containing Dashboard. Does not block input focus when shown. |
 | `components/Dashboard.tsx` | dashboard | Tab-cycled panel: Threads/Tasks/Schedules/Executions/Cost. Tab key cycles, per-tab query/subscribe lifecycle. |
