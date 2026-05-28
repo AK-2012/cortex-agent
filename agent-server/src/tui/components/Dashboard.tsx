@@ -105,7 +105,7 @@ function TabContent({
     case 'threads':
       return <DashboardThreadsTab data={dashState.tabs.threads} mutate={mutate} />;
     case 'tasks':
-      return <DashboardTasksTab data={dashState.tabs.tasks} />;
+      return <DashboardTasksTab data={dashState.tabs.tasks} mutate={mutate} projectId={projectId ?? undefined} />;
     case 'schedules':
       return <DashboardSchedulesTab data={dashState.tabs.schedules} mutate={mutate!} />;
     case 'executions':

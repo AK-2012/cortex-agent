@@ -36,7 +36,7 @@ export const EMPTY_DASH_STATE: DashState = {
 
 export const TAB_SCOPES: Record<TabName, { queryId: string; events: string[] }> = {
   threads: { queryId: 'dash-threads', events: ['thread.created', 'thread.completed', 'thread.transitioned', 'thread.failed'] },
-  tasks: { queryId: 'dash-tasks', events: ['task.claimed', 'task.completed', 'task.dispatched'] },
+  tasks: { queryId: 'dash-tasks', events: ['task.claimed', 'task.unclaimed', 'task.completed', 'task.dispatched', 'task.blocked', 'task.unblocked'] },
   schedules: { queryId: 'dash-schedules', events: ['scheduler.tick'] },
   executions: { queryId: 'dash-executions', events: ['agent.started', 'agent.completed', 'agent.failed', 'agent.superseded'] },
   cost: { queryId: 'dash-cost', events: ['agent.completed'] },
