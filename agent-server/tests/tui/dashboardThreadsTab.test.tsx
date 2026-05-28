@@ -181,6 +181,26 @@ test('happy path: confirm cancel sends threads.cancel mutate', async () => {
   instance.cleanup();
 });
 
+test('no-mutate prop disables c keybind', async () => {
+  const tabData: TabData = { data: THREADS_DATA, loading: false, error: null, lastUpdated: Date.now() };
+  const instance = render(React.createElement(DashboardThreadsTab as any, { data: tabData }));
+  await delay(100);
+
+  const output = instance.lastFrame();
+  assert.ok(output.includes('Alpha'), 'threads list should render');
+
+  // Press c — should be a no-op since mutate is undefined
+  instance.stdin.write('c');
+  await delay(100);
+
+  // ConfirmModal should NOT open
+  const output2 = instance.lastFrame();
+  assert.ok(!output2.includes('Cancel thread?'), 'modal should not open when mutate is undefined');
+
+  instance.unmount();
+  instance.cleanup();
+});
+
 test('already-terminal path shows inline feedback', async () => {
   const errorResult: MutateResult = {
     ok: false,

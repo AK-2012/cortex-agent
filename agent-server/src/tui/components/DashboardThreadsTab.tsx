@@ -50,7 +50,7 @@ export function DashboardThreadsTab({ data, mutate }: DashboardThreadsTabProps):
       setFocusedIndex(prev => Math.max(0, prev - 1));
     } else if (key.downArrow) {
       setFocusedIndex(prev => Math.min(data.data.length - 1, prev + 1));
-    } else if (input === 'c' && !key.ctrl) {
+    } else if (input === 'c' && !key.ctrl && mutate) {
       setConfirmingIndex(focusedIndex);
     }
   });

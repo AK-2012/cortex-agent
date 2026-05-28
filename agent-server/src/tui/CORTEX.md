@@ -16,7 +16,7 @@ M5 Ink TUI client — chat+dashboard terminal client speaking M4 protocol. Zero 
 | `components/StatusLine.tsx` | status bar | Connection state / queued count / error / reconnect / notification count. Key hints: Ctrl+D Dashboard, Ctrl+N Notifications, Ctrl+P Projects. |
 | `components/SidePanel.tsx` | side panel | Ctrl+D toggle host. Right-side box containing Dashboard. Does not block input focus when shown. |
 | `components/Dashboard.tsx` | dashboard | Tab-cycled panel: Threads/Tasks/Schedules/Executions/Cost. Tab key cycles, per-tab query/subscribe lifecycle. |
-| `components/DashboardThreadsTab.tsx` | threads tab | Thread list with status icon, template name, step progress. |
+| `components/DashboardThreadsTab.tsx` | threads tab | Thread list with status icon, template name, step progress. ↑/↓ focus, [c] cancel → ConfirmModal → threads.cancel mutate. Inline "(already finished)" feedback on already-terminal error (5s auto-clear). |
 | `components/DashboardTasksTab.tsx` | tasks tab | Task list with status/priority/text/claimed. Disabled mutation buttons (Phase 3). |
 | `components/DashboardSchedulesTab.tsx` | schedules tab | Schedule list with type/nextRun/paused. Disabled mutation buttons (Phase 3). |
 | `components/DashboardExecutionsTab.tsx` | executions tab | Execution list with status/type/machine/duration/cost. Disabled mutation buttons (Phase 3). |
