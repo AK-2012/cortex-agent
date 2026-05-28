@@ -8,6 +8,8 @@ Updated: 2026-05-27
 
 ## 最近推进
 
+- **d12f Schedules pause/resume/remove + cb70 Threads cancel 实现完成**（`5e064ab6`）：DashboardSchedulesTab 新增每行 ↑/↓ 导航 + [p] pause / [r] resume / [x] remove（ConfirmModal）+ 内联错误展示（5s 自动清除）；DashboardThreadsTab 新增 [c] cancel（ConfirmModal）+ 已终止状态内联提示。Phase 3 placeholder 已移除。90/90 TUI 全绿，零新 tsc 错误。
+
 - **6e64 useMutate hook 实现完成**（`edb28b34`）：`useMutate({sendFrame, onFrame})` → `{mutate, handleFrame}` — 发 `ui.mutate` 帧 + `crypto.randomUUID()` id，Map 跟踪，匹配 `ui.mutateResult` 根据 id 解析，10s 超时，unmount 清理。4 TDD 全绿，零新 tsc 错误。
 
 - **e278 ConfirmModal 实现完成**（`b0edb3dd`）：`<ConfirmModal title body onConfirm onCancel reasonInput?/>` — y/Enter 确认、n/Esc 取消、可选 reasonInput 显示 TextInput 后 onConfirm(reason)。5 TDD 全绿，零新 tsc 错误。
@@ -30,7 +32,7 @@ Updated: 2026-05-27
 - **TUI Phase 3 实施**（10 个新 task，2026-05-27 创建）：
   - 三个 high-prio foundation：`6e64` useMutate hook ✅（`edb28b34`）、`e278` ConfirmModal ✅（`b0edb3dd`）、`6911` AskUserModal
   - `3919` PlanFeedbackModal 依赖 6911
-  - 四个 dashboard tab 写操作并行（依赖 6e64 + e278）：`d12f` Schedules（pause/resume/remove）、`cb70` Threads（cancel）、`b271` Executions（cancel）、`a8c9` Tasks（claim/unclaim/complete/block-with-reason/unblock）
+  - 四个 dashboard tab 写操作并行（依赖 6e64 + e278）：`d12f` Schedules（pause/resume/remove）✅（`5e064ab6`）、`cb70` Threads（cancel）✅（`5e064ab6`）、`b271` Executions（cancel）、`a8c9` Tasks（claim/unclaim/complete/block-with-reason/unblock）
   - `fae7` E2E smoke EXP-069（6 场景：4 tab + AskUserModal round-trip + tasks block-with-reason）依赖五个实施 task
   - `d340` Phase 3 stage-gate 依赖 fae7 + 3919
 - 其它就绪 task：`c2ab`（重写 cortex-run CLI → sendCommand）、`ec32`（测试重命名）；`7629` + `5737`（DR-0011 收尾）等上游完成。
