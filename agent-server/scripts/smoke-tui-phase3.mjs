@@ -14,7 +14,7 @@
 //   the daemon, not through the task mutation API), the daemon doesn't see
 //   them in tasks.list WS queries until its cache is refreshed.
 //   The warmTaskCache() helper (below) works around this by temporarily
-//   blocking then unblocking an existing done task (DONE_TASK_ID) that is
+//   blocking then unblocking an existing done task (DONE_TASK_ID in CACHE_WARM_PROJECT) that is
 //   already in the daemon's cache. This triggers taskStore.refresh(),
 //   causing all tasks to be re-read from disk — including the newly added
 //   sacrificial tasks.
