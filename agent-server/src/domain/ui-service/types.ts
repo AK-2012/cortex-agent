@@ -280,6 +280,7 @@ export interface UiServiceDeps {
     getAll(project?: string): any[];
     getById(taskId: string): any | null;
     load(): void;
+    refresh(): void;
   };
   scheduler: {
     list(): Promise<ScheduleTask[]>;

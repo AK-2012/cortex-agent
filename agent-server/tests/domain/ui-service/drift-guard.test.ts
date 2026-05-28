@@ -33,6 +33,7 @@ function makeMinimalDeps(): UiServiceDeps {
       getAll: () => [],
       getById: () => null,
       load: () => {},
+      refresh: () => {},
     },
     scheduler: {
       list: async () => [],
