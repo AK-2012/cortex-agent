@@ -1,16 +1,19 @@
-// input:  TabData for schedules tab
-// output: Schedules list — type badge + message + nextRun + paused indicator
-// pos:    Dashboard tab: read-only schedule list with disabled mutation buttons
+// input:  TabData for schedules tab + mutate function
+// output: Schedules list — type badge + message + nextRun + paused indicator + per-row mutations
+// pos:    Dashboard tab: interactive schedule list with pause/resume/remove via ui.mutate
 
-import React from 'react';
-import { Box, Text } from 'ink';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
+import { Box, Text, useInput } from 'ink';
 import type { TabData } from '../hooks/useDashboardData.js';
+import type { MutateResult, MutateError } from '../hooks/useMutate.js';
+import { ConfirmModal } from './ConfirmModal.js';
 
 interface DashboardSchedulesTabProps {
   data: TabData;
+  mutate: (op: string, args: Record<string, unknown>) => Promise<MutateResult>;
 }
 
-export function DashboardSchedulesTab({ data }: DashboardSchedulesTabProps): React.JSX.Element {
+export function DashboardSchedulesTab({ data, mutate }: DashboardSchedulesTabProps): React.JSX.Element {
   if (data.loading && data.data.length === 0) {
     return <Text dimColor>Loading schedules...</Text>;
   }
@@ -21,31 +24,159 @@ export function DashboardSchedulesTab({ data }: DashboardSchedulesTabProps): Rea
     return <Text dimColor>No schedules</Text>;
   }
 
+  return <SchedulesList data={data} mutate={mutate} />;
+}
+
+function SchedulesList({ data, mutate }: DashboardSchedulesTabProps): React.JSX.Element {
+  const schedules = data.data as any[];
+  const [focusedRowIndex, setFocusedRowIndex] = useState(0);
+  const [removingScheduleId, setRemovingScheduleId] = useState<string | null>(null);
+
+  // Refs for stale-closure-safe access inside useInput / callbacks
+  const removingScheduleIdRef = useRef<string | null>(null);
+  const focusedRowIndexRef = useRef(0);
+  focusedRowIndexRef.current = focusedRowIndex;
+  const mutateRef = useRef(mutate);
+  mutateRef.current = mutate;
+
+  // Ensure focusedRowIndex is valid when data changes
+  useEffect(() => {
+    if (schedules.length > 0 && focusedRowIndex >= schedules.length) {
+      setFocusedRowIndex(Math.max(0, schedules.length - 1));
+    }
+  }, [schedules.length, focusedRowIndex]);
+
+  // ── Error state with 5s auto-clear ──
+
+  const [errorState, setErrorState] = useState<{ scheduleId: string; code: string; message: string } | null>(null);
+  const errorTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const showError = useCallback((scheduleId: string, code: string, message: string) => {
+    if (errorTimerRef.current) clearTimeout(errorTimerRef.current);
+    setErrorState({ scheduleId, code, message });
+    errorTimerRef.current = setTimeout(() => {
+      setErrorState(null);
+      errorTimerRef.current = null;
+    }, 5000);
+  }, []);
+
+  // Cleanup timer on unmount
+  useEffect(() => {
+    return () => {
+      if (errorTimerRef.current) clearTimeout(errorTimerRef.current);
+    };
+  }, []);
+
+  // ── Mutate result handler ──
+
+  const handleResult = useCallback((scheduleId: string) => (result: MutateResult) => {
+    if (!result.ok) {
+      const err = result as MutateError;
+      showError(scheduleId, err.error.code, err.error.message);
+    } else {
+      setErrorState(prev => prev?.scheduleId === scheduleId ? null : prev);
+    }
+  }, [showError]);
+
+  // ── Keyboard handler ──
+
+  const isInputActive = removingScheduleId === null && schedules.length > 0;
+
+  useInput((_input, key) => {
+    if (removingScheduleIdRef.current !== null) return;
+
+    if (key.upArrow) {
+      setFocusedRowIndex(prev => Math.max(0, prev - 1));
+      return;
+    }
+    if (key.downArrow) {
+      setFocusedRowIndex(prev => Math.min(schedules.length - 1, prev + 1));
+      return;
+    }
+
+    const sched = schedules[focusedRowIndexRef.current];
+    if (!sched) return;
+
+    if (_input === 'p') {
+      mutateRef.current('schedules.pause', { scheduleId: sched.id }).then(handleResult(sched.id));
+    } else if (_input === 'r') {
+      mutateRef.current('schedules.resume', { scheduleId: sched.id }).then(handleResult(sched.id));
+    } else if (_input === 'x') {
+      setRemovingScheduleId(sched.id);
+      removingScheduleIdRef.current = sched.id;
+    }
+  }, { isActive: isInputActive });
+
+  // ── Remove confirmation modal ──
+
+  if (removingScheduleId !== null) {
+    const sched = schedules.find(s => s.id === removingScheduleId);
+    const body = sched
+      ? `${sched.type}: ${sched.message ?? ''} | next: ${sched.nextRun ? new Date(sched.nextRun).toLocaleString() : 'never'}`
+      : '';
+
+    return (
+      <ConfirmModal
+        title="Remove schedule?"
+        body={body}
+        onConfirm={() => {
+          const id = removingScheduleIdRef.current;
+          if (id) {
+            mutateRef.current('schedules.remove', { scheduleId: id }).then(handleResult(id));
+          }
+          setRemovingScheduleId(null);
+          removingScheduleIdRef.current = null;
+        }}
+        onCancel={() => {
+          setRemovingScheduleId(null);
+          removingScheduleIdRef.current = null;
+        }}
+      />
+    );
+  }
+
+  // ── Schedule list ──
+
   return (
     <Box flexDirection="column">
-      {data.data.map((sched: any, i: number) => (
-        <Box key={sched.id ?? i} flexDirection="column" marginBottom={1}>
-          <Box>
-            <ScheduleTypeBadge type={sched.type} paused={sched.paused} />
-            <Text> </Text>
-            <Text bold>{String(sched.message ?? '').slice(0, 25)}{(sched.message ?? '').length > 25 ? '…' : ''}</Text>
+      {schedules.map((sched: any, i: number) => {
+        const isFocused = i === focusedRowIndex;
+        return (
+          <Box key={sched.id ?? i} flexDirection="column" marginBottom={1}>
+            <Box>
+              {isFocused ? <Text bold>{'> '}</Text> : <Text>  </Text>}
+              <ScheduleTypeBadge type={sched.type} paused={sched.paused} focused={isFocused} />
+              <Text> </Text>
+              <Text bold={isFocused} dimColor={!isFocused}>
+                {String(sched.message ?? '').slice(0, 25)}{(sched.message ?? '').length > 25 ? '…' : ''}
+              </Text>
+            </Box>
+            <Box marginLeft={2}>
+              <Text dimColor>
+                {sched.paused
+                  ? `paused by ${sched.pausedBy ?? '?'}`
+                  : `next: ${sched.nextRun ? new Date(sched.nextRun).toLocaleString() : 'never'}`}
+              </Text>
+            </Box>
+            {isFocused ? (
+              <Box marginLeft={2}>
+                <Text>[p] Pause [r] Resume [x] Remove</Text>
+              </Box>
+            ) : null}
+            {errorState?.scheduleId === sched.id ? (
+              <Box marginLeft={2}>
+                <Text color="red">{errorState.code}: {errorState.message}</Text>
+              </Box>
+            ) : null}
           </Box>
-          <Box marginLeft={2}>
-            <Text dimColor>
-              {sched.paused ? `paused by ${sched.pausedBy ?? '?'}` : `next: ${sched.nextRun ? new Date(sched.nextRun).toLocaleString() : 'never'}`}
-            </Text>
-          </Box>
-          <Box marginLeft={2}>
-            <Text dimColor>[pause] Phase 3 | [remove] Phase 3</Text>
-          </Box>
-        </Box>
-      ))}
+        );
+      })}
     </Box>
   );
 }
 
-function ScheduleTypeBadge({ type, paused }: { type: string; paused: boolean }): React.JSX.Element {
+function ScheduleTypeBadge({ type, paused, focused }: { type: string; paused: boolean; focused: boolean }): React.JSX.Element {
   const color = paused ? 'yellow' : 'green';
   const label = paused ? `⏸ ${type}` : `▶ ${type}`;
-  return <Text color={color}>{label}</Text>;
+  return <Text color={color} bold={focused}>{label}</Text>;
 }

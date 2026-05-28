@@ -11,6 +11,7 @@ import { DashboardTasksTab } from './DashboardTasksTab.js';
 import { DashboardSchedulesTab } from './DashboardSchedulesTab.js';
 import { DashboardExecutionsTab } from './DashboardExecutionsTab.js';
 import { DashboardCostTab } from './DashboardCostTab.js';
+import type { MutateResult } from '../hooks/useMutate.js';
 
 // ── Types ──
 
@@ -29,6 +30,7 @@ export const DASHBOARD_TABS: DashboardTabInfo[] = [
 
 interface DashboardProps {
   sendFrame: (frame: any) => void;
+  mutate?: (op: string, args: Record<string, unknown>) => Promise<MutateResult>;
   projectId: string | null;
   dashState: DashState;
   onMarkPending: (tab: string) => void;
@@ -43,6 +45,7 @@ interface DashboardProps {
 function TabContent({
   tab,
   sendFrame,
+  mutate,
   projectId,
   dashState,
   onMarkPending,
@@ -51,6 +54,7 @@ function TabContent({
 }: {
   tab: TabName;
   sendFrame: (frame: any) => void;
+  mutate?: (op: string, args: Record<string, unknown>) => Promise<MutateResult>;
   projectId: string | null;
   dashState: DashState;
   onMarkPending: (tab: string) => void;
@@ -99,13 +103,13 @@ function TabContent({
 
   switch (tab) {
     case 'threads':
-      return <DashboardThreadsTab data={dashState.tabs.threads} />;
+      return <DashboardThreadsTab data={dashState.tabs.threads} mutate={mutate} />;
     case 'tasks':
       return <DashboardTasksTab data={dashState.tabs.tasks} />;
     case 'schedules':
-      return <DashboardSchedulesTab data={dashState.tabs.schedules} />;
+      return <DashboardSchedulesTab data={dashState.tabs.schedules} mutate={mutate!} />;
     case 'executions':
-      return <DashboardExecutionsTab data={dashState.tabs.executions} />;
+      return <DashboardExecutionsTab data={dashState.tabs.executions} mutate={mutate} />;
     case 'cost':
       return <DashboardCostTab data={dashState.tabs.cost} />;
     default:
@@ -117,6 +121,7 @@ function TabContent({
 
 export function Dashboard({
   sendFrame,
+  mutate,
   projectId,
   dashState,
   onMarkPending,
@@ -149,6 +154,7 @@ export function Dashboard({
         <TabContent
           tab={activeTab as TabName}
           sendFrame={sendFrame}
+          mutate={mutate}
           projectId={projectId}
           dashState={dashState}
           onMarkPending={onMarkPending}
