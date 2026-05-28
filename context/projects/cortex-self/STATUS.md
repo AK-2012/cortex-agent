@@ -8,6 +8,8 @@ Updated: 2026-05-27
 
 ## 最近推进
 
+- **fae7 E2E smoke EXP-069 完成**（本 task, `1c2f77ca`）：`scripts/smoke-tui-phase3.mjs` 6 个 scenario 全 PASS / 0 FAIL（32 assertions）。S1 schedules pause→resume→remove 热重载验证；S2 threads.cancel + S3 executions.cancel 孤儿实体清理；S4 tasks claim→complete + S5 tasks block-with-reason YAML 状态变化；S6 AskUserModal round-trip 全链路。所有 sacrificial 实体清理。EXP-069 已记录，index 已更新。
+
 - **a8c9 Tasks claim/unclaim/complete/block/unblock 实现完成**（`aab6554a`）：DashboardTasksTab 新增每行 ↑/↓ 导航 + [c] claim / [u] unclaim / [d] complete（ConfirmModal）/ [b] block（ConfirmModal + reasonInput）/ [B] unblock。`task-lock-busy` 错误显示"auto-expires in 20m"内联提示（5s 自动清除）。Phase 3 placeholder 已移除。14 TDD 全绿，167/167 TUI 全绿，零新 tsc 错误。
 
 - **3919 PlanFeedbackModal 实现完成**（`e0fa5d4e`）：新增 `<PlanFeedbackModal>` 组件 — 计划文本滚动展示 + Approve/Provide Feedback/Cancel 三个编号选项（1/2/3 热键），反馈选择后进入文本输入模式，完整 submit 帧构建。App.tsx 根据 `callbackId.startsWith('plan')` 分发 PlanFeedbackModal 或 AskUserModal。10 TDD 全绿，零新 tsc 错误。TUI 测试总量提升至 100/100。
@@ -37,6 +39,6 @@ Updated: 2026-05-27
   - 三个 high-prio foundation：`6e64` useMutate hook ✅（`edb28b34`）、`e278` ConfirmModal ✅（`b0edb3dd`）、`6911` AskUserModal ✅
   - `3919` PlanFeedbackModal ✅（`e0fa5d4e`）
   - 四个 dashboard tab 写操作并行（依赖 6e64 + e278）：`d12f` Schedules（pause/resume/remove）✅（`5e064ab6`）、`cb70` Threads（cancel）✅（`5e064ab6`）、`b271` Executions（cancel）、`a8c9` Tasks（claim/unclaim/complete/block-with-reason/unblock）✅（`aab6554a`）
-  - `fae7` E2E smoke EXP-069（6 场景：4 tab + AskUserModal round-trip + tasks block-with-reason）依赖五个实施 task
-  - `d340` Phase 3 stage-gate 依赖 fae7 + 3919
+  - `fae7` E2E smoke EXP-069 ✅（`1c2f77ca`, 本 task）
+  - `d340` Phase 3 stage-gate 依赖 3919（fae7 已完成）
 - 其它就绪 task：`c2ab`（重写 cortex-run CLI → sendCommand）、`ec32`（测试重命名）；`7629` + `5737`（DR-0011 收尾）等上游完成。
