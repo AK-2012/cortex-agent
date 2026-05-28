@@ -17,10 +17,11 @@ import { useNotifications } from './hooks/useNotifications.js';
 import type { NotificationEntry } from './hooks/useNotifications.js';
 import { useDashboardData } from './hooks/useDashboardData.js';
 import { SessionPicker } from './components/SessionPicker.js';
+import { AskUserModal } from './components/AskUserModal.js';
 import type { ResumableSession } from './components/SessionPicker.js';
-import { isNotification, isUiQueryResult, isUiEvent } from '../platform/tui/protocol.js';
+import { isNotification, isUiQueryResult, isUiEvent, isModalOpen, isModalAck } from '../platform/tui/protocol.js';
 import type { WsState } from './ws-client.js';
-import type { TuiFrame, HandshakeAck } from '../platform/tui/protocol.js';
+import type { TuiFrame, HandshakeAck, ModalOpen, ModalAck } from '../platform/tui/protocol.js';
 import type { ProjectEntry } from './components/ProjectSwitcher.js';
 
 // ── Types ──
@@ -65,7 +66,23 @@ export function App({
   onResumeCancel,
 }: AppProps): React.JSX.Element {
   // ── Hooks ──
-  const transcript = useTranscript();
+  const [activeModal, setActiveModal] = useState<ModalOpen | null>(null);
+  const [modalAckErrors, setModalAckErrors] = useState<Record<string, string>>({});
+
+  const transcript = useTranscript({
+    onModalOpen: useCallback((frame: ModalOpen) => {
+      setActiveModal(frame);
+      setModalAckErrors({});
+    }, []),
+    onModalAck: useCallback((frame: ModalAck) => {
+      if (frame.errors && Object.keys(frame.errors).length > 0) {
+        setModalAckErrors(frame.errors);
+      } else {
+        setActiveModal(null);
+        setModalAckErrors({});
+      }
+    }, []),
+  });
   const notif = useNotifications();
   const dashboard = useDashboardData();
 
@@ -207,9 +224,9 @@ export function App({
   }, [sendFrame]);
 
   // Modals pre-empt input
-  const modalOpen = notificationsOpen || projectSwitcherOpen;
+  const modalOpen = activeModal !== null || notificationsOpen || projectSwitcherOpen;
 
-  // Keyboard bindings
+  // Keyboard bindings — disabled when a modal is active
   useKeybindings({
     onSubmit: handleSubmit,
     onCancel: handleCancel,
@@ -220,7 +237,7 @@ export function App({
     onToggleSidePanel: handleToggleSidePanel,
     onToggleNotifications: handleToggleNotifications,
     onToggleProjectSwitcher: handleToggleProjectSwitcher,
-  });
+  }, !modalOpen);
 
   // Dashboard subscription management callbacks
   const handleMarkPending = useCallback((tab: string) => {
@@ -291,7 +308,16 @@ export function App({
       ) : null}
 
       {/* Input area */}
-      {modalOpen ? (
+      {/* AskUserModal — pre-empts all other modals */}
+      {activeModal ? (
+        <AskUserModal
+          modal={activeModal.modal}
+          triggerId={activeModal.triggerId}
+          sendFrame={sendFrame}
+          ackErrors={modalAckErrors}
+          onClose={() => { setActiveModal(null); setModalAckErrors({}); }}
+        />
+      ) : modalOpen ? (
         <Box borderStyle="single" borderDimColor paddingX={1} marginTop={1}>
           {notificationsOpen ? (
             <NotificationsModal

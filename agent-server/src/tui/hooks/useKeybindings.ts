@@ -17,12 +17,13 @@ export interface KeybindingHandlers {
   onToggleProjectSwitcher?: () => void; // Ctrl+P
 }
 
-export function useKeybindings(handlers: KeybindingHandlers): void {
+export function useKeybindings(handlers: KeybindingHandlers, isActive = true): void {
   const lastCtrlCTs = useRef(0);
   const handlersRef = useRef(handlers);
   handlersRef.current = handlers;
 
   useInput((input, key) => {
+    if (!isActive) return;
     const h = handlersRef.current;
 
     // Ctrl+C: first sends !cancel, second within 1s exits

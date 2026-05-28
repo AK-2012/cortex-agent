@@ -555,5 +555,5 @@ export function encodeFrame(f: TuiFrame): string {
 
 export type {
   MessageRef, MessageContent, RichBlock, ActionElement,
-  ModalDefinition, ModalFieldValue,
+  ModalDefinition, ModalField, ModalFieldValue,
 } from '../types.js';

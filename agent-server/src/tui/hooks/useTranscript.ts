@@ -6,6 +6,7 @@ import { useRef, useCallback, useState } from 'react';
 import type {
   ChatPost, ChatUpdate, ChatDelete, ChatMarkQueued,
   StreamText, StreamMutableOpen, StreamMutableUpdate, StreamFlush,
+  ModalOpen, ModalAck,
   TuiFrame,
 } from '../../platform/tui/protocol.js';
 import { isChatPost, isChatUpdate, isChatDelete, isChatMarkQueued,
@@ -38,11 +39,20 @@ const BATCH_WINDOW_MS = 30;
 
 // ── Hook ──
 
-export function useTranscript() {
+export function useTranscript(opts?: {
+  onModalOpen?: (frame: ModalOpen) => void;
+  onModalAck?: (frame: ModalAck) => void;
+}) {
   const [state, setState] = useState<TranscriptState>(() => ({
     messages: new Map(),
     ids: [],
   }));
+
+  // Modal callbacks stored in refs for stable dispatch identity
+  const onModalOpenRef = useRef(opts?.onModalOpen);
+  onModalOpenRef.current = opts?.onModalOpen;
+  const onModalAckRef = useRef(opts?.onModalAck);
+  onModalAckRef.current = opts?.onModalAck;
 
   // Batcher refs
   const batchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -141,12 +151,12 @@ export function useTranscript() {
     }
 
     if (isModalOpen(frame)) {
-      setState(prev => _handlePhase2Placeholder(prev, `modal-${frame.triggerId}`, '[modal] Phase 2'));
+      onModalOpenRef.current?.(frame);
       return;
     }
 
     if (isModalAck(frame)) {
-      setState(prev => _handlePhase2Placeholder(prev, `modal-ack-${frame.id}`, '[modal.ack] Phase 2'));
+      onModalAckRef.current?.(frame);
       return;
     }
   }, [flushBatch, scheduleBatch]);
