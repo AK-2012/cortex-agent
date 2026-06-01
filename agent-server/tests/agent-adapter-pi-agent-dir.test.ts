@@ -11,6 +11,7 @@ import * as os from 'node:os';
 import {
   writeProvidersConfig,
   ensureAuthVisible,
+  buildProviderOverrides,
 } from '../src/agent-adapter/pi/agent-dir.js';
 
 // ─── writeProvidersConfig: multi-provider override ──────────────
@@ -113,6 +114,52 @@ test('writeProvidersConfig: atomic — leaves no .tmp files on success', () => {
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
+});
+
+// ─── buildProviderOverrides: routing-driven override set ────────
+// The set of providers whose baseUrl is overridden to the gateway is driven by what the
+// spawn actually uses (current provider) UNION what PI reports having credentials for
+// (discovered) — NOT by discovery alone. This lets a profile route through the gateway even
+// when PI has no direct credentials (gateway injects managed keys).
+
+test('buildProviderOverrides: unions discovered providers with the current provider', () => {
+  const out = buildProviderOverrides(['deepseek', 'qwen-ksu'], 'anthropic', null);
+  const names = out.map(o => o.name).sort();
+  assert.deepEqual(names, ['anthropic', 'deepseek', 'qwen-ksu']);
+});
+
+test('buildProviderOverrides: does not duplicate when current provider is already discovered', () => {
+  const out = buildProviderOverrides(['deepseek'], 'deepseek', null);
+  assert.equal(out.length, 1);
+  assert.equal(out[0].name, 'deepseek');
+});
+
+test('buildProviderOverrides: applies gatewayPath as basePath to the current provider', () => {
+  const out = buildProviderOverrides(['deepseek'], 'anthropic', '/deepseek-anthropic');
+  const a = out.find(o => o.name === 'anthropic');
+  assert.equal(a?.basePath, '/deepseek-anthropic');
+});
+
+test('buildProviderOverrides: gatewayPath overrides default path even when current provider was discovered', () => {
+  const out = buildProviderOverrides(['deepseek'], 'deepseek', '/deepseek/anthropic');
+  assert.equal(out.length, 1);
+  assert.equal(out[0].basePath, '/deepseek/anthropic');
+});
+
+test('buildProviderOverrides: discovered providers get no explicit basePath (default /<name>)', () => {
+  const out = buildProviderOverrides(['deepseek'], 'anthropic', null);
+  const d = out.find(o => o.name === 'deepseek');
+  assert.equal(d?.basePath, undefined);
+});
+
+test('buildProviderOverrides: returns discovered as-is when no current provider', () => {
+  const out = buildProviderOverrides(['deepseek', 'qwen-ksu'], null, null);
+  assert.deepEqual(out.map(o => o.name).sort(), ['deepseek', 'qwen-ksu']);
+});
+
+test('buildProviderOverrides: current provider alone when discovery is empty (gateway-managed creds)', () => {
+  const out = buildProviderOverrides([], 'anthropic', null);
+  assert.deepEqual(out.map(o => o.name), ['anthropic']);
 });
 
 // ─── ensureAuthVisible: symlink user's PI auth.json into cortex-private dir ───

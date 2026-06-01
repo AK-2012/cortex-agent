@@ -8,7 +8,15 @@ import { profileRepo } from '@store/profile-repo.js';
 export interface ProfileEntry {
   model: string;
   backend?: string;
+  /** Gateway route mode — a logical name resolved by gateway.yaml (e.g. "plan", "api", "anthropic").
+   *  Used for ALL backends to build the gateway URL `/m/<mode>/<endpoint>`; gateway.yaml owns the
+   *  upstream URL + keys for each mode. (For claude the endpoint is "anthropic"; for pi it is the
+   *  `provider` below.) */
   mode?: string;
+  /** PI `--provider` (protocol family, e.g. "anthropic", "openai-codex"). Only meaningful for
+   *  backend='pi'; defaults to "anthropic" when omitted. Decoupled from `mode`: `mode` selects the
+   *  gateway route, `provider` selects the PI request protocol + the gateway endpoint segment. */
+  provider?: string;
   extraEnv?: Record<string, string>;
   extraOption?: Record<string, string>;
   /** DR-0012: opt into TUI-mode Claude (interactive tmux + jsonl tail). Default 'print' for backward
@@ -31,16 +39,20 @@ export interface ResolvedProfileConfig {
   model: string;
   backend: string;
   mode: string | null;
+  /** PI `--provider` (protocol). null → adapter defaults to "anthropic". Ignored for non-pi backends. */
+  provider: string | null;
   extraEnv: Record<string, string>;
   extraOption: Record<string, string>;
   /** DR-0012: resolved claude adapter mode. 'print' (default, uses -p + stream-json) or 'tui'
    *  (interactive Claude under tmux + jsonl tail). Ignored for non-claude backends. */
   claudeBackend: 'print' | 'tui';
-  fallback: Array<{ model: string; backend: string; mode: string | null; extraEnv: Record<string, string>; extraOption: Record<string, string>; claudeBackend: 'print' | 'tui' }>;
+  fallback: Array<{ model: string; backend: string; mode: string | null; provider: string | null; extraEnv: Record<string, string>; extraOption: Record<string, string>; claudeBackend: 'print' | 'tui' }>;
 }
 
 const PROFILE_NAME_RE = /^[a-zA-Z0-9_-]+$/;
 const MODE_NAME_RE = /^[a-zA-Z0-9_-]+$/;
+// provider shares mode's safe-name shape (alphanumeric, dash, underscore).
+const PROVIDER_NAME_RE = /^[a-zA-Z0-9_-]+$/;
 const ENV_KEY_RE = /^[A-Z_][A-Z0-9_]*$/;
 const VALID_BACKENDS = new Set(['claude', 'codex', 'pi']);
 
@@ -54,7 +66,7 @@ function loadProfilesFile(): ProfilesFile {
   }
 }
 
-function validateProfileEntry(profile: unknown, label: string): void {
+function validateProfileEntry(profile: unknown, label: string, inheritedBackend = 'claude'): void {
   const p = profile as Record<string, unknown>;
   if (!p || typeof p !== 'object' || Array.isArray(p)) {
     throw new Error(`${label} must be an object`);
@@ -65,9 +77,21 @@ function validateProfileEntry(profile: unknown, label: string): void {
   if (p.backend !== undefined && !VALID_BACKENDS.has(p.backend as string)) {
     throw new Error(`${label} has invalid backend: ${p.backend}`);
   }
+  // Effective backend resolves to the explicit value, else the inherited one (primary → fallback).
+  const effectiveBackend = typeof p.backend === 'string' ? p.backend : inheritedBackend;
+  // PI requires an explicit provider — no default, no fallback (the PI `--provider` / gateway
+  // endpoint group must be stated outright, never silently assumed).
+  if (effectiveBackend === 'pi' && p.provider === undefined) {
+    throw new Error(`${label} uses backend 'pi' and must declare an explicit provider (no default)`);
+  }
   if (p.mode !== undefined) {
     if (typeof p.mode !== 'string' || !MODE_NAME_RE.test(p.mode)) {
       throw new Error(`${label} has invalid mode: ${p.mode}`);
+    }
+  }
+  if (p.provider !== undefined) {
+    if (typeof p.provider !== 'string' || !PROVIDER_NAME_RE.test(p.provider)) {
+      throw new Error(`${label} has invalid provider: ${String(p.provider)}`);
     }
   }
   if (p.extraEnv !== undefined) {
@@ -136,12 +160,13 @@ function validateProfilesFile(data: unknown): void {
     }
     validateProfileEntry(profile, `profile "${name}"`);
     const pe = profile as Record<string, unknown>;
+    const primaryBackend = typeof pe.backend === 'string' ? pe.backend : 'claude';
     if (pe.fallback !== undefined) {
       if (!Array.isArray(pe.fallback)) {
         throw new Error(`profile "${name}" fallback must be an array`);
       }
       pe.fallback.forEach((fb: unknown, i: number) => {
-        validateProfileEntry(fb, `profile "${name}" fallback[${i}]`);
+        validateProfileEntry(fb, `profile "${name}" fallback[${i}]`, primaryBackend);
       });
     }
   }
@@ -188,6 +213,7 @@ function resolveProfileConfig(name: string | null = null): ResolvedProfileConfig
     model: profile.model,
     backend: profile.backend || 'claude',
     mode: profile.mode || null,
+    provider: profile.provider || null,
     extraEnv: { ...(profile.extraEnv || {}) },
     extraOption: { ...(profile.extraOption || {}) },
     claudeBackend: resolveClaudeBackend(profile),
@@ -196,6 +222,9 @@ function resolveProfileConfig(name: string | null = null): ResolvedProfileConfig
     model: fb.model,
     backend: fb.backend || primary.backend,
     mode: fb.mode || primary.mode,
+    // provider does NOT inherit from primary — pi entries must each declare it explicitly (enforced
+    // by validation), and non-pi entries leave it null.
+    provider: fb.provider || null,
     extraEnv: { ...(fb.extraEnv || {}) },
     extraOption: { ...(fb.extraOption || {}) },
     claudeBackend: fb.claudeBackend !== undefined ? resolveClaudeBackend(fb) : primary.claudeBackend,

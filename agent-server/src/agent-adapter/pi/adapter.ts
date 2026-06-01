@@ -15,7 +15,7 @@ import type { NormalizedEvent } from '../normalize/event-types.js';
 import { buildSpawnArgs } from './spawn-args.js';
 import { createLineSplitter, encodeCommand } from './framing.js';
 import { piRpcLineToNormalized, createPIEventParserState, type PIEventParserState } from './event-parser.js';
-import { PI_AGENT_DIR, PI_SESSIONS_DIR, writeProvidersConfig, ensureAuthVisible } from './agent-dir.js';
+import { PI_AGENT_DIR, PI_SESSIONS_DIR, writeProvidersConfig, buildProviderOverrides, ensureAuthVisible } from './agent-dir.js';
 import { parsePiListModelsOutput } from '@core/gateway-generator.js';
 import { buildPrompt } from '../normalize/prompt-builder.js';
 
@@ -594,11 +594,16 @@ export class PIAdapter implements AgentAdapter {
         log.warn(`Failed to mirror PI auth.json: ${(err as Error).message}`);
       }
       try {
-        const providers = discoverPIProviders();
-        if (providers.length > 0) {
-          writeProvidersConfig(providers.map(name => ({ name })), config.piGatewayBaseUrl);
+        // Override set = providers PI reports creds for (discovered) ∪ the provider THIS spawn
+        // uses (config.piProvider). The current provider is always routed through the gateway even
+        // when discovery doesn't list it (e.g. an anthropic-protocol relay whose key the gateway
+        // injects). config.piGatewayPath, when set, decouples the gateway route from the provider name.
+        const discovered = discoverPIProviders();
+        const overrides = buildProviderOverrides(discovered, config.piProvider ?? null, config.piGatewayPath ?? null);
+        if (overrides.length > 0) {
+          writeProvidersConfig(overrides, config.piGatewayBaseUrl);
         } else {
-          log.warn('pi --list-models returned no providers; PI subprocess may fail to authenticate');
+          log.warn('No PI providers to route (empty discovery and no profile provider); PI subprocess may fail to authenticate');
         }
       } catch (err) {
         log.warn(`Failed to write PI models.json: ${(err as Error).message}`);

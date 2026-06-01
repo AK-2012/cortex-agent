@@ -62,9 +62,14 @@ export interface AgentSpawnConfig {
   anthropicBaseUrl?: string;
 
   // --- PI-specific passthroughs; other backends ignore these ---
-  /** PI provider name (e.g. "anthropic", "deepseek", "openai-codex"). Sourced from the active
-   *  cortex profile's `mode` field. PI adapter passes it to the subprocess as `--provider <name>`. */
+  /** PI provider name / protocol (e.g. "anthropic", "deepseek", "openai-codex"). Sourced from the
+   *  active cortex profile's `provider` field (defaults to "anthropic"). PI adapter passes it to the
+   *  subprocess as `--provider <name>`. */
   piProvider?: string;
+  /** Gateway sub-path for `piProvider`'s models.json override, derived in code as `/m/<mode>/<provider>`
+   *  from the profile's logical `mode` (gateway.yaml owns the route → upstream + keys). Decouples the
+   *  gateway route from the provider name. Omitted (no mode) → adapter defaults to `/<piProvider>`. */
+  piGatewayPath?: string;
   /** Base URL of the cortex local gateway (e.g. "http://127.0.0.1:9880"). PI adapter writes a
    *  multi-provider models.json overriding every discovered provider's baseUrl to land on this
    *  gateway, so PI traffic is monitored / cost-tracked rather than going direct to upstreams. */

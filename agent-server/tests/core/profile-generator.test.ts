@@ -15,6 +15,7 @@ import {
   writeProfilesJson,
 } from '../../src/core/profile-generator.js';
 import type { DiscoveredEndpoint } from '../../src/core/gateway-generator.js';
+import { validateProfilesFile } from '../../src/domain/agents/profile-manager.js';
 
 // ─── Fixture helpers ────────────────────────────────────────────
 
@@ -169,6 +170,51 @@ test('generateProfiles: openai-codex endpoint → backend=pi', () => {
   });
   assert.equal(result.profiles.plan.backend, 'pi');
   assert.equal(result.profiles.plan.mode, 'openai-codex');
+});
+
+// ─── PI backends must carry an explicit provider (new routing contract) ─────
+
+test('generateProfiles: pi backend profile includes provider === endpoint name', () => {
+  const result = generateProfiles([ANTHROPIC_PLAN, DEEPSEEK], {
+    executeChoice: { mode: 'deepseek', model: 'deepseek-v4-pro' },
+  });
+  assert.equal(result.profiles.execute.backend, 'pi');
+  assert.equal((result.profiles.execute as any).provider, 'deepseek');
+});
+
+test('generateProfiles: openai-codex pi profile includes provider=openai-codex', () => {
+  const result = generateProfiles([ANTHROPIC_PLAN, OPENAI_CODEX], {
+    executeChoice: { mode: 'openai-codex', model: 'gpt-5.4-mini' },
+  });
+  assert.equal(result.profiles.execute.backend, 'pi');
+  assert.equal((result.profiles.execute as any).provider, 'openai-codex');
+});
+
+test('generateProfiles: claude backend profile does NOT carry a provider', () => {
+  const result = generateProfiles([ANTHROPIC_PLAN], {
+    planChoice: { mode: 'plan', model: 'claude-opus-4-7' },
+  });
+  assert.equal(result.profiles.plan.backend, 'claude');
+  assert.equal((result.profiles.plan as any).provider, undefined);
+});
+
+test('generateProfiles: pi fallback entries also carry a provider', () => {
+  const result = generateProfiles([ANTHROPIC_PLAN, DEEPSEEK], {
+    planChoice: { mode: 'plan', model: 'claude-opus-4-7' },
+    planFallback: [{ mode: 'deepseek', model: 'deepseek-v4-flash' }],
+  });
+  assert.equal((result.profiles.plan.fallback![0] as any).provider, 'deepseek');
+});
+
+test('generateProfiles: output passes profile-manager validation (pi provider required)', () => {
+  // Regression guard: a fresh `cortex init` config containing a pi profile (incl. a pi fallback)
+  // must be loadable by the server — validateProfilesFile now rejects pi profiles without provider.
+  const result = generateProfiles([ANTHROPIC_PLAN, DEEPSEEK, OPENAI_CODEX], {
+    planChoice: { mode: 'plan', model: 'claude-opus-4-7' },
+    executeChoice: { mode: 'deepseek', model: 'deepseek-v4-flash' },
+    executeFallback: [{ mode: 'openai-codex', model: 'gpt-5.4-mini' }],
+  });
+  assert.doesNotThrow(() => validateProfilesFile(result));
 });
 
 // ─── listChoices: strict lexicographic order ────────────────────
@@ -393,6 +439,20 @@ test('generateProfiles: extraProfiles does not overwrite plan/execute', () => {
   assert.equal(result.profiles.execute.model, 'deepseek-v4-flash');
   // extra profile exists separately
   assert.equal(result.profiles['deepseek-v4-pro'].model, 'deepseek-v4-pro');
+});
+
+test('generateProfiles: extraProfiles sanitizes dotted model names (dots → dashes) into valid profile names', () => {
+  const result = generateProfiles([ANTHROPIC_PLAN, OPENAI_CODEX], {
+    planChoice: { mode: 'plan', model: 'claude-opus-4-7' },
+    extraProfiles: [{ mode: 'openai-codex', model: 'gpt-5.4-mini' }],
+  });
+  // Profile name has dots replaced with dashes so it passes the profile-name regex…
+  assert.ok(result.profiles['gpt-5-4-mini'], 'expected sanitized profile name gpt-5-4-mini');
+  assert.equal(result.profiles['gpt-5.4-mini'], undefined, 'dotted name must not be used as a key');
+  // …but the model id itself is preserved verbatim (needed for the actual API call).
+  assert.equal(result.profiles['gpt-5-4-mini'].model, 'gpt-5.4-mini');
+  // And the whole result must be loadable by the server.
+  assert.doesNotThrow(() => validateProfilesFile(result));
 });
 
 test('generateProfiles: extraProfiles skips names colliding with managed profile names', () => {

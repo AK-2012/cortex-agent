@@ -20,6 +20,8 @@ interface ProfileEntry {
   model: string;
   backend: string;
   mode: string;
+  /** PI `--provider` (= gateway endpoint group). Required for backend='pi'; omitted for claude/codex. */
+  provider?: string;
   fallback?: ProfileEntry[];
   extraEnv?: Record<string, string>;
   extraOption?: Record<string, string>;
@@ -102,11 +104,19 @@ function findModelEntry(models: ModelEntry[], choice: ModelChoice, label: string
 
 /** Build a ProfileEntry from a ModelEntry (no fallback chain attached yet). */
 function makeProfileEntry(m: ModelEntry): ProfileEntry {
-  return {
+  const entry: ProfileEntry = {
     model: m.model,
     backend: m.backend,
     mode: m.mode,
   };
+  // PI backends require an explicit `provider` (the PI `--provider` / gateway endpoint group).
+  // For discovered PI providers, endpoint === provider name (discoverEndpoints sets mode = endpoint
+  // = provider), so the gateway URL `/m/<mode>/<provider>` lands on the generated `<endpoint>:
+  // { <mode>: ... }` route. claude/codex backends carry no provider.
+  if (m.backend === 'pi') {
+    entry.provider = m.endpoint;
+  }
+  return entry;
 }
 
 /** Build fallback entries from explicit user choices. Throws if any choice can't be resolved. */
@@ -198,7 +208,10 @@ export function generateProfiles(
   // Profile name = model name (e.g., selecting deepseek-v4-pro → profile "deepseek-v4-pro").
   if (opts.extraProfiles && opts.extraProfiles.length > 0) {
     for (const choice of opts.extraProfiles) {
-      const name = choice.model;
+      // Profile names must match /^[a-zA-Z0-9_-]+$/. Model ids may contain dots (e.g. "gpt-5.4"),
+      // which are invalid in a profile name — sanitize dots → dashes. The model id stored in the
+      // entry stays verbatim (makeProfileEntry uses choice.model) so the API call is unaffected.
+      const name = choice.model.replace(/\./g, '-');
       if (name === 'plan' || name === 'execute') {
         log.warn(`Skipping extra profile "${name}": name conflicts with managed profile`);
         continue;

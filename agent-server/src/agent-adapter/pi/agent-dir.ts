@@ -1,6 +1,7 @@
 // input:  DATA_DIR
 // output: PI_AGENT_DIR / PI_SESSIONS_DIR / PI_MODELS_PATH constants
 //         + writeProvidersConfig (multi-provider models.json override)
+//         + buildProviderOverrides (routing-driven override set: discovered ∪ current provider)
 //         + ensureAuthVisible (symlink user's ~/.pi/agent/auth.json into PI_AGENT_DIR
 //           so the PI subprocess can resolve OAuth/API key credentials)
 //         + ensurePIAgentDirs
@@ -94,6 +95,38 @@ export function writeProvidersConfig(
     try { if (existsSync(tmp)) unlinkSync(tmp); } catch { /* ignore */ }
     throw err;
   }
+}
+
+/**
+ * Compute the set of PI providers whose baseUrl should be overridden to the gateway for a spawn.
+ *
+ * Design: "route through gateway" and "PI has credentials" are independent concerns. Discovery
+ * (`pi --list-models`) only reports providers the user is authenticated to, but a profile may
+ * legitimately route a provider through the gateway even without direct PI credentials (the
+ * gateway injects managed keys). So the override set is the union of:
+ *   - `discovered`        — providers PI reports creds for (credential passthrough via auth.json)
+ *   - `currentProvider`   — the provider THIS spawn uses (`--provider`); it MUST be routed, always
+ *
+ * `gatewayPath`, when set, becomes the current provider's `basePath` (decouples the gateway route
+ * from the provider name — e.g. provider "anthropic" landing on "/deepseek-anthropic"). It wins
+ * over the default `/<name>` even if the current provider was also discovered.
+ */
+export function buildProviderOverrides(
+  discovered: string[],
+  currentProvider: string | null,
+  gatewayPath?: string | null,
+): ProviderOverride[] {
+  const byName = new Map<string, ProviderOverride>();
+  for (const name of discovered) {
+    if (!byName.has(name)) byName.set(name, { name });
+  }
+  if (currentProvider) {
+    byName.set(currentProvider, {
+      name: currentProvider,
+      ...(gatewayPath ? { basePath: gatewayPath } : {}),
+    });
+  }
+  return Array.from(byName.values());
 }
 
 // ─── auth.json visibility (symlink / copy from user PI dir) ──────

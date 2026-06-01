@@ -22,6 +22,8 @@ export interface AgentConfig {
   model: string;
   backend: string;
   mode: string | null;
+  /** PI `--provider` (protocol). null → defaults to "anthropic". Only used for backend='pi'. */
+  provider?: string | null;
   extraEnv?: Record<string, string>;
   extraOption?: Record<string, string>;
   /** DR-0012: Claude adapter mode (print/tui). Only meaningful for backend='claude'. */
@@ -54,6 +56,25 @@ export interface RunAgentOptions {
   onToolUse?: ((name: string, input: any) => void) | null;
   onFallback?: (current: AgentConfig, next: AgentConfig, result: AgentResult | null, error?: Error) => Promise<void>;
   [key: string]: any;
+}
+
+// --- PI gateway routing ---
+
+/**
+ * Build the gateway sub-path for a PI provider's models.json override, following the gateway's URL
+ * convention `/m/<mode>/<endpoint>`. The `mode` selects the gateway route (gateway.yaml owns the
+ * upstream + keys); the `provider` is both the PI `--provider` and the gateway endpoint segment.
+ *
+ * `provider` is required for pi profiles (validated at load time — no default, no fallback). Returns
+ * undefined when `mode` is absent — the PI adapter then falls back to the default `/<provider>` path
+ * (direct per-provider routing, no `/m/` mode indirection).
+ *
+ * Keeping this derivation in code (not in the profile) means profiles only carry the logical
+ * `mode` name; no gateway path string leaks into profiles.json.
+ */
+export function buildPiGatewaySubPath(mode: string | null, provider: string): string | undefined {
+  if (!mode) return undefined;
+  return `/m/${mode}/${provider}`;
 }
 
 // --- Adapter execution ---
@@ -103,7 +124,11 @@ function buildSpawnConfig(
     // PI-specific routing: provider name (= profile mode) + gateway base URL. PI adapter writes
     // a multi-provider models.json (writeProvidersConfig) so every PI provider lands on the
     // gateway. Claude / codex adapters ignore these fields.
-    piProvider: config.backend === 'pi' && config.mode ? config.mode : undefined,
+    // PI routing: `provider` is the --provider (protocol; required for pi, validated at load — no
+    // default). The gateway sub-path `/m/<mode>/<provider>` is derived from the profile's logical
+    // `mode` (gateway.yaml owns the route).
+    piProvider: config.backend === 'pi' && config.provider ? config.provider : undefined,
+    piGatewayPath: config.backend === 'pi' && config.provider ? buildPiGatewaySubPath(config.mode, config.provider) : undefined,
     piGatewayBaseUrl: config.backend === 'pi' ? GATEWAY_URL : undefined,
     cortexContext: hasContext ? ctx : undefined,
     appendSystemPrompt,
@@ -218,7 +243,7 @@ export function runAgentOnce(message: string, options: RunAgentOptions, config: 
 export function runAgent(message: string, options: RunAgentOptions = {}): AgentHandle {
   const profileConfig: ResolvedProfileConfig = resolveProfileConfig(options.profileName);
   const configs: AgentConfig[] = [
-    { model: profileConfig.model, backend: profileConfig.backend, mode: profileConfig.mode, extraEnv: profileConfig.extraEnv, extraOption: profileConfig.extraOption, claudeBackend: profileConfig.claudeBackend },
+    { model: profileConfig.model, backend: profileConfig.backend, mode: profileConfig.mode, provider: profileConfig.provider, extraEnv: profileConfig.extraEnv, extraOption: profileConfig.extraOption, claudeBackend: profileConfig.claudeBackend },
     ...(profileConfig.fallback || []),
   ];
 
