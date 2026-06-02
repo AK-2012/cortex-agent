@@ -1,6 +1,8 @@
 // input:  DATA_DIR
 // output: PI_AGENT_DIR / PI_SESSIONS_DIR / PI_MODELS_PATH constants
-//         + writeProvidersConfig (multi-provider models.json override)
+//         + writeProvidersConfig (multi-provider models.json override; re-asserts PI compat
+//           flags lost when baseUrl is rewritten to the gateway — see PROVIDER_COMPAT_OVERRIDES,
+//           e.g. deepseek supportsDeveloperRole=false to avoid HTTP 400 on the `developer` role)
 //         + buildProviderOverrides (routing-driven override set: discovered ∪ current provider)
 //         + ensureAuthVisible (symlink user's ~/.pi/agent/auth.json into PI_AGENT_DIR
 //           so the PI subprocess can resolve OAuth/API key credentials)
@@ -53,7 +55,26 @@ export interface ProviderOverride {
    * (e.g. deepseek's anthropic-compat endpoint: `/deepseek/anthropic`).
    */
   basePath?: string;
+  /**
+   * Per-spawn PI compat flags to write into this provider's models.json entry.
+   * Merged ON TOP of PROVIDER_COMPAT_OVERRIDES (explicit wins). Normally unset —
+   * the static table covers the known cases.
+   */
+  compat?: Record<string, unknown>;
 }
+
+/**
+ * PI compat flags that PI auto-detects from the provider's *real* endpoint URL but loses once
+ * cortex rewrites `baseUrl` to the gateway. PI's `detectCompat()` keys `supportsDeveloperRole`
+ * off `baseUrl.includes("deepseek.com")` ONLY (not the provider name), so routing DeepSeek
+ * through `http://127.0.0.1:9880/deepseek` makes PI wrongly assume the endpoint accepts the
+ * OpenAI `developer` system-prompt role — DeepSeek's API rejects it with HTTP 400 (empty output).
+ * We re-assert the lost flags here, keyed by PI provider name (the override preserves the name).
+ * Add a row here if another gateway-routed provider exhibits the same URL-detection loss.
+ */
+const PROVIDER_COMPAT_OVERRIDES: Record<string, Record<string, unknown>> = {
+  deepseek: { supportsDeveloperRole: false },
+};
 
 export interface WriteProvidersOpts {
   /** Override target file path. Defaults to PI_MODELS_PATH. */
@@ -74,10 +95,17 @@ export function writeProvidersConfig(
 ): void {
   const targetPath = opts?.modelsPath ?? PI_MODELS_PATH;
 
-  const providersBlock: Record<string, { baseUrl: string }> = {};
+  const providersBlock: Record<string, { baseUrl: string; compat?: Record<string, unknown> }> = {};
   for (const p of providers) {
     const basePath = p.basePath ?? `/${p.name}`;
-    providersBlock[p.name] = { baseUrl: `${gatewayUrl}${basePath}` };
+    const entry: { baseUrl: string; compat?: Record<string, unknown> } = {
+      baseUrl: `${gatewayUrl}${basePath}`,
+    };
+    // Re-assert compat flags PI can no longer auto-detect now that baseUrl is the gateway.
+    // Static table first, then per-override compat (explicit wins).
+    const compat = { ...PROVIDER_COMPAT_OVERRIDES[p.name], ...p.compat };
+    if (Object.keys(compat).length > 0) entry.compat = compat;
+    providersBlock[p.name] = entry;
   }
 
   const data = { providers: providersBlock };

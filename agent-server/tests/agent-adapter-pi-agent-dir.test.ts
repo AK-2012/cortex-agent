@@ -116,6 +116,48 @@ test('writeProvidersConfig: atomic — leaves no .tmp files on success', () => {
   }
 });
 
+test('writeProvidersConfig: deepseek gets compat.supportsDeveloperRole=false (gateway hides deepseek.com so PI cannot auto-detect)', () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cortex-pi-models-'));
+  try {
+    const modelsPath = path.join(tmpDir, 'models.json');
+    writeProvidersConfig([{ name: 'deepseek' }], 'http://127.0.0.1:9880', { modelsPath });
+    const data = JSON.parse(fs.readFileSync(modelsPath, 'utf-8'));
+    assert.equal(data.providers.deepseek.compat.supportsDeveloperRole, false);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test('writeProvidersConfig: non-deepseek provider has NO compat field (no regression)', () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cortex-pi-models-'));
+  try {
+    const modelsPath = path.join(tmpDir, 'models.json');
+    writeProvidersConfig([{ name: 'anthropic' }], 'http://127.0.0.1:9880', { modelsPath });
+    const data = JSON.parse(fs.readFileSync(modelsPath, 'utf-8'));
+    assert.equal(data.providers.anthropic.compat, undefined);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test('writeProvidersConfig: explicit per-override compat merges over the static table', () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cortex-pi-models-'));
+  try {
+    const modelsPath = path.join(tmpDir, 'models.json');
+    writeProvidersConfig(
+      [{ name: 'deepseek', compat: { supportsStore: false } }],
+      'http://127.0.0.1:9880',
+      { modelsPath },
+    );
+    const data = JSON.parse(fs.readFileSync(modelsPath, 'utf-8'));
+    // static table contributes supportsDeveloperRole, explicit override adds supportsStore
+    assert.equal(data.providers.deepseek.compat.supportsDeveloperRole, false);
+    assert.equal(data.providers.deepseek.compat.supportsStore, false);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
 // ─── buildProviderOverrides: routing-driven override set ────────
 // The set of providers whose baseUrl is overridden to the gateway is driven by what the
 // spawn actually uses (current provider) UNION what PI reports having credentials for
