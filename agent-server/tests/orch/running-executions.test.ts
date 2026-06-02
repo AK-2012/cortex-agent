@@ -108,6 +108,22 @@ test('killByThreadId: resolves via byThreadId, calls kill(), cleans all indices'
   assert.equal(second, false);
 });
 
+test('killByExecutionId: resolves via byExecutionId, calls kill(), cleans all indices (conversation Cancel)', () => {
+  const exec = new RunningExecutions();
+  const handle = makeKillTracker();
+  // Conversation path registers under the channel key with no threadId, executionId only.
+  exec.register('C123', makeInput({ threadId: null, executionId: 'E1', kill: () => handle.kill() }));
+
+  const result = exec.killByExecutionId('E1');
+  assert.equal(result, true);
+  assert.equal(handle.killed, true);
+  assert.equal(exec.has('C123'), false);
+  assert.equal(exec.getByExecutionId('E1'), null);
+
+  const second = exec.killByExecutionId('E1');
+  assert.equal(second, false);
+});
+
 // ── Event publishing ──────────────────────────────────────────────────
 
 test('register with executionId publishes agent.started', () => {

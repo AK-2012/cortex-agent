@@ -122,16 +122,20 @@ export interface StatusBlocksTemplate {
   sessionName: string | null;
   isDm: boolean;
   threadId?: string | null;
+  /** Execution-scoped Cancel target for the conversation path (plain user messages that
+   *  are no longer wrapped in a thread). When set, the Cancel handler resolves the running
+   *  execution via executionId instead of threadId. */
+  executionId?: string | null;
 }
 
-function buildActionElements({ channel, sessionName, isDm, includeCancel, threadId }: StatusBlocksTemplate & { includeCancel: boolean }): ActionElement[] {
+function buildActionElements({ channel, sessionName, isDm, includeCancel, threadId, executionId }: StatusBlocksTemplate & { includeCancel: boolean }): ActionElement[] {
   const elements: ActionElement[] = [];
   if (includeCancel) {
     elements.push({
       type: 'button',
       text: 'Cancel',
       actionId: 'status_cancel',
-      value: JSON.stringify({ channel, threadId: threadId ?? null }),
+      value: JSON.stringify({ channel, threadId: threadId ?? null, executionId: executionId ?? null }),
       style: 'danger',
     });
   }

@@ -160,7 +160,10 @@ async function validateThreadAddTarget(addAgentName: string, existingThread: any
     await adapter.postMessage(interactiveDest, { text: `${Icons.error} Unknown agent: \`${addAgentName}\`. Use \`!thread agents\` to see available agents.` }, threadAnchorId ? { threadId: threadAnchorId } : undefined);
     return null;
   }
-  const targetThread = existingThread || threadStore.findByChannel(channel).find((t: any) => t.status === 'completed' || t.status === 'waiting');
+  // Plain user conversations are no longer wrapped in a thread (templateName='default'), so they
+  // cannot be chained off. Exclude any legacy 'default' threads still present in the store — the
+  // user must start an explicit thread with `!thread <agent> <message>` to use `!thread add`.
+  const targetThread = existingThread || threadStore.findByChannel(channel).find((t: any) => (t.status === 'completed' || t.status === 'waiting') && t.templateName !== 'default');
   if (!targetThread) {
     await adapter.postMessage(interactiveDest, { text: `${Icons.error} No thread found. Start one first with \`!thread <agent> <message>\`.` }, threadAnchorId ? { threadId: threadAnchorId } : undefined);
     return null;

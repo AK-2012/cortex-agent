@@ -1,13 +1,12 @@
-// input:  mode-manager, agent-lifecycle, orch/channel-queue, orch/busy-tracker, orch/active-agents
-// output: AgentRunner — wraps executeDefaultAgent + launchDefaultAgent lifecycle [S8]
-// pos:    orch/ — sole default-agent execution path
+// input:  conversation-runner, agent-lifecycle, orch/channel-queue, orch/busy-tracker, orch/active-agents
+// output: AgentRunner — plain user-message path: session/status/ledger/callbacks + runConversation (no thread) [S8]
+// pos:    orch/ — sole plain user-message execution path
 // >>> If I am updated, update my header comment and the parent folder's CORTEX.md <<<
 
 import * as path from 'path';
 import type { Destination, PlatformAdapter, MessageRef, DownloadedFile, IncomingMessage, PlatformFileRef, OutputStream } from '@platform/index.js';
 import { resolveDestinationConduit } from '@platform/types.js';
 import type { AgentResult } from '@core/types/agent-types.js';
-import type { ThreadRunResult } from '@domain/threads/runner.js';
 import { conduitQueues, enqueue } from './conduit-queue.js';
 import { trackPendingTask } from './busy-tracker.js';
 import { getSessionAsync } from '@domain/sessions/session.js';
@@ -26,8 +25,8 @@ const log = createLogger('agent-runner');
 import { createToolTrace } from '@platform/index.js';
 import { setStreamingCallback, clearStreamingCallback, publishPlanSubmitted, publishAskUserRequested } from './routing/hook-bridge.js';
 import { maybeNotifyCodexLowUsage } from '@domain/costs/codex-usage-monitor.js';
-import { getAgent, createDefaultThread } from '@domain/threads/index.js';
-import { runThread } from '@domain/threads/runner.js';
+import { getAgent } from '@domain/threads/index.js';
+import { runConversation } from './conversation-runner.js';
 import { downloadFiles as downloadPlatformFiles } from './routing/file-handler.js';
 import { WORKSPACE_DIR } from '@core/utils.js';
 
@@ -113,54 +112,46 @@ export class AgentRunner {
     const messageTs = message.ref.messageId;
     await initTurnTracking(channel, sessionId, sessionName, messageTs, userMessage || '', statusMsg.messageId);
     const onMessagePosted = (ref: MessageRef) => void conversationLedger.addResponseTs(channel, messageTs, ref.messageId).catch((e) => log.error(e));
-    // 2. Resolve agent config and create default thread (BEFORE execution, replaces createAutoThread)
-    const agentConfig = resolveDefaultAgent(agentMessage, channel);
-    const thread = createDefaultThread(channel, {
-      agentName: agentConfig.defaultAgentName || 'main',
-      userMessage: agentMessage,
-      userMessageTs: messageTs,
-      platformThreadId: threadAnchorId || statusMsg.messageId,
-    });
-
-    // 3. Update status message with Cancel button now that we have thread.id
-    const blocksTemplateWithThread = { ...blocksTemplate, threadId: thread.id };
-    await adapter.updateMessage(statusMsg, {
-      text: statusText,
-      richBlocks: buildStatusActionBlocks(statusText, blocksTemplateWithThread),
-    }).catch(() => {});
-    initStatusBlocks(statusMsg, blocksTemplateWithThread);
-
-    // 4. Build agent callbacks (streaming, fallback, progress — passed to runThread)
+    // 2. Build agent callbacks (streaming, fallback, progress)
     const callbacks = buildAgentCallbacks(adapter, dest, statusMsg, threadAnchorId, startTime, sessionName, sessionId, onMessagePosted);
 
-    // 5. Build PI interactive-event callbacks (plan approval / ask-user-question routing)
-    const interactiveCallbacks = buildInteractiveCallbacks(channel, sessionId, thread.id);
+    // 3. Build PI interactive-event callbacks (plan approval / ask-user-question routing).
+    //    No threadId — plain user messages are no longer wrapped in a thread.
+    const interactiveCallbacks = buildInteractiveCallbacks(channel, sessionId, null);
 
-    // 6. Call runThread instead of runAgent
-    let result: AgentResult | undefined;
+    // 4. Run the conversation turn directly (no thread). The Cancel button is attached once the
+    //    execution record exists (execution-scoped cancel), via onExecutionStarted.
+    let capturedExecutionId: string | null = null;
     try {
-      const threadResult: ThreadRunResult = await runThread(thread.id, {
+      const convResult = await runConversation({
         adapter, channel,
-        destination: { type: 'interactive-reply', conduit: channel, sessionId: sessionId ?? '' },
-        threadAnchorId: threadAnchorId || statusMsg.messageId,
-        statusMsg, startTime,
+        userMessage: agentMessage,
         existingSessionId: sessionId,
         sessionName,
         files: downloadedFiles,
+        startTime,
+        trigger: 'user',
+        onExecutionStarted: async (executionId) => {
+          capturedExecutionId = executionId;
+          const blocksTemplateWithExec = { ...blocksTemplate, executionId };
+          await adapter.updateMessage(statusMsg, {
+            text: statusText,
+            richBlocks: buildStatusActionBlocks(statusText, blocksTemplateWithExec),
+          }).catch(() => {});
+          initStatusBlocks(statusMsg, blocksTemplateWithExec);
+        },
         onAssistantMessage: callbacks.onAssistantMsg,
         onProgress: callbacks.onProgress,
         onFallback: callbacks.onFallback,
         onToolUse: composeToolUse(callbacks.onToolUse, interactiveCallbacks.onToolUse),
         onPlanWritten: interactiveCallbacks.onPlanWritten,
         onAskUserQuestion: interactiveCallbacks.onAskUserQuestion,
-        isUserInitiated: true,
       });
-      result = threadResult.lastAgentResult;
       clearStreamingCallback(channel);
-      await maybeNotifyCodexLowUsage({ adapter, result });
+      await maybeNotifyCodexLowUsage({ adapter, result: convResult.result });
       await handleDefaultAgentResult({
-        result, channel, adapter, statusMsg, startTime, userMessage,
-        executionId: threadResult.executionId,
+        result: convResult.result, channel, adapter, statusMsg, startTime, userMessage,
+        executionId: convResult.executionId,
         sessionName, sessionId, threadAnchorId, messageTs, callbacks,
       });
     } catch (error) {
@@ -168,7 +159,7 @@ export class AgentRunner {
       await handleAgentError({
         error: error as { message: string; cancelled?: boolean },
         channel, adapter, statusMsg, startTime,
-        executionId: null,
+        executionId: capturedExecutionId,
         sessionName, sessionId, threadAnchorId, userMessageTs: messageTs,
       });
     }

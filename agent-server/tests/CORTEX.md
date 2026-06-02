@@ -54,6 +54,7 @@ Reference implementation: the `freshModuleWithCleanup(t)` helper in `tests/rate-
 | `task-mutations.test.ts` | Test | addTask/batchEdit/decompose |
 | `thread-manager.test.ts` | Test | resolveSystemVars/evaluateTransitions |
 | `thread-runner.test.ts` | Test | buildThreadSummary/initThreadContext |
+| `conversation-runner.test.ts` | Test | buildConversationPrompt golden-prompt fidelity vs legacy default-thread prompt |
 | `thread-abort.test.ts` | Test | detectAbortMarker/abortThread |
 | `thread-stages.test.ts` | Test | Thread step stage progression |
 | `thread-coder-review.e2e.test.ts` | Test | coder/reviewer two-stage e2e |

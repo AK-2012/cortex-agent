@@ -192,3 +192,37 @@ export function buildStepPrompt(threadId: string, agentConfig: AgentSlotConfig, 
 
   return prompt.trim();
 }
+
+/**
+ * Assemble the prompt for a single plain user-conversation turn — the thread-independent
+ * counterpart of buildStepPrompt. Plain user messages are NOT wrapped in a thread, so there
+ * is no thread record, artifact, previous step, or transition to consider.
+ *
+ * Fidelity with the legacy default-thread path (templateName='default', isUserInitiated=true):
+ *  - applies the default agent's promptTemplate (typically `{{input}}`) with empty thread vars;
+ *  - prepends the agent directive (resolved for {{systemVar}});
+ *  - prepends user context ONLY under the same gate the default thread used —
+ *    loadUserContext({templateName:'default'}) returns null unless CORTEX_INJECT_USER_CONTEXT=1
+ *    AND the template is a direct-* template, so 'default' yields null today (behavior preserved);
+ *  - NEVER injects THREAD_PROTOCOL_PREAMBLE (no artifact, no [ABORT] protocol for conversations).
+ */
+export function buildConversationPrompt(agentConfig: AgentSlotConfig, input: string): string {
+  const { template: templateStr } = pickStepTemplate(agentConfig, null);
+  const vars: Record<string, string> = {
+    input,
+    artifactPath: '',
+    previousOutput: '',
+    modifiedFiles: '',
+    modifiedFilesWithDiff: '',
+    ...getSystemVars(),
+  };
+  let prompt = applyPromptTemplate(templateStr, vars);
+
+  const prefixes: string[] = [];
+  const userCtx = loadUserContext({ templateName: 'default' });
+  if (userCtx) prefixes.push(userCtx);
+  if (agentConfig.directive) prefixes.push(resolveSystemVars(agentConfig.directive));
+  if (prefixes.length > 0) prompt = prefixes.join('\n\n') + '\n\n' + prompt;
+
+  return prompt.trim();
+}

@@ -242,15 +242,38 @@ async function handleStatusCancel(ctx: ActionContext): Promise<void> {
   if (!_adapter) return;
   let channel: string;
   let threadId: string | null;
+  let executionId: string | null;
   try {
     const parsed = JSON.parse(ctx.value);
     channel = parsed.channel;
     threadId = parsed.threadId ?? null;
+    executionId = parsed.executionId ?? null;
   } catch {
     return;
   }
+
+  // Conversation path: plain user messages are no longer wrapped in a thread, so the
+  // Cancel button carries an executionId. Resolve and kill via the execution index;
+  // there is no thread to cancel.
+  if (!threadId && executionId) {
+    const exec = runningExecutions.getByExecutionId(executionId);
+    if (!exec) {
+      log.warn('Cancel button clicked but no running execution for executionId', { channel, executionId });
+      return;
+    }
+    if (exec.sessionId) await setSessionAsync(exec.channel ?? channel, exec.sessionId, getActiveBackend()).catch(() => {});
+    runningExecutions.killByExecutionId(executionId);
+    conduitQueues.delete(exec.channel ?? channel);
+    if (ctx.messageRef) {
+      await _adapter.updateMessage(ctx.messageRef, {
+        text: `${Icons.stopped} Cancelled. Session preserved — next message will resume.`,
+      }).catch(() => {});
+    }
+    return;
+  }
+
   if (!threadId) {
-    log.warn('Cancel button clicked but threadId missing in value', { channel });
+    log.warn('Cancel button clicked but threadId/executionId missing in value', { channel });
     return;
   }
   const exec = runningExecutions.getByThreadId(threadId);

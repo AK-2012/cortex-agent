@@ -5,8 +5,32 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { writeStatus, sealStatus } from '../src/orchestration/status-helpers.js';
+import { writeStatus, sealStatus, buildStatusActionBlocks } from '../src/orchestration/status-helpers.js';
 import { MockAdapter } from '../src/platform/testing.js';
+import type { RichBlock, ActionElement } from '../src/platform/index.js';
+
+function cancelButtonValue(blocks: RichBlock[]): any {
+  const actions = blocks.find((b: any) => b.type === 'actions') as any;
+  const cancel = (actions?.elements as ActionElement[] | undefined)?.find((e: any) => e.actionId === 'status_cancel') as any;
+  return cancel ? JSON.parse(cancel.value) : null;
+}
+
+// --- Cancel button payload ---
+
+test('buildStatusActionBlocks: Cancel button carries executionId (conversation path)', () => {
+  const blocks = buildStatusActionBlocks('Processing', { channel: 'C1', sessionName: null, isDm: true, executionId: 'exec_abc' });
+  const value = cancelButtonValue(blocks);
+  assert.equal(value.channel, 'C1');
+  assert.equal(value.executionId, 'exec_abc');
+  assert.equal(value.threadId, null);
+});
+
+test('buildStatusActionBlocks: Cancel button carries threadId (thread path), executionId null', () => {
+  const blocks = buildStatusActionBlocks('Processing', { channel: 'C1', sessionName: null, isDm: false, threadId: 'thr_x' });
+  const value = cancelButtonValue(blocks);
+  assert.equal(value.threadId, 'thr_x');
+  assert.equal(value.executionId, null);
+});
 
 // --- Basic serialization ---
 

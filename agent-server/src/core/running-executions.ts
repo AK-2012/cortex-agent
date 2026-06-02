@@ -121,6 +121,22 @@ export class RunningExecutions {
   }
 
   /**
+   * Kill the execution for an executionId, remove it from all indices, and return true.
+   * Resolves through the byExecutionId secondary index. Used by the conversation path's
+   * Cancel button, which carries an executionId (no threadId, since plain user messages
+   * are no longer wrapped in a thread).
+   * Returns false if no entry has that executionId.
+   */
+  killByExecutionId(executionId: string): boolean {
+    const entry = this.byExecutionId.get(executionId);
+    if (!entry) return false;
+    entry.kill();
+    this._removeFromIndices(entry);
+    this.byKey.delete(entry.registryKey);
+    return true;
+  }
+
+  /**
    * Remove an execution by key without calling kill() or publishing events.
    * No-op if the key is not registered.
    */
