@@ -311,6 +311,99 @@ test('runMigrations - vector-clock: only runs versions newer than tracked', asyn
   assert.equal(compareCalVer(versions['config/thread-templates.json'], '2026.5.10') > 0, true);
 });
 
+// ── M2: profiles.json provider backfill ────────────────────────
+
+test('runMigrations - backfills pi provider from mode when missing', async () => {
+  const idx = _testIdx++;
+  const { dataDir, storeDir, configDir, defaultsDir } = setupDirs(idx);
+
+  await writeJson(path.join(configDir, 'profiles.json'), {
+    defaultProfile: 'plan',
+    profiles: {
+      plan: { model: 'opus', backend: 'claude', mode: 'plan' },          // non-pi: untouched
+      execute: { model: 'deepseek-v4-flash', backend: 'pi', mode: 'anthropic' }, // pi, no provider
+      noMode: { model: 'x', backend: 'pi' },                              // pi, no mode either
+    },
+  });
+
+  await runMigrations({ dataDir, defaultsDir, storeDir });
+
+  const m = await readJson(path.join(configDir, 'profiles.json')) as any;
+  assert.equal(m.profiles.plan.provider, undefined, 'claude profile gets no provider');
+  assert.equal(m.profiles.execute.provider, 'anthropic', 'provider := mode');
+  assert.equal(m.profiles.noMode.provider, 'anthropic', 'provider defaults to anthropic when no mode');
+
+  const versions = await readJson(path.join(storeDir, 'versions.json')) as any;
+  assert.ok(versions['config/profiles.json']);
+});
+
+test('runMigrations - does not overwrite an existing pi provider', async () => {
+  const idx = _testIdx++;
+  const { dataDir, storeDir, configDir, defaultsDir } = setupDirs(idx);
+
+  await writeJson(path.join(configDir, 'profiles.json'), {
+    defaultProfile: 'execute',
+    profiles: {
+      execute: { model: 'deepseek-v4-pro', backend: 'pi', mode: 'plan', provider: 'deepseek' },
+    },
+  });
+
+  await runMigrations({ dataDir, defaultsDir, storeDir });
+
+  const m = await readJson(path.join(configDir, 'profiles.json')) as any;
+  assert.equal(m.profiles.execute.provider, 'deepseek', 'existing provider preserved');
+});
+
+test('runMigrations - backfills pi provider in fallback entries (inherits backend+mode)', async () => {
+  const idx = _testIdx++;
+  const { dataDir, storeDir, configDir, defaultsDir } = setupDirs(idx);
+
+  await writeJson(path.join(configDir, 'profiles.json'), {
+    defaultProfile: 'p',
+    profiles: {
+      // Primary is pi; first fallback inherits pi backend + mode, second is explicit claude.
+      p: {
+        model: 'a', backend: 'pi', mode: 'anthropic',
+        fallback: [
+          { model: 'b' },                                  // inherits backend=pi, mode=anthropic
+          { model: 'c', backend: 'claude', mode: 'plan' }, // non-pi, untouched
+          { model: 'd', backend: 'pi', mode: 'openai' },   // explicit pi + own mode
+        ],
+      },
+    },
+  });
+
+  await runMigrations({ dataDir, defaultsDir, storeDir });
+
+  const m = await readJson(path.join(configDir, 'profiles.json')) as any;
+  assert.equal(m.profiles.p.provider, 'anthropic');
+  assert.equal(m.profiles.p.fallback[0].provider, 'anthropic', 'fallback inherits primary mode');
+  assert.equal(m.profiles.p.fallback[1].provider, undefined, 'claude fallback untouched');
+  assert.equal(m.profiles.p.fallback[2].provider, 'openai', 'explicit pi fallback uses own mode');
+});
+
+test('runMigrations - profiles.json migration is idempotent / no-op when already valid', async () => {
+  const idx = _testIdx++;
+  const { dataDir, storeDir, configDir, defaultsDir } = setupDirs(idx);
+
+  const valid = {
+    defaultProfile: 'execute',
+    profiles: {
+      execute: { model: 'deepseek-v4-flash', backend: 'pi', mode: 'anthropic', provider: 'anthropic' },
+      plan: { model: 'opus', backend: 'claude', mode: 'plan' },
+    },
+  };
+  await writeJson(path.join(configDir, 'profiles.json'), valid);
+
+  await runMigrations({ dataDir, defaultsDir, storeDir });
+  const first = await readJson(path.join(configDir, 'profiles.json'));
+  await runMigrations({ dataDir, defaultsDir, storeDir });
+  const second = await readJson(path.join(configDir, 'profiles.json'));
+
+  assert.deepEqual(first, valid);
+  assert.deepEqual(second, first);
+});
+
 test('runMigrations - no defaults file, still runs (migration function handles undefined)', async () => {
   const idx = _testIdx++;
   const { dataDir, storeDir, configDir, defaultsDir } = setupDirs(idx);

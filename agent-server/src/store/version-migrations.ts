@@ -86,6 +86,46 @@ const migrations: Migration[] = [
       return data;
     },
   },
+  // M2: Backfill `provider` on pi profiles that predate the gateway-routing split (6e50225f).
+  // That commit made `provider` REQUIRED for backend='pi' with no default — so any pre-upgrade
+  // profiles.json with a pi profile lacking `provider` now fails the whole-file validation in
+  // profile-manager (loadProfilesFile re-throws on ANY entry error → the entire config won't load
+  // → agent-server can't start). Pre-split, the PI `--provider` was sourced from the profile's
+  // `mode`, so `provider := mode` exactly reproduces the old behavior. Falls back to "anthropic"
+  // (the PI adapter's own default) when `mode` is also absent. Idempotent: entries that already
+  // declare `provider` are left untouched. Covers both primary entries and fallback[] entries,
+  // mirroring profile-manager's effective-backend/mode inheritance (fallback inherits the primary's
+  // backend and mode when its own are omitted).
+  {
+    filePath: 'config/profiles.json',
+    version: '2026.5.25',
+    migrate(data: unknown): unknown {
+      if (typeof data !== 'object' || data === null || Array.isArray(data)) return data;
+      const profiles = (data as Record<string, unknown>).profiles;
+      if (typeof profiles !== 'object' || profiles === null || Array.isArray(profiles)) return data;
+
+      const backfill = (entry: unknown, inheritedBackend: string, inheritedMode?: string): void => {
+        if (typeof entry !== 'object' || entry === null || Array.isArray(entry)) return;
+        const e = entry as Record<string, unknown>;
+        const backend = typeof e.backend === 'string' ? e.backend : inheritedBackend;
+        if (backend !== 'pi' || e.provider !== undefined) return;
+        const mode = typeof e.mode === 'string' ? e.mode : inheritedMode;
+        e.provider = mode && mode.length > 0 ? mode : 'anthropic';
+      };
+
+      for (const entry of Object.values(profiles as Record<string, unknown>)) {
+        backfill(entry, 'claude', undefined);
+        if (typeof entry !== 'object' || entry === null || Array.isArray(entry)) continue;
+        const e = entry as Record<string, unknown>;
+        const primaryBackend = typeof e.backend === 'string' ? e.backend : 'claude';
+        const primaryMode = typeof e.mode === 'string' ? e.mode : undefined;
+        if (Array.isArray(e.fallback)) {
+          for (const fb of e.fallback) backfill(fb, primaryBackend, primaryMode);
+        }
+      }
+      return data;
+    },
+  },
 ];
 
 // ── Versions file I/O ──────────────────────────────────────────
