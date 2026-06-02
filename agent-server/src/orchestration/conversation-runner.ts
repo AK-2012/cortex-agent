@@ -137,14 +137,25 @@ export async function runConversation(opts: RunConversationOptions): Promise<Con
 
   const result = await handle.promise;
 
-  // Rate-limited turns are not "completed" — finalize the execution record as failed to mirror
-  // the legacy default-thread path (recordStepOutcome). On the normal path handleAgentSuccess
-  // finalizes the record; here we only release the in-memory running-execution entry.
+  // Finalize the execution record here so this function is self-contained and serves both the
+  // interactive path (agent-runner) and the scheduler. completeExecution/failExecution are
+  // idempotent (execution-repo guards terminal status), so the interactive path's later
+  // handleAgentSuccess→finalizeLocalExecution call is a harmless no-op.
+  const durationS = (Date.now() - opts.startTime) / 1000;
   if (result?.rateLimited) {
-    const durationS = (Date.now() - opts.startTime) / 1000;
     executionRegistry.failExecution(execution.id, { durationS, error: 'Rate limited' });
+    // Release the running-execution entry as a failure so the bus event (agent.failed)
+    // matches the finalized record status, not agent.completed.
+    runningExecutions.fail(opts.channel, 'Rate limited');
+  } else {
+    executionRegistry.completeExecution(execution.id, {
+      costUsd: result?.total_cost_usd,
+      numTurns: result?.num_turns,
+      durationS,
+      finalOutput: result?.finalOutput || null,
+    });
+    runningExecutions.complete(opts.channel, result?.total_cost_usd ?? 0);
   }
-  runningExecutions.complete(opts.channel, result?.total_cost_usd ?? 0);
 
   return { result, executionId: execution.id };
 }
