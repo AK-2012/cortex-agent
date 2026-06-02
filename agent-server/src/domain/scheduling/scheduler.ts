@@ -169,7 +169,7 @@ interface RunnerParams {
   profileName: string;
   /** Where the fired task should land — passed through so scheduled-task.ts can pick its dispatch branch. */
   target?: ScheduleTask['target'];
-  /** What to do if the chosen target's session/thread no longer exists at fire time. */
+  /** What to do if the chosen target thread no longer exists at fire time. */
   fallback?: ScheduleTask['fallback'];
 }
 

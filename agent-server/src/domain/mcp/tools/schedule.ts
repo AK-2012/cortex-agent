@@ -1,9 +1,9 @@
 // input:  McpServer + scheduleRepo + Scheduler (for timing math) + cortex_context resolver
 // output: cortex_schedule_{add,list,get,remove,pause,resume} tool registrations
 // pos:    MCP entry that lets the running LLM CRUD scheduled tasks without shelling out
-//         to bin/schedule. Resolves __current__ shorthand (current-project/current-session/
-//         current-thread) against the live execution context at create time so the persisted
-//         record always shows real project/session/thread IDs.
+//         to bin/schedule. Resolves __current__ shorthand (current-project/current-thread)
+//         against the live execution context at create time so the persisted
+//         record always shows real project/thread IDs.
 // >>> If I am updated, update my header comment and the parent folder's CORTEX.md <<<
 
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';

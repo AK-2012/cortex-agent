@@ -36,7 +36,6 @@ Scheduled tasks allow Cortex to automatically execute messages at set times — 
 **Targets (where the fired task lands):**
 - `fresh` *(default)* — new isolated thread + new session (current behavior; safest for unrelated tasks)
 - `current-project` — spawn a fresh session in the project (default for project-addressed schedules)
-- `current-session` — reuse the current cortex-XXXX session (same conversation)
 - `current-thread` — continue the current thread (only valid while it's running/waiting)
 
 `current-*` shorthand resolves to concrete IDs at create time, so `cortex_schedule_list` always shows real IDs.
@@ -58,8 +57,8 @@ mcp__cortex__cortex_schedule_add({
   time?: '09:00',                            // for daily/weekly
   dayOfWeek?: 'mon' | 0-6,                   // for weekly
   delay?: '2h' | '90m',                      // for once
-  target?: 'fresh' | 'current-project' | 'current-session' | 'current-thread' | { kind, ... },
-  fallback?: 'fresh' | 'skip' | 'wait',      // when target session/thread is gone at fire time
+  target?: 'fresh' | 'current-project' | 'current-thread' | { kind, ... },
+  fallback?: 'fresh' | 'skip' | 'wait',      // when target thread is gone at fire time
   profile?: 'fast-worker',
   channel?: 'C123',                          // override; defaults to current context
 })
@@ -76,15 +75,15 @@ mcp__cortex__cortex_schedule_resume({ id })
 >
 > Call `mcp__cortex__cortex_schedule_add({ type: 'daily', time: '09:00', message: '/orient', target: 'current-project' })` — done. No need to call `cortex_context` first; the shorthand resolves automatically.
 
-> User: "Report training status in this conversation after 30 minutes"
+> User: "Report training status in this thread after 30 minutes"
 >
-> Call `mcp__cortex__cortex_schedule_add({ type: 'once', delay: '30m', message: 'Check training results on <machine> and report', target: 'current-session' })` — the schedule will resume the same Claude/Codex session, so prior context is intact.
+> Call `mcp__cortex__cortex_schedule_add({ type: 'once', delay: '30m', message: 'Check training results on <machine> and report', target: 'current-thread' })` — the schedule continues the current thread (valid while it is running/waiting), so prior context is intact.
 
 > User: "Run deep retrospective every Monday at 9 PM"
 >
 > Call `mcp__cortex__cortex_schedule_add({ type: 'weekly', dayOfWeek: 'mon', time: '21:00', message: '/deep-retrospective' })` — `target` defaults to `fresh`, which is the right choice for a standalone weekly job.
 
-If `current-session` / `current-thread` is requested but the context lacks the field, the tool throws — it does NOT silently fall back to fresh. Re-issue with `target: 'fresh'` if that's actually what you want.
+If `current-thread` is requested but the context lacks the field, the tool throws — it does NOT silently fall back to fresh. Re-issue with `target: 'fresh'` if that's actually what you want.
 
 ---
 

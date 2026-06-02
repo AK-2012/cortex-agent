@@ -46,7 +46,7 @@ export interface ScheduleTask {
   taskConfigHash?: string;
   /** Dispatch routing — defaults to { kind: 'fresh' } for legacy records. */
   target?: ScheduleTarget;
-  /** What to do when target session/thread no longer exists at fire time.
+  /** What to do when the target thread no longer exists at fire time.
    *  fresh: silently fall back to fresh-thread dispatch.
    *  skip:  record lastSkipped, post a Slack one-liner, do not run.
    *  wait:  reschedule short delay (max 3 retries), then fall back to fresh. */
