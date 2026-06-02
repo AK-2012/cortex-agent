@@ -11,6 +11,15 @@ import { DATA_DIR, CONFIG_DIR, HOOKS_DIR } from '../../core/utils.js';
 export const MAX_TIMEOUT = 30_000_000;
 export const IDLE_SESSION_TIMEOUT = 65 * 60 * 1000;
 export const TURN_IDLE_TIMEOUT = 60 * 60 * 1000;
+/** DR-0012: fast-fail window for a fresh turn. The jsonl file appears only after the first submit,
+ *  so the tail no longer blocks at spawn; this bounds the "claude never started" case to seconds
+ *  instead of the 60-min TURN_IDLE_TIMEOUT. Cleared on the first jsonl event of the turn. */
+export const JSONL_FIRST_EVENT_TIMEOUT = 30 * 1000;
+/** DR-0012: delay between pasting the prompt and sending Enter. Claude Code's Ink TUI uses
+ *  bracketed paste; an Enter sent immediately after paste-buffer is swallowed and the prompt is
+ *  never submitted. A short settle delay lets the paste register before the submit keystroke.
+ *  Verified empirically (2.1.160): 0ms → never submits; ~300ms+ → reliable. */
+export const PASTE_SUBMIT_DELAY_MS = 400;
 
 export const LOGS_DIR = path.join(DATA_DIR, 'logs', 'sessions');
 mkdirSync(LOGS_DIR, { recursive: true });

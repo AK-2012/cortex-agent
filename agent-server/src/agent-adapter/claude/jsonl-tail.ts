@@ -239,7 +239,8 @@ function extractQuestionsFromInput(input: any): QuestionSpec[] {
 export interface JsonlTailOptions {
   /** Read pre-existing content when start() is called. Default false (skip to end-of-file). */
   fromStart?: boolean;
-  /** Max time to wait for file to appear before start() rejects, in ms. Default 5000. */
+  /** @deprecated No longer used. start() is non-blocking and never rejects on a missing file —
+   *  the tail polls until the file appears. Kept for backward-compatible construction. */
   waitForFileMs?: number;
   /** Poll interval for file size changes, in ms. Default 200. fs.watch is not used because it's
    *  unreliable on some filesystems; polling is universal and the throughput here is low. */
@@ -282,15 +283,20 @@ export class JsonlTail extends EventEmitter {
   }
 
   async start(): Promise<void> {
-    const existedBeforeStart = fs.existsSync(this.filePath);
-    await this.waitForFile();
     if (this.stopped) return;
-    // Read from start when: explicitly requested OR file did not exist before start()
-    // (in the latter case, everything in it is "new" from our perspective).
+    // Non-blocking on a missing file. Current Claude Code creates the session transcript only
+    // AFTER the first message is submitted, so the tail must attach BEFORE the file exists
+    // (DR-0012 soak finding). We therefore do NOT wait for / require the file here — we begin
+    // polling immediately and readNewBytes() picks it up the moment Claude creates it.
+    const existedBeforeStart = fs.existsSync(this.filePath);
+    // Read from start when: explicitly requested OR file does not exist yet (in the latter case,
+    // everything that gets written is "new" from our perspective — i.e. the whole first turn).
     if (this.fromStart || !existedBeforeStart) {
       this.offset = 0;
-      this.readNewBytes();
+      this.readNewBytes(); // no-op while the file is absent — statSync is guarded
     } else {
+      // Resume: the file already holds prior turns; seek to EOF so we don't reprocess history
+      // (which would re-emit a stale turn_duration and prematurely complete the new turn).
       try {
         const st = fs.statSync(this.filePath);
         this.offset = st.size;
@@ -307,17 +313,6 @@ export class JsonlTail extends EventEmitter {
       clearTimeout(this.pollTimer);
       this.pollTimer = null;
     }
-  }
-
-  private async waitForFile(): Promise<void> {
-    const deadline = Date.now() + this.waitForFileMs;
-    while (Date.now() < deadline) {
-      if (this.stopped) return;
-      if (fs.existsSync(this.filePath)) return;
-      await new Promise(r => setTimeout(r, 50));
-    }
-    if (fs.existsSync(this.filePath)) return;
-    throw new Error(`jsonl-tail: file did not appear within ${this.waitForFileMs}ms: ${this.filePath}`);
   }
 
   private schedulePoll(): void {

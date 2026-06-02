@@ -435,30 +435,41 @@ test('JsonlTail stop() halts further events', async (t) => {
   assert.equal(events.length, 1, 'no events after stop()');
 });
 
-test('JsonlTail waits up to waitForFileMs when file does not exist yet', async (t) => {
+test('JsonlTail start() resolves immediately when file is absent, then backfills on appearance', async (t) => {
+  // New contract (post-2.1.141 Claude): the jsonl file does not exist until the first message is
+  // submitted, so the tail must attach BEFORE the file exists. start() must not block on / reject
+  // for a missing file — it begins polling and reads from offset 0 once the file appears.
   const p = makeTempPath();
   t.after(() => { try { fs.unlinkSync(p); } catch {} });
 
   const events: any[] = [];
-  const tail = new JsonlTail(p, { waitForFileMs: 2000 });
+  const tail = new JsonlTail(p);
   t.after(async () => await tail.stop());
   tail.on('event', e => events.push(e));
-  const startPromise = tail.start();
 
-  // File appears 300ms later
+  // start() must resolve promptly even though the file does not exist yet.
+  const t0 = Date.now();
+  await tail.start();
+  assert.ok(Date.now() - t0 < 200, 'start() must not block waiting for the file');
+  assert.equal(events.length, 0, 'nothing read while file is absent');
+
+  // File appears later (mirrors Claude creating the transcript after the first submit).
   setTimeout(() => {
     fs.writeFileSync(p, JSON.stringify({ type: 'late' }) + '\n');
   }, 300);
 
-  await startPromise;
-  await new Promise(r => setTimeout(r, 400));
+  // Poll picks it up; give a generous margin over the 200ms poll interval.
+  await new Promise(r => setTimeout(r, 600));
   assert.equal(events.length, 1);
   assert.equal(events[0].type, 'late');
 });
 
-test('JsonlTail start() rejects if file never appears within waitForFileMs', async (t) => {
+test('JsonlTail start() does not reject when file never appears (keeps polling)', async (t) => {
   const p = makeTempPath();
-  const tail = new JsonlTail(p, { waitForFileMs: 200 });
+  const tail = new JsonlTail(p);
   t.after(async () => await tail.stop());
-  await assert.rejects(() => tail.start(), /file did not appear/i);
+  // Must resolve without throwing even though the file is never created.
+  await tail.start();
+  await new Promise(r => setTimeout(r, 250));
+  // No crash, no events — the tail simply waits.
 });

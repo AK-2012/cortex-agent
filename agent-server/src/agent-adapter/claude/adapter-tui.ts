@@ -4,7 +4,6 @@
 // >>> If I am updated, update my header comment and the parent folder's CORTEX.md <<<
 
 import { EventEmitter } from 'node:events';
-import * as fs from 'fs';
 import * as path from 'path';
 import { createLogger } from '@core/log.js';
 import { TmuxControl } from './tmux-control.js';
@@ -16,6 +15,8 @@ import {
   IDLE_SESSION_TIMEOUT,
   MAX_TIMEOUT,
   TURN_IDLE_TIMEOUT,
+  JSONL_FIRST_EVENT_TIMEOUT,
+  PASTE_SUBMIT_DELAY_MS,
 } from './defaults.js';
 import { buildSpawnArgs, buildClaudeEnv, type CortexAgentContext } from './spawn-args.js';
 import { buildPrompt, mergeSubstantialOutput } from './event-parser.js';
@@ -39,8 +40,15 @@ export interface TuiSessionDeps {
   tmux: TmuxControl;
   /** Factory creating a tail for the given jsonl path. Defaults to real JsonlTail in production. */
   tailFactory: (jsonlPath: string) => JsonlTailLike;
-  /** Max wait for jsonl file to appear after spawning. Tests pass 0 (skip wait). Default 5000ms. */
+  /** @deprecated No longer used — the jsonl file appears only after the first submit, so there is
+   *  nothing to wait for at spawn. Kept so existing callers/tests construct without changes. */
   waitForJsonlMs?: number;
+  /** Fast-fail window (ms) for a fresh turn producing no jsonl output. Tests override with a small
+   *  value. Defaults to JSONL_FIRST_EVENT_TIMEOUT. */
+  firstEventTimeoutMs?: number;
+  /** Delay (ms) between pasting the prompt and sending Enter. Tests set 0 to submit synchronously.
+   *  Defaults to PASTE_SUBMIT_DELAY_MS (needed so Claude's Ink TUI registers the paste). */
+  pasteSubmitDelayMs?: number;
 }
 
 export interface ClaudeTuiSessionConfig {
@@ -132,7 +140,8 @@ export class ClaudeTuiSession {
 
   private readonly tmux: TmuxControl;
   private readonly tailFactory: (p: string) => JsonlTailLike;
-  private readonly waitForJsonlMs: number;
+  private readonly firstEventTimeoutMs: number;
+  private readonly pasteSubmitDelayMs: number;
   private readonly config: ClaudeTuiSessionConfig;
 
   private tail: JsonlTailLike | null = null;
@@ -144,6 +153,7 @@ export class ClaudeTuiSession {
   private idleTimer: NodeJS.Timeout | null = null;
   private maxTimer: NodeJS.Timeout | null = null;
   private turnIdleTimer: NodeJS.Timeout | null = null;
+  private firstEventTimer: NodeJS.Timeout | null = null;
 
   constructor(config: ClaudeTuiSessionConfig) {
     this.config = config;
@@ -154,7 +164,8 @@ export class ClaudeTuiSession {
     this.needsResume = config.needsResume;
     this.tmux = config.deps.tmux;
     this.tailFactory = config.deps.tailFactory;
-    this.waitForJsonlMs = config.deps.waitForJsonlMs ?? 5000;
+    this.firstEventTimeoutMs = config.deps.firstEventTimeoutMs ?? JSONL_FIRST_EVENT_TIMEOUT;
+    this.pasteSubmitDelayMs = config.deps.pasteSubmitDelayMs ?? PASTE_SUBMIT_DELAY_MS;
 
     this.tmuxName = `${TUI_TMUX_NAME_PREFIX}${this.sessionId}`;
     this.jsonlPath = computeJsonlPath(this.cwd, this.sessionId);
@@ -204,6 +215,16 @@ export class ClaudeTuiSession {
       if (typeof v === 'string') stringEnv[k] = v;
     }
 
+    // A tmux session under our name may already exist while we are NOT `alive` — e.g. a prior
+    // spawn created it but then failed (the first tail.start threw), or it was orphaned. Killing
+    // it first (idempotent) keeps the next newSession from crashing with "duplicate session" and
+    // permanently wedging the pool entry. The top-of-method guard already returned early for the
+    // healthy alive+hasSession case, so reaching here with a live session means it is stale.
+    if (this.tmux.hasSession(this.tmuxName)) {
+      log.warn(`ensureSpawned: stale tmux session ${this.tmuxName} present while not alive — killing before respawn`);
+      this.tmux.killSession(this.tmuxName);
+    }
+
     log.info(`Spawning TUI session ${this.tmuxName} (${this.needsResume ? 'resume' : 'new'})`);
     this.tmux.newSession({
       name: this.tmuxName,
@@ -216,7 +237,10 @@ export class ClaudeTuiSession {
     // This covers the "tmux died externally between turns" case (DR-0012 §3.6 recovery path).
     this.needsResume = true;
 
-    await this.waitForJsonl();
+    // NOTE: we do NOT wait for the jsonl file here. Current Claude Code creates the transcript only
+    // after the first message is submitted (DR-0012 soak finding), so the file cannot appear before
+    // the paste in sendMessage. The tail attaches now (non-blocking) and backfills the first turn
+    // once Claude writes it; a missing-output failure is bounded by the first-event watchdog.
     // Tear down any pre-existing tail before reassigning. This path is reached during
     // recovery from external tmux death (alive flag was true but hasSession returned false),
     // where the previous tail's poll timer would otherwise keep firing forever and
@@ -242,16 +266,6 @@ export class ClaudeTuiSession {
     // Long-lived timers must not keep the event loop alive (so node:test cleanly exits when
     // tests don't explicitly kill every session). Cleared on close/kill regardless.
     if (typeof this.maxTimer.unref === 'function') this.maxTimer.unref();
-  }
-
-  private async waitForJsonl(): Promise<void> {
-    if (this.waitForJsonlMs <= 0) return;
-    const deadline = Date.now() + this.waitForJsonlMs;
-    while (Date.now() < deadline) {
-      if (fs.existsSync(this.jsonlPath)) return;
-      await new Promise(r => setTimeout(r, 50));
-    }
-    // Best-effort: jsonl may appear after first user message; do not throw here.
   }
 
   // -----------------------------------------------------------------------------
@@ -283,10 +297,16 @@ export class ClaudeTuiSession {
       };
     });
 
-    // Paste prompt + Enter
+    // Paste prompt, let the Ink TUI register the bracketed paste, THEN submit with Enter.
+    // Enter sent immediately after paste-buffer is swallowed and the prompt never submits
+    // (DR-0012 soak finding on Claude 2.1.160) — hence the settle delay.
     this.tmux.pasteText(this.tmuxName, prompt);
+    if (this.pasteSubmitDelayMs > 0) {
+      await new Promise(r => setTimeout(r, this.pasteSubmitDelayMs));
+    }
     this.tmux.sendKeys(this.tmuxName, 'Enter');
     this.startTurnIdleTimer();
+    this.armFirstEventWatchdog();
 
     return turnPromise;
   }
@@ -312,6 +332,7 @@ export class ClaudeTuiSession {
     }
     this.currentTurn = null;
     if (this.turnIdleTimer) { clearTimeout(this.turnIdleTimer); this.turnIdleTimer = null; }
+    this.clearFirstEventWatchdog();
     turn.reject(new CancelledError());
   }
 
@@ -320,6 +341,9 @@ export class ClaudeTuiSession {
   // -----------------------------------------------------------------------------
 
   private handleRawEvent(raw: any): void {
+    // First jsonl line of the turn proves Claude started producing output — disarm the fast-fail
+    // watchdog; from here the per-event turnIdleTimer governs stalls.
+    this.clearFirstEventWatchdog();
     this.resetIdleTimer();
     this.bumpTurnIdleTimer();
     const events = this.normalizer.consume(raw);
@@ -393,6 +417,7 @@ export class ClaudeTuiSession {
   private completeTurn(turn: PendingTurn): void {
     if (this.currentTurn !== turn) return;
     if (this.turnIdleTimer) { clearTimeout(this.turnIdleTimer); this.turnIdleTimer = null; }
+    this.clearFirstEventWatchdog();
     this.currentTurn = null;
     // Note: needsResume is set to true in ensureSpawned() after first spawn — that flag stays
     // true for the rest of this ClaudeTuiSession's lifetime so recovery from tmux death uses
@@ -441,6 +466,33 @@ export class ClaudeTuiSession {
     this.startTurnIdleTimer();
   }
 
+  /**
+   * One-shot fast-fail watchdog for the window between submitting a prompt and the first jsonl
+   * event. Replaces the old 5s file-appear wait that used to fail fast at spawn — now that the
+   * tail is non-blocking, a Claude that never starts would otherwise hang until TURN_IDLE_TIMEOUT
+   * (60 min). On fire: reject the pending turn with a descriptive error and kill the session.
+   * Disarmed by {@link clearFirstEventWatchdog} on the first jsonl event of the turn.
+   */
+  private armFirstEventWatchdog(): void {
+    this.clearFirstEventWatchdog();
+    this.firstEventTimer = setTimeout(() => {
+      const turn = this.currentTurn;
+      if (!turn) return;
+      log.warn(`TUI session ${this.sessionId.substring(0, 8)} produced no jsonl output within ${this.firstEventTimeoutMs}ms of submit — killing`);
+      // Detach the turn before kill() so it surfaces this descriptive error rather than kill()'s
+      // generic CancelledError (which the adapter treats as a silent user cancel).
+      this.currentTurn = null;
+      if (this.turnIdleTimer) { clearTimeout(this.turnIdleTimer); this.turnIdleTimer = null; }
+      turn.reject(new Error(`claude produced no jsonl output within ${this.firstEventTimeoutMs}ms of submit (session may have failed to start)`));
+      this.kill();
+    }, this.firstEventTimeoutMs);
+    if (typeof this.firstEventTimer.unref === 'function') this.firstEventTimer.unref();
+  }
+
+  private clearFirstEventWatchdog(): void {
+    if (this.firstEventTimer) { clearTimeout(this.firstEventTimer); this.firstEventTimer = null; }
+  }
+
   // -----------------------------------------------------------------------------
   //  Shutdown
   // -----------------------------------------------------------------------------
@@ -449,6 +501,7 @@ export class ClaudeTuiSession {
     if (this.idleTimer) clearTimeout(this.idleTimer);
     if (this.maxTimer) clearTimeout(this.maxTimer);
     if (this.turnIdleTimer) clearTimeout(this.turnIdleTimer);
+    this.clearFirstEventWatchdog();
     this.idleTimer = this.maxTimer = this.turnIdleTimer = null;
     this.alive = false;
     if (this.tail) {
@@ -467,6 +520,7 @@ export class ClaudeTuiSession {
     if (this.idleTimer) clearTimeout(this.idleTimer);
     if (this.maxTimer) clearTimeout(this.maxTimer);
     if (this.turnIdleTimer) clearTimeout(this.turnIdleTimer);
+    this.clearFirstEventWatchdog();
     this.idleTimer = this.maxTimer = this.turnIdleTimer = null;
     const wasAlive = this.alive;
     this.alive = false;

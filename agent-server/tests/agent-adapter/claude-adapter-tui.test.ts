@@ -65,6 +65,7 @@ function makeDeps(): {
       return t as any;
     },
     waitForJsonlMs: 0, // skip the file-wait poll in tests
+    pasteSubmitDelayMs: 0, // submit synchronously in tests (no Ink TUI to settle)
   };
   return { deps, tmuxCalls, tails };
 }
@@ -144,6 +145,34 @@ test('sendMessage pastes the prompt text and submits with Enter', async (t) => {
   assert.ok(hasLoadBuffer, 'load-buffer (write tmpfile -> tmux buffer) must run');
   assert.ok(hasPasteBuffer, 'paste-buffer must run');
   assert.ok(hasEnterKey, 'Enter must be sent to submit the prompt');
+
+  tails[0].finishTurn();
+  await turnPromise;
+});
+
+test('sendMessage delays Enter after paste so the Ink TUI registers the bracketed paste', async (t) => {
+  // Regression: an Enter sent immediately after paste-buffer is swallowed by Claude's Ink TUI and
+  // the prompt never submits (no jsonl is ever written). A settle delay between paste and Enter is
+  // required. Here we assert Enter is NOT sent within the delay window, then IS after it elapses.
+  const { exec, calls } = makeRecordingExec();
+  const tails: MockTail[] = [];
+  const deps: TuiSessionDeps = {
+    tmux: new TmuxControl(exec),
+    tailFactory: (path: string) => { const tl = new MockTail(path); tails.push(tl); return tl as any; },
+    waitForJsonlMs: 0,
+    pasteSubmitDelayMs: 80,
+  };
+  const sess = makeSession(deps);
+  t.after(() => sess.kill());
+
+  const turnPromise = sess.sendMessage('hi', {});
+  await new Promise(r => setImmediate(r));
+  const enterCount = () => calls.filter(c => c.args[0] === 'send-keys' && c.args.includes('Enter')).length;
+  assert.ok(calls.some(c => c.args[0] === 'paste-buffer'), 'paste-buffer must have run');
+  assert.equal(enterCount(), 0, 'Enter must NOT be sent during the paste-settle delay');
+
+  await new Promise(r => setTimeout(r, 140));
+  assert.equal(enterCount(), 1, 'Enter must be sent after the paste-settle delay elapses');
 
   tails[0].finishTurn();
   await turnPromise;
@@ -529,6 +558,98 @@ test('jsonl path encodes BOTH slashes AND dots in cwd (regression: DATA_DIR /hom
 
   tails[0].finishTurn();
   await p;
+});
+
+test('first-turn tail.start() failure does not wedge the session — next sendMessage kills the orphan tmux session and respawns', async (t) => {
+  // Regression for the "duplicate session" crash: if the first ensureSpawned() throws AFTER
+  // tmux new-session already created the session (e.g. tail.start() rejected), `alive` stays false
+  // but the tmux session is live. The next sendMessage must kill that orphan before new-session,
+  // otherwise tmux fails with "duplicate session" and the session is permanently wedged.
+  const { exec, calls: tmuxCalls } = makeRecordingExec();
+  const tails: MockTail[] = [];
+  let startCount = 0;
+  const deps: TuiSessionDeps = {
+    tmux: new TmuxControl(exec),
+    tailFactory: (path: string) => {
+      const tail = new MockTail(path);
+      // Make ONLY the first tail's start() reject (simulates jsonl never appearing on turn 1).
+      const idx = startCount;
+      tail.start = async () => {
+        startCount++;
+        if (idx === 0) throw new Error('jsonl-tail: simulated first-turn start failure');
+        tail.started = true; tail.startCalls++;
+      };
+      tails.push(tail);
+      return tail as any;
+    },
+    waitForJsonlMs: 0,
+    pasteSubmitDelayMs: 0,
+  };
+  const sess = makeSession(deps);
+  t.after(() => sess.kill());
+
+  // Turn 1: ensureSpawned throws because the (first) tail.start rejects.
+  await assert.rejects(sess.sendMessage('q1', {}), /simulated first-turn start failure/);
+  const newSessAfterT1 = tmuxCalls.filter(c => c.args[0] === 'new-session');
+  assert.equal(newSessAfterT1.length, 1, 'turn 1 created the tmux session before failing');
+
+  // Turn 2: must kill the orphan (hasSession true, alive false) then new-session again, and resolve.
+  const p2 = sess.sendMessage('q2', {});
+  await new Promise(r => setImmediate(r));
+  const newSessCalls = tmuxCalls.filter(c => c.args[0] === 'new-session');
+  assert.equal(newSessCalls.length, 2, 'turn 2 must respawn after the wedged first turn');
+  const killIdx = tmuxCalls.findIndex(c => c.args[0] === 'kill-session');
+  const secondNewIdx = tmuxCalls.map(c => c.args[0]).lastIndexOf('new-session');
+  assert.ok(killIdx !== -1 && killIdx < secondNewIdx, 'orphan tmux session must be killed before the second new-session');
+  assert.ok(newSessCalls[1].args.includes('--resume'), 'respawn after first-spawn must use --resume (jsonl persists)');
+
+  tails[tails.length - 1].finishTurn();
+  await p2;
+});
+
+test('first-event watchdog rejects the turn when no jsonl output arrives within the timeout', async (t) => {
+  const { exec } = makeRecordingExec();
+  const tails: MockTail[] = [];
+  const deps: TuiSessionDeps = {
+    tmux: new TmuxControl(exec),
+    tailFactory: (path: string) => { const tl = new MockTail(path); tails.push(tl); return tl as any; },
+    waitForJsonlMs: 0,
+    pasteSubmitDelayMs: 0,
+    firstEventTimeoutMs: 60, // tiny fast-fail window for the test
+  };
+  const sess = makeSession(deps);
+  t.after(() => sess.kill());
+
+  // Spawn + paste happen, but we never push any jsonl event → watchdog must fire.
+  // The watchdog timer is unref()'d, so hold the loop open with a normal timer while it fires.
+  const turnPromise = sess.sendMessage('hi', {});
+  let rejection: Error | null = null;
+  turnPromise.catch((e) => { rejection = e; });
+  await new Promise(r => setTimeout(r, 150));
+  assert.ok(rejection, 'turn must reject when no jsonl output arrives');
+  assert.match((rejection as unknown as Error).message, /no jsonl output/i);
+  // Session was killed by the watchdog.
+  assert.equal(sess.isAlive(), false);
+});
+
+test('first-event watchdog is disarmed once the first jsonl event arrives', async (t) => {
+  const { deps, tails } = makeDeps();
+  (deps as any).firstEventTimeoutMs = 80;
+  const sess = makeSession(deps);
+  t.after(() => sess.kill());
+
+  const turnPromise = sess.sendMessage('hi', {});
+  await new Promise(r => setImmediate(r));
+  // First event arrives before the 80ms watchdog → it must NOT fire.
+  tails[0].push({
+    type: 'assistant',
+    message: { id: 'm1', model: 'claude-sonnet-4-5-x', content: [{ type: 'text', text: 'ok' }], usage: { input_tokens: 1, output_tokens: 1 } },
+  });
+  await new Promise(r => setTimeout(r, 120)); // exceed the watchdog window
+  assert.equal(sess.isAlive(), true, 'watchdog must not kill after first event');
+  tails[0].finishTurn();
+  const result = await turnPromise;
+  assert.equal(result.finalOutput, 'ok');
 });
 
 test('respawn after external tmux death stops the previous jsonl tail (no double-emit leak)', async (t) => {
