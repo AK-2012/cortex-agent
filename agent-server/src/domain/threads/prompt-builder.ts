@@ -145,7 +145,7 @@ function applyPromptTemplate(templateStr: string, vars: Record<string, string>):
   return withBlocks.replace(/\{\{(\w+)\}\}/g, (_, key) => vars[key] || '');
 }
 
-export function buildStepPrompt(threadId: string, agentConfig: AgentSlotConfig, stage: string | null = null, isUserInitiated?: boolean): string {
+export function buildStepPrompt(threadId: string, agentConfig: AgentSlotConfig, stage: string | null = null): string {
   const thread = threadStore.get(threadId);
   if (!thread) return '';
   const { template: templateStr, continuesSession } = pickStepTemplate(agentConfig, stage);
@@ -167,7 +167,7 @@ export function buildStepPrompt(threadId: string, agentConfig: AgentSlotConfig, 
     const userCtx = loadUserContext(thread);
     if (userCtx) prefixes.push(userCtx);
     if (agentConfig.directive) prefixes.push(resolveSystemVars(agentConfig.directive));
-    if (thread.artifactPath && !isUserInitiated) prefixes.push(THREAD_PROTOCOL_PREAMBLE);
+    if (thread.artifactPath) prefixes.push(THREAD_PROTOCOL_PREAMBLE);
     if (prefixes.length > 0) prompt = prefixes.join('\n\n') + '\n\n' + prompt;
   }
 

@@ -6,9 +6,6 @@ import test, { before, after } from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
-  createDefaultThread,
-  isDefaultThread,
-  listAgents,
   loadConfig,
   parseTarget,
   resolveStageName,
@@ -98,38 +95,3 @@ test('THREAD_PROTOCOL_PREAMBLE is a non-empty string with [Cortex Thread Protoco
   assert.ok(THREAD_PROTOCOL_PREAMBLE.includes('[Cortex Thread Protocol]'));
 });
 
-// --- createDefaultThread + isDefaultThread ---
-
-test('createDefaultThread creates thread with templateName=default and workspace', () => {
-  const anyAgent = listAgents()[0];
-  const thread = createDefaultThread(`C-def-test-${Math.random().toString(36).slice(2, 8)}`, {
-    agentName: anyAgent.name,
-    userMessage: 'test input',
-    userMessageTs: 'ts',
-  });
-  createdThreadIds.add(thread.id);
-  assert.equal(thread.templateName, 'default');
-  assert.ok(thread.workspacePath.length > 0, 'should have workspace');
-  assert.ok(thread.artifactPath.length > 0, 'should have artifact path');
-});
-
-test('createDefaultThread thread is detected as default by isDefaultThread', () => {
-  const anyAgent = listAgents()[0];
-  const thread = createDefaultThread(`C-def-check-${Math.random().toString(36).slice(2, 8)}`, {
-    agentName: anyAgent.name,
-    userMessage: 'test',
-    userMessageTs: 'ts',
-  });
-  createdThreadIds.add(thread.id);
-  assert.equal(isDefaultThread(thread.id), true);
-});
-
-test('createDefaultThread throws for unknown agent', () => {
-  assert.throws(() => {
-    createDefaultThread('C-err', {
-      agentName: 'non-existent-agent-12345',
-      userMessage: 'test',
-      userMessageTs: 'ts',
-    });
-  }, /Unknown agent/);
-});

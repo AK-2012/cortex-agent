@@ -7,22 +7,18 @@
 
 import type { ScheduleTarget, ScheduleTask } from '@store/schedule-repo.js';
 import type { ThreadRecord } from '@core/types/thread-types.js';
-import type { Session } from '@store/session-registry-repo.js';
 
 /** What scheduled-task.ts should do at fire time. Each kind maps to one runtime branch:
- *  - fresh / default-thread → createDefaultThread + runThreadExec (default-path)
+ *  - fresh → createThread('scheduler') + runThreadExec (fresh scheduler session)
  *  - continue-thread → continueThread (resumes the existing thread's slot session)
  *  - skip → record lastSkipped, post a one-line Slack note, do not run.
  */
 export type DispatchPlan =
   | { kind: 'fresh'; channel: string }
-  | { kind: 'default-thread'; channel: string; existingSessionId: string | null }
   | { kind: 'continue-thread'; channel: string; threadId: string }
   | { kind: 'skip'; reason: string };
 
 export interface DispatchLookups {
-  /** Look up a cortex-XXXX session record. Null if it's been GC'd or never registered. */
-  lookupSession(sessionName: string): Promise<Session | null>;
   /** Look up a thread record by id. Null if missing. */
   getThread(threadId: string): ThreadRecord | null;
 }
@@ -54,14 +50,6 @@ export async function planScheduledDispatch(input: DispatchPlanInput): Promise<D
     // Always spawn a fresh session in the project channel.
     // The scheduler resolves projectId → channel before calling runScheduledTask.
     return { kind: 'fresh', channel: input.fallbackChannel };
-  }
-
-  if (target.kind === 'session') {
-    const record = await input.lookups.lookupSession(target.sessionName);
-    if (!record) {
-      return applyFallback(input, `session ${target.sessionName} no longer exists`);
-    }
-    return { kind: 'default-thread', channel: record.channel, existingSessionId: record.sessionId };
   }
 
   if (target.kind === 'thread') {

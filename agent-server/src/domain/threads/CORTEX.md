@@ -8,8 +8,8 @@ External callers should import from index.ts, not reference sub-files directly.
 | `utils.ts` | utility | isDefaultThread / isAdHocThread / getSessionKey / parseTarget / resolveStageName |
 | `artifact-io.ts` | I/O | readArtifact / cleanupWorkspace / getModifiedFilesFromSession / getSessionFileChanges / renderModifiedFilesWithDiff / FileChange |
 | `template-loader.ts` | config | loadConfig / startConfigWatcher / stopConfigWatcher / getTemplate / getAgent / listTemplates / listTemplateNames / listAgents / resolveFileRef |
-| `prompt-builder.ts` | build | buildStepPrompt / resolveSystemVars / resolveAgentSlotConfig / resolveTemplateAgents / formatEndpoint / pickStepTemplate / THREAD_PROTOCOL_PREAMBLE |
-| `state-machine.ts` | state machine | createThread / createAutoThreadRecord / createDefaultThread / addAgentToThread / resolveNextStep / evaluateTransitions / recordStepResult / completeThread / failThread / cancelThread / abortThread / detectAbortMarker |
+| `prompt-builder.ts` | build | buildStepPrompt / buildConversationPrompt / resolveSystemVars / resolveAgentSlotConfig / resolveTemplateAgents / formatEndpoint / pickStepTemplate / THREAD_PROTOCOL_PREAMBLE |
+| `state-machine.ts` | state machine | createThread / addAgentToThread / resolveNextStep / evaluateTransitions / recordStepResult / completeThread / failThread / cancelThread / abortThread / detectAbortMarker |
 | `runner.ts` | runtime | runThread / continueThread / buildThreadSummary — thread execution engine, registers handle via runningExecutions |
 | `hook-runner.ts` | hook | executeLifecycleHook — lifecycle hook script executor + hook agent runner |
 | `index.ts` | entry | barrel re-export, the only import point for all external callers |

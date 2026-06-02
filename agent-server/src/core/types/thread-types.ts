@@ -297,15 +297,8 @@ export interface RunThreadOptions {
   threadAnchorId: string | null;
   statusMsg: MessageRef | null;
   startTime: number;
-  existingSessionId: string | null;
-  /** Pre-resolved session name from the caller (e.g. agent-runner).
-   *  buildStepConfig reuses it for default threads instead of generating a new name. */
-  sessionName?: string | null;
-  onAssistantMessage?: ((text: string) => void) | null;
   onProgress?: ((progress: any) => void) | null;
-  onFallback?: any;
   onToolUse?: ((name: string, input: any) => void) | null;
-  isUserInitiated?: boolean;
   files?: any[];
   /** Called by the facade event loop when a plan_written NormalizedEvent fires (PI backend: during turn, not after). */
   onPlanWritten?: ((event: { path: string; content: string; toolUseId: string }) => void) | null;

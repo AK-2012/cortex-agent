@@ -1,6 +1,6 @@
 // Thread lifecycle state machine.
 // input:  thread-store, template-loader, prompt-builder, utils, artifact-io
-// output: createThread / createAutoThreadRecord / createDefaultThread / addAgentToThread /
+// output: createThread / addAgentToThread /
 //         resolveNextStep / evaluateTransitions / recordStepResult / completeThread /
 //         failThread / cancelThread / abortThread / detectAbortMarker
 
@@ -136,72 +136,6 @@ export function createThread(channel: string, options: {
   threadStore.set(thread);
   const mode = isTemplate ? `template=${options.templateName}` : `agent=${options.agentName}`;
   log.info(`Created thread ${id} (${mode}, workspace=${workspacePath})`);
-  return thread;
-}
-
-/** Create a lightweight completed thread record (no filesystem workspace).
- *  Used to track single-agent path executions so !thread add can chain off them. */
-export function createAutoThreadRecord(channel: string, options: {
-  agentName: string;
-  userMessage: string;
-  userMessageTs: string;
-  platformThreadId?: string | null;
-  projectId?: string;
-}): ThreadRecord {
-  const agentConfig = resolveAgentSlotConfigByName(options.agentName);
-  if (!agentConfig) throw new Error(`Unknown agent: ${options.agentName}`);
-  const id = threadStore.generateId();
-
-  const thread = makeThreadRecord({
-    id, channel,
-    projectId: options.projectId,
-    templateName: null,
-    platformThreadId: options.platformThreadId || null,
-    userMessage: options.userMessage,
-    userMessageTs: options.userMessageTs,
-    workspacePath: '', artifactPath: '',
-    agents: { [agentConfig.slotId]: newAgentSlot(agentConfig) },
-    activeAgent: agentConfig.slotId,
-    activeStage: resolveStageName(agentConfig, null),
-    metadata: null,
-  });
-  threadStore.set(thread);
-  log.info(`Created auto thread record ${id} (agent=${options.agentName})`);
-  return thread;
-}
-
-/** Create a thread record that uses the 'default' template (single-step, single-agent with workspace).
- *  Used by the agent-runner wrapper to create a thread BEFORE execution, so that isDefaultThread()
- *  returns true and the thread runner uses default-path semantics.
- *  Unlike createAutoThreadRecord (post-hoc, templateName=null, no workspace), this sets
- *  templateName='default' and creates a workspace so it is detected as a default thread. */
-export function createDefaultThread(channel: string, options: {
-  agentName: string;
-  userMessage: string;
-  userMessageTs: string;
-  platformThreadId?: string | null;
-  projectId?: string;
-}): ThreadRecord {
-  const agentConfig = resolveAgentSlotConfigByName(options.agentName);
-  if (!agentConfig) throw new Error(`Unknown agent: ${options.agentName}`);
-  const id = threadStore.generateId();
-  const { workspacePath, artifactPath } = createWorkspace(id);
-
-  const thread = makeThreadRecord({
-    id, channel,
-    projectId: options.projectId,
-    templateName: 'default',
-    platformThreadId: options.platformThreadId || null,
-    userMessage: options.userMessage,
-    userMessageTs: options.userMessageTs,
-    workspacePath, artifactPath,
-    agents: { [agentConfig.slotId]: newAgentSlot(agentConfig) },
-    activeAgent: agentConfig.slotId,
-    activeStage: resolveStageName(agentConfig, null),
-    metadata: null,
-  });
-  threadStore.set(thread);
-  log.info(`Created default thread ${id} (agent=${options.agentName})`);
   return thread;
 }
 

@@ -101,8 +101,6 @@ function makeRunOpts(channel: string, overrides: Partial<RunThreadOptions> = {})
     threadAnchorId: null,
     statusMsg: null,
     startTime: Date.now(),
-    existingSessionId: null,
-    onAssistantMessage: null,
     onProgress: null,
     ...overrides,
   };
@@ -141,7 +139,6 @@ test('RunThreadOptions.extraHooks compiles with per-phase ThreadHookConfig entri
     threadAnchorId: null,
     statusMsg: null,
     startTime: 0,
-    existingSessionId: null,
     extraHooks: {
       onStart: hookConfig,
       onTransition: hookConfig,
@@ -162,7 +159,6 @@ test('RunThreadOptions.extraHooks is optional (omitting it still type-checks)', 
     threadAnchorId: null,
     statusMsg: null,
     startTime: 0,
-    existingSessionId: null,
   };
   assert.equal(opts.extraHooks, undefined);
 });

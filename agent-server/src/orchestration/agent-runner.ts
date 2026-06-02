@@ -103,8 +103,8 @@ export class AgentRunner {
     // 1. Orchestration side effects (keep — ledger, status, hook-bridge)
     const statusText = buildUserProcessingMessage({ startTime, profileName: getActiveProfile(channel), sessionName, sessionId });
     const blocksTemplate = { channel, sessionName, isDm: true };
-    // Post status message WITHOUT Cancel button initially — Cancel is added after
-    // createDefaultThread gives us a threadId (A3: execution-scoped Cancel).
+    // Post status message WITHOUT Cancel button initially — Cancel is added once runConversation
+    // creates the execution record (onExecutionStarted), keyed by executionId (no thread).
     const statusMsg = await adapter.postMessage(dest, {
       text: statusText,
       richBlocks: buildSealedStatusActionBlocks(statusText, blocksTemplate),
@@ -203,7 +203,6 @@ async function handleDefaultAgentResult({ result, channel, adapter, statusMsg, s
     return;
   }
   await handleAgentSuccess({ result, channel, adapter, statusMsg, startTime, userMessage, executionId, trigger: 'user', sessionName, threadAnchorId, userMessageTs: messageTs, onAssistantMessage: callbacks.onAssistantMsg });
-  // NOTE: createAutoThread removed — thread was created pre-execution via createDefaultThread
 }
 
 async function resolveSessionName(sessionId: string | null, channel: string, userMessage: string, adapter: PlatformAdapter): Promise<string> {

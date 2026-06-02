@@ -98,6 +98,9 @@ function uniqueThreadId(prefix: string): string {
   return id;
 }
 
+/** Minimal OutputStream stand-in for ThreadContext literals in unit tests. */
+const noopStream = { emitText: () => {}, flush: async () => {} } as any;
+
 function makeRunOpts(channel: string, overrides: Partial<RunThreadOptions> = {}): RunThreadOptions {
   return {
     adapter: new MockAdapter() as any,
@@ -106,8 +109,6 @@ function makeRunOpts(channel: string, overrides: Partial<RunThreadOptions> = {})
     threadAnchorId: null,
     statusMsg: null,
     startTime: Date.now(),
-    existingSessionId: null,
-    onAssistantMessage: null,
     onProgress: null,
     ...overrides,
   };
@@ -121,7 +122,7 @@ test('buildThreadSummary renders completed single-step thread on one line', () =
     createdAt: '2026-04-16T10:00:00Z', endedAt: '2026-04-16T10:00:12Z',
     steps: [{ stepIndex: 0, agentSlotId: 'main', stage: null, executionId: null, sessionId: null, sessionName: null, input: '', output: 'ok', costUsd: 0.1234, numTurns: 2, durationS: 12, startedAt: null, endedAt: null }],
   });
-  const summary = buildThreadSummary({ thread, finalOutput: 'ok', totalCostUsd: 0.1234, totalNumTurns: 2, isDefault: false, lastAgentResult: null, executionId: null });
+  const summary = buildThreadSummary({ thread, finalOutput: 'ok', totalCostUsd: 0.1234, totalNumTurns: 2, lastAgentResult: null, executionId: null });
   assert.match(summary, /^✅ Thread complete \| 1 steps \| \$0\.1234 \|/);
   assert.equal(summary.split('\n').length, 1, 'single-step threads should not include per-step breakdown');
 });
@@ -135,7 +136,7 @@ test('buildThreadSummary includes per-step breakdown when >1 step', () => {
       { stepIndex: 1, agentSlotId: 'coder', stage: null, executionId: null, sessionId: null, sessionName: null, input: '', output: 'b', costUsd: 0.2, numTurns: 3, durationS: 20, startedAt: null, endedAt: null },
     ],
   });
-  const summary = buildThreadSummary({ thread, finalOutput: 'b', totalCostUsd: 0.3, totalNumTurns: 4, isDefault: false, lastAgentResult: null, executionId: null });
+  const summary = buildThreadSummary({ thread, finalOutput: 'b', totalCostUsd: 0.3, totalNumTurns: 4, lastAgentResult: null, executionId: null });
   const lines = summary.split('\n');
   assert.equal(lines.length, 3);
   assert.match(lines[1], /planner: 1 turns · \$0\.1000 ·/);
@@ -146,8 +147,8 @@ test('buildThreadSummary uses blocked emoji for cancelled and error for failed',
   const base = makeThreadRecord({ id: 'thr_y', channel: 'C1', createdAt: '2026-04-16T10:00:00Z', endedAt: '2026-04-16T10:00:01Z' });
   const cancelled = { ...base, status: 'cancelled' as const };
   const failed = { ...base, status: 'failed' as const, error: 'boom' };
-  const sCancel = buildThreadSummary({ thread: cancelled, finalOutput: null, totalCostUsd: 0, totalNumTurns: 0, isDefault: false, lastAgentResult: null, executionId: null });
-  const sFail = buildThreadSummary({ thread: failed, finalOutput: null, totalCostUsd: 0, totalNumTurns: 0, isDefault: false, lastAgentResult: null, executionId: null });
+  const sCancel = buildThreadSummary({ thread: cancelled, finalOutput: null, totalCostUsd: 0, totalNumTurns: 0, lastAgentResult: null, executionId: null });
+  const sFail = buildThreadSummary({ thread: failed, finalOutput: null, totalCostUsd: 0, totalNumTurns: 0, lastAgentResult: null, executionId: null });
   assert.match(sCancel, /^🚫/);
   assert.match(sFail, /^❌/);
   assert.match(sFail, /Error: boom/);
@@ -162,7 +163,7 @@ test('buildThreadSummary handles missing per-step cost/turns/duration as "?"', (
       { stepIndex: 1, agentSlotId: 'b', stage: null, executionId: null, sessionId: null, sessionName: null, input: '', output: null, costUsd: null, numTurns: null, durationS: null, startedAt: null, endedAt: null },
     ],
   });
-  const summary = buildThreadSummary({ thread, finalOutput: null, totalCostUsd: 0, totalNumTurns: 0, isDefault: false, lastAgentResult: null, executionId: null });
+  const summary = buildThreadSummary({ thread, finalOutput: null, totalCostUsd: 0, totalNumTurns: 0, lastAgentResult: null, executionId: null });
   assert.match(summary, /a: \? · \? · \?/);
   assert.match(summary, /b: \? · \? · \?/);
 });
@@ -172,36 +173,22 @@ test('buildThreadSummary elapsed is 0 when endedAt is null', () => {
     id: 'thr_w', channel: 'C1', status: 'completed', totalCostUsd: 0, endedAt: null,
     steps: [{ stepIndex: 0, agentSlotId: 'main', stage: null, executionId: null, sessionId: null, sessionName: null, input: '', output: '', costUsd: 0, numTurns: 0, durationS: 0, startedAt: null, endedAt: null }],
   });
-  const summary = buildThreadSummary({ thread, finalOutput: '', totalCostUsd: 0, totalNumTurns: 0, isDefault: true, lastAgentResult: null, executionId: null });
+  const summary = buildThreadSummary({ thread, finalOutput: '', totalCostUsd: 0, totalNumTurns: 0, lastAgentResult: null, executionId: null });
   assert.ok(summary.length > 0);
   assert.doesNotMatch(summary, /NaN/);
 });
 
 // --- initThreadContext ---
 
-test('initThreadContext on ad-hoc thread (no template) returns isDefault=false, template=null, vm non-null', () => {
+test('initThreadContext on a thread returns template=null for ad-hoc and a non-null OutputStream', () => {
   const id = uniqueThreadId('init-adhoc');
   registerTestThread(makeThreadRecord({ id, channel: 'C-init-1', templateName: null }));
   const ctx = initThreadContext(id, makeRunOpts('C-init-1'));
-  assert.equal(ctx.isDefault, false);
   assert.equal(ctx.template, null);
-  assert.ok(ctx.stream, 'non-default threads should get an OutputStream aggregator');
+  assert.ok(ctx.stream, 'threads should get an OutputStream aggregator');
   assert.equal(ctx.lastAgentResult, null);
   assert.equal(ctx.totalNumTurns, 0);
   assert.equal(ctx.thread.id, id);
-});
-
-test('initThreadContext on default template returns isDefault=true and vm=null (pass-through)', () => {
-  const id = uniqueThreadId('init-default');
-  // The default template is detected by isDefaultThread(threadId) — an empty-templateName/auto-thread heuristic.
-  // Shortest path: use an auto-record shape (no workspace) with templateName=null and a specific channel pattern.
-  // isDefaultThread is not observable here without importing the helper; just assert the non-default path above.
-  // For coverage of the default branch, we construct a template thread and then spot-check that vm behavior
-  // flips based on isDefault by inspecting the stream presence only.
-  registerTestThread(makeThreadRecord({ id, channel: 'C-init-2', templateName: null }));
-  const ctx = initThreadContext(id, makeRunOpts('C-init-2'));
-  // We cannot force isDefault=true without loadConfig; guard that the branch is at least reachable:
-  assert.equal(typeof ctx.isDefault, 'boolean');
 });
 
 test('initThreadContext throws when thread does not exist', () => {
@@ -210,19 +197,10 @@ test('initThreadContext throws when thread does not exist', () => {
 
 // --- evaluateAndTransition short-circuit paths ---
 
-test('evaluateAndTransition returns false for default (single-agent) thread', async () => {
-  const id = uniqueThreadId('eval-default');
-  registerTestThread(makeThreadRecord({ id, channel: 'C-eval-1', templateName: null }));
-  const ctx: ThreadContext = { thread: threadStore.get(id)!, isDefault: true, template: null, meta: null, stream: null, lastAgentResult: null, totalNumTurns: 0 };
-  const stepCtx = { agentSlotId: 'main', agentConfig: { slotId: 'main', profile: '__active__', persistSession: false }, isFirstStep: true, multiAgent: false } as any;
-  const result = await evaluateAndTransition(id, stepCtx, ctx, makeRunOpts('C-eval-1'));
-  assert.equal(result, false);
-});
-
 test('evaluateAndTransition returns false for ad-hoc thread (no template)', async () => {
   const id = uniqueThreadId('eval-adhoc');
   registerTestThread(makeThreadRecord({ id, channel: 'C-eval-2', templateName: null }));
-  const ctx: ThreadContext = { thread: threadStore.get(id)!, isDefault: false, template: null, meta: null, vm: null, lastAgentResult: null, totalNumTurns: 0 };
+  const ctx: ThreadContext = { thread: threadStore.get(id)!, template: null, meta: null, stream: noopStream, lastAgentResult: null, totalNumTurns: 0 };
   const stepCtx = { agentSlotId: 'main', agentConfig: { slotId: 'main', profile: '__active__', persistSession: false }, isFirstStep: true, multiAgent: false } as any;
   const result = await evaluateAndTransition(id, stepCtx, ctx, makeRunOpts('C-eval-2'));
   assert.equal(result, false);
@@ -234,14 +212,13 @@ test('finalizeThread falls back to lastAgentResult.finalOutput when artifact mis
   const id = uniqueThreadId('final-fallback');
   registerTestThread(makeThreadRecord({ id, channel: 'C-fin-1', templateName: null, artifactPath: '/nonexistent/path/artifact.md', totalCostUsd: 0.5 }));
   const ctx: ThreadContext = {
-    thread: threadStore.get(id)!, isDefault: true, template: null, meta: null, vm: null,
+    thread: threadStore.get(id)!, template: null, meta: null, stream: noopStream,
     lastAgentResult: { finalOutput: 'from-agent' }, totalNumTurns: 3,
   };
   const result = await finalizeThread(id, ctx);
   assert.equal(result.finalOutput, 'from-agent');
   assert.equal(result.totalCostUsd, 0.5);
   assert.equal(result.totalNumTurns, 3);
-  assert.equal(result.isDefault, true);
 });
 
 test('finalizeThread reads artifact file when present and prefers it over lastAgentResult', async () => {
@@ -252,7 +229,7 @@ test('finalizeThread reads artifact file when present and prefers it over lastAg
   const id = uniqueThreadId('final-artifact');
   registerTestThread(makeThreadRecord({ id, channel: 'C-fin-2', templateName: null, artifactPath, totalCostUsd: 0.1 }));
   const ctx: ThreadContext = {
-    thread: threadStore.get(id)!, isDefault: false, template: null, meta: null, vm: null,
+    thread: threadStore.get(id)!, template: null, meta: null, stream: noopStream,
     lastAgentResult: { finalOutput: 'from-agent-fallback' }, totalNumTurns: 1,
   };
   const result = await finalizeThread(id, ctx);
@@ -274,7 +251,7 @@ test('finalizeThread flushes OutputStream with final output when stream is prese
     flush: async () => { flushCount++; },
   };
   const ctx: ThreadContext = {
-    thread: threadStore.get(id)!, isDefault: false, template: null, meta: null, stream: fakeStream as any,
+    thread: threadStore.get(id)!, template: null, meta: null, stream: fakeStream as any,
     lastAgentResult: null, totalNumTurns: 0,
   };
   await finalizeThread(id, ctx);
@@ -289,7 +266,7 @@ test('finalizeThread does not flush stream when finalOutput is null', async () =
   let flushed = false;
   const fakeStream = { emitText: () => {}, flush: async () => { flushed = true; } };
   const ctx: ThreadContext = {
-    thread: threadStore.get(id)!, isDefault: false, template: null, meta: null, stream: fakeStream as any,
+    thread: threadStore.get(id)!, template: null, meta: null, stream: fakeStream as any,
     lastAgentResult: null, totalNumTurns: 0,
   };
   const result = await finalizeThread(id, ctx);
@@ -310,7 +287,7 @@ test('finalizeThread includes executionId from last step when steps have executi
     }],
   }));
   const ctx: ThreadContext = {
-    thread: threadStore.get(id)!, isDefault: true, template: null, meta: null, vm: null,
+    thread: threadStore.get(id)!, template: null, meta: null, stream: noopStream,
     lastAgentResult: null, totalNumTurns: 0,
   };
   const result = await finalizeThread(id, ctx);
@@ -324,7 +301,7 @@ test('finalizeThread returns null executionId when no steps exist', async () => 
     steps: [],
   }));
   const ctx: ThreadContext = {
-    thread: threadStore.get(id)!, isDefault: true, template: null, meta: null, vm: null,
+    thread: threadStore.get(id)!, template: null, meta: null, stream: noopStream,
     lastAgentResult: null, totalNumTurns: 0,
   };
   const result = await finalizeThread(id, ctx);

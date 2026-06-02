@@ -12,12 +12,12 @@ const log = createLogger('scheduled-task');
 import * as pendingTaskTracker from '../../tasks/pending-tracker.js';
 import { sessionStore } from '@store/session-registry-repo.js';
 import { threadStore } from '@store/thread-repo.js';
-import { getActiveProfile, getDefaultAgent } from '../../agents/index.js';
+import { getActiveProfile } from '../../agents/index.js';
 import { projectStore } from '@domain/projects/index.js';
 import { normalizeSkillCommandPrefix } from '../../memory/skill-scanner.js';
 import { isValidDispatchPrompt, hasRunningExecutionForSchedule } from '../../tasks/dispatcher.js';
 import { allConfigsRateLimited } from '../../agents/facade.js';
-import { createThread, createDefaultThread } from '../../threads/index.js';
+import { createThread } from '../../threads/index.js';
 import { runThread as runThreadExec, continueThread } from '../../threads/runner.js';
 import { maybeNotifyCodexLowUsage } from '../../costs/codex-usage-monitor.js';
 import { buildUserProcessingMessage, computeElapsed, buildSessionTag } from '@core/status-format.js';
@@ -92,7 +92,6 @@ async function resolveDispatchPlan(projectId: string, target: ScheduleTarget | u
     fallback,
     fallbackChannel: projectId,
     lookups: {
-      lookupSession: (name) => sessionStore.lookupSession(name),
       getThread: (id) => threadStore.get(id),
     },
   });
@@ -186,22 +185,7 @@ function dispatchByPlan({ plan, normalizedMessage, message, scheduleTaskId, effe
   };
 
   if (plan.kind === 'continue-thread') {
-    return continueThread(plan.threadId, normalizedMessage, { ...baseRunOpts, existingSessionId: null });
-  }
-
-  if (plan.kind === 'default-thread') {
-    const defaultAgent = getDefaultAgent() || 'main';
-    const thread = createDefaultThread(plan.channel, {
-      agentName: defaultAgent,
-      userMessage: normalizedMessage,
-      userMessageTs: `sched_${Date.now()}`,
-      platformThreadId: statusMsg?.messageId || null,
-      projectId: project,
-    });
-    // Default-thread metadata is unused by createDefaultThread today, so attach trigger / scheduleTaskId
-    // post-creation so executionRegistry rows still carry the schedule association.
-    threadStore.set({ ...thread, metadata: { scheduleTaskId, trigger: 'scheduled', profileOverride: effectiveProfile } });
-    return runThreadExec(thread.id, { ...baseRunOpts, existingSessionId: plan.existingSessionId });
+    return continueThread(plan.threadId, normalizedMessage, { ...baseRunOpts });
   }
 
   // plan.kind === 'fresh' — original scheduled-task semantics: scheduler template, fresh session.
@@ -212,7 +196,7 @@ function dispatchByPlan({ plan, normalizedMessage, message, scheduleTaskId, effe
     projectId: project,
     metadata: { scheduleTaskId, trigger: 'scheduled', profileOverride: effectiveProfile },
   });
-  return runThreadExec(thread.id, { ...baseRunOpts, existingSessionId: null });
+  return runThreadExec(thread.id, { ...baseRunOpts });
 }
 
 // Self-register

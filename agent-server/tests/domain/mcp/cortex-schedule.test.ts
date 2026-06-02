@@ -38,11 +38,6 @@ test('resolveTargetShorthand: "current-project" → resolved project', () => {
   assert.deepEqual(out, { kind: 'project', projectId: 'cortex-self' });
 });
 
-test('resolveTargetShorthand: "current-session" → resolved session', () => {
-  const out = resolveTargetShorthand('current-session', FULL_CTX);
-  assert.deepEqual(out, { kind: 'session', sessionName: 'cortex-abc111', sessionId: 'sess-uuid-1', channel: 'C123' });
-});
-
 test('resolveTargetShorthand: "current-thread" → resolved thread', () => {
   const out = resolveTargetShorthand('current-thread', FULL_CTX);
   assert.deepEqual(out, { kind: 'thread', threadId: 'thr_xyz999', channel: 'C123' });
@@ -54,13 +49,6 @@ test('resolveTargetShorthand: "current-project" without project → throws', () 
   assert.throws(
     () => resolveTargetShorthand('current-project', { ...FULL_CTX, project: null }),
     /current-project.*project/i,
-  );
-});
-
-test('resolveTargetShorthand: "current-session" without sessionName → throws', () => {
-  assert.throws(
-    () => resolveTargetShorthand('current-session', { ...FULL_CTX, sessionName: null }),
-    /current-session.*session/i,
   );
 });
 
@@ -76,13 +64,6 @@ test('resolveTargetShorthand: "current-thread" without threadId → throws (does
 test('resolveTargetShorthand: explicit { kind: "project", projectId } passes through', () => {
   const out = resolveTargetShorthand({ kind: 'project', projectId: 'my-project' } as any, FULL_CTX);
   assert.deepEqual(out, { kind: 'project', projectId: 'my-project' });
-});
-
-test('resolveTargetShorthand: explicit { kind: "session", ... } requires sessionName + sessionId + channel', () => {
-  assert.throws(
-    () => resolveTargetShorthand({ kind: 'session', sessionName: 'cortex-x' } as any, FULL_CTX),
-    /session.*sessionId|channel/i,
-  );
 });
 
 test('resolveTargetShorthand: explicit { kind: "thread", threadId, channel } passes through', () => {

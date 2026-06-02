@@ -13,7 +13,6 @@ import {
   failThread,
   abortThread,
   detectAbortMarker,
-  isDefaultThread,
   isAdHocThread,
   getSessionKey,
   getTemplate,
@@ -49,8 +48,6 @@ interface ThreadRunResult {
   totalCostUsd: number;
   /** Total number of turns across all steps */
   totalNumTurns: number;
-  /** Was this a default (single-agent) thread? */
-  isDefault: boolean;
   /** The result object from the last agent call (for backward compat with handleAgentSuccess) */
   lastAgentResult: any;
   /** The execution ID from the last completed step — used by handleAgentSuccess in the wrapper. */
@@ -62,10 +59,9 @@ interface ThreadRunResult {
 /** Outer-scope state shared across the whole runThread() lifecycle. */
 interface ThreadContext {
   thread: ThreadRecord;
-  isDefault: boolean;
   template: ThreadTemplate | null;
   meta: ThreadRecord['metadata'];
-  stream: OutputStream | null;
+  stream: OutputStream;
   lastAgentResult: any;
   totalNumTurns: number;
 }
@@ -107,13 +103,11 @@ function formatAgentStageLabel(agentSlotId: AgentSlotId, stage: string | null): 
 function initThreadContext(threadId: string, opts: RunThreadOptions): ThreadContext {
   const thread = threadStore.get(threadId);
   if (!thread) throw new Error(`Thread not found: ${threadId}`);
-  const isDefault = isDefaultThread(threadId);
   const template = thread.templateName ? (getTemplate(thread.templateName) || null) : null;
-  // For all non-default threads, aggregate output into an OutputStream.
-  // Default template passes through opts.onAssistantMessage from app.ts (backward compat).
-  // The caller supplies the Destination (interactive-reply or project-report).
-  const stream = !isDefault ? opts.adapter.openOutputStream(opts.destination, { threadId: opts.threadAnchorId }) : null;
-  return { thread, isDefault, template, meta: thread.metadata, stream, lastAgentResult: null, totalNumTurns: 0 };
+  // Aggregate agent output into an OutputStream. The caller supplies the Destination
+  // (interactive-reply or project-report).
+  const stream = opts.adapter.openOutputStream(opts.destination, { threadId: opts.threadAnchorId });
+  return { thread, template, meta: thread.metadata, stream, lastAgentResult: null, totalNumTurns: 0 };
 }
 
 /** Resolve next step, post boundary notifications, update the status message.
@@ -173,20 +167,11 @@ async function buildStepConfig(
 
   // Build prompt for this step — pass the stage so stage-aware agents send their stage-specific
   // prompt (and, in incremental mode on session resume, skip directive + preamble + auto previousOutput).
-  const prompt = buildStepPrompt(threadId, agentConfig, stage, opts.isUserInitiated);
+  const prompt = buildStepPrompt(threadId, agentConfig, stage);
 
-  // Determine session configuration
-  let sessionId: string | null = null;
-  let sessionKey: string | null = null;
-  if (ctx.isDefault) {
-    // Default template: use existing channel session (backward compatible)
-    sessionId = opts.existingSessionId;
-    sessionKey = null; // falls back to channel key in claude-bridge
-  } else {
-    // Multi-agent: use thread-specific session key
-    sessionKey = getSessionKey(threadId, agentSlotId);
-    sessionId = slot.persistSession ? slot.sessionId : null;
-  }
+  // Determine session configuration — thread steps use a thread-scoped session key.
+  const sessionKey = getSessionKey(threadId, agentSlotId);
+  const sessionId = slot.persistSession ? slot.sessionId : null;
 
   // Resolve profile: agents with a hardcoded profile always use their own declaration.
   // metadata.profileOverride only applies to __active__ agents (default/main/scheduler-main),
@@ -199,7 +184,7 @@ async function buildStepConfig(
   const executionKind = ctx.meta?.trigger === 'task-dispatch' ? 'dispatch'
     : ctx.meta?.trigger === 'scheduled' ? 'scheduled'
     : 'local';
-  const executionTrigger = ctx.meta?.trigger || (ctx.isDefault ? 'user' : 'thread-step');
+  const executionTrigger = ctx.meta?.trigger || 'thread-step';
   const label = formatAgentStageLabel(agentSlotId, stage);
   const execution = executionRegistry.startLocalExecution({
     kind: executionKind,
@@ -209,7 +194,7 @@ async function buildStepConfig(
     backend: getActiveBackend(),
     billingMode: getClaudeMode(),
     sessionId,
-    label: ctx.isDefault ? prompt.substring(0, 60) : `[${label}] ${prompt.substring(0, 40)}`,
+    label: `[${label}] ${prompt.substring(0, 40)}`,
     scheduleTaskId: ctx.meta?.scheduleTaskId || null,
     threadId,
     agentSlotId,
@@ -218,7 +203,7 @@ async function buildStepConfig(
   return {
     agentSlotId, agentConfig, isFirstStep, multiAgent, stage,
     prompt, sessionId, sessionKey,
-    sessionName: (ctx.isDefault && opts.sessionName) ? opts.sessionName : await sessionStore.generateSessionName(),
+    sessionName: await sessionStore.generateSessionName(),
     profileName, execution,
     stepStartTime: new Date().toISOString(),
   };
@@ -238,19 +223,15 @@ function setupStepCallbacks(
   const stream = ctx.stream;
   const label = formatAgentStageLabel(agentSlotId, stage);
 
-  // Determine callbacks:
-  // - default: pass through from opts (app.ts OutputStream)
-  // - non-default: aggregate into thread-runner's stream; prefix only for multi-agent
+  // Aggregate assistant output into the thread-runner's OutputStream; prefix only for multi-agent.
   const slotPrefix = multiAgent ? `*[${label}]*` : null;
-  const baseAssistantMessage = stream
-    ? (text: string) => { stream.emitText(slotPrefix ? `${slotPrefix} ${text}` : text); }
-    : opts.onAssistantMessage;
+  const baseAssistantMessage = (text: string) => { stream.emitText(slotPrefix ? `${slotPrefix} ${text}` : text); };
 
-  // Tool trace (env-gated): caller-supplied onToolUse takes precedence (default-thread path —
-  // agent-runner owns the stream). Otherwise build one bound to the runner's own stream.
+  // Tool trace (env-gated): caller-supplied onToolUse takes precedence. Otherwise build one bound
+  // to the runner's own stream.
   const callerOnToolUse = opts.onToolUse ?? null;
   const toolTrace = callerOnToolUse ? null : createToolTrace(stream, { slotPrefix });
-  const onAssistantMessage = toolTrace && baseAssistantMessage
+  const onAssistantMessage = toolTrace
     ? (text: string) => { toolTrace.flush(); baseAssistantMessage(text); }
     : baseAssistantMessage;
   const onToolUse = callerOnToolUse
@@ -259,7 +240,7 @@ function setupStepCallbacks(
   // onProgress: caller override (e.g. scheduler's buildUserProcessingMessage) takes precedence;
   // fallback to thread-specific status format for multi-agent pipelines
   const onProgress = opts.onProgress
-    || (stream && multiAgent
+    || (multiAgent
       ? (progress: any) => {
           const elapsed = (Date.now() - opts.startTime) / 1000;
           if (opts.statusMsg) {
@@ -299,15 +280,15 @@ async function executeAndAwaitAgent(
     project: threadStore.get(threadId)?.projectId,
     trigger: meta?.trigger || undefined,
     threadId,
-    useCoreMcp: !ctx.isDefault,
+    useCoreMcp: true,
     sessionName: stepCtx.sessionName,
     claudeAgent: agentConfig.claudeAgent || null,
     systemPrompt: agentConfig.systemPrompt ? resolveSystemVars(agentConfig.systemPrompt) : null,
     outputStyle: agentConfig.outputStyle || null,
     tools: agentConfig.tools || null,
     pluginDirs: agentConfig.pluginDirs || null,
-    onFallback: ctx.isDefault ? opts.onFallback : null,
-    isUserInitiated: ctx.isDefault ? (opts.isUserInitiated || false) : false,
+    onFallback: null,
+    isUserInitiated: false,
     onAssistantMessage: callbacks.onAssistantMessage,
     onProgress: callbacks.onProgress,
     onToolUse: callbacks.onToolUse,
@@ -410,8 +391,6 @@ async function evaluateAndTransition(
   ctx: ThreadContext,
   opts: RunThreadOptions,
 ): Promise<boolean> {
-  // For default template, we only run one step
-  if (ctx.isDefault) return false;
   // Ad-hoc threads: run one agent per invocation, then stop
   if (isAdHocThread(threadId)) return false;
 
@@ -464,7 +443,6 @@ async function finalizeThread(threadId: string, ctx: ThreadContext): Promise<Thr
     finalOutput,
     totalCostUsd: finalThread.totalCostUsd,
     totalNumTurns: ctx.totalNumTurns,
-    isDefault: ctx.isDefault,
     lastAgentResult: ctx.lastAgentResult,
     executionId: finalThread.steps[finalThread.steps.length - 1]?.executionId ?? null,
   };
@@ -476,10 +454,8 @@ async function runThread(threadId: string, opts: RunThreadOptions): Promise<Thre
   try {
     // --- onStart hook (before first step) ---
     // Template hook first, then per-call extraHooks (see note at onTransition).
-    if (!ctx.isDefault) {
-      await executeLifecycleHook(threadId, 'start', ctx.template?.hooks?.onStart, opts);
-      await executeLifecycleHook(threadId, 'start', opts.extraHooks?.onStart, opts);
-    }
+    await executeLifecycleHook(threadId, 'start', ctx.template?.hooks?.onStart, opts);
+    await executeLifecycleHook(threadId, 'start', opts.extraHooks?.onStart, opts);
 
     while (true) {
       const stepInfo = await resolveAndNotifyStep(threadId, ctx, opts);
@@ -508,12 +484,10 @@ async function runThread(threadId: string, opts: RunThreadOptions): Promise<Thre
 
     // --- onEnd hook (after main loop) ---
     // Template hook first, then per-call extraHooks (see note at onTransition).
-    if (!ctx.isDefault) {
-      const threadForEnd = threadStore.get(threadId)!;
-      const lastStep = threadForEnd.steps[threadForEnd.steps.length - 1];
-      await executeLifecycleHook(threadId, 'end', ctx.template?.hooks?.onEnd, opts, lastStep?.agentSlotId);
-      await executeLifecycleHook(threadId, 'end', opts.extraHooks?.onEnd, opts, lastStep?.agentSlotId);
-    }
+    const threadForEnd = threadStore.get(threadId)!;
+    const lastStep = threadForEnd.steps[threadForEnd.steps.length - 1];
+    await executeLifecycleHook(threadId, 'end', ctx.template?.hooks?.onEnd, opts, lastStep?.agentSlotId);
+    await executeLifecycleHook(threadId, 'end', opts.extraHooks?.onEnd, opts, lastStep?.agentSlotId);
 
     // Only complete if not already in a terminal state (e.g. cancelled during loop)
     const threadBeforeComplete = threadStore.get(threadId);

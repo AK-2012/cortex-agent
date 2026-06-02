@@ -15,7 +15,6 @@ import {
   buildStepPrompt,
   cancelThread,
   cleanupWorkspace,
-  createAutoThreadRecord,
   createThread,
   detectAbortMarker,
   listAgents,
@@ -220,14 +219,14 @@ function minimalAbortedThread(reason: string | null, endedAt: string | null): Th
 
 test('buildThreadSummary renders stopped emoji for aborted status', () => {
   const thread = minimalAbortedThread('blocked on upstream', '2026-04-16T10:00:05Z');
-  const summary = buildThreadSummary({ thread, finalOutput: null, totalCostUsd: 0, totalNumTurns: 0, isDefault: false, lastAgentResult: null, executionId: null });
+  const summary = buildThreadSummary({ thread, finalOutput: null, totalCostUsd: 0, totalNumTurns: 0, lastAgentResult: null, executionId: null });
   assert.match(summary, /^🛑/);
   assert.match(summary, /Aborted: blocked on upstream/);
 });
 
 test('buildThreadSummary renders "Aborted (no reason given)" when abortReason is null', () => {
   const thread = minimalAbortedThread(null, '2026-04-16T10:00:05Z');
-  const summary = buildThreadSummary({ thread, finalOutput: null, totalCostUsd: 0, totalNumTurns: 0, isDefault: false, lastAgentResult: null, executionId: null });
+  const summary = buildThreadSummary({ thread, finalOutput: null, totalCostUsd: 0, totalNumTurns: 0, lastAgentResult: null, executionId: null });
   assert.match(summary, /Aborted \(no reason given\)/);
 });
 
@@ -253,17 +252,21 @@ test('buildStepPrompt injects THREAD_PROTOCOL_PREAMBLE for ad-hoc thread with wo
   assert.ok(prompt.includes(THREAD_PROTOCOL_PREAMBLE), 'preamble should be auto-injected for artifact-owning thread');
 });
 
-test('buildStepPrompt does NOT inject preamble for auto-record thread (no workspace)', () => {
+test('buildStepPrompt does NOT inject preamble for a thread with no artifact path', () => {
   const anyAgent = listAgents()[0];
   const agentConfig = resolveAgentSlotConfig(anyAgent.name)!;
-  const thread = createAutoThreadRecord(`C-autorec-${Math.random().toString(36).slice(2, 8)}`, {
+  const thread = createThread(`C-noart-${Math.random().toString(36).slice(2, 8)}`, {
     agentName: anyAgent.name,
     userMessage: 'hello',
     userMessageTs: 'ts',
   });
   trackThreadId(thread.id);
 
-  assert.equal(thread.artifactPath, '', 'auto-record should have no artifact path');
+  // Clear the artifact path to simulate a thread without a workspace artifact.
+  thread.artifactPath = '';
+  threadStore.set(thread);
+
+  assert.equal(threadStore.get(thread.id)!.artifactPath, '', 'thread should have no artifact path');
   const prompt = buildStepPrompt(thread.id, agentConfig);
   assert.equal(prompt.includes(THREAD_PROTOCOL_PREAMBLE), false, 'preamble should not fire without artifact');
 });

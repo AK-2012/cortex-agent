@@ -1,8 +1,9 @@
 // input:  Node test runner + planScheduledDispatch (pure planner)
-// output: 4-way target dispatch + fallback policy regression
+// output: fresh / project / thread target dispatch + fallback policy regression
 // pos:    locks the dispatch decision tree extracted from scheduled-task.ts so the
 //         orchestration around it (Slack / executions / progress) stays untouched.
-//         M4: channel target removed, project target added.
+//         M4: channel target removed, project target added. Later: session target removed
+//         (along with the default-thread path) — user messages are no longer threads.
 // >>> If I am updated, update my header comment and the parent folder's CORTEX.md <<<
 
 import test from 'node:test';
@@ -12,7 +13,6 @@ import type { ScheduleTarget } from '../src/store/schedule-repo.js';
 
 function lookups(overrides: Partial<Parameters<typeof planScheduledDispatch>[0]['lookups']> = {}) {
   return {
-    lookupSession: async () => null,
     getThread: () => null,
     ...overrides,
   };
@@ -50,41 +50,6 @@ test('plan: target=project always returns { kind: "fresh" } on fallbackChannel',
     lookups: lookups(),
   });
   assert.deepEqual(plan, { kind: 'fresh', channel: 'C1' });
-});
-
-// --- target=session ---
-
-test('plan: target=session with valid session record → default-thread reusing sessionId', async () => {
-  const plan = await planScheduledDispatch({
-    target: { kind: 'session', sessionName: 'cortex-abc', sessionId: 'sess-1', channel: 'CZ' },
-    fallback: 'fresh',
-    fallbackChannel: 'C1',
-    lookups: lookups({
-      lookupSession: async (name) => name === 'cortex-abc' ? { sessionId: 'sess-1', channel: 'CZ' } as any : null,
-    }),
-  });
-  assert.deepEqual(plan, { kind: 'default-thread', channel: 'CZ', existingSessionId: 'sess-1' });
-});
-
-test('plan: target=session record missing + fallback=fresh → fresh on the original task channel', async () => {
-  const plan = await planScheduledDispatch({
-    target: { kind: 'session', sessionName: 'cortex-gone', sessionId: 'sess-old', channel: 'CZ' },
-    fallback: 'fresh',
-    fallbackChannel: 'C1',
-    lookups: lookups({ lookupSession: async () => null }),
-  });
-  assert.deepEqual(plan, { kind: 'fresh', channel: 'C1' });
-});
-
-test('plan: target=session record missing + fallback=skip → skip with reason', async () => {
-  const plan = await planScheduledDispatch({
-    target: { kind: 'session', sessionName: 'cortex-gone', sessionId: 'sess-old', channel: 'CZ' },
-    fallback: 'skip',
-    fallbackChannel: 'C1',
-    lookups: lookups({ lookupSession: async () => null }),
-  });
-  assert.equal(plan.kind, 'skip');
-  assert.match((plan as { reason: string }).reason, /session/i);
 });
 
 // --- target=thread ---

@@ -139,33 +139,3 @@ test('(f) AgentRunner constructed with no opts uses module-level defaults', () =
   assert.equal(runner._enqueue, enqueue, 'defaults to module-level enqueue');
 });
 
-// ── (g) resolveDefaultAgent output is compatible with createDefaultThread ──────
-// Phase 2 Step 4: validates the composition used in refactored _executeReal.
-
-test('(g) resolveDefaultAgent output is compatible with createDefaultThread', async () => {
-  loadConfig();
-  const { createDefaultThread } = await import('../../src/domain/threads/index.js');
-  const channel = freshChannel();
-  const rawMessage = 'test task';
-
-  const agentConfig = resolveDefaultAgent(rawMessage);
-  const thread = createDefaultThread(channel, {
-    agentName: agentConfig.defaultAgentName || 'main',
-    // Production _executeReal stores raw agentMessage (not effectiveMessage with directive).
-    // buildStepPrompt handles directive injection from the template's agent config.
-    userMessage: rawMessage,
-    userMessageTs: 'ts-1',
-    platformThreadId: 'pf-1',
-  });
-
-  assert.ok(thread.id, 'thread has an id');
-  assert.equal(thread.templateName, 'default', 'default template');
-  assert.equal(thread.channel, channel, 'correct channel');
-  // userMessage should be the raw message, not directive-injected
-  assert.equal(thread.userMessage, rawMessage, 'raw message stored in thread, directive injection left to buildStepPrompt');
-  assert.ok(thread.workspacePath, 'workspacePath set');
-  assert.equal(thread.platformThreadId, 'pf-1', 'platformThreadId preserved');
-  // Verify the agent config still resolves effectiveMessage separately (unused by _executeReal
-  // but kept for backward compatibility with external callers of resolveDefaultAgent)
-  assert.ok(agentConfig.effectiveMessage.includes(rawMessage), 'effectiveMessage preserves the user message');
-});

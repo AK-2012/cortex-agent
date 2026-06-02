@@ -125,7 +125,7 @@ async function executeDispatchTask({ selected, selectedTask, channel, scheduleTa
 
   const icb = ctx.buildInteractiveCallbacks?.(channel, null);
   const threadResult = await runThreadExec(thread.id, {
-    adapter, channel: channel, threadAnchorId: statusMsg?.messageId || null, statusMsg, startTime, existingSessionId: null,
+    adapter, channel: channel, threadAnchorId: statusMsg?.messageId || null, statusMsg, startTime,
     destination: { type: 'project-report', projectId: selectedTask.project || channel, trigger: 'task-dispatch', sessionId: '' },
     onToolUse: icb?.onToolUse ?? null, onPlanWritten: icb?.onPlanWritten ?? null, onAskUserQuestion: icb?.onAskUserQuestion ?? null,
     extraHooks: {

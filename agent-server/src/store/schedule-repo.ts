@@ -20,8 +20,6 @@ export type ScheduleTarget =
   | { kind: 'fresh' }
   /** Fire into the project — spawns a fresh session in the project's channel. */
   | { kind: 'project'; projectId: string }
-  /** Fire into a specific cortex-XXXX session, reusing its sessionId. Channel+sessionId are locked at create time. */
-  | { kind: 'session'; sessionName: string; sessionId: string; channel: string }
   /** Continue a specific thread; only valid while thread.status is running|waiting. */
   | { kind: 'thread'; threadId: string; channel: string };
 

@@ -221,21 +221,14 @@ test('ScheduleRepo - target field round-trips through addTask/findTask (project 
   assert.equal(found.fallback, 'fresh');
 });
 
-test('ScheduleRepo - target field round-trips for session and thread kinds', async () => {
+test('ScheduleRepo - target field round-trips for thread kind', async () => {
   const repo = createRepo();
-  await repo.addTask(makeTask({
-    id: 'target-session',
-    target: { kind: 'session', sessionName: 'cortex-abc', sessionId: 'sess-uuid', channel: 'C1' },
-  } as Partial<ScheduleTask>));
   await repo.addTask(makeTask({
     id: 'target-thread',
     target: { kind: 'thread', threadId: 'thr_xyz', channel: 'C1' },
   } as Partial<ScheduleTask>));
-  const s = await repo.findTask('target-session');
   const t = await repo.findTask('target-thread');
-  assert.ok(s && s.target?.kind === 'session');
   assert.ok(t && t.target?.kind === 'thread');
-  assert.equal((s.target as { sessionName: string }).sessionName, 'cortex-abc');
   assert.equal((t.target as { threadId: string }).threadId, 'thr_xyz');
 });
 

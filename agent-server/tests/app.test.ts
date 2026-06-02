@@ -141,8 +141,6 @@ test('scheduled success path creates thread and runs via thread system', async (
     'planScheduledDispatch',
     'threadStore',
     'sessionRepo',
-    'getDefaultAgent',
-    'createDefaultThread',
     'continueThread',
     '_allConfigsRateLimited',
     '_getOutboundQueue',
@@ -195,10 +193,6 @@ test('scheduled success path creates thread and runs via thread system', async (
     { findActive: () => null, get: () => null, set: () => {} },
     // sessionRepo stub.
     { getSessionAsync: async () => undefined },
-    // getDefaultAgent \u2014 only used by default-thread branch (not fresh).
-    () => 'main',
-    // createDefaultThread \u2014 only used by default-thread branch.
-    () => ({ id: 'thread-default' }),
     // continueThread \u2014 only used by continue-thread branch.
     async () => ({ lastAgentResult: null, totalCostUsd: 0, totalNumTurns: 0 }),
     // allConfigsRateLimited \u2014 always allow in tests

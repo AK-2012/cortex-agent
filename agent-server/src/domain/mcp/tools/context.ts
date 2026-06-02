@@ -87,7 +87,7 @@ export async function resolveCortexContext(deps: ContextToolDeps): Promise<Corte
 export function registerContextTools(server: McpServer, deps: ContextToolDeps): void {
   server.tool(
     'cortex_context',
-    'Return the current Cortex execution context: sessionId, sessionName (cortex-XXXX), threadId, profile, project, backend. Use this to discover the current scope before calling cortex_schedule_add with target=current-project/current-session/current-thread.',
+    'Return the current Cortex execution context: sessionId, sessionName (cortex-XXXX), threadId, profile, project, backend. Use this to discover the current scope before calling cortex_schedule_add with target=current-project/current-thread.',
     {},
     { readOnlyHint: true },
     async () => {
