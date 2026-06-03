@@ -27,8 +27,10 @@ import type {
 import * as fs from 'fs';
 import * as path from 'path';
 import { createLogger } from '@core/log.js';
+import { STORE_DIR } from '@core/paths.js';
 import type { OutputStream, OpenOutputStreamOpts } from '../output-stream.js';
 import { FeishuOutputStream } from './feishu-output-stream.js';
+import { ProjectConduitsStore } from './project-conduits.js';
 
 const log = createLogger('feishu');
 
@@ -145,7 +147,7 @@ export class FeishuAdapter implements PlatformAdapter {
 
     // If replying in a thread, use the reply API
     if (threadId) {
-      return this.replyInThread(threadId, content);
+      return this.replyInThread(threadId, content, resolved.channel);
     }
 
     const { msgType, msgContent } = this.buildMessagePayload(content);
@@ -274,7 +276,7 @@ export class FeishuAdapter implements PlatformAdapter {
     if (!destResolved.channel) {
       return;
     }
-    const { resolved: fileResolved, size } = this.resolveFilePath(filePath);
+    const { resolved: fileResolved } = this.resolveFilePath(filePath);
     const fileName = opts?.filename || path.basename(fileResolved);
 
     // Upload file to get file_key
@@ -311,14 +313,29 @@ export class FeishuAdapter implements PlatformAdapter {
   }
 
   async downloadFile(fileRef: PlatformFileRef, destDir: string): Promise<DownloadedFile> {
-    const resp = await this.client.im.v1.file.get({
-      path: { file_key: fileRef.id },
-    });
+    const raw = (fileRef.raw as any) || {};
+    const messageId: string | undefined = raw.message_id;
+    const type: 'file' | 'image' = raw.resourceType === 'image' ? 'image' : 'file';
 
     const ext = path.extname(fileRef.name) || '';
     const localPath = path.join(destDir, `${fileRef.id}${ext}`);
-    await (resp as any).writeFile(localPath);
 
+    // Message attachments must be fetched via messageResource.get (requires the
+    // owning message_id + a resource type). im.v1.file.get only works for files
+    // we uploaded ourselves, so it's a last-resort fallback when message_id is
+    // somehow missing.
+    let resp: any;
+    if (messageId) {
+      resp = await this.client.im.v1.messageResource.get({
+        path: { message_id: messageId, file_key: fileRef.id },
+        params: { type },
+      });
+    } else {
+      log.warn(`downloadFile: no message_id on fileRef "${fileRef.id}"; falling back to file.get`);
+      resp = await this.client.im.v1.file.get({ path: { file_key: fileRef.id } });
+    }
+
+    await (resp as any).writeFile(localPath);
     return { localPath, mimetype: fileRef.mimetype, name: fileRef.name };
   }
 
@@ -337,22 +354,32 @@ export class FeishuAdapter implements PlatformAdapter {
 
   // --- Project conduit mapping (file-backed, separate file from Slack) ---
 
-  private _feishuConduits: Record<string, string> = {};
+  private _conduitsStore: ProjectConduitsStore | null = null;
+
+  private _getConduitsStore(): ProjectConduitsStore {
+    if (!this._conduitsStore) {
+      this._conduitsStore = new ProjectConduitsStore(
+        path.join(STORE_DIR, 'feishu-channel-registry.json'),
+      );
+    }
+    return this._conduitsStore;
+  }
 
   async bindProjectConduit(projectId: string, conduitHint: string): Promise<void> {
-    this._feishuConduits[projectId] = conduitHint;
+    await this._getConduitsStore().set(projectId, conduitHint);
   }
 
   async unbindProjectConduit(projectId: string): Promise<void> {
-    delete this._feishuConduits[projectId];
+    await this._getConduitsStore().remove(projectId);
   }
 
   async getProjectConduits(): Promise<Record<string, string>> {
-    return { ...this._feishuConduits };
+    return this._getConduitsStore().getAll();
   }
 
   async resolveInboundProject(conduit: string): Promise<string | null> {
-    for (const [project, ch] of Object.entries(this._feishuConduits)) {
+    const conduits = await this._getConduitsStore().getAll();
+    for (const [project, ch] of Object.entries(conduits)) {
       if (ch === conduit) return project;
     }
     return null;
@@ -367,10 +394,15 @@ export class FeishuAdapter implements PlatformAdapter {
     switch (dest.type) {
       case 'interactive-reply':
         return { channel: dest.conduit, kind: 'interactive-reply' };
-      case 'project-report':
-        // FIXME: resolve projectId → Feishu chat_id when a project→chat mapping
-        // layer is added for Feishu. For now, projectId is used directly.
-        return { channel: dest.projectId, kind: 'project-report' };
+      case 'project-report': {
+        const conduits = await this.getProjectConduits();
+        const channel = conduits[dest.projectId];
+        if (!channel) {
+          log.warn(`No conduit registered for project "${dest.projectId}"; dropping project-report`);
+          return { channel: null, kind: 'project-report-noop' };
+        }
+        return { channel, kind: 'project-report' };
+      }
       case 'system-notice':
         if (!this.config.adminChannel) {
           log.warn('No admin channel configured; dropping system-notice');
@@ -394,19 +426,24 @@ export class FeishuAdapter implements PlatformAdapter {
     const senderId = sender.sender_id?.open_id || sender.sender_id?.user_id || '';
     const isBot = sender.sender_type === 'app';
 
-    // Parse message content (JSON string)
-    let text = '';
-    try {
-      const parsed = JSON.parse(message.content || '{}');
-      text = parsed.text || '';
-    } catch {
-      text = message.content || '';
-    }
-
     const chatId = message.chat_id || '';
     const messageId = message.message_id || '';
     const rootId = message.root_id || undefined;
     const parentId = message.parent_id || undefined;
+    const messageType = message.message_type || '';
+
+    // Parse message content (JSON string). For file/image/media/audio messages,
+    // the resource key (file_key/image_key) lives inside this JSON — NOT on the
+    // message object itself.
+    let parsed: any = {};
+    try {
+      parsed = JSON.parse(message.content || '{}');
+    } catch {
+      parsed = {};
+    }
+    const text: string = typeof parsed.text === 'string'
+      ? parsed.text
+      : (typeof message.content === 'string' && !message.content.startsWith('{') ? message.content : '');
 
     const ref: MessageRef = {
       conduit: chatId,
@@ -414,10 +451,9 @@ export class FeishuAdapter implements PlatformAdapter {
       threadId: rootId || parentId || undefined,
     };
 
-    // Extract file references if present
-    const files: PlatformFileRef[] | undefined = message.file_key
-      ? [{ id: message.file_key, name: message.file_name || '', mimetype: message.file_type || '', url: '', raw: message }]
-      : undefined;
+    // Extract file references from the parsed content. The id (file_key/image_key)
+    // plus message_id + resourceType are needed by downloadFile (messageResource.get).
+    const files = this.extractInboundFiles(messageType, parsed, messageId);
 
     // TODO: Parse Feishu forwarded/merged messages (merge_forward msg type) into
     // IncomingAttachment[]. Feishu's format differs from Slack's msg.attachments.
@@ -444,6 +480,38 @@ export class FeishuAdapter implements PlatformAdapter {
     });
   }
 
+  /**
+   * Build PlatformFileRef[] from a parsed Feishu message content payload.
+   * Feishu stores the resource key inside `content` (not on the message object):
+   *   - file / media (video): { file_key, file_name? }
+   *   - image:               { image_key }
+   *   - audio:               { file_key }
+   * message_id + resourceType are stashed in `raw` so downloadFile() can call
+   * im.v1.messageResource.get (which requires both message_id and a type param).
+   */
+  private extractInboundFiles(messageType: string, parsed: any, messageId: string): PlatformFileRef[] | undefined {
+    const mk = (id: string, name: string, mimetype: string, resourceType: 'file' | 'image'): PlatformFileRef[] => [
+      { id, name, mimetype, url: '', raw: { message_id: messageId, resourceType } },
+    ];
+
+    switch (messageType) {
+      case 'file':
+        if (!parsed.file_key) return undefined;
+        return mk(parsed.file_key, parsed.file_name || parsed.file_key, '', 'file');
+      case 'media':
+        if (!parsed.file_key) return undefined;
+        return mk(parsed.file_key, parsed.file_name || `${parsed.file_key}.mp4`, 'video/mp4', 'file');
+      case 'audio':
+        if (!parsed.file_key) return undefined;
+        return mk(parsed.file_key, `${parsed.file_key}.opus`, 'audio/opus', 'file');
+      case 'image':
+        if (!parsed.image_key) return undefined;
+        return mk(parsed.image_key, `${parsed.image_key}.png`, 'image/png', 'image');
+      default:
+        return undefined;
+    }
+  }
+
   private async handleCardAction(data: any): Promise<any> {
     const event = data.event || data;
     const action = event.action || {};
@@ -462,15 +530,13 @@ export class FeishuAdapter implements PlatformAdapter {
       const handler = this.modalHandlers.get(formName);
       if (handler) {
         const normalizedValues = this.normalizeFormValues(action.form_value);
-        let ackCalled = false;
         await handler({
           callbackId: formName,
           privateMetadata: JSON.stringify(action.value || {}),
           values: normalizedValues,
           userId,
           async ack(_response) {
-            ackCalled = true;
-            // Feishu ack is implicit via response — nothing to do
+            // Feishu ack is implicit via the callback return value — nothing to do.
           },
         });
         // Return toast or updated card if needed
@@ -523,7 +589,7 @@ export class FeishuAdapter implements PlatformAdapter {
     };
   }
 
-  private async replyInThread(threadMessageId: string, content: MessageContent): Promise<MessageRef> {
+  private async replyInThread(threadMessageId: string, content: MessageContent, conduit: string): Promise<MessageRef> {
     const { msgType, msgContent } = this.buildMessagePayload(content);
     const res = await this.client.im.v1.message.reply({
       path: { message_id: threadMessageId },
@@ -534,7 +600,7 @@ export class FeishuAdapter implements PlatformAdapter {
     });
 
     const messageId = (res as any)?.data?.message_id || '';
-    return { conduit: '', messageId, threadId: threadMessageId };
+    return { conduit, messageId, threadId: threadMessageId };
   }
 
   /** Convert RichBlock[] to Feishu card schema 2.0 elements. */
@@ -599,7 +665,7 @@ export class FeishuAdapter implements PlatformAdapter {
         case 'select':
           formElements.push({
             tag: 'select_static',
-            name: `${field.blockId}::${field.actionId}`,
+            name: `${field.blockId}::${field.actionId}::select`,
             placeholder: field.placeholder
               ? { tag: 'plain_text', content: field.placeholder }
               : undefined,
@@ -612,7 +678,7 @@ export class FeishuAdapter implements PlatformAdapter {
         case 'multi_select':
           formElements.push({
             tag: 'multi_select_static',
-            name: `${field.blockId}::${field.actionId}`,
+            name: `${field.blockId}::${field.actionId}::multi`,
             placeholder: field.placeholder
               ? { tag: 'plain_text', content: field.placeholder }
               : undefined,
@@ -625,7 +691,7 @@ export class FeishuAdapter implements PlatformAdapter {
         case 'text_input':
           formElements.push({
             tag: 'input',
-            name: `${field.blockId}::${field.actionId}`,
+            name: `${field.blockId}::${field.actionId}::text`,
             placeholder: field.placeholder
               ? { tag: 'plain_text', content: field.placeholder }
               : undefined,
@@ -634,12 +700,17 @@ export class FeishuAdapter implements PlatformAdapter {
       }
     }
 
-    // Add submit button inside form
+    // Add submit button inside form.
+    // The button's `name` is what arrives as `event.action.name` in the
+    // card.action.trigger callback — handleCardAction uses it to look up the
+    // modal handler, which is registered under modal.callbackId. So the button
+    // name MUST equal callbackId (not a literal "submit"), otherwise the
+    // submission is silently dropped.
     formElements.push({
       tag: 'button',
       text: { tag: 'plain_text', content: modal.submitLabel || 'Submit' },
       type: 'primary',
-      name: 'submit',
+      name: modal.callbackId,
       action_type: 'form_submit',
     });
 
@@ -663,36 +734,38 @@ export class FeishuAdapter implements PlatformAdapter {
 
   /**
    * Normalize Feishu form_value into the platform-agnostic ModalFieldValue format.
-   * Feishu form_value is a flat dict { field_name: value }.
+   * Feishu form_value is a flat dict { field_name: value } where field_name follows
+   * our convention "{blockId}::{actionId}::{kind}" (kind ∈ select | multi | text).
+   * The kind segment is what lets us map a single-select (a bare string) to
+   * `selectedOption` rather than `value` — the downstream consumer
+   * (interaction-handlers.ts) reads `selectedOption.value` for single-select.
    * We reconstruct the two-level { blockId: { actionId: ModalFieldValue } } structure.
    */
   private normalizeFormValues(formValue: Record<string, any>): Record<string, Record<string, ModalFieldValue>> {
     const normalized: Record<string, Record<string, ModalFieldValue>> = {};
 
     for (const [fieldName, rawValue] of Object.entries(formValue)) {
-      // Field names follow our convention: "{blockId}::{actionId}"
-      const sepIdx = fieldName.indexOf('::');
-      const blockId = sepIdx >= 0 ? fieldName.substring(0, sepIdx) : fieldName;
-      const actionId = sepIdx >= 0 ? fieldName.substring(sepIdx + 2) : fieldName;
+      const parts = fieldName.split('::');
+      const blockId = parts[0] ?? fieldName;
+      const actionId = parts[1] ?? fieldName;
+      const kind = parts[2]; // select | multi | text | undefined
 
       if (!normalized[blockId]) normalized[blockId] = {};
 
-      if (Array.isArray(rawValue)) {
+      if (kind === 'multi' || Array.isArray(rawValue)) {
         // Multi-select: array of selected values
+        const arr = Array.isArray(rawValue) ? rawValue : [rawValue];
         normalized[blockId][actionId] = {
-          selectedOptions: rawValue.map(v => ({ value: String(v) })),
+          selectedOptions: arr.map(v => ({ value: String(v) })),
         };
-      } else if (typeof rawValue === 'string') {
-        // Could be a text input value or a single select value
-        // Heuristic: if it looks like a select option (short, no spaces), treat as selectedOption
-        // Otherwise treat as text input
-        normalized[blockId][actionId] = { value: rawValue };
-      } else if (rawValue && typeof rawValue === 'object') {
-        // Selected option object
-        normalized[blockId][actionId] = {
-          selectedOption: { value: String(rawValue.value || rawValue) },
-        };
+      } else if (kind === 'select') {
+        // Single-select: Feishu sends the option value as a bare string
+        const value = rawValue && typeof rawValue === 'object'
+          ? String((rawValue as any).value ?? '')
+          : String(rawValue ?? '');
+        normalized[blockId][actionId] = { selectedOption: { value } };
       } else {
+        // Text input (or unknown): plain string value
         normalized[blockId][actionId] = { value: String(rawValue ?? '') };
       }
     }
