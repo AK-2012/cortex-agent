@@ -1,11 +1,12 @@
-// input:  MCP SDK, task-ops tool module
-// output: MCP stdio service, exposing remote_* tools only
+// input:  MCP SDK, task-ops + time tool modules
+// output: MCP stdio service, exposing remote_* tools plus current_time
 // pos:    Core MCP server — thread agents load only this one (no Slack/cost/schedule tools)
 // >>> If I am updated, update my header comment and the parent folder's CORTEX.md <<<
 
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { registerTaskOpsTools } from './tools/task-ops.js';
+import { registerTimeTools } from './tools/time.js';
 import { isMainModule } from '@core/utils.js';
 import { createLogger } from '@core/log.js';
 import { CORTEX_VERSION } from '@core/version.js';
@@ -17,6 +18,7 @@ const log = createLogger('mcp-core');
 const server = new McpServer({ name: 'cortex-core', version: CORTEX_VERSION });
 
 registerTaskOpsTools(server);
+registerTimeTools(server);
 
 // --- Exported tool name list (for verification) ---
 
@@ -27,6 +29,7 @@ export const TOOL_NAMES: readonly string[] = [
   'remote_edit',
   'remote_glob',
   'remote_grep',
+  'current_time',
 ];
 
 // --- Start (called by barrel when run as standalone) ---

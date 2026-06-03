@@ -28,7 +28,7 @@ test('ext-server (server.ts) registers 10 non-remote tool names', async () => {
   assert.equal(new Set(names).size, 10, 'no duplicate tool names');
 });
 
-test('core-server (core-server.ts) registers 6 remote_* tool names', async () => {
+test('core-server (core-server.ts) registers 6 remote_* tools plus current_time', async () => {
   const mod = await import('../../../src/domain/mcp/core-server.js');
   const names: readonly string[] = mod.TOOL_NAMES;
 
@@ -39,9 +39,10 @@ test('core-server (core-server.ts) registers 6 remote_* tool names', async () =>
     'remote_edit',
     'remote_glob',
     'remote_grep',
+    'current_time',
   ];
 
   assert.deepEqual([...names].sort(), [...expected].sort());
-  assert.equal(names.length, 6);
-  assert.equal(new Set(names).size, 6, 'no duplicate tool names');
+  assert.equal(names.length, 7);
+  assert.equal(new Set(names).size, 7, 'no duplicate tool names');
 });

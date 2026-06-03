@@ -69,7 +69,8 @@ Reference implementation: the `freshModuleWithCleanup(t)` helper in `tests/rate-
 | `client-manager.test.ts` | Test | client-manager handshake/sendCommand + `buildRemoteSpawnCommand` cmd.exe-wrap regression + retry-on-spawn-failure regression |
 | `cortex-run-callback-handler.test.ts` | Test | task-callback handler (DR-0011 §4.4): idempotency, skipVerify, ghost callback, blockTask note |
 | `mcp-server.test.ts` | Test | Import safety and startup hints |
-| `domain/mcp/tools-registration.test.ts` | Test | All 16 MCP tool names registered (9 legacy + cortex_context + 6 cortex_schedule_*) |
+| `domain/mcp/tools-registration.test.ts` | Test | All MCP tool names registered (ext: 10; core: 6 remote_* + current_time) |
+| `domain/mcp/time-tool.test.ts` | Test | current_time handler: valid tz payload, default tz, invalid-tz error |
 | `domain/mcp/server.test.ts` | Test | Server module loads without Slack env + no wildcard registration ([S10-A]) |
 | `domain/mcp/cortex-schedule.test.ts` | Test | resolveTargetShorthand: __current__ to concrete ID 12-way resolution and error paths |
 | `scheduled-target-dispatch.test.ts` | Test | planScheduledDispatch: fresh/channel/session/thread + fallback decision tree |
