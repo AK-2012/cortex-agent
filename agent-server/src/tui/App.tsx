@@ -22,7 +22,8 @@ import { SessionPicker } from './components/SessionPicker.js';
 import { AskUserModal } from './components/AskUserModal.js';
 import { PlanFeedbackModal } from './components/PlanFeedbackModal.js';
 import type { ResumableSession } from './components/SessionPicker.js';
-import { isNotification, isUiQueryResult, isUiEvent, isModalOpen, isModalAck } from '../platform/tui/protocol.js';
+import { isNotification, isUiQueryResult, isUiEvent, isModalOpen, isModalAck, isErrorFrame } from '../platform/tui/protocol.js';
+import { computeFocusZone, isAgentResponseFrame } from './logic.js';
 import type { WsState } from './ws-client.js';
 import type { TuiFrame, HandshakeAck, ModalOpen, ModalAck } from '../platform/tui/protocol.js';
 import type { ProjectEntry } from './components/ProjectSwitcher.js';
@@ -39,6 +40,8 @@ export interface AppProps {
   serverVersion: string | null;
   projectId: string | null;
   sessionName: string | null;
+  /** Fatal/connection error surfaced from the entry layer (e.g. backoff cap exceeded). */
+  errorMessage?: string | null;
   /**
    * Called when this App component is ready to receive frames for dispatch.
    * The parent (index.tsx) calls this function for each WS frame.
@@ -62,6 +65,7 @@ export function App({
   serverVersion,
   projectId,
   sessionName,
+  errorMessage,
   onSetDispatch,
   resumableSessions,
   resumePending,
@@ -90,8 +94,9 @@ export function App({
   const dashboard = useDashboardData();
 
   const [queuedCount, setQueuedCount] = useState(0);
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [inputDisabled, setInputDisabled] = useState(false);
+  // The user can always type; awaitingResponse only blocks *sending* until the
+  // agent starts replying (no explicit turn-end frame exists in the protocol).
+  const [awaitingResponse, setAwaitingResponse] = useState(false);
 
   // Phase 2 state
   const [sidePanelVisible, setSidePanelVisible] = useState(false);
@@ -116,6 +121,13 @@ export function App({
 
   // Route non-mutate frames to the appropriate handler
   const routeFrame = useCallback((frame: TuiFrame) => {
+    // Any agent reply / stream frame means the turn is being answered — unblock
+    // sending and clear the queued counter (there is no explicit turn-end frame).
+    // An error frame also releases the lock so a failed turn never strands input.
+    if (isAgentResponseFrame(frame) || isErrorFrame(frame)) {
+      setAwaitingResponse(false);
+      setQueuedCount(0);
+    }
     if (isNotification(frame)) {
       notif.add(frame);
       return;
@@ -153,6 +165,13 @@ export function App({
     sendFrame({ type: 'ui.query', id: 'dash-cost', scope: 'cost.summary', params: {} } as any);
   }, []);
 
+  // Switching project/session (session.switched is handled in index.tsx and never
+  // reaches routeFrame) must release any pending send-lock from the old session.
+  useEffect(() => {
+    setAwaitingResponse(false);
+    setQueuedCount(0);
+  }, [projectId, sessionName]);
+
   // Submit message
   const handleSubmit = useCallback((text: string) => {
     const id = `msg-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -162,7 +181,7 @@ export function App({
       text,
     } as any);
     setQueuedCount(prev => prev + 1);
-    setInputDisabled(true);
+    setAwaitingResponse(true);
   }, [sendFrame]);
 
   // Cancel (sends !cancel)
@@ -232,10 +251,12 @@ export function App({
     } as any);
   }, [sendFrame]);
 
-  // Modals pre-empt input
+  // Modals pre-empt input; an open dashboard takes keyboard focus from the input.
   const modalOpen = activeModal !== null || notificationsOpen || projectSwitcherOpen;
+  const focusZone = computeFocusZone({ modalOpen, sidePanelVisible });
 
-  // Keyboard bindings — disabled when a modal is active
+  // Keyboard bindings — toggles/cancel always active outside modals; scroll only
+  // when the chat input owns focus; reconnect only when not connected.
   useKeybindings({
     onSubmit: handleSubmit,
     onCancel: handleCancel,
@@ -246,7 +267,11 @@ export function App({
     onToggleSidePanel: handleToggleSidePanel,
     onToggleNotifications: handleToggleNotifications,
     onToggleProjectSwitcher: handleToggleProjectSwitcher,
-  }, !modalOpen);
+    onReconnect,
+  }, focusZone !== 'modal', {
+    allowScroll: focusZone === 'input',
+    allowReconnect: connectionState !== 'connected',
+  });
 
   // Dashboard subscription management callbacks
   const handleMarkPending = useCallback((tab: string) => {
@@ -298,6 +323,7 @@ export function App({
         {/* Dashboard side panel */}
         <SidePanel
           visible={sidePanelVisible}
+          active={focusZone === 'dashboard'}
           sendFrame={sendFrame}
           projectId={projectId}
           dashState={dashboard.state}
@@ -362,8 +388,8 @@ export function App({
       ) : (
         <InputBox
           onSubmit={handleSubmit}
-          onCancel={handleCancel}
-          disabled={inputDisabled}
+          awaitingResponse={awaitingResponse}
+          focus={focusZone === 'input'}
         />
       )}
 

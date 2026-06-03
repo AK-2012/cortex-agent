@@ -10,6 +10,8 @@ import type { MutateResult } from '../hooks/useMutate.js';
 
 interface SidePanelProps {
   visible: boolean;
+  /** Whether the dashboard currently owns the keyboard (focus zone === 'dashboard'). */
+  active: boolean;
   sendFrame: (frame: any) => void;
   projectId: string | null;
   dashState: DashState;
@@ -23,6 +25,7 @@ interface SidePanelProps {
 
 export function SidePanel({
   visible,
+  active,
   sendFrame,
   projectId,
   dashState,
@@ -38,6 +41,7 @@ export function SidePanel({
   return (
     <Box width={40} borderStyle="single" borderDimColor marginLeft={1} flexShrink={0}>
       <Dashboard
+        active={active}
         sendFrame={sendFrame}
         projectId={projectId}
         dashState={dashState}

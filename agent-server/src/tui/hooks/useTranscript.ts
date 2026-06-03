@@ -256,18 +256,39 @@ export function _handleStreamText(prev: TranscriptState, frame: StreamText): Tra
   }
 
   if (!found) {
-    // No existing stream — try to find the message that matches the text context
-    // As a fallback, add stream to the last message
+    // No existing stream — attach to the last message if one exists, otherwise
+    // create a synthetic message keyed by streamId so streamed replies aren't
+    // dropped on an empty transcript (no chat.post anchors TUI streams).
     const lastId = prev.ids[prev.ids.length - 1];
     if (lastId) {
       const lastMsg = messages.get(lastId)!;
       const streams = new Map(lastMsg.streams);
       streams.set(streamId, { segments: [frame.text], mutable: new Map() });
       messages.set(lastId, { ...lastMsg, streams });
+      return { messages, ids: prev.ids };
     }
+    return _appendSyntheticStreamMessage(prev, streamId, { segments: [frame.text], mutable: new Map() });
   }
 
   return { messages, ids: prev.ids };
+}
+
+/** Create a new message owned by an orphan stream (empty-transcript safety net). */
+function _appendSyntheticStreamMessage(
+  prev: TranscriptState,
+  streamId: string,
+  stream: StreamState,
+): TranscriptState {
+  const messageId = `stream:${streamId}`;
+  const msg: RenderedMessage = {
+    messageId,
+    text: '',
+    queued: false,
+    streams: new Map([[streamId, stream]]),
+  };
+  const messages = new Map(prev.messages);
+  messages.set(messageId, msg);
+  return { messages, ids: [...prev.ids, messageId] };
 }
 
 export function _handleStreamMutableOpen(prev: TranscriptState, frame: StreamMutableOpen): TranscriptState {
@@ -286,7 +307,8 @@ export function _handleStreamMutableOpen(prev: TranscriptState, frame: StreamMut
     }
   }
 
-  // No existing stream — add to last message
+  // No existing stream — attach to last message, or create a synthetic one
+  // when the transcript is empty so the streamed reply is not lost.
   const lastId = prev.ids[prev.ids.length - 1];
   if (lastId) {
     const lastMsg = messages.get(lastId)!;
@@ -295,9 +317,13 @@ export function _handleStreamMutableOpen(prev: TranscriptState, frame: StreamMut
     mutable.set(frame.regionId, frame.text);
     streams.set(streamId, { segments: [], mutable });
     messages.set(lastId, { ...lastMsg, streams });
+    return { messages, ids: prev.ids };
   }
 
-  return { messages, ids: prev.ids };
+  return _appendSyntheticStreamMessage(prev, streamId, {
+    segments: [],
+    mutable: new Map([[frame.regionId, frame.text]]),
+  });
 }
 
 export function _handleStreamMutableUpdate(prev: TranscriptState, frame: StreamMutableUpdate): TranscriptState {

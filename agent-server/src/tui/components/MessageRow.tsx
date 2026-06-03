@@ -5,6 +5,7 @@
 import React from 'react';
 import { Box, Text } from 'ink';
 import { RichBlocks } from '../render/rich-blocks.js';
+import { collectStreamText } from '../logic.js';
 import type { RenderedMessage } from '../hooks/useTranscript.js';
 
 interface MessageRowProps {
@@ -12,17 +13,9 @@ interface MessageRowProps {
 }
 
 export function MessageRow({ message }: MessageRowProps): React.JSX.Element {
-  const hasStreams = message.streams.size > 0;
-  const streamSegments: string[] = [];
-
-  if (hasStreams) {
-    for (const [, stream] of message.streams) {
-      streamSegments.push(...stream.segments);
-      for (const [, regionText] of stream.mutable) {
-        streamSegments.push(regionText);
-      }
-    }
-  }
+  // Concatenate all stream segments + mutable regions into a single flowing
+  // string instead of one Text per chunk (chunks don't align to line breaks).
+  const streamText = message.streams.size > 0 ? collectStreamText(message.streams) : '';
 
   return (
     <Box flexDirection="column" marginBottom={1}>
@@ -34,13 +27,9 @@ export function MessageRow({ message }: MessageRowProps): React.JSX.Element {
         ) : null}
       </Box>
 
-      {/* Streaming segments */}
-      {streamSegments.length > 0 ? (
-        <Box flexDirection="column">
-          {streamSegments.map((seg, i) => (
-            <Text key={i} dimColor>{seg}</Text>
-          ))}
-        </Box>
+      {/* Streaming text */}
+      {streamText.length > 0 ? (
+        <Text dimColor>{streamText}</Text>
       ) : null}
 
       {/* Queued indicator */}

@@ -152,8 +152,10 @@ export class WsClient {
 
     this._retryCount++;
 
-    // Check cap exceeded
+    // Check cap exceeded — settle into a terminal 'disconnected' state so the UI
+    // shows the retry hint instead of spinning on 'reconnecting' forever.
     if (this._retryCount > BACKOFF_MS.length + 3) {
+      this._setState('disconnected');
       this._opts.onCapExceeded?.();
       return;
     }

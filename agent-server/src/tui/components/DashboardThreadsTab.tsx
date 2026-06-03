@@ -20,9 +20,11 @@ interface ThreadRow {
 interface DashboardThreadsTabProps {
   data: TabData;
   mutate?: (op: string, args: Record<string, unknown>) => Promise<MutateResult>;
+  /** Whether the dashboard owns the keyboard. Defaults true for standalone tests. */
+  active?: boolean;
 }
 
-export function DashboardThreadsTab({ data, mutate }: DashboardThreadsTabProps): React.JSX.Element {
+export function DashboardThreadsTab({ data, mutate, active = true }: DashboardThreadsTabProps): React.JSX.Element {
   const [focusedIndex, setFocusedIndex] = useState(0);
   const [confirmingIndex, setConfirmingIndex] = useState<number | null>(null);
   const [alreadyTerminalRows, setAlreadyTerminalRows] = useState<Set<number>>(new Set());
@@ -53,7 +55,7 @@ export function DashboardThreadsTab({ data, mutate }: DashboardThreadsTabProps):
     } else if (input === 'c' && !key.ctrl && mutate) {
       setConfirmingIndex(focusedIndex);
     }
-  });
+  }, { isActive: active });
 
   if (data.loading && data.data.length === 0) {
     return <Text dimColor>Loading threads...</Text>;

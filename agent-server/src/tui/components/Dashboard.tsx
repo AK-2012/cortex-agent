@@ -29,6 +29,8 @@ export const DASHBOARD_TABS: DashboardTabInfo[] = [
 ];
 
 interface DashboardProps {
+  /** Whether the dashboard owns the keyboard (focus zone === 'dashboard'). */
+  active: boolean;
   sendFrame: (frame: any) => void;
   mutate?: (op: string, args: Record<string, unknown>) => Promise<MutateResult>;
   projectId: string | null;
@@ -44,6 +46,7 @@ interface DashboardProps {
 
 function TabContent({
   tab,
+  active,
   sendFrame,
   mutate,
   projectId,
@@ -53,6 +56,7 @@ function TabContent({
   onUnregisterSubscription,
 }: {
   tab: TabName;
+  active: boolean;
   sendFrame: (frame: any) => void;
   mutate?: (op: string, args: Record<string, unknown>) => Promise<MutateResult>;
   projectId: string | null;
@@ -103,13 +107,13 @@ function TabContent({
 
   switch (tab) {
     case 'threads':
-      return <DashboardThreadsTab data={dashState.tabs.threads} mutate={mutate} />;
+      return <DashboardThreadsTab data={dashState.tabs.threads} mutate={mutate} active={active} />;
     case 'tasks':
-      return <DashboardTasksTab data={dashState.tabs.tasks} mutate={mutate} projectId={projectId ?? undefined} />;
+      return <DashboardTasksTab data={dashState.tabs.tasks} mutate={mutate} projectId={projectId ?? undefined} active={active} />;
     case 'schedules':
-      return <DashboardSchedulesTab data={dashState.tabs.schedules} mutate={mutate!} />;
+      return <DashboardSchedulesTab data={dashState.tabs.schedules} mutate={mutate!} active={active} />;
     case 'executions':
-      return <DashboardExecutionsTab data={dashState.tabs.executions} mutate={mutate} />;
+      return <DashboardExecutionsTab data={dashState.tabs.executions} mutate={mutate} active={active} />;
     case 'cost':
       return <DashboardCostTab data={dashState.tabs.cost} />;
     default:
@@ -120,6 +124,7 @@ function TabContent({
 // ── Component ──
 
 export function Dashboard({
+  active,
   sendFrame,
   mutate,
   projectId,
@@ -136,7 +141,7 @@ export function Dashboard({
       const nextIdx = (currentIdx + 1) % DASHBOARD_TABS.length;
       onSetActiveTab(DASHBOARD_TABS[nextIdx].key);
     }
-  });
+  }, { isActive: active });
 
   return (
     <Box flexDirection="column" width="100%">
@@ -153,6 +158,7 @@ export function Dashboard({
       <Box flexDirection="column" flexGrow={1} paddingX={1}>
         <TabContent
           tab={activeTab as TabName}
+          active={active}
           sendFrame={sendFrame}
           mutate={mutate}
           projectId={projectId}

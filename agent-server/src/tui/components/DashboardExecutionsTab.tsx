@@ -11,9 +11,11 @@ import type { MutateResult, MutateError } from '../hooks/useMutate.js';
 interface DashboardExecutionsTabProps {
   data: TabData;
   mutate?: (op: string, args: Record<string, unknown>) => Promise<MutateResult>;
+  /** Whether the dashboard owns the keyboard. Defaults true for standalone tests. */
+  active?: boolean;
 }
 
-export function DashboardExecutionsTab({ data, mutate }: DashboardExecutionsTabProps): React.JSX.Element {
+export function DashboardExecutionsTab({ data, mutate, active = true }: DashboardExecutionsTabProps): React.JSX.Element {
   const [focusedIndex, setFocusedIndex] = useState(0);
   const [showConfirm, setShowConfirm] = useState(false);
   const [notFoundMsg, setNotFoundMsg] = useState<{ index: number; message: string } | null>(null);
@@ -40,7 +42,7 @@ export function DashboardExecutionsTab({ data, mutate }: DashboardExecutionsTabP
       confirmIndexRef.current = focusedIndex;
       setShowConfirm(true);
     }
-  });
+  }, { isActive: active });
 
   const handleConfirm = useCallback(async () => {
     setShowConfirm(false);

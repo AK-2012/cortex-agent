@@ -85,6 +85,7 @@ async function main(): Promise<void> {
       serverVersion: ackData?.serverVersion ?? null,
       projectId: currentProjectId ?? ackData?.defaultProjectId ?? null,
       sessionName: currentSessionName,
+      errorMessage,
       onSetDispatch: (dispatch) => { dispatchFrame = dispatch; },
       resumableSessions,
       resumePending,
@@ -136,6 +137,7 @@ async function main(): Promise<void> {
         connectionState = s;
         if (s === 'connected') {
           ackData = client.ack as any;
+          errorMessage = null; // clear any prior cap-exceeded error on success
         }
         doRender();
       },
@@ -213,9 +215,10 @@ async function main(): Promise<void> {
           return;
         }
 
-        // Dispatch frame to App for routing (transcript, dashboard, notifications)
+        // Dispatch frame to App for routing (transcript, dashboard, notifications).
+        // The App's hooks update React state, which triggers re-render — no extra
+        // doRender() here (that caused a full-tree reconcile on every stream token).
         dispatchFrame?.(frame);
-        doRender();
       },
       onClose: (reason) => {
         connectionState = 'reconnecting';

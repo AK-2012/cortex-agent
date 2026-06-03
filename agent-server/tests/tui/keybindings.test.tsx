@@ -134,6 +134,90 @@ test('useKeybindings calls onToggleProjectSwitcher on Ctrl+P', async (t) => {
   instance.cleanup();
 });
 
+test('useKeybindings calls onReconnect on R when allowReconnect is set', async (t) => {
+  const events: string[] = [];
+
+  function TestAppReconnect() {
+    useKeybindings({
+      onSubmit: () => {},
+      onCancel: () => {},
+      onScrollUp: () => {},
+      onScrollDown: () => {},
+      onClearView: () => {},
+      onExit: () => {},
+      onReconnect: () => events.push('reconnect'),
+    }, true, { allowReconnect: true });
+    return React.createElement(Text, null, 'test');
+  }
+
+  const instance = render(React.createElement(TestAppReconnect));
+  await delay(200);
+
+  instance.stdin.write('R');
+  await delay(200);
+
+  assert.ok(events.includes('reconnect'), `expected reconnect in events: ${JSON.stringify(events)}`);
+
+  instance.unmount();
+  instance.cleanup();
+});
+
+test('useKeybindings does NOT reconnect on R when allowReconnect is false', async (t) => {
+  const events: string[] = [];
+
+  function TestAppNoReconnect() {
+    useKeybindings({
+      onSubmit: () => {},
+      onCancel: () => {},
+      onScrollUp: () => {},
+      onScrollDown: () => {},
+      onClearView: () => {},
+      onExit: () => {},
+      onReconnect: () => events.push('reconnect'),
+    }, true, { allowReconnect: false });
+    return React.createElement(Text, null, 'test');
+  }
+
+  const instance = render(React.createElement(TestAppNoReconnect));
+  await delay(200);
+
+  instance.stdin.write('R');
+  await delay(200);
+
+  assert.equal(events.length, 0, `expected no reconnect, got ${JSON.stringify(events)}`);
+
+  instance.unmount();
+  instance.cleanup();
+});
+
+test('useKeybindings does NOT scroll when allowScroll is false', async (t) => {
+  const events: string[] = [];
+
+  function TestAppNoScroll() {
+    useKeybindings({
+      onSubmit: () => {},
+      onCancel: () => {},
+      onScrollUp: () => events.push('scrollUp'),
+      onScrollDown: () => events.push('scrollDown'),
+      onClearView: () => {},
+      onExit: () => {},
+    }, true, { allowScroll: false });
+    return React.createElement(Text, null, 'test');
+  }
+
+  const instance = render(React.createElement(TestAppNoScroll));
+  await delay(200);
+
+  instance.stdin.write('\x1b[A'); // up arrow
+  instance.stdin.write('\x1b[B'); // down arrow
+  await delay(200);
+
+  assert.equal(events.length, 0, `expected no scroll, got ${JSON.stringify(events)}`);
+
+  instance.unmount();
+  instance.cleanup();
+});
+
 test('useKeybindings calls onCancel on Escape', async (t) => {
   const events: string[] = [];
 

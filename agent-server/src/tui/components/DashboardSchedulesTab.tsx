@@ -11,9 +11,11 @@ import { ConfirmModal } from './ConfirmModal.js';
 interface DashboardSchedulesTabProps {
   data: TabData;
   mutate: (op: string, args: Record<string, unknown>) => Promise<MutateResult>;
+  /** Whether the dashboard owns the keyboard. Defaults true for standalone tests. */
+  active?: boolean;
 }
 
-export function DashboardSchedulesTab({ data, mutate }: DashboardSchedulesTabProps): React.JSX.Element {
+export function DashboardSchedulesTab({ data, mutate, active = true }: DashboardSchedulesTabProps): React.JSX.Element {
   if (data.loading && data.data.length === 0) {
     return <Text dimColor>Loading schedules...</Text>;
   }
@@ -24,10 +26,10 @@ export function DashboardSchedulesTab({ data, mutate }: DashboardSchedulesTabPro
     return <Text dimColor>No schedules</Text>;
   }
 
-  return <SchedulesList data={data} mutate={mutate} />;
+  return <SchedulesList data={data} mutate={mutate} active={active} />;
 }
 
-function SchedulesList({ data, mutate }: DashboardSchedulesTabProps): React.JSX.Element {
+function SchedulesList({ data, mutate, active = true }: DashboardSchedulesTabProps): React.JSX.Element {
   const schedules = data.data as any[];
   const [focusedRowIndex, setFocusedRowIndex] = useState(0);
   const [removingScheduleId, setRemovingScheduleId] = useState<string | null>(null);
@@ -80,7 +82,7 @@ function SchedulesList({ data, mutate }: DashboardSchedulesTabProps): React.JSX.
 
   // ── Keyboard handler ──
 
-  const isInputActive = removingScheduleId === null && schedules.length > 0;
+  const isInputActive = active && removingScheduleId === null && schedules.length > 0;
 
   useInput((input, key) => {
     if (removingScheduleIdRef.current !== null) return;

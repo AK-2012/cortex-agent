@@ -15,16 +15,28 @@ export interface KeybindingHandlers {
   onToggleSidePanel?: () => void; // Ctrl+D
   onToggleNotifications?: () => void; // Ctrl+N
   onToggleProjectSwitcher?: () => void; // Ctrl+P
+  onReconnect?: () => void; // R (when disconnected)
 }
 
-export function useKeybindings(handlers: KeybindingHandlers, isActive = true): void {
+export interface KeybindingOpts {
+  /** Handle scroll/clear keys here. False when another zone (dashboard) owns nav. */
+  allowScroll?: boolean;
+  /** Allow R to trigger reconnect (only meaningful when not connected). */
+  allowReconnect?: boolean;
+}
+
+export function useKeybindings(handlers: KeybindingHandlers, isActive = true, opts: KeybindingOpts = {}): void {
   const lastCtrlCTs = useRef(0);
   const handlersRef = useRef(handlers);
   handlersRef.current = handlers;
+  const optsRef = useRef(opts);
+  optsRef.current = opts;
 
   useInput((input, key) => {
     if (!isActive) return;
     const h = handlersRef.current;
+    const o = optsRef.current;
+    const allowScroll = o.allowScroll !== false;
 
     // Ctrl+C: first sends !cancel, second within 1s exits
     if (input === 'c' && key.ctrl) {
@@ -35,6 +47,12 @@ export function useKeybindings(handlers: KeybindingHandlers, isActive = true): v
       }
       lastCtrlCTs.current = now;
       h.onCancel(); // sends !cancel
+      return;
+    }
+
+    // R: reconnect (only when disconnected/reconnecting)
+    if ((input === 'r' || input === 'R') && !key.ctrl && o.allowReconnect && h.onReconnect) {
+      h.onReconnect();
       return;
     }
 
@@ -51,7 +69,7 @@ export function useKeybindings(handlers: KeybindingHandlers, isActive = true): v
 
     // Ctrl+L: clear transcript view
     if (input === 'l' && key.ctrl) {
-      h.onClearView();
+      if (allowScroll) h.onClearView();
       return;
     }
 
@@ -73,23 +91,23 @@ export function useKeybindings(handlers: KeybindingHandlers, isActive = true): v
       return;
     }
 
-    // ↑/↓: scroll
+    // ↑/↓: scroll (only when this zone owns navigation)
     if (key.upArrow) {
-      h.onScrollUp();
+      if (allowScroll) h.onScrollUp();
       return;
     }
     if (key.downArrow) {
-      h.onScrollDown();
+      if (allowScroll) h.onScrollDown();
       return;
     }
 
     // PgUp/PgDn: paginated scroll
     if (key.pageUp) {
-      h.onScrollUp(true);
+      if (allowScroll) h.onScrollUp(true);
       return;
     }
     if (key.pageDown) {
-      h.onScrollDown(true);
+      if (allowScroll) h.onScrollDown(true);
       return;
     }
   });

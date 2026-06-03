@@ -14,13 +14,15 @@ interface DashboardTasksTabProps {
   data: TabData;
   mutate?: (op: string, args: Record<string, unknown>) => Promise<MutateResult>;
   projectId?: string;
+  /** Whether the dashboard owns the keyboard. Defaults true for standalone tests. */
+  active?: boolean;
 }
 
 type ConfirmMode = 'complete' | 'block' | null;
 
 // ── Component ──
 
-export function DashboardTasksTab({ data, mutate, projectId }: DashboardTasksTabProps): React.JSX.Element {
+export function DashboardTasksTab({ data, mutate, projectId, active = true }: DashboardTasksTabProps): React.JSX.Element {
   if (data.loading && data.data.length === 0) {
     return <Text dimColor>Loading tasks...</Text>;
   }
@@ -31,12 +33,12 @@ export function DashboardTasksTab({ data, mutate, projectId }: DashboardTasksTab
     return <Text dimColor>No tasks</Text>;
   }
 
-  return <TasksList data={data} mutate={mutate} projectId={projectId} />;
+  return <TasksList data={data} mutate={mutate} projectId={projectId} active={active} />;
 }
 
 // ── Tasks List ──
 
-function TasksList({ data, mutate, projectId }: DashboardTasksTabProps): React.JSX.Element {
+function TasksList({ data, mutate, projectId, active = true }: DashboardTasksTabProps): React.JSX.Element {
   const tasks = data.data as any[];
   const [focusedIndex, setFocusedIndex] = useState(0);
   const [confirmingIndex, setConfirmingIndex] = useState<number | null>(null);
@@ -117,7 +119,7 @@ function TasksList({ data, mutate, projectId }: DashboardTasksTabProps): React.J
 
   // ── Keyboard handler ──
 
-  const isInputActive = confirmingIndex === null && tasks.length > 0;
+  const isInputActive = active && confirmingIndex === null && tasks.length > 0;
 
   useInput((input, key) => {
     if (confirmingIndexRef.current !== null) return;
