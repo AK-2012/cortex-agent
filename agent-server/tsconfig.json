@@ -6,6 +6,8 @@
     "moduleResolution": "NodeNext",
     "strict": false,
     "noImplicitAny": false,
+    "// noEmit": "This base config is for editors + `tsc --noEmit` typechecking only. The real build uses the standalone tsconfig.build.json (outDir: dist). noEmit:true here stops a bare `tsc` from littering src/ and tests/ with compiled .js next to each .ts.",
+    "noEmit": true,
     "jsx": "react-jsx",
     "jsxImportSource": "react",
     "esModuleInterop": true,
