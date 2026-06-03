@@ -369,13 +369,21 @@ class ExecutionRepo {
 
   /** Reconcile stale dispatch executions: mark dispatches that are no longer pending and too old as stale.
    *  Returns { count, staled } where count is reconciled count and staled is the list of affected IDs. */
-  async reconcileStaleDispatches({ isTaskPending, maxAgeMs }: {
-    isTaskPending: (taskId: string) => boolean; maxAgeMs: number;
+  async reconcileStaleDispatches({ isTaskPending, isLive, maxAgeMs, graceMs }: {
+    isTaskPending: (taskId: string) => boolean;
+    /** True if the execution is still live in the in-memory registry (in-process dispatch). */
+    isLive?: (executionId: string) => boolean;
+    /** Hard ceiling: reap even a "live" dispatch once this old (wedged). */
+    maxAgeMs: number;
+    /** Short grace for a not-pending, not-live dispatch (a crashed in-process orphan). */
+    graceMs?: number;
   }): Promise<{ count: number; staled: string[] }> {
     await this._pendingPersist;
     return this.mutex.run(async () => {
       const now = Date.now();
       const timestamp = nowIso();
+      // Without an isLive signal, fall back to the blunt hard-ceiling behavior.
+      const orphanGraceMs = graceMs ?? maxAgeMs;
       let reconciled = 0;
       const staled: string[] = [];
 
@@ -383,9 +391,17 @@ class ExecutionRepo {
         if (record.status !== 'running') continue;
         if (record.kind !== 'dispatch') continue;
         const taskId = record.dispatch?.taskId;
-        if (taskId && isTaskPending(taskId)) continue;
+        if (taskId && isTaskPending(taskId)) continue;   // tracked remote dispatch — keep
         const startedAt = record.runtime?.startedAt ? new Date(record.runtime.startedAt).getTime() : 0;
-        if (now - startedAt < maxAgeMs) continue;
+        const age = now - startedAt;
+        // Only LOCAL in-process dispatch is observable via the in-memory registry. A remote
+        // dispatch (machine set) runs on another host and is never "live" here, so the short
+        // orphan grace must not apply to it — it stays on the hard ceiling and is governed by
+        // isTaskPending. The short grace targets a crashed local in-process orphan only.
+        const isLocal = !record.dispatch?.machine || record.dispatch.machine === 'local';
+        const live = isLocal && isLive ? isLive(record.id) : false;
+        const threshold = (isLocal && !live) ? orphanGraceMs : maxAgeMs;
+        if (age < threshold) continue;
         record.status = 'stale';
         record.runtime.updatedAt = timestamp;
         record.runtime.endedAt = timestamp;

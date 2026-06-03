@@ -193,7 +193,13 @@ process.on('SIGTERM', async () => {
     log.warn(`Startup: recoverTuiOrphans failed: ${(e as Error).message}`);
   }
   executionRepo.load();
-  await executionRegistry.markMissingRunningExecutionsStale((record) => record.kind === 'dispatch');
+  // Keep only REMOTE dispatch running across restart (it runs on another machine/tmux and
+  // survives). An in-process dispatch (dispatch=null / machine 'local') dies with the server, so
+  // stale it immediately — otherwise its 'running' record poisons a dispatch concurrency slot
+  // until the reconciler's next tick.
+  await executionRegistry.markMissingRunningExecutionsStale(
+    (record) => record.kind === 'dispatch' && !!record.dispatch?.machine && record.dispatch.machine !== 'local',
+  );
 
   // ── Wire UI service into the TUI gateway ────────────────────────────────
   //
