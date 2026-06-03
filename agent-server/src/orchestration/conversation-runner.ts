@@ -138,24 +138,15 @@ export async function runConversation(opts: RunConversationOptions): Promise<Con
 
   const result = await handle.promise;
 
-  // Finalize the execution record here so this function is self-contained and serves both the
-  // interactive path (agent-runner) and the scheduler. completeExecution/failExecution are
-  // idempotent (execution-repo guards terminal status), so the interactive path's later
-  // handleAgentSuccess→finalizeLocalExecution call is a harmless no-op.
+  // Finalize the execution here (persistent record + registry teardown + balanced agent.* event)
+  // so this function is self-contained and serves both the interactive path (agent-runner) and
+  // the scheduler. teardownExecution is idempotent (execution-repo guards terminal status), so the
+  // interactive path's later handleAgentSuccess→finalizeLocalExecution call is a harmless no-op.
   const durationS = (Date.now() - opts.startTime) / 1000;
   if (result?.rateLimited) {
-    executionRegistry.failExecution(execution.id, { durationS, error: 'Rate limited' });
-    // Release the running-execution entry as a failure so the bus event (agent.failed)
-    // matches the finalized record status, not agent.completed.
-    runningExecutions.fail(execution.id, 'Rate limited');
+    executionRegistry.teardownExecution({ executionId: execution.id, status: 'failed', durationS, error: { message: 'Rate limited' } });
   } else {
-    executionRegistry.completeExecution(execution.id, {
-      costUsd: result?.total_cost_usd,
-      numTurns: result?.num_turns,
-      durationS,
-      finalOutput: result?.finalOutput || null,
-    });
-    runningExecutions.complete(execution.id, result?.total_cost_usd ?? 0);
+    executionRegistry.teardownExecution({ executionId: execution.id, status: 'completed', durationS, result });
   }
 
   return { result, executionId: execution.id };

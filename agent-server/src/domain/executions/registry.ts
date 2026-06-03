@@ -9,6 +9,8 @@ import { executionRepo, TERMINAL_STATUSES } from '@store/execution-repo.js';
 import { PROJECTS_DIR } from '@core/utils.js';
 import { readLock, releaseLock } from '@domain/tasks/system/task-lock.js';
 import { createLogger } from '@core/log.js';
+import { runningExecutions } from '@core/running-executions.js';
+import type { AgentResult } from '@core/types/agent-types.js';
 
 export type { ExecutionRecord, DispatchInfo } from '@store/execution-repo.js';
 export { TERMINAL_STATUSES };
@@ -113,6 +115,45 @@ export function cancelExecutionByTaskId(taskId: string, metrics?: Parameters<typ
   const record = executionRepo.getExecutionByTaskId(taskId);
   if (!record) return null;
   return cancelExecution(record.id, metrics);
+}
+
+/**
+ * Close an execution across BOTH ledgers in one call: finalize the persistent record
+ * (idempotent — terminal status is guarded in execution-repo) and tear down the in-memory
+ * live registry while publishing the matching agent.* lifecycle event.
+ *
+ * This is the single teardown every execution path should funnel through so the persistent
+ * status, the live registry, and the bus events never drift apart. In particular it gives
+ * thread steps their agent.completed/failed events, which the old event-less remove() skipped.
+ *
+ * Does NOT touch the busy-tracker — trackPendingTask(±1) is per-enqueue (a thread spans many
+ * steps under one +1), so it stays managed by the caller.
+ */
+export function teardownExecution({ executionId, status, result, error, durationS, costUsd }: {
+  executionId: string | null;
+  status: 'completed' | 'failed' | 'cancelled';
+  result?: AgentResult | null;
+  error?: { message?: string } | null;
+  durationS: number;
+  costUsd?: number;
+}) {
+  if (!executionId) return null;
+  let rec;
+  if (status === 'completed') {
+    rec = completeExecution(executionId, {
+      costUsd: result?.total_cost_usd, numTurns: result?.num_turns, durationS, finalOutput: result?.finalOutput || null,
+    });
+    runningExecutions.complete(executionId, costUsd ?? result?.total_cost_usd ?? 0);
+  } else if (status === 'cancelled') {
+    rec = cancelExecution(executionId, { durationS });
+    // The kill already happened on the cancel path; supersede() publishes agent.superseded
+    // and removes the entry (a second kill() is harmless).
+    runningExecutions.supersede(executionId, 'cancelled');
+  } else {
+    rec = failExecution(executionId, { durationS, error: error?.message || null });
+    runningExecutions.fail(executionId, error?.message ?? 'error');
+  }
+  return rec;
 }
 
 // --- Async operations ---

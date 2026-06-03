@@ -310,17 +310,20 @@ async function executeAndAwaitAgent(
   });
 
   try {
+    // On success the registry entry stays live until recordStepOutcome tears it down
+    // (so the agent.completed event fires there). On error we tear down here.
     return await handle.promise;
   } catch (agentError: any) {
-    // Finalize execution as failed so it doesn't stay stuck in 'running'
+    // Finalize execution as failed (persistent record + registry + agent.failed event)
+    // so it doesn't stay stuck in 'running' and the dashboards see a balanced lifecycle.
     const failDurationS = (Date.now() - new Date(stepStartTime).getTime()) / 1000;
-    executionRegistry.failExecution(execution.id, {
+    executionRegistry.teardownExecution({
+      executionId: execution.id,
+      status: 'failed',
       durationS: failDurationS,
-      error: agentError?.message || 'Agent process error',
+      error: { message: agentError?.message || 'Agent process error' },
     });
     throw agentError;
-  } finally {
-    runningExecutions.remove(stepCtx.execution.id);
   }
 }
 
@@ -368,18 +371,15 @@ async function recordStepOutcome(
     });
   }
 
-  // Finalize execution
+  // Finalize execution: persistent record + registry teardown + balanced agent.* event.
   if (result?.rateLimited) {
-    executionRegistry.failExecution(execution.id, {
-      durationS: stepDurationS,
-      error: 'Rate limited',
+    executionRegistry.teardownExecution({
+      executionId: execution.id, status: 'failed', durationS: stepDurationS,
+      error: { message: 'Rate limited' },
     });
   } else {
-    executionRegistry.completeExecution(execution.id, {
-      costUsd: result?.total_cost_usd,
-      numTurns: result?.num_turns,
-      durationS: stepDurationS,
-      finalOutput: result?.finalOutput || null,
+    executionRegistry.teardownExecution({
+      executionId: execution.id, status: 'completed', durationS: stepDurationS, result,
     });
   }
 }
