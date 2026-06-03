@@ -93,9 +93,9 @@ async function processEdit({ channel, adapter, originalTs, newText, turnIndex, c
   const backend = resolveBackendForChannel(channel) || conversation.backend;
 
   // Step 1: Cancel any active processing on this channel
-  if (activeAgents.has(channel)) {
+  if (activeAgents.hasChannel(channel)) {
     supersededEdits.mark(channel);
-    activeAgents.supersede(channel, 'edit');
+    activeAgents.supersedeByChannel(channel, 'edit');
     conduitQueues.delete(channel);
     log.info('Killed active process for edit retry');
   }

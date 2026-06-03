@@ -62,8 +62,8 @@ export interface ConversationResult {
  *
  * Does NOT catch agent errors: the caller's try/catch (agent-runner._executeReal) invokes
  * handleAgentError, which finalizes the execution record and removes the running-execution
- * entry via runningExecutions.fail(channel). On success this function removes the entry via
- * runningExecutions.complete(channel); handleAgentSuccess finalizes the execution record.
+ * entry via runningExecutions.fail(executionId). On success this function removes the entry via
+ * runningExecutions.complete(executionId); handleAgentSuccess finalizes the execution record.
  */
 export async function runConversation(opts: RunConversationOptions): Promise<ConversationResult> {
   const defaultAgentName = getDefaultAgent() || 'main';
@@ -124,11 +124,12 @@ export async function runConversation(opts: RunConversationOptions): Promise<Con
 
   // Track the handle for cancellation under the channel key (preserves !cancel / supersede /
   // killByKey paths); executionId is indexed too so the Cancel button can resolve it.
-  runningExecutions.register(opts.channel, {
+  runningExecutions.register({
     threadId: null,
     channel: opts.channel,
     agentSlotId: null,
     executionId: execution.id,
+    kind: execution.kind,
     kill: () => handle.kill(),
     backend: getActiveBackend(),
     agentProcess: handle.agentProcess,
@@ -146,7 +147,7 @@ export async function runConversation(opts: RunConversationOptions): Promise<Con
     executionRegistry.failExecution(execution.id, { durationS, error: 'Rate limited' });
     // Release the running-execution entry as a failure so the bus event (agent.failed)
     // matches the finalized record status, not agent.completed.
-    runningExecutions.fail(opts.channel, 'Rate limited');
+    runningExecutions.fail(execution.id, 'Rate limited');
   } else {
     executionRegistry.completeExecution(execution.id, {
       costUsd: result?.total_cost_usd,
@@ -154,7 +155,7 @@ export async function runConversation(opts: RunConversationOptions): Promise<Con
       durationS,
       finalOutput: result?.finalOutput || null,
     });
-    runningExecutions.complete(opts.channel, result?.total_cost_usd ?? 0);
+    runningExecutions.complete(execution.id, result?.total_cost_usd ?? 0);
   }
 
   return { result, executionId: execution.id };

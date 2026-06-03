@@ -1,6 +1,8 @@
 // input:  Node test runner, RunningExecutions + EventBus
-// output: regression tests for RunningExecutions: three-index consistency, kill chains, event publishing
-// pos:    validates Phase 1 Step 1 invariants — register/get/kill/remove across byKey/byThreadId/byExecutionId
+// output: regression tests for RunningExecutions — executionId-keyed registry with channel/thread
+//         secondary indices. Validates P3 fix (multiple live executions per channel coexist),
+//         balanced lifecycle events, and identity-guarded index cleanup.
+// pos:    validates the Stage 1 backbone refactor (plan: execution lifecycle).
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -14,7 +16,8 @@ function makeInput(overrides: Partial<RunningExecutionInput> = {}): RunningExecu
     threadId: null,
     channel: null,
     agentSlotId: null,
-    executionId: null,
+    executionId: 'E-default',
+    kind: null,
     kill: () => true,
     backend: 'claude',
     ...overrides,
@@ -37,91 +40,106 @@ function collectEvents(bus: EventBus): CortexEvent[] {
 
 // ── Index consistency ─────────────────────────────────────────────────
 
-test('register with key only: appears only in byKey', () => {
+test('register by executionId: resolvable by id and channel; not by unknown thread', () => {
   const exec = new RunningExecutions();
-  exec.register('C123', makeInput());
+  exec.register(makeInput({ executionId: 'E1', channel: 'C123' }));
 
-  assert.ok(exec.has('C123'));
-  assert.ok(exec.getByKey('C123') !== null);
-  assert.equal(exec.getByKey('C123')!.registryKey, 'C123');
-  assert.equal(exec.getByThreadId('T1'), null);
-  assert.equal(exec.getByExecutionId('E1'), null);
-});
-
-test('register with key + threadId: appears in byKey and byThreadId; remove cleans both', () => {
-  const exec = new RunningExecutions();
-  exec.register('C123', makeInput({ threadId: 'T1' }));
-
-  assert.ok(exec.has('C123'));
-  assert.equal(exec.getByThreadId('T1')!.registryKey, 'C123');
-
-  exec.remove('C123');
-  assert.equal(exec.has('C123'), false);
+  assert.ok(exec.hasId('E1'));
+  assert.equal(exec.getById('E1')!.registryKey, 'E1');
+  assert.equal(exec.getByChannel('C123').length, 1);
+  assert.equal(exec.getByChannel('C123')[0]!.executionId, 'E1');
   assert.equal(exec.getByThreadId('T1'), null);
 });
 
-test('register with key + threadId + executionId: appears in all 3 indices; remove cleans all 3', () => {
+test('register returns the primary key (executionId)', () => {
   const exec = new RunningExecutions();
-  exec.register('C123', makeInput({ threadId: 'T1', executionId: 'E1' }));
+  const key = exec.register(makeInput({ executionId: 'E1', channel: 'C1' }));
+  assert.equal(key, 'E1');
+});
 
-  assert.equal(exec.getByKey('C123')!.executionId, 'E1');
+test('register with threadId: appears in byThreadId and byChannel; remove(id) cleans all', () => {
+  const exec = new RunningExecutions();
+  exec.register(makeInput({ executionId: 'E1', threadId: 'T1', channel: 'C123' }));
+
   assert.equal(exec.getByThreadId('T1')!.executionId, 'E1');
-  assert.equal(exec.getByExecutionId('E1')!.registryKey, 'C123');
+  assert.equal(exec.getByChannel('C123').length, 1);
 
-  exec.remove('C123');
-  assert.equal(exec.getByKey('C123'), null);
+  exec.remove('E1');
+  assert.equal(exec.hasId('E1'), false);
   assert.equal(exec.getByThreadId('T1'), null);
-  assert.equal(exec.getByExecutionId('E1'), null);
+  assert.equal(exec.getByChannel('C123').length, 0);
+  assert.equal(exec.hasChannel('C123'), false);
+});
+
+// ── P3 regression: multiple live executions per channel ────────────────
+
+test('two executions on the same channel coexist — neither evicts the other', () => {
+  const exec = new RunningExecutions();
+  const hA = makeKillTracker();
+  const hB = makeKillTracker();
+  exec.register(makeInput({ executionId: 'EA', channel: 'C1', kill: () => hA.kill() }));
+  exec.register(makeInput({ executionId: 'EB', channel: 'C1', kill: () => hB.kill() }));
+
+  // Both are tracked
+  assert.equal(exec.getByChannel('C1').length, 2);
+  assert.ok(exec.getById('EA') !== null);
+  assert.ok(exec.getById('EB') !== null);
+
+  // Killing one leaves the other live (no silent eviction / handle leak)
+  assert.equal(exec.killById('EA'), true);
+  assert.equal(hA.killed, true);
+  assert.equal(hB.killed, false);
+  assert.equal(exec.getById('EA'), null);
+  assert.equal(exec.getByChannel('C1').length, 1);
+  assert.equal(exec.getByChannel('C1')[0]!.executionId, 'EB');
+});
+
+test('killByChannel kills every execution on the channel and returns the count', () => {
+  const exec = new RunningExecutions();
+  const hA = makeKillTracker();
+  const hB = makeKillTracker();
+  exec.register(makeInput({ executionId: 'EA', channel: 'C1', kill: () => hA.kill() }));
+  exec.register(makeInput({ executionId: 'EB', channel: 'C1', kill: () => hB.kill() }));
+  exec.register(makeInput({ executionId: 'EC', channel: 'C2' }));
+
+  const n = exec.killByChannel('C1');
+  assert.equal(n, 2);
+  assert.equal(hA.killed, true);
+  assert.equal(hB.killed, true);
+  assert.equal(exec.getByChannel('C1').length, 0);
+  // Other channel untouched
+  assert.equal(exec.getByChannel('C2').length, 1);
+
+  assert.equal(exec.killByChannel('C1'), 0);
 });
 
 // ── Kill chain ────────────────────────────────────────────────────────
 
-test('killByKey: calls kill(), removes from all indices, returns true; second call returns false', () => {
+test('killById: calls kill(), removes from all indices, returns true; second call false', () => {
   const exec = new RunningExecutions();
   const handle = makeKillTracker();
-  exec.register('C123', makeInput({ threadId: 'T1', executionId: 'E1', kill: () => handle.kill() }));
+  exec.register(makeInput({ executionId: 'E1', threadId: 'T1', channel: 'C1', kill: () => handle.kill() }));
 
-  const result1 = exec.killByKey('C123');
-  assert.equal(result1, true);
+  assert.equal(exec.killById('E1'), true);
   assert.equal(handle.killed, true);
-  assert.equal(exec.has('C123'), false);
+  assert.equal(exec.hasId('E1'), false);
   assert.equal(exec.getByThreadId('T1'), null);
-  assert.equal(exec.getByExecutionId('E1'), null);
+  assert.equal(exec.getByChannel('C1').length, 0);
 
-  const result2 = exec.killByKey('C123');
-  assert.equal(result2, false);
+  assert.equal(exec.killById('E1'), false);
 });
 
-test('killByThreadId: resolves via byThreadId, calls kill(), cleans all indices', () => {
+test('killByThreadId: resolves via byThreadId, kills, cleans all indices', () => {
   const exec = new RunningExecutions();
   const handle = makeKillTracker();
-  exec.register('C123', makeInput({ threadId: 'T1', executionId: 'E1', kill: () => handle.kill() }));
+  exec.register(makeInput({ executionId: 'E1', threadId: 'T1', channel: 'C1', kill: () => handle.kill() }));
 
-  const result = exec.killByThreadId('T1');
-  assert.equal(result, true);
+  assert.equal(exec.killByThreadId('T1'), true);
   assert.equal(handle.killed, true);
-  assert.equal(exec.has('C123'), false);
+  assert.equal(exec.hasId('E1'), false);
   assert.equal(exec.getByThreadId('T1'), null);
-  assert.equal(exec.getByExecutionId('E1'), null);
 
-  const second = exec.killByThreadId('T1');
-  assert.equal(second, false);
-});
-
-test('killByExecutionId: resolves via byExecutionId, calls kill(), cleans all indices (conversation Cancel)', () => {
-  const exec = new RunningExecutions();
-  const handle = makeKillTracker();
-  // Conversation path registers under the channel key with no threadId, executionId only.
-  exec.register('C123', makeInput({ threadId: null, executionId: 'E1', kill: () => handle.kill() }));
-
-  const result = exec.killByExecutionId('E1');
-  assert.equal(result, true);
-  assert.equal(handle.killed, true);
-  assert.equal(exec.has('C123'), false);
-  assert.equal(exec.getByExecutionId('E1'), null);
-
-  const second = exec.killByExecutionId('E1');
-  assert.equal(second, false);
+  assert.equal(exec.killByThreadId('T1'), false);
 });
 
 // ── Event publishing ──────────────────────────────────────────────────
@@ -131,7 +149,7 @@ test('register with executionId publishes agent.started', () => {
   const events = collectEvents(bus);
   const exec = new RunningExecutions(bus);
 
-  exec.register('C123', makeInput({ channel: 'C123', executionId: 'exec-1', backend: 'claude' }));
+  exec.register(makeInput({ channel: 'C123', executionId: 'exec-1', backend: 'claude' }));
 
   assert.equal(events.length, 1);
   assert.equal(events[0].type, 'agent.started');
@@ -142,30 +160,18 @@ test('register with executionId publishes agent.started', () => {
   }
 });
 
-test('register without executionId does NOT publish agent.started', () => {
-  const bus = new EventBus();
-  const events = collectEvents(bus);
-  const exec = new RunningExecutions(bus);
-
-  exec.register('C123', makeInput());
-
-  assert.equal(exec.has('C123'), true);
-  assert.equal(events.length, 0, 'no executionId → no event');
-});
-
 test('complete publishes agent.completed with cost + durationMs and removes entry', async () => {
   const bus = new EventBus();
   const exec = new RunningExecutions(bus);
-  exec.register('C123', makeInput({ channel: 'C123', executionId: 'exec-2', backend: 'codex' }));
+  exec.register(makeInput({ channel: 'C123', executionId: 'exec-2', backend: 'codex' }));
 
-  // Wait long enough for durationMs > 0
   await new Promise((r) => setTimeout(r, 5));
 
   const events = collectEvents(bus);
-  const ok = exec.complete('C123', 0.42);
+  const ok = exec.complete('exec-2', 0.42);
 
   assert.equal(ok, true);
-  assert.equal(exec.has('C123'), false);
+  assert.equal(exec.hasId('exec-2'), false);
   assert.equal(events.length, 1);
   assert.equal(events[0].type, 'agent.completed');
   if (events[0].type === 'agent.completed') {
@@ -174,21 +180,19 @@ test('complete publishes agent.completed with cost + durationMs and removes entr
     assert.ok(events[0].durationMs >= 0);
   }
 
-  // Second complete is a no-op
-  const second = exec.complete('C123');
-  assert.equal(second, false);
+  assert.equal(exec.complete('exec-2'), false);
 });
 
 test('fail publishes agent.failed with error and removes entry', () => {
   const bus = new EventBus();
   const exec = new RunningExecutions(bus);
-  exec.register('C123', makeInput({ channel: 'C123', executionId: 'exec-3', backend: 'claude' }));
+  exec.register(makeInput({ channel: 'C123', executionId: 'exec-3', backend: 'claude' }));
 
   const events = collectEvents(bus);
-  const ok = exec.fail('C123', 'boom');
+  const ok = exec.fail('exec-3', 'boom');
 
   assert.equal(ok, true);
-  assert.equal(exec.has('C123'), false);
+  assert.equal(exec.hasId('exec-3'), false);
   assert.equal(events.length, 1);
   assert.equal(events[0].type, 'agent.failed');
   if (events[0].type === 'agent.failed') {
@@ -197,21 +201,18 @@ test('fail publishes agent.failed with error and removes entry', () => {
   }
 });
 
-test('supersede kills handle, removes entry, and publishes agent.superseded', () => {
+test('supersede(id) kills handle, removes entry, publishes agent.superseded', () => {
   const bus = new EventBus();
   const exec = new RunningExecutions(bus);
   const handle = makeKillTracker();
-  exec.register('C123', makeInput({
-    channel: 'C123', executionId: 'exec-4', backend: 'claude',
-    kill: () => handle.kill(),
-  }));
+  exec.register(makeInput({ channel: 'C123', executionId: 'exec-4', kill: () => handle.kill() }));
 
   const events = collectEvents(bus);
-  const ok = exec.supersede('C123', 'edit');
+  const ok = exec.supersede('exec-4', 'edit');
 
   assert.equal(ok, true);
-  assert.equal(handle.killed, true, 'supersede must call kill()');
-  assert.equal(exec.has('C123'), false);
+  assert.equal(handle.killed, true);
+  assert.equal(exec.hasId('exec-4'), false);
   assert.equal(events.length, 1);
   assert.equal(events[0].type, 'agent.superseded');
   if (events[0].type === 'agent.superseded') {
@@ -220,138 +221,100 @@ test('supersede kills handle, removes entry, and publishes agent.superseded', ()
   }
 });
 
-// ── Edge cases ────────────────────────────────────────────────────────
-
-test('setBus after construction: events not published until bus is wired', () => {
-  const exec = new RunningExecutions();
-  exec.register('C123', makeInput({ channel: 'C123', executionId: 'exec-5', backend: 'claude' }));
-
-  // No bus yet → no events. Now wire one.
+test('supersedeByChannel kills+supersedes every entry on the channel (edit flow)', () => {
   const bus = new EventBus();
+  const exec = new RunningExecutions(bus);
+  const hA = makeKillTracker();
+  const hB = makeKillTracker();
+  exec.register(makeInput({ channel: 'C1', executionId: 'EA', kill: () => hA.kill() }));
+  exec.register(makeInput({ channel: 'C1', executionId: 'EB', kill: () => hB.kill() }));
+
   const events = collectEvents(bus);
-  exec.setBus(bus);
+  const n = exec.supersedeByChannel('C1', 'edit');
 
-  exec.complete('C123', 1.0);
-  assert.equal(events.length, 1);
-  assert.equal(events[0].type, 'agent.completed');
+  assert.equal(n, 2);
+  assert.equal(hA.killed, true);
+  assert.equal(hB.killed, true);
+  assert.equal(exec.getByChannel('C1').length, 0);
+  assert.equal(events.filter((e) => e.type === 'agent.superseded').length, 2);
 });
 
-test('non-channel key (hookHandleKey): register with threadId=null, entry in byKey but not byThreadId', () => {
+// ── kind field (Stage 4 dispatch accounting) ──────────────────────────
+
+test('register stores the kind field for dispatch accounting', () => {
   const exec = new RunningExecutions();
-  exec.register('hook:my-handle', makeInput({ threadId: null, channel: null }));
-
-  assert.ok(exec.has('hook:my-handle'));
-  assert.equal(exec.getByKey('hook:my-handle')!.registryKey, 'hook:my-handle');
-  assert.equal(exec.getByKey('hook:my-handle')!.threadId, null);
-  assert.equal(exec.getByThreadId('anything'), null);
+  exec.register(makeInput({ executionId: 'E1', channel: 'C1', kind: 'dispatch' }));
+  assert.equal(exec.getById('E1')!.kind, 'dispatch');
 });
 
-test('duplicate threadId replaced: second registration with same threadId updates byThreadId', () => {
+// ── Identity-guarded index cleanup ─────────────────────────────────────
+
+test('removing an entry with a shared threadId must not corrupt byThreadId for the active entry', () => {
   const exec = new RunningExecutions();
-  exec.register('C1', makeInput({ threadId: 'T1', channel: 'C1' }));
-  exec.register('C2', makeInput({ threadId: 'T1', channel: 'C2' }));
+  exec.register(makeInput({ executionId: 'EA', threadId: 'T', channel: 'C1' }));
+  exec.register(makeInput({ executionId: 'EB', threadId: 'T', channel: 'C2' }));
+  // byThreadId['T'] = EB (second registration wins)
 
-  // byThreadId now points to C2
-  assert.equal(exec.getByThreadId('T1')!.registryKey, 'C2');
-  // C1 still exists in byKey with its original threadId value
-  assert.equal(exec.getByKey('C1')!.threadId, 'T1');
-  assert.equal(exec.getByKey('C1')!.channel, 'C1');
-
-  // Removing C2 (owner of byThreadId) cleans the index
-  exec.remove('C2');
-  assert.equal(exec.getByThreadId('T1'), null);
-  // C1 is still in byKey with its original threadId value
-  assert.equal(exec.getByKey('C1')!.registryKey, 'C1');
-  assert.equal(exec.getByKey('C1')!.threadId, 'T1');
+  exec.remove('EA');
+  // byThreadId['T'] must still point to EB
+  assert.equal(exec.getByThreadId('T')!.executionId, 'EB');
 });
 
-test('removing stale key with shared threadId must not corrupt byThreadId for active entry', () => {
+test('ad-hoc registryKey (no executionId) is supported and keyed by registryKey', () => {
   const exec = new RunningExecutions();
-  exec.register('A', makeInput({ threadId: 'T' }));
-  exec.register('B', makeInput({ threadId: 'T' }));
-  // byThreadId['T'] = B (the second registration wins)
-  // byKey['A'] still holds threadId: 'T' as stale data
-
-  exec.remove('A');
-  // byThreadId['T'] must still point to B — removing stale key A must not touch it
-  assert.equal(exec.getByThreadId('T')!.registryKey, 'B');
+  const key = exec.register(makeInput({ executionId: null, registryKey: 'hook:my-handle', channel: 'C1' }));
+  assert.equal(key, 'hook:my-handle');
+  assert.equal(exec.getById('hook:my-handle')!.registryKey, 'hook:my-handle');
+  exec.remove('hook:my-handle');
+  assert.equal(exec.getById('hook:my-handle'), null);
 });
 
-test('removing stale key with shared executionId must not corrupt byExecutionId for active entry', () => {
-  const exec = new RunningExecutions();
-  const handleA = makeKillTracker();
-  const handleD = makeKillTracker();
-  exec.register('C', makeInput({ executionId: 'E', kill: () => handleA.kill() }));
-  exec.register('D', makeInput({ executionId: 'E', kill: () => handleD.kill() }));
-  // byExecutionId['E'] = D (the second registration wins)
-
-  exec.killByKey('C');
-  // byExecutionId['E'] must still point to D — killing stale key C must not touch it
-  assert.equal(exec.getByExecutionId('E')!.registryKey, 'D');
-  // D is still alive and its kill was NOT called
-  assert.equal(handleD.killed, false);
-});
-
-// ── Additional edge cases ─────────────────────────────────────────────
+// ── Misc ───────────────────────────────────────────────────────────────
 
 test('getAll returns snapshot of all registered entries', () => {
   const exec = new RunningExecutions();
   assert.equal(exec.getAll().length, 0);
 
-  exec.register('C1', makeInput({ channel: 'C1' }));
-  exec.register('C2', makeInput({ channel: 'C2' }));
+  exec.register(makeInput({ executionId: 'E1', channel: 'C1' }));
+  exec.register(makeInput({ executionId: 'E2', channel: 'C2' }));
   assert.equal(exec.getAll().length, 2);
 
-  exec.remove('C1');
+  exec.remove('E1');
   assert.equal(exec.getAll().length, 1);
-  assert.equal(exec.getAll()[0]!.registryKey, 'C2');
+  assert.equal(exec.getAll()[0]!.executionId, 'E2');
 });
 
-test('getByExecutionId returns null for unknown executionId', () => {
+test('getById returns null for unknown id', () => {
   const exec = new RunningExecutions();
-  exec.register('C123', makeInput({ executionId: 'exec-1' }));
-
-  assert.equal(exec.getByExecutionId('exec-1')!.registryKey, 'C123');
-  assert.equal(exec.getByExecutionId('nonexistent'), null);
+  exec.register(makeInput({ executionId: 'E1' }));
+  assert.equal(exec.getById('E1')!.executionId, 'E1');
+  assert.equal(exec.getById('nope'), null);
 });
 
-test('re-register at same key silently replaces old entry and cleans old indices', () => {
+test('remove is a no-op for a non-existent id', () => {
   const exec = new RunningExecutions();
-  exec.register('C1', makeInput({ threadId: 'T1', executionId: 'E1', channel: 'C1', backend: 'claude' }));
-  exec.register('C1', makeInput({ threadId: 'T2', executionId: 'E2', channel: 'C1', backend: 'codex' }));
-
-  // Old indices are gone
-  assert.equal(exec.getByThreadId('T1'), null);
-  assert.equal(exec.getByExecutionId('E1'), null);
-
-  // New indices active
-  assert.equal(exec.getByThreadId('T2')!.registryKey, 'C1');
-  assert.equal(exec.getByExecutionId('E2')!.registryKey, 'C1');
-  assert.equal(exec.getByKey('C1')!.backend, 'codex');
-});
-
-test('remove is no-op for non-existent key', () => {
-  const exec = new RunningExecutions();
-  // Should not throw
   exec.remove('nonexistent');
-  assert.equal(exec.has('nonexistent'), false);
+  assert.equal(exec.hasId('nonexistent'), false);
 });
 
 test('register stores startTime as a recent timestamp', () => {
   const exec = new RunningExecutions();
   const before = Date.now();
-  exec.register('C1', makeInput());
-  const entry = exec.getByKey('C1')!;
-  assert.ok(entry.startTime >= before, 'startTime must be >= before timestamp');
-  assert.ok(entry.startTime <= Date.now(), 'startTime must be <= now');
+  exec.register(makeInput({ executionId: 'E1' }));
+  const entry = exec.getById('E1')!;
+  assert.ok(entry.startTime >= before);
+  assert.ok(entry.startTime <= Date.now());
 });
 
-test('constructor accepts optional bus', () => {
+test('setBus after construction: events not published until bus is wired', () => {
+  const exec = new RunningExecutions();
+  exec.register(makeInput({ channel: 'C123', executionId: 'exec-5' }));
+
   const bus = new EventBus();
   const events = collectEvents(bus);
-  const exec = new RunningExecutions(bus);
+  exec.setBus(bus);
 
-  exec.register('C1', makeInput({ executionId: 'exec-1' }));
+  exec.complete('exec-5', 1.0);
   assert.equal(events.length, 1);
-  assert.equal(events[0].type, 'agent.started');
+  assert.equal(events[0].type, 'agent.completed');
 });

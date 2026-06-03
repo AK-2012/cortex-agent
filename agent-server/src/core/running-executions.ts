@@ -1,16 +1,22 @@
 // input:  AgentHandle-like kill function, EventBus
-// output: RunningExecutions singleton — unified execution registry with byKey/byThreadId/byExecutionId indices
-// pos:    orch/ layer, encapsulates three-index registry + publishes agent.* lifecycle events
-//         Pure additive — no existing call points are replaced by this file.
+// output: RunningExecutions singleton — executionId-keyed registry with channel/thread secondary indices
+// pos:    orch/ layer, encapsulates the in-memory live-execution registry + publishes agent.* lifecycle events
+//
+// Primary key is the executionId (globally unique), so multiple live executions can coexist on one
+// channel without evicting each other (the P3 fix). channel and threadId are secondary lookup indices.
+// An ad-hoc string registryKey is supported for executions with no executionId (rare).
 
 import type { EventBus } from '@events/index.js';
 
 export interface RunningExecution {
   threadId: string | null;
   channel: string | null;
+  /** Primary key — the executionId when present, otherwise the ad-hoc registryKey. */
   registryKey: string;
   agentSlotId: string | null;
   executionId: string | null;
+  /** Execution kind ('local' | 'dispatch' | 'scheduled' | null) — used for dispatch concurrency accounting. */
+  kind: string | null;
   kill: () => boolean;
   startTime: number;
   backend: string;
@@ -20,15 +26,17 @@ export interface RunningExecution {
   sessionId?: string | null;
 }
 
-export type RunningExecutionInput = Omit<RunningExecution, 'registryKey' | 'startTime'>;
+/** Input accepted by register(). registryKey/startTime are assigned internally; kind defaults to null. */
+export type RunningExecutionInput =
+  Omit<RunningExecution, 'registryKey' | 'startTime' | 'kind'> & { registryKey?: string; kind?: string | null };
 
 export class RunningExecutions {
-  /** Primary index: key is channel or hookHandleKey (arbitrary string). */
+  /** Primary index: key is executionId (or ad-hoc registryKey when executionId is null). */
   private byKey = new Map<string, RunningExecution>();
   /** Secondary index: threadId → RunningExecution, only if threadId is non-null. */
   private byThreadId = new Map<string, RunningExecution>();
-  /** Secondary index: executionId → RunningExecution, only if executionId is non-null. */
-  private byExecutionId = new Map<string, RunningExecution>();
+  /** Secondary index: channel → set of RunningExecutions on that channel. */
+  private byChannel = new Map<string, Set<RunningExecution>>();
   /** EventBus for publishing agent.* lifecycle events. May be set after construction. */
   private _bus: EventBus | null = null;
 
@@ -41,27 +49,39 @@ export class RunningExecutions {
   }
 
   /**
-   * Register a new execution under an arbitrary key.
-   * Silently replaces any existing entry at the same key.
-   * Secondary indices (byThreadId / byExecutionId) are kept in sync.
-   * Publishes agent.started if executionId is non-null and bus is wired.
+   * Register a live execution, keyed by its executionId (or an ad-hoc registryKey).
+   * Returns the primary key. Secondary indices (byThreadId / byChannel) are kept in sync.
+   * Publishes agent.started if executionId is non-null and a bus is wired.
    */
-  register(key: string, exec: RunningExecutionInput): void {
-    // Clean up old entry at this key, if any, to keep secondary indices consistent
+  register(exec: RunningExecutionInput): string {
+    const key = exec.executionId ?? exec.registryKey;
+    if (!key) throw new Error('RunningExecutions.register requires an executionId or registryKey');
+
+    // Replace any existing entry at this key (same executionId re-registered) — keeps indices clean.
     const existing = this.byKey.get(key);
-    if (existing) {
-      this._removeFromIndices(existing);
-    }
+    if (existing) this._removeFromIndices(existing);
 
     const entry: RunningExecution = {
-      ...exec,
+      threadId: exec.threadId,
+      channel: exec.channel,
       registryKey: key,
+      agentSlotId: exec.agentSlotId,
+      executionId: exec.executionId,
+      kind: exec.kind ?? null,
+      kill: exec.kill,
       startTime: Date.now(),
+      backend: exec.backend,
+      agentProcess: exec.agentProcess,
+      sessionId: exec.sessionId,
     };
 
     this.byKey.set(key, entry);
     if (entry.threadId) this.byThreadId.set(entry.threadId, entry);
-    if (entry.executionId) this.byExecutionId.set(entry.executionId, entry);
+    if (entry.channel) {
+      let set = this.byChannel.get(entry.channel);
+      if (!set) { set = new Set(); this.byChannel.set(entry.channel, set); }
+      set.add(entry);
+    }
 
     if (this._bus && entry.executionId) {
       this._bus.publish({
@@ -71,80 +91,34 @@ export class RunningExecutions {
         backend: entry.backend,
       });
     }
+    return key;
   }
 
-  /** Look up an execution by its primary registry key. Returns null if not found. */
-  getByKey(key: string): RunningExecution | null {
-    return this.byKey.get(key) ?? null;
+  /** Look up an execution by its primary key (executionId or ad-hoc registryKey). */
+  getById(id: string): RunningExecution | null {
+    return this.byKey.get(id) ?? null;
   }
 
-  /** Look up an execution by threadId. Returns null if not found or threadId was null at registration. */
+  /** Returns true if an execution is registered under the given id/key. */
+  hasId(id: string): boolean {
+    return this.byKey.has(id);
+  }
+
+  /** Look up an execution by threadId. Returns null if not found. */
   getByThreadId(threadId: string): RunningExecution | null {
     return this.byThreadId.get(threadId) ?? null;
   }
 
-  /** Look up an execution by executionId. Returns null if not found. */
-  getByExecutionId(executionId: string): RunningExecution | null {
-    return this.byExecutionId.get(executionId) ?? null;
+  /** Return all live executions registered on a channel (empty array if none). */
+  getByChannel(channel: string): RunningExecution[] {
+    const set = this.byChannel.get(channel);
+    return set ? Array.from(set) : [];
   }
 
-  /** Returns true if an execution is registered under the given key. */
-  has(key: string): boolean {
-    return this.byKey.has(key);
-  }
-
-  /**
-   * Kill the execution for a key, remove it from all indices, and return the result of kill().
-   * Returns false if no entry is registered for the key.
-   */
-  killByKey(key: string): boolean {
-    const entry = this.byKey.get(key);
-    if (!entry) return false;
-    const killed = entry.kill();
-    this._removeFromIndices(entry);
-    this.byKey.delete(key);
-    return killed;
-  }
-
-  /**
-   * Kill the execution for a threadId, remove it from all indices, and return true.
-   * Resolves through byThreadId secondary index.
-   * Returns false if no entry has that threadId.
-   */
-  killByThreadId(threadId: string): boolean {
-    const entry = this.byThreadId.get(threadId);
-    if (!entry) return false;
-    entry.kill();
-    this._removeFromIndices(entry);
-    this.byKey.delete(entry.registryKey);
-    return true;
-  }
-
-  /**
-   * Kill the execution for an executionId, remove it from all indices, and return true.
-   * Resolves through the byExecutionId secondary index. Used by the conversation path's
-   * Cancel button, which carries an executionId (no threadId, since plain user messages
-   * are no longer wrapped in a thread).
-   * Returns false if no entry has that executionId.
-   */
-  killByExecutionId(executionId: string): boolean {
-    const entry = this.byExecutionId.get(executionId);
-    if (!entry) return false;
-    entry.kill();
-    this._removeFromIndices(entry);
-    this.byKey.delete(entry.registryKey);
-    return true;
-  }
-
-  /**
-   * Remove an execution by key without calling kill() or publishing events.
-   * No-op if the key is not registered.
-   */
-  remove(key: string): void {
-    const entry = this.byKey.get(key);
-    if (!entry) return;
-    this._removeFromIndices(entry);
-    this.byKey.delete(key);
+  /** Returns true if at least one live execution is registered on the channel. */
+  hasChannel(channel: string): boolean {
+    const set = this.byChannel.get(channel);
+    return !!set && set.size > 0;
   }
 
   /** Return all registered executions (snapshot of the primary index). */
@@ -153,15 +127,57 @@ export class RunningExecutions {
   }
 
   /**
-   * Mark the execution for a key as completed and publish agent.completed.
-   * Returns false if no entry is registered for the key (e.g., already removed).
-   * Publishes agent.completed only if executionId is non-null and bus is wired.
+   * Kill the execution for an id, remove it from all indices, and return the result of kill().
+   * Returns false if no entry is registered for the id.
    */
-  complete(key: string, costUsd = 0): boolean {
-    const entry = this.byKey.get(key);
+  killById(id: string): boolean {
+    const entry = this.byKey.get(id);
     if (!entry) return false;
-    this._removeFromIndices(entry);
-    this.byKey.delete(key);
+    const killed = entry.kill();
+    this._delete(entry);
+    return killed;
+  }
+
+  /**
+   * Kill the execution for a threadId, remove it from all indices, and return true.
+   * Returns false if no entry has that threadId.
+   */
+  killByThreadId(threadId: string): boolean {
+    const entry = this.byThreadId.get(threadId);
+    if (!entry) return false;
+    entry.kill();
+    this._delete(entry);
+    return true;
+  }
+
+  /** Kill every execution on a channel; returns the number killed. */
+  killByChannel(channel: string): number {
+    const entries = this.getByChannel(channel);
+    for (const entry of entries) {
+      entry.kill();
+      this._delete(entry);
+    }
+    return entries.length;
+  }
+
+  /**
+   * Remove an execution by id without calling kill() or publishing events.
+   * No-op if the id is not registered.
+   */
+  remove(id: string): void {
+    const entry = this.byKey.get(id);
+    if (!entry) return;
+    this._delete(entry);
+  }
+
+  /**
+   * Mark the execution for an id as completed and publish agent.completed.
+   * Returns false if no entry is registered (e.g., already removed).
+   */
+  complete(id: string, costUsd = 0): boolean {
+    const entry = this.byKey.get(id);
+    if (!entry) return false;
+    this._delete(entry);
     if (this._bus && entry.executionId) {
       this._bus.publish({
         type: 'agent.completed',
@@ -174,15 +190,13 @@ export class RunningExecutions {
   }
 
   /**
-   * Mark the execution for a key as failed and publish agent.failed.
-   * Returns false if no entry is registered for the key (e.g., already removed by supersede).
-   * Publishes agent.failed only if executionId is non-null and bus is wired.
+   * Mark the execution for an id as failed and publish agent.failed.
+   * Returns false if no entry is registered (e.g., already removed).
    */
-  fail(key: string, error: string): boolean {
-    const entry = this.byKey.get(key);
+  fail(id: string, error: string): boolean {
+    const entry = this.byKey.get(id);
     if (!entry) return false;
-    this._removeFromIndices(entry);
-    this.byKey.delete(key);
+    this._delete(entry);
     if (this._bus && entry.executionId) {
       this._bus.publish({
         type: 'agent.failed',
@@ -194,16 +208,14 @@ export class RunningExecutions {
   }
 
   /**
-   * Kill the execution for a key, remove it, and publish agent.superseded.
-   * Returns false if no entry is registered for the key.
-   * Publishes agent.superseded only if executionId is non-null and bus is wired.
+   * Kill the execution for an id, remove it, and publish agent.superseded.
+   * Returns false if no entry is registered for the id.
    */
-  supersede(key: string, reason: string): boolean {
-    const entry = this.byKey.get(key);
+  supersede(id: string, reason: string): boolean {
+    const entry = this.byKey.get(id);
     if (!entry) return false;
     entry.kill();
-    this._removeFromIndices(entry);
-    this.byKey.delete(key);
+    this._delete(entry);
     if (this._bus && entry.executionId) {
       this._bus.publish({
         type: 'agent.superseded',
@@ -214,17 +226,41 @@ export class RunningExecutions {
     return true;
   }
 
+  /** Supersede (kill + event) every execution on a channel; returns the number superseded. */
+  supersedeByChannel(channel: string, reason: string): number {
+    const entries = this.getByChannel(channel);
+    for (const entry of entries) {
+      entry.kill();
+      this._delete(entry);
+      if (this._bus && entry.executionId) {
+        this._bus.publish({ type: 'agent.superseded', executionId: entry.executionId, reason });
+      }
+    }
+    return entries.length;
+  }
+
+  /** Delete an entry from the primary map and all secondary indices. */
+  private _delete(entry: RunningExecution): void {
+    this.byKey.delete(entry.registryKey);
+    this._removeFromIndices(entry);
+  }
+
   /**
-   * Remove an entry from secondary indices (byThreadId / byExecutionId).
-   * Guards each delete with identity check: only clears the index if it still points
-   * to this entry.  This prevents corruption when a stale entry (whose threadId/executionId
-   * has been claimed by a newer entry) is removed.
+   * Remove an entry from secondary indices (byThreadId / byChannel).
+   * Guards each delete with an identity check: only clears the index if it still points
+   * to this entry, preventing corruption when a stale entry (whose threadId has been
+   * claimed by a newer entry) is removed.
    */
   private _removeFromIndices(entry: RunningExecution): void {
     if (entry.threadId && this.byThreadId.get(entry.threadId) === entry)
       this.byThreadId.delete(entry.threadId);
-    if (entry.executionId && this.byExecutionId.get(entry.executionId) === entry)
-      this.byExecutionId.delete(entry.executionId);
+    if (entry.channel) {
+      const set = this.byChannel.get(entry.channel);
+      if (set) {
+        set.delete(entry);
+        if (set.size === 0) this.byChannel.delete(entry.channel);
+      }
+    }
   }
 }
 

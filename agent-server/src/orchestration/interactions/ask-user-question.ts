@@ -126,7 +126,7 @@ function tryResolveHook(group) {
   // NOTE: Check for sendExtensionUiResponse capability directly instead of exec.backend,
   // because the profile's backend (which determines the adapter) may differ from
   // getActiveBackend() (which is stored in exec.backend).
-  const exec = runningExecutions.getByKey(group.channel);
+  const exec = runningExecutions.getByChannel(group.channel).find(e => e.agentProcess) ?? null;
   if (exec && exec.agentProcess) {
     const proc = exec.agentProcess as any;
     if (typeof proc.sendExtensionUiResponse === 'function') {

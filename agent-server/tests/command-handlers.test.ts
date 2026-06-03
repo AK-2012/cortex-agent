@@ -283,10 +283,10 @@ test('!cancel <taskId> cancels a dispatched task via injected handler', async ()
 test('plain !cancel still cancels the current active process', async (t) => {
   const adapter = new MockAdapter();
   let killed = false;
-  runningExecutions.register('C123', { threadId: null, channel: 'C123', agentSlotId: null, executionId: null, kill: () => { killed = true; return true; }, backend: 'test' });
+  runningExecutions.register({ threadId: null, channel: 'C123', agentSlotId: null, executionId: 'exec-conv1', kill: () => { killed = true; return true; }, backend: 'test' });
   // Simulate a running queue entry so cancel can clear it
   conduitQueues.set('C123', Promise.resolve());
-  t.after(() => { runningExecutions.remove('C123'); conduitQueues.delete('C123'); });
+  t.after(() => { runningExecutions.remove('exec-conv1'); conduitQueues.delete('C123'); });
   const dispatchCommand = createCommandDispatcher({
     scheduler: null,
     cancelDispatchedTask: async () => ({ ok: false, message: 'should not be called' }),
@@ -309,10 +309,10 @@ test('!cancel --all kills all running executions for current channel, spares oth
   let killedC1 = false;
   let killedC2 = false;
 
-  runningExecutions.register('key-C1', { threadId: 'thr_11111111', channel: 'C1', agentSlotId: null, executionId: 'exec-1', kill: () => { killedC1 = true; return true; }, backend: 'test' });
-  runningExecutions.register('key-C2', { threadId: 'thr_22222222', channel: 'C2', agentSlotId: null, executionId: 'exec-2', kill: () => { killedC2 = true; return true; }, backend: 'test' });
+  runningExecutions.register({ threadId: 'thr_11111111', channel: 'C1', agentSlotId: null, executionId: 'exec-1', kill: () => { killedC1 = true; return true; }, backend: 'test' });
+  runningExecutions.register({ threadId: 'thr_22222222', channel: 'C2', agentSlotId: null, executionId: 'exec-2', kill: () => { killedC2 = true; return true; }, backend: 'test' });
   conduitQueues.set('C1', Promise.resolve());
-  t.after(() => { runningExecutions.remove('key-C1'); runningExecutions.remove('key-C2'); conduitQueues.delete('C1'); });
+  t.after(() => { runningExecutions.remove('exec-1'); runningExecutions.remove('exec-2'); conduitQueues.delete('C1'); });
 
   const dispatchCommand = createCommandDispatcher({ scheduler: null });
   const handled = dispatchCommand('!cancel --all', 'C1', adapter);
@@ -340,8 +340,8 @@ test('!cancel <threadId> kills by threadId', async (t) => {
   const adapter = new MockAdapter();
   let killed = false;
 
-  runningExecutions.register('C1', { threadId: 'thr_a1b2c3d4', channel: 'C1', agentSlotId: null, executionId: 'exec-1', kill: () => { killed = true; return true; }, backend: 'test' });
-  t.after(() => { runningExecutions.remove('C1'); });
+  runningExecutions.register({ threadId: 'thr_a1b2c3d4', channel: 'C1', agentSlotId: null, executionId: 'exec-1', kill: () => { killed = true; return true; }, backend: 'test' });
+  t.after(() => { runningExecutions.remove('exec-1'); });
 
   const dispatchCommand = createCommandDispatcher({ scheduler: null, cancelDispatchedTask: null });
   const handled = dispatchCommand('!cancel thr_a1b2c3d4', 'C1', adapter);
@@ -383,9 +383,9 @@ test('!cancel <threadId> with non-thread-id arg falls back to taskId dispatch', 
 test('!thread cancel is alias for !cancel (kills by channel)', async (t) => {
   const adapter = new MockAdapter();
   let killed = false;
-  runningExecutions.register('C123', { threadId: null, channel: 'C123', agentSlotId: null, executionId: null, kill: () => { killed = true; return true; }, backend: 'test' });
+  runningExecutions.register({ threadId: null, channel: 'C123', agentSlotId: null, executionId: 'exec-conv2', kill: () => { killed = true; return true; }, backend: 'test' });
   conduitQueues.set('C123', Promise.resolve());
-  t.after(() => { runningExecutions.remove('C123'); conduitQueues.delete('C123'); });
+  t.after(() => { runningExecutions.remove('exec-conv2'); conduitQueues.delete('C123'); });
 
   const dispatchCommand = createCommandDispatcher({ scheduler: null });
   const handled = dispatchCommand('!thread cancel', 'C123', adapter);
@@ -410,9 +410,9 @@ test('!thread cancel with nothing running shows "Nothing running"', async (t) =>
 
 test('!thread list --running shows running threads across channels', async (t) => {
   const adapter = new MockAdapter();
-  runningExecutions.register('key-C1', { threadId: 'thr_a1111111', channel: 'C1', agentSlotId: null, executionId: 'exec-1', kill: () => true, backend: 'test' });
-  runningExecutions.register('key-C2', { threadId: 'thr_b2222222', channel: 'C2', agentSlotId: null, executionId: 'exec-2', kill: () => true, backend: 'codex' });
-  t.after(() => { runningExecutions.remove('key-C1'); runningExecutions.remove('key-C2'); });
+  runningExecutions.register({ threadId: 'thr_a1111111', channel: 'C1', agentSlotId: null, executionId: 'exec-1', kill: () => true, backend: 'test' });
+  runningExecutions.register({ threadId: 'thr_b2222222', channel: 'C2', agentSlotId: null, executionId: 'exec-2', kill: () => true, backend: 'codex' });
+  t.after(() => { runningExecutions.remove('exec-1'); runningExecutions.remove('exec-2'); });
 
   const dispatchCommand = createCommandDispatcher({ scheduler: null });
   const handled = dispatchCommand('!thread list --running', 'C1', adapter);

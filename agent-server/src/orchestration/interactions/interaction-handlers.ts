@@ -171,7 +171,7 @@ function dispatchAskUserQuestionResume(group: QuestionGroup & { channel: string;
  */
 function tryResolvePIPlan(pending: PendingPlan, value: string | null): boolean {
   if (!pending.extensionUiId) return false;
-  const exec = runningExecutions.getByKey(pending.channel);
+  const exec = runningExecutions.getByChannel(pending.channel).find(e => e.agentProcess) ?? null;
   if (!exec?.agentProcess) return false;
   const proc = exec.agentProcess as any;
   if (typeof proc.sendExtensionUiResponse !== 'function') return false;
@@ -256,13 +256,13 @@ async function handleStatusCancel(ctx: ActionContext): Promise<void> {
   // Cancel button carries an executionId. Resolve and kill via the execution index;
   // there is no thread to cancel.
   if (!threadId && executionId) {
-    const exec = runningExecutions.getByExecutionId(executionId);
+    const exec = runningExecutions.getById(executionId);
     if (!exec) {
       log.warn('Cancel button clicked but no running execution for executionId', { channel, executionId });
       return;
     }
     if (exec.sessionId) await setSessionAsync(exec.channel ?? channel, exec.sessionId, getActiveBackend()).catch(() => {});
-    runningExecutions.killByExecutionId(executionId);
+    runningExecutions.killById(executionId);
     conduitQueues.delete(exec.channel ?? channel);
     if (ctx.messageRef) {
       await _adapter.updateMessage(ctx.messageRef, {

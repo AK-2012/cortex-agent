@@ -297,11 +297,12 @@ async function executeAndAwaitAgent(
   });
 
   // Track handle for cancellation
-  runningExecutions.register(opts.channel, {
+  runningExecutions.register({
     threadId,
     channel: opts.channel,
     agentSlotId: stepCtx.agentSlotId,
     executionId: stepCtx.execution.id,
+    kind: stepCtx.execution.kind,
     kill: () => handle.kill(),
     backend: getActiveBackend(),
     agentProcess: handle.agentProcess,
@@ -319,7 +320,7 @@ async function executeAndAwaitAgent(
     });
     throw agentError;
   } finally {
-    runningExecutions.remove(opts.channel);
+    runningExecutions.remove(stepCtx.execution.id);
   }
 }
 
@@ -502,7 +503,11 @@ async function runThread(threadId: string, opts: RunThreadOptions): Promise<Thre
     }
     throw error;
   } finally {
-    runningExecutions.remove(opts.channel);
+    // Defensive: per-step teardown already removes each execution; clear any stragglers on
+    // this channel without killing (a thrown loop could leave a registered step entry).
+    for (const e of runningExecutions.getByChannel(opts.channel)) {
+      runningExecutions.remove(e.executionId ?? e.registryKey);
+    }
     // Cleanup thread-specific sessions
     closeSessionsByPrefix(`thr:${threadId}:`);
   }
@@ -571,10 +576,10 @@ function buildThreadSummary(result: ThreadRunResult): string {
 // Proxy functions to support existing callers that import cancelActiveThread / getActiveHandle from runner.ts.
 // These delegate to the unified RunningExecutions singleton.
 function cancelActiveThread(channel: string): boolean {
-  return runningExecutions.killByKey(channel);
+  return runningExecutions.killByChannel(channel) > 0;
 }
 function getActiveHandle(channel: string): RunningExecution | null {
-  return runningExecutions.getByKey(channel);
+  return runningExecutions.getByChannel(channel)[0] ?? null;
 }
 
 export {

@@ -102,12 +102,12 @@ test('!cancel with 2+ executions shows interactive list with cancel buttons', as
   });
   router.bindToAdapter(adapter);
 
-  runningExecutions.register('exec-1', {
-    threadId: 'thr_a1b2c3d4', channel: 'C123', agentSlotId: null, executionId: null,
+  runningExecutions.register({
+    threadId: 'thr_a1b2c3d4', channel: 'C123', agentSlotId: null, executionId: 'exec-1',
     kill: () => true, backend: 'plan',
   });
-  runningExecutions.register('exec-2', {
-    threadId: 'thr_e5f6g7h8', channel: 'C123', agentSlotId: null, executionId: null,
+  runningExecutions.register({
+    threadId: 'thr_e5f6g7h8', channel: 'C123', agentSlotId: null, executionId: 'exec-2',
     kill: () => true, backend: 'claudeCode',
   });
 
@@ -137,17 +137,17 @@ test('!cancel with 2+ executions: clicking cancel button kills execution', async
   });
   router.bindToAdapter(adapter);
 
-  runningExecutions.register('exec-cancel-test', {
-    threadId: null, channel: 'C123', agentSlotId: null, executionId: null,
+  runningExecutions.register({
+    threadId: null, channel: 'C123', agentSlotId: null, executionId: 'exec-cancel-test',
     kill: () => true, backend: 'plan',
   });
 
   await adapter.simulateAction('cmd:cancel:exec-0',
-    JSON.stringify({ threadId: null, registryKey: 'exec-cancel-test' }),
+    JSON.stringify({ threadId: null, executionId: 'exec-cancel-test' }),
     { channelId: 'C123', messageRef: { conduit: 'C123', messageId: 'msg-1' } },
   );
 
-  assert.equal(runningExecutions.getByKey('exec-cancel-test'), null);
+  assert.equal(runningExecutions.getById('exec-cancel-test'), null);
   const lastUpdated = adapter.updated[adapter.updated.length - 1];
   assert.ok(lastUpdated, 'expected an updateMessage call');
   assert.ok(lastUpdated.content.text.includes('Cancelled'));
@@ -168,8 +168,8 @@ test('!cancel with 1 execution falls back to direct cancel', async () => {
   });
   router.bindToAdapter(adapter);
 
-  runningExecutions.register('exec-single', {
-    threadId: null, channel: 'C456', agentSlotId: null, executionId: null,
+  runningExecutions.register({
+    threadId: null, channel: 'C456', agentSlotId: null, executionId: 'exec-single',
     kill: () => true, backend: 'plan',
   });
 
@@ -209,8 +209,8 @@ test('!cancel --all still works in interactive mode', () => {
   });
   router.bindToAdapter(adapter);
 
-  runningExecutions.register('exec-all-1', {
-    threadId: null, channel: 'Call', agentSlotId: null, executionId: null,
+  runningExecutions.register({
+    threadId: null, channel: 'Call', agentSlotId: null, executionId: 'exec-all-1',
     kill: () => true, backend: 'plan',
   });
 

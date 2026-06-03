@@ -19,7 +19,7 @@ const MAX_CANCEL_BUTTONS = 10;
 export function createCancelHandler(cancelDispatchedTask: ((opts: { taskId: string; channel: string }) => Promise<{ ok: boolean; message: string }>) | null, router?: CommandActionRouter) {
   if (router) {
     const cancelHandler = async (ctx: import('@platform/index.js').ActionContext) => {
-      const { threadId, registryKey } = JSON.parse(ctx.value);
+      const { threadId, executionId } = JSON.parse(ctx.value);
       const adapter = router.getAdapter();
       if (!adapter) return;
 
@@ -30,18 +30,18 @@ export function createCancelHandler(cancelDispatchedTask: ((opts: { taskId: stri
         if (exec?.sessionId) {
           await setSessionAsync(ctx.channelId, exec.sessionId, getActiveBackend()).catch(() => {});
         }
-      } else if (registryKey) {
-        const exec = runningExecutions.getByKey(registryKey);
+      } else if (executionId) {
+        const exec = runningExecutions.getById(executionId);
         if (exec?.sessionId) {
           await setSessionAsync(ctx.channelId, exec.sessionId, getActiveBackend()).catch(() => {});
         }
-        runningExecutions.killByKey(registryKey);
+        runningExecutions.killById(executionId);
       }
-      conduitQueues.delete(registryKey || threadId || ctx.channelId);
+      conduitQueues.delete(ctx.channelId);
 
       if (ctx.messageRef) {
         await adapter.updateMessage(ctx.messageRef, {
-          text: `${Icons.stopped} Cancelled (${threadId || registryKey})`,
+          text: `${Icons.stopped} Cancelled (${threadId || executionId})`,
         }).catch(() => {});
       }
     };
@@ -61,7 +61,7 @@ export function createCancelHandler(cancelDispatchedTask: ((opts: { taskId: stri
 
       // --all: kill all running executions in the current channel
       if (firstArg === '--all') {
-        const executions = runningExecutions.getAll().filter(e => e.channel === channel);
+        const executions = runningExecutions.getByChannel(channel);
         if (executions.length === 0) {
           await adapter.postMessage(dest, { text: 'Nothing running to cancel.' });
           return;
@@ -73,7 +73,7 @@ export function createCancelHandler(cancelDispatchedTask: ((opts: { taskId: stri
           if (exec.sessionId) {
             await setSessionAsync(channel, exec.sessionId, getActiveBackend()).catch(() => {});
           }
-          runningExecutions.killByKey(exec.registryKey);
+          runningExecutions.killById(exec.registryKey);
         }
         conduitQueues.delete(channel);
         await adapter.postMessage(dest, { text: `${Icons.stopped} Cancelled ${executions.length} execution(s).` });
@@ -107,7 +107,7 @@ export function createCancelHandler(cancelDispatchedTask: ((opts: { taskId: stri
     }
 
     // No args: check how many executions are running on this channel
-    const executions = runningExecutions.getAll().filter(e => e.channel === channel);
+    const executions = runningExecutions.getByChannel(channel);
 
     // 0 executions: nothing to cancel
     if (executions.length === 0) {
@@ -121,7 +121,7 @@ export function createCancelHandler(cancelDispatchedTask: ((opts: { taskId: stri
       if (exec.threadId) {
         await cancelThreadById(exec.threadId).catch(() => {});
       }
-      runningExecutions.killByKey(exec.registryKey);
+      runningExecutions.killById(exec.registryKey);
       if (exec.sessionId) {
         await setSessionAsync(channel, exec.sessionId, getActiveBackend()).catch(() => {});
       }
@@ -143,7 +143,7 @@ export function createCancelHandler(cancelDispatchedTask: ((opts: { taskId: stri
         actionId: `cmd:cancel:exec-${i}`,
         value: JSON.stringify({
           threadId: exec.threadId,
-          registryKey: exec.registryKey,
+          executionId: exec.executionId,
         }),
         style: 'danger' as const,
       })),

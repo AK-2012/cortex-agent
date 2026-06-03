@@ -114,7 +114,7 @@ async function backfillLedgerSessionId(result: { sessionId?: string | null }, ch
 // --- Agent error handler ---
 
 export async function handleAgentError({ error, channel, adapter, statusMsg, startTime, executionId, sessionName = null, sessionId = null, effectiveSessionId = null, threadAnchorId = null, userMessageTs = null }: { error: { message: string; cancelled?: boolean }; channel: string; adapter: PlatformAdapter; statusMsg: MessageRef; startTime: number; executionId: string | null; sessionName?: string | null; sessionId?: string | null; effectiveSessionId?: string | null; threadAnchorId?: string | null; userMessageTs?: string | null }): Promise<void> {
-  runningExecutions.fail(channel, error.message);
+  if (executionId) runningExecutions.fail(executionId, error.message);
   const resolvedSessionId = effectiveSessionId || sessionId;
   const sessionTag = buildSessionTag(sessionName, resolvedSessionId);
   const { elapsedStr, elapsedS } = computeElapsed(startTime);
@@ -184,9 +184,9 @@ export async function resumeAskUserQuestionGroup({ adapter, group, responseText 
     const askDurable = askQueue ? buildDurableHooks(askQueue) : null;
     const onAssistantMsg = makeStreamingMessageCallback(adapter, askDest, null, null, askDurable);
     handle = runAgent(responseText, { channel: group.channel, sessionId: group.sessionId, files: [], project: projectStore.resolveFromMessage(responseText)?.id ?? 'general', trigger: 'ask-user-question', onAssistantMessage: onAssistantMsg });
-    runningExecutions.register(group.channel, { threadId: group.threadId ?? null, channel: group.channel, agentSlotId: null, executionId, kill: () => handle.kill(), backend: askBackend });
+    runningExecutions.register({ threadId: group.threadId ?? null, channel: group.channel, agentSlotId: null, executionId, kill: () => handle.kill(), backend: askBackend });
     const result = await handle.promise;
-    runningExecutions.complete(group.channel, result?.total_cost_usd ?? 0);
+    runningExecutions.complete(executionId, result?.total_cost_usd ?? 0);
     await maybeNotifyCodexLowUsage({ adapter, result });
     await handleAgentSuccess({ result, channel: group.channel, adapter, statusMsg, startTime, userMessage: responseText, executionId, trigger: 'ask-user-question', onAssistantMessage: onAssistantMsg });
   } catch (error) {
@@ -252,9 +252,9 @@ async function runRetryAgent({ channel, text, adapter, statusMsg, startTime, ses
       isUserInitiated: true, onAssistantMessage: onAssistantMsg,
       onProgress: buildRetryProgressUpdater(adapter, channel, statusMsg, retryPrefix, startTime, sessionName, sessionId),
     });
-    runningExecutions.register(channel, { threadId: null /* A5: edit-retry — threadId not yet wired; Cancel button will warn */, channel, agentSlotId: null, executionId, kill: () => handle.kill(), backend: retryBackend });
+    runningExecutions.register({ threadId: null /* A5: edit-retry — threadId not yet wired; Cancel button will warn */, channel, agentSlotId: null, executionId, kill: () => handle.kill(), backend: retryBackend });
     const result = await handle.promise;
-    runningExecutions.complete(channel, result?.total_cost_usd ?? 0);
+    runningExecutions.complete(executionId, result?.total_cost_usd ?? 0);
     clearStreamingCallback(channel);
     await maybeNotifyCodexLowUsage({ adapter, result });
 

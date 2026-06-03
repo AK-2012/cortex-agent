@@ -216,12 +216,12 @@ async function runHookAgent(
     onProgress: null,
   });
 
-  const hookHandleKey = `${opts.channel}:hook`;
-  runningExecutions.register(hookHandleKey, {
+  runningExecutions.register({
     threadId,
     channel: opts.channel,
     agentSlotId: slotId,
     executionId: execution.id,
+    kind: execution.kind,
     kill: () => handle.kill(),
     backend: getActiveBackend(),
   });
@@ -230,7 +230,7 @@ async function runHookAgent(
   try {
     result = await handle.promise;
   } finally {
-    runningExecutions.remove(hookHandleKey);
+    runningExecutions.remove(execution.id);
   }
 
   // Record step

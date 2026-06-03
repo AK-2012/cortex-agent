@@ -76,8 +76,8 @@ async function handleThreadAgents(channel: string, adapter: PlatformAdapter) {
 
 async function handleThreadCancelAlias(channel: string, adapter: PlatformAdapter) {
   const dest: Destination = { type: 'interactive-reply', conduit: channel, sessionId: '' };
-  // Alias for !cancel — delegate to the same killByKey behavior
-  if (runningExecutions.killByKey(channel)) {
+  // Alias for !cancel — delegate to the same kill-by-channel behavior
+  if (runningExecutions.killByChannel(channel) > 0) {
     log.info('Cancel requested for channel:', channel);
     conduitQueues.delete(channel);
     await adapter.postMessage(dest, { text: `${Icons.stopped} Cancelled. Session preserved — next message will resume.` });
