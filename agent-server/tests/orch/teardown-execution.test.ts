@@ -71,6 +71,25 @@ test('teardownExecution is idempotent — second call does not re-finalize or do
   assert.equal(events.length, 0, 'no event on the second teardown');
 });
 
+test('teardownExecution(cancelled) sets record cancelled, kills the handle, and publishes a balanced event', () => {
+  const bus = new EventBus();
+  const rec = executionRegistry.startLocalExecution({ channel: 'C-teardown', project: 'general', trigger: 'user', backend: 'test' });
+  let killed = false;
+  runningExecutions.setBus(bus);
+  runningExecutions.register({ threadId: null, channel: 'C-teardown', agentSlotId: null, executionId: rec.id, kind: 'local', kill: () => { killed = true; return true; }, backend: 'test' });
+
+  const events: CortexEvent[] = [];
+  bus.subscribe('*', (e) => { events.push(e); });
+
+  teardownExecution({ executionId: rec.id, status: 'cancelled', durationS: 1 });
+
+  assert.equal(executionRegistry.getExecution(rec.id)!.status, 'cancelled');
+  assert.equal(killed, true, 'cancelled teardown must kill the live handle');
+  assert.equal(runningExecutions.hasId(rec.id), false);
+  // A balanced terminal event is published (agent.started is no longer dangling on cancel).
+  assert.equal(events.filter((e) => e.type === 'agent.superseded').length, 1);
+});
+
 test('teardownExecution(null executionId) is a safe no-op', () => {
   assert.doesNotThrow(() => teardownExecution({ executionId: null, status: 'completed', durationS: 0 }));
 });

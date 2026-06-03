@@ -3,17 +3,25 @@ import { Icons } from '../../../core/icons.js';
 import type { Destination, PlatformAdapter } from '@platform/index.js';
 import type { CommandResult } from './command-context.js';
 import type { CommandActionRouter } from '@orch/interactions/command-action-router.js';
-import { runningExecutions } from '../../../core/running-executions.js';
+import { runningExecutions, type RunningExecution } from '../../../core/running-executions.js';
 import { conduitQueues } from '../../conduit-queue.js';
 import { cancelThread as cancelThreadById } from '@domain/threads/index.js';
 import { setSessionAsync } from '@domain/sessions/session.js';
 import { getActiveBackend } from '@domain/agents/index.js';
 import * as executionRegistry from '@domain/executions/registry.js';
 
-/** Mark the persistent execution record as cancelled BEFORE the kill, so the kill-error path's
- *  failExecution becomes a terminal no-op and the record reads 'cancelled', not 'failed'. */
-function markCancelled(executionId: string | null | undefined): void {
-  if (executionId) executionRegistry.cancelExecution(executionId, {});
+/** Cancel one live execution: preserve its session, cancel its thread record, then tear it down as
+ *  'cancelled'. teardownExecution sets the persistent record cancelled BEFORE killing the handle, so
+ *  the kill-error path's failExecution is a terminal no-op — and it publishes a balanced terminal
+ *  event so agent.started is not left dangling. */
+async function cancelLive(exec: RunningExecution, channel: string): Promise<void> {
+  if (exec.sessionId) await setSessionAsync(channel, exec.sessionId, getActiveBackend()).catch(() => {});
+  if (exec.threadId) await cancelThreadById(exec.threadId).catch(() => {});
+  if (exec.executionId) {
+    executionRegistry.teardownExecution({ executionId: exec.executionId, status: 'cancelled', durationS: 0 });
+  } else {
+    runningExecutions.killById(exec.registryKey);
+  }
 }
 
 /** Matches thread IDs like `thr_a1b2c3d4`. */
@@ -30,22 +38,10 @@ export function createCancelHandler(cancelDispatchedTask: ((opts: { taskId: stri
       const adapter = router.getAdapter();
       if (!adapter) return;
 
-      if (threadId) {
-        const exec = runningExecutions.getByThreadId(threadId);
-        markCancelled(exec?.executionId);
-        runningExecutions.killByThreadId(threadId);
-        await cancelThreadById(threadId).catch(() => {});
-        if (exec?.sessionId) {
-          await setSessionAsync(ctx.channelId, exec.sessionId, getActiveBackend()).catch(() => {});
-        }
-      } else if (executionId) {
-        const exec = runningExecutions.getById(executionId);
-        markCancelled(executionId);
-        if (exec?.sessionId) {
-          await setSessionAsync(ctx.channelId, exec.sessionId, getActiveBackend()).catch(() => {});
-        }
-        runningExecutions.killById(executionId);
-      }
+      const exec = threadId
+        ? runningExecutions.getByThreadId(threadId)
+        : (executionId ? runningExecutions.getById(executionId) : null);
+      if (exec) await cancelLive(exec, ctx.channelId);
       conduitQueues.delete(ctx.channelId);
 
       if (ctx.messageRef) {
@@ -76,14 +72,7 @@ export function createCancelHandler(cancelDispatchedTask: ((opts: { taskId: stri
           return;
         }
         for (const exec of executions) {
-          if (exec.threadId) {
-            await cancelThreadById(exec.threadId).catch(() => {});
-          }
-          if (exec.sessionId) {
-            await setSessionAsync(channel, exec.sessionId, getActiveBackend()).catch(() => {});
-          }
-          markCancelled(exec.executionId);
-          runningExecutions.killById(exec.registryKey);
+          await cancelLive(exec, channel);
         }
         conduitQueues.delete(channel);
         await adapter.postMessage(dest, { text: `${Icons.stopped} Cancelled ${executions.length} execution(s).` });
@@ -93,12 +82,8 @@ export function createCancelHandler(cancelDispatchedTask: ((opts: { taskId: stri
       // Thread ID pattern: kill by threadId + cancel thread store record
       if (THREAD_ID_RE.test(firstArg)) {
         const exec = runningExecutions.getByThreadId(firstArg);
-        markCancelled(exec?.executionId);
-        if (runningExecutions.killByThreadId(firstArg)) {
-          await cancelThreadById(firstArg).catch(() => {});
-          if (exec?.sessionId) {
-            await setSessionAsync(channel, exec.sessionId, getActiveBackend()).catch(() => {});
-          }
+        if (exec) {
+          await cancelLive(exec, channel);
           log.info('Cancel requested for thread:', firstArg);
           await adapter.postMessage(dest, { text: `${Icons.stopped} Thread \`${firstArg}\` cancelled.` });
         } else {
@@ -128,15 +113,7 @@ export function createCancelHandler(cancelDispatchedTask: ((opts: { taskId: stri
 
     // 1 execution: cancel directly (existing default behavior)
     if (executions.length === 1) {
-      const exec = executions[0];
-      markCancelled(exec.executionId);
-      if (exec.threadId) {
-        await cancelThreadById(exec.threadId).catch(() => {});
-      }
-      runningExecutions.killById(exec.registryKey);
-      if (exec.sessionId) {
-        await setSessionAsync(channel, exec.sessionId, getActiveBackend()).catch(() => {});
-      }
+      await cancelLive(executions[0], channel);
       conduitQueues.delete(channel);
       await adapter.postMessage(dest, { text: `${Icons.stopped} Cancelled. Session preserved — next message will resume.` });
       return;

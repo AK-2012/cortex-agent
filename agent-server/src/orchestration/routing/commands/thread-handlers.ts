@@ -77,12 +77,14 @@ async function handleThreadAgents(channel: string, adapter: PlatformAdapter) {
 
 async function handleThreadCancelAlias(channel: string, adapter: PlatformAdapter) {
   const dest: Destination = { type: 'interactive-reply', conduit: channel, sessionId: '' };
-  // Alias for !cancel — delegate to the same kill-by-channel behavior.
-  // Mark records cancelled before the kill so the kill-error path can't flip them to 'failed'.
-  for (const e of runningExecutions.getByChannel(channel)) {
-    if (e.executionId) executionRegistry.cancelExecution(e.executionId, {});
+  // Alias for !cancel — tear down every live execution on the channel as 'cancelled'
+  // (record→cancelled, kill the handle, balanced event), matching the !cancel path.
+  const execs = runningExecutions.getByChannel(channel);
+  for (const e of execs) {
+    if (e.executionId) executionRegistry.teardownExecution({ executionId: e.executionId, status: 'cancelled', durationS: 0 });
+    else runningExecutions.killById(e.registryKey);
   }
-  if (runningExecutions.killByChannel(channel) > 0) {
+  if (execs.length > 0) {
     log.info('Cancel requested for channel:', channel);
     conduitQueues.delete(channel);
     await adapter.postMessage(dest, { text: `${Icons.stopped} Cancelled. Session preserved — next message will resume.` });

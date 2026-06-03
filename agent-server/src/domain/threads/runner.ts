@@ -503,10 +503,19 @@ async function runThread(threadId: string, opts: RunThreadOptions): Promise<Thre
     }
     throw error;
   } finally {
-    // Defensive: per-step teardown already removes each execution; clear any stragglers on
-    // this channel without killing (a thrown loop could leave a registered step entry).
+    // Defensive: the per-step path finalizes each execution on success (recordStepOutcome) and on
+    // error (executeAndAwaitAgent). If the loop threw AFTER an agent result but BEFORE the step was
+    // finalized, the step's execution can still be registered and its persistent record still
+    // 'running' — finalize it as failed across both ledgers so it neither leaks a 'running' record
+    // nor poisons a dispatch slot. Scope to THIS thread's entries so a concurrent run on the same
+    // channel is never touched.
     for (const e of runningExecutions.getByChannel(opts.channel)) {
-      runningExecutions.remove(e.executionId ?? e.registryKey);
+      if (e.threadId !== threadId) continue;
+      if (e.executionId) {
+        executionRegistry.teardownExecution({ executionId: e.executionId, status: 'failed', durationS: 0, error: { message: 'thread ended before step finalized' } });
+      } else {
+        runningExecutions.remove(e.registryKey);
+      }
     }
     // Cleanup thread-specific sessions
     closeSessionsByPrefix(`thr:${threadId}:`);

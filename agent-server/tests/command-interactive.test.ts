@@ -174,6 +174,7 @@ test('!cancel with 1 execution falls back to direct cancel', async () => {
   });
 
   dispatchCommand('!cancel', 'C456', adapter);
+  await flush();
 
   const lastPosted = adapter.posted[adapter.posted.length - 1];
   assert.ok(lastPosted);
@@ -199,7 +200,7 @@ test('!cancel with 0 executions shows "Nothing running"', () => {
   assert.ok(lastPosted.content.text.includes('Nothing running'));
 });
 
-test('!cancel --all still works in interactive mode', () => {
+test('!cancel --all still works in interactive mode', async () => {
   const adapter = new MockAdapter();
   const router = new CommandActionRouter();
   const dispatchCommand = createCommandDispatcher({
@@ -215,6 +216,7 @@ test('!cancel --all still works in interactive mode', () => {
   });
 
   dispatchCommand('!cancel --all', 'Call', adapter);
+  await flush();
 
   const lastPosted = adapter.posted[adapter.posted.length - 1];
   assert.ok(lastPosted);
