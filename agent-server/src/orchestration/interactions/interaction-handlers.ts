@@ -14,6 +14,7 @@ import { resolveRequest as resolveHookRequest, getStreamingCallback } from '../r
 import { resumeAskUserQuestionGroup } from '../lifecycle.js';
 import { planApprovals } from './plan-approvals.js';
 import { runningExecutions } from '../../core/running-executions.js';
+import * as executionRegistry from '@domain/executions/registry.js';
 import { conduitQueues } from '../conduit-queue.js';
 import { setSessionAsync, deleteSessionAsync } from '@domain/sessions/session.js';
 import { sessionStore } from '@store/session-registry-repo.js';
@@ -261,6 +262,7 @@ async function handleStatusCancel(ctx: ActionContext): Promise<void> {
       log.warn('Cancel button clicked but no running execution for executionId', { channel, executionId });
       return;
     }
+    executionRegistry.cancelExecution(executionId, {});
     if (exec.sessionId) await setSessionAsync(exec.channel ?? channel, exec.sessionId, getActiveBackend()).catch(() => {});
     runningExecutions.killById(executionId);
     conduitQueues.delete(exec.channel ?? channel);
@@ -281,6 +283,7 @@ async function handleStatusCancel(ctx: ActionContext): Promise<void> {
     log.warn('Cancel button clicked but no running execution for threadId', { channel, threadId });
     return;
   }
+  if (exec.executionId) executionRegistry.cancelExecution(exec.executionId, {});
   await cancelThreadById(threadId).catch(() => {});
   if (exec.sessionId) await setSessionAsync(exec.channel ?? channel, exec.sessionId, getActiveBackend()).catch(() => {});
   runningExecutions.killByThreadId(threadId);

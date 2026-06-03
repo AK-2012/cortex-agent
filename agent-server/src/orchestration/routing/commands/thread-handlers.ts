@@ -9,6 +9,7 @@ import type { Destination, PlatformAdapter } from '@platform/index.js';
 import { threadStore } from '@store/thread-repo.js';
 import { listTemplates, listAgents } from '@domain/threads/index.js';
 import { runningExecutions } from '../../../core/running-executions.js';
+import * as executionRegistry from '@domain/executions/registry.js';
 import { conduitQueues } from '../../conduit-queue.js';
 
 const log = createLogger('thread-handlers');
@@ -76,7 +77,11 @@ async function handleThreadAgents(channel: string, adapter: PlatformAdapter) {
 
 async function handleThreadCancelAlias(channel: string, adapter: PlatformAdapter) {
   const dest: Destination = { type: 'interactive-reply', conduit: channel, sessionId: '' };
-  // Alias for !cancel — delegate to the same kill-by-channel behavior
+  // Alias for !cancel — delegate to the same kill-by-channel behavior.
+  // Mark records cancelled before the kill so the kill-error path can't flip them to 'failed'.
+  for (const e of runningExecutions.getByChannel(channel)) {
+    if (e.executionId) executionRegistry.cancelExecution(e.executionId, {});
+  }
   if (runningExecutions.killByChannel(channel) > 0) {
     log.info('Cancel requested for channel:', channel);
     conduitQueues.delete(channel);

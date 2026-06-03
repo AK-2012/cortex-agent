@@ -8,6 +8,13 @@ import { conduitQueues } from '../../conduit-queue.js';
 import { cancelThread as cancelThreadById } from '@domain/threads/index.js';
 import { setSessionAsync } from '@domain/sessions/session.js';
 import { getActiveBackend } from '@domain/agents/index.js';
+import * as executionRegistry from '@domain/executions/registry.js';
+
+/** Mark the persistent execution record as cancelled BEFORE the kill, so the kill-error path's
+ *  failExecution becomes a terminal no-op and the record reads 'cancelled', not 'failed'. */
+function markCancelled(executionId: string | null | undefined): void {
+  if (executionId) executionRegistry.cancelExecution(executionId, {});
+}
 
 /** Matches thread IDs like `thr_a1b2c3d4`. */
 const THREAD_ID_RE = /^thr_[0-9a-f]{8}$/;
@@ -25,6 +32,7 @@ export function createCancelHandler(cancelDispatchedTask: ((opts: { taskId: stri
 
       if (threadId) {
         const exec = runningExecutions.getByThreadId(threadId);
+        markCancelled(exec?.executionId);
         runningExecutions.killByThreadId(threadId);
         await cancelThreadById(threadId).catch(() => {});
         if (exec?.sessionId) {
@@ -32,6 +40,7 @@ export function createCancelHandler(cancelDispatchedTask: ((opts: { taskId: stri
         }
       } else if (executionId) {
         const exec = runningExecutions.getById(executionId);
+        markCancelled(executionId);
         if (exec?.sessionId) {
           await setSessionAsync(ctx.channelId, exec.sessionId, getActiveBackend()).catch(() => {});
         }
@@ -73,6 +82,7 @@ export function createCancelHandler(cancelDispatchedTask: ((opts: { taskId: stri
           if (exec.sessionId) {
             await setSessionAsync(channel, exec.sessionId, getActiveBackend()).catch(() => {});
           }
+          markCancelled(exec.executionId);
           runningExecutions.killById(exec.registryKey);
         }
         conduitQueues.delete(channel);
@@ -83,6 +93,7 @@ export function createCancelHandler(cancelDispatchedTask: ((opts: { taskId: stri
       // Thread ID pattern: kill by threadId + cancel thread store record
       if (THREAD_ID_RE.test(firstArg)) {
         const exec = runningExecutions.getByThreadId(firstArg);
+        markCancelled(exec?.executionId);
         if (runningExecutions.killByThreadId(firstArg)) {
           await cancelThreadById(firstArg).catch(() => {});
           if (exec?.sessionId) {
@@ -118,6 +129,7 @@ export function createCancelHandler(cancelDispatchedTask: ((opts: { taskId: stri
     // 1 execution: cancel directly (existing default behavior)
     if (executions.length === 1) {
       const exec = executions[0];
+      markCancelled(exec.executionId);
       if (exec.threadId) {
         await cancelThreadById(exec.threadId).catch(() => {});
       }

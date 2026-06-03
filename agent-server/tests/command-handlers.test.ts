@@ -16,6 +16,7 @@ import { MockAdapter } from '../src/platform/testing.js';
 import { PROJECTS_DIR } from '../src/core/paths.js';
 import { _testSetRegistry } from '../src/domain/tasks/dispatch-utils.js';
 import { runningExecutions } from '../src/core/running-executions.js';
+import * as executionRegistry from '../src/domain/executions/registry.js';
 import { conduitQueues } from '../src/orchestration/conduit-queue.js';
 import { threadStore } from '../src/store/thread-repo.js';
 
@@ -300,6 +301,25 @@ test('plain !cancel still cancels the current active process', async (t) => {
   assert.equal(conduitQueues.has('C123'), false);
   assert.equal(adapter.posted[0].destination.conduit, 'C123');
   assert.equal(adapter.posted[0].content.text, '🛑 Cancelled. Session preserved — next message will resume.');
+});
+
+test('!cancel marks the execution record cancelled (not failed), idempotently', async (t) => {
+  const adapter = new MockAdapter();
+  const rec = executionRegistry.startLocalExecution({ channel: 'Ccancel', project: 'general', trigger: 'user', backend: 'test' });
+  runningExecutions.register({ threadId: null, channel: 'Ccancel', agentSlotId: null, executionId: rec.id, kill: () => true, backend: 'test' });
+  t.after(() => { runningExecutions.remove(rec.id); });
+
+  const dispatchCommand = createCommandDispatcher({
+    scheduler: null,
+    cancelDispatchedTask: async () => ({ ok: false, message: 'should not be called' }),
+  });
+  dispatchCommand('!cancel', 'Ccancel', adapter);
+  for (let i = 0; i < 5; i++) await new Promise(r => setImmediate(r));
+
+  assert.equal(executionRegistry.getExecution(rec.id)!.status, 'cancelled', 'record must be cancelled, not running/failed');
+  // The kill-error path would later call failExecution; it must NOT flip a terminal record.
+  executionRegistry.failExecution(rec.id, { durationS: 1, error: 'killed' });
+  assert.equal(executionRegistry.getExecution(rec.id)!.status, 'cancelled', 'cancelled record stays cancelled');
 });
 
 // ── !cancel --all ─────────────────────────────────────────────────────────
