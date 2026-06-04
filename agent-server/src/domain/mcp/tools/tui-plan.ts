@@ -145,7 +145,6 @@ export function registerTuiPlanTools(server: McpServer, deps: TuiToolDeps): void
     'cortex_plan_enter',
     'Enter Cortex plan mode. Use this BEFORE designing a non-trivial implementation. Replaces native EnterPlanMode in Cortex TUI sessions — investigation is read-only, the plan must be written to a file under `plan/`, and cortex_plan_exit is required before implementation. Optional `reasoning` is recorded for the audit trail.',
     { reasoning: z.string().optional() },
-    {},
     async (args) => runPlanEnter(args ?? {}) as any,
   );
 
@@ -156,7 +155,6 @@ export function registerTuiPlanTools(server: McpServer, deps: TuiToolDeps): void
       plan_file_path: z.string().describe('Absolute path of the plan file to submit'),
       summary: z.string().optional().describe('Optional one-paragraph summary surfaced alongside the plan'),
     },
-    {},
     async (args) => (await runPlanExit(args as { plan_file_path: string; summary?: string }, deps)) as any,
   );
 }

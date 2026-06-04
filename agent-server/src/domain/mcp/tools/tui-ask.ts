@@ -141,7 +141,6 @@ export function registerTuiAskTools(server: McpServer, deps: TuiToolDeps): void 
         }),
       ).min(1).max(4).describe('Questions to ask (1-4 questions).'),
     },
-    {},
     async (args) => (await runAskUser(args as AskUserArgs, deps)) as any,
   );
 }
