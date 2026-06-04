@@ -114,6 +114,17 @@ export function buildClaudeEnv(
     if (key.startsWith('CLAUDE_CODE')) delete env[key];
   }
   env.CLAUDE_CODE_DISABLE_AUTO_MEMORY = '1';
+  // Startup-latency trims — kill network round-trips and first-run/IDE checks that Claude performs
+  // at launch but Cortex never benefits from (headless tmux/-p, plugin-loaded skills, no IDE). These
+  // only remove non-essential startup work; none change model behavior or disable experiment gates
+  // (we deliberately do NOT set DISABLE_TELEMETRY / NONESSENTIAL_TRAFFIC, which would). Must be set
+  // AFTER the CLAUDE_CODE* strip loop above. See code.claude.com/docs/en/env-vars.
+  env.DISABLE_AUTOUPDATER = '1';                                  // no npm registry update check at launch
+  env.CLAUDE_CODE_DISABLE_OFFICIAL_MARKETPLACE_AUTOINSTALL = '1'; // skip first-run marketplace install
+  env.CLAUDE_CODE_IDE_SKIP_AUTO_INSTALL = '1';                    // no IDE extension auto-install
+  env.CLAUDE_CODE_AUTO_CONNECT_IDE = 'false';                     // no IDE auto-connect probe
+  env.CLAUDE_CODE_DISABLE_POLICY_SKILLS = '1';                    // skip system managed-skills dir (Cortex uses pluginDirs)
+  env.CLAUDE_CODE_DISABLE_TERMINAL_TITLE = '1';                   // no title updates; also skips the title-gen Haiku call in -p
   env.SLACK_CHANNEL = channel;
   env.SLACK_BOT_TOKEN = process.env.SLACK_BOT_TOKEN;
   env.CORTEX_SESSION_ID = sessionId;

@@ -371,6 +371,16 @@ test('buildClaudeEnv — baseline strips CLAUDE_CODE_* from parent and sets DISA
     assert.equal(env.CLAUDE_CODE_DISABLE_AUTO_MEMORY, '1');
     assert.equal(env.CORTEX_SESSION_ID, 'sid-1');
     assert.equal(env.SLACK_CHANNEL, 'C1');
+    // Startup-latency trims (set after the CLAUDE_CODE_* strip loop, so they survive it).
+    assert.equal(env.DISABLE_AUTOUPDATER, '1');
+    assert.equal(env.CLAUDE_CODE_DISABLE_OFFICIAL_MARKETPLACE_AUTOINSTALL, '1');
+    assert.equal(env.CLAUDE_CODE_IDE_SKIP_AUTO_INSTALL, '1');
+    assert.equal(env.CLAUDE_CODE_AUTO_CONNECT_IDE, 'false');
+    assert.equal(env.CLAUDE_CODE_DISABLE_POLICY_SKILLS, '1');
+    assert.equal(env.CLAUDE_CODE_DISABLE_TERMINAL_TITLE, '1');
+    // We deliberately do NOT disable telemetry/experiment-gates by default.
+    assert.equal(env.DISABLE_TELEMETRY, undefined);
+    assert.equal(env.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC, undefined);
   } finally {
     if (prev === undefined) delete process.env.CLAUDE_CODE_ATTRIBUTION_HEADER;
     else process.env.CLAUDE_CODE_ATTRIBUTION_HEADER = prev;
