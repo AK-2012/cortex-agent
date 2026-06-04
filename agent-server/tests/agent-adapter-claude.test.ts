@@ -13,7 +13,7 @@ import {
   SESSION_START_HOOKS,
 } from '../src/agent-adapter/claude/hooks-builder.js';
 import { summarizeToolInput } from '../src/agent-adapter/claude/tool-summarizers.js';
-import { DEFAULT_TOOLS, MCP_CONFIG, TUI_TOOLS, TUI_MCP_CONFIG } from '../src/agent-adapter/claude/defaults.js';
+import { DEFAULT_TOOLS, MCP_CONFIG, CORE_MCP_CONFIG, TUI_TOOLS, TUI_MCP_CONFIG } from '../src/agent-adapter/claude/defaults.js';
 import {
   extractAskUserQuestions,
   setActivePlanFile,
@@ -86,7 +86,7 @@ test('buildSpawnArgs with full options — system-prompt, append, model, agent, 
 
 // --- buildSpawnArgs: TUI mode (DR-0012) ---
 
-test("buildSpawnArgs mode='tui' — omits -p / stream-json flags, defaults to TUI_MCP_CONFIG and TUI_TOOLS", () => {
+test("buildSpawnArgs mode='tui' — omits -p / stream-json flags, layers TUI bridge on the full MCP set + TUI_TOOLS", () => {
   const args = buildSpawnArgs({
     tools: null,
     systemPrompt: null,
@@ -108,10 +108,33 @@ test("buildSpawnArgs mode='tui' — omits -p / stream-json flags, defaults to TU
   assert.ok(args.includes('--dangerously-skip-permissions'));
   assert.ok(args.includes('--permission-mode'));
   assert.ok(args.includes('bypassPermissions'));
-  assert.ok(args.includes(TUI_MCP_CONFIG));
+  // MCP loading mirrors print mode (full MCP_CONFIG) AND additionally layers the TUI bridge.
+  assert.ok(args.includes(MCP_CONFIG), 'tui non-thread loads the same base MCP set as print mode');
+  assert.ok(args.includes(TUI_MCP_CONFIG), 'tui non-thread also loads the cortex-tui-bridge server');
   assert.ok(args.includes(TUI_TOOLS));
   assert.ok(args.includes('--session-id'));
   assert.ok(args.includes('uuid-tui-1'));
+});
+
+test("buildSpawnArgs mode='tui' — thread/core session (mcpConfigPath=CORE_MCP_CONFIG) drops the TUI bridge", () => {
+  const args = buildSpawnArgs({
+    tools: null,
+    systemPrompt: null,
+    appendSystemPrompt: null,
+    model: null,
+    claudeAgent: null,
+    pluginDirs: null,
+    outputStyle: null,
+    needsResume: false,
+    sessionId: 'uuid-tui-thread',
+    mode: 'tui',
+    mcpConfigPath: CORE_MCP_CONFIG,
+  });
+  assert.ok(args.includes(CORE_MCP_CONFIG), 'thread tui loads only the core MCP server set');
+  assert.ok(!args.includes(TUI_MCP_CONFIG), 'thread tui must NOT load the cortex-tui-bridge server');
+  assert.ok(!args.includes(MCP_CONFIG), 'thread tui must not fall back to the full MCP set');
+  // No bridge → fall back to the standard tool whitelist (not TUI_TOOLS, which references bridge tools).
+  assert.ok(!args.includes(TUI_TOOLS), 'thread tui must not whitelist the bridge tools');
 });
 
 test("buildSpawnArgs mode='tui' — explicit tools/mcpConfigPath override defaults", () => {

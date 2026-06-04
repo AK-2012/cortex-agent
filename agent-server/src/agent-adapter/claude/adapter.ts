@@ -603,6 +603,9 @@ function getOrCreateTuiSession(config: AgentSpawnConfig, sessionIdEffective: str
       pluginDirs: opts.pluginDirs,
       outputStyle: opts.outputStyle,
       extraOption: opts.extraOption ?? null,
+      // Mirror the print-mode rule (spawnProcess): template thread sessions load only the core MCP
+      // server. buildSpawnArgs reads this CORE_MCP_CONFIG marker to also suppress the TUI bridge.
+      mcpConfigPath: opts.context?.useCoreMcp ? CORE_MCP_CONFIG : undefined,
       callbackSource: opts.callbackSource,
       scheduleTaskId: opts.scheduleTaskId,
       anthropicBaseUrl: opts.anthropicBaseUrl,

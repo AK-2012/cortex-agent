@@ -4,6 +4,9 @@
 // >>> If I am updated, update my header comment and the parent folder's CORTEX.md <<<
 
 import { DEFAULT_TOOLS, MCP_CONFIG, CORE_MCP_CONFIG, TUI_MCP_CONFIG, TUI_TOOLS } from './defaults.js';
+// CORE_MCP_CONFIG is the thread/core marker: callers set mcpConfigPath to it for template thread
+// sessions (remote_* only). buildSpawnArgs uses identity against it to decide whether to layer the
+// TUI bridge server on top.
 import { buildHooksSettings } from './hooks-builder.js';
 
 /**
@@ -32,11 +35,19 @@ export interface ClaudeSpawnOptions {
 
 export function buildSpawnArgs(options: ClaudeSpawnOptions): string[] {
   const mode: ClaudeSpawnMode = options.mode ?? 'print';
-  // Per-mode defaults: TUI mode loads the TUI MCP set + tool whitelist that excludes
-  // AskUserQuestion / EnterPlanMode / ExitPlanMode (replaced by cortex-tui-bridge MCP tools).
-  const mcpConfigDefault = mode === 'tui' ? TUI_MCP_CONFIG : MCP_CONFIG;
-  const toolsDefault = mode === 'tui' ? TUI_TOOLS : DEFAULT_TOOLS;
-  const mcpConfig = options.mcpConfigPath || mcpConfigDefault;
+  // MCP server selection is identical to print mode: the base config follows the caller's
+  // mcpConfigPath (CORE_MCP_CONFIG for thread/core sessions) and otherwise the full MCP_CONFIG
+  // (cortex-core + cortex-ext). TUI mode additionally layers the cortex-tui-bridge server on top
+  // (its cortex_plan_*/cortex_ask_user tools replace the native EnterPlanMode/ExitPlanMode/
+  // AskUserQuestion), EXCEPT for thread/core sessions — threads run no plan/ask interactions and
+  // must stay on the core server set only. `--mcp-config` is variadic, so we pass both files.
+  const isCoreOnly = options.mcpConfigPath === CORE_MCP_CONFIG;
+  const baseMcpConfig = options.mcpConfigPath || MCP_CONFIG;
+  const mcpConfigs: string[] = [baseMcpConfig];
+  if (mode === 'tui' && !isCoreOnly) mcpConfigs.push(TUI_MCP_CONFIG);
+  // TUI tool whitelist swaps the three native interaction tools for their MCP bridge equivalents;
+  // thread/core TUI sessions have no bridge server, so they fall back to the standard tool set.
+  const toolsDefault = (mode === 'tui' && !isCoreOnly) ? TUI_TOOLS : DEFAULT_TOOLS;
 
   const args: string[] = [];
 
@@ -52,7 +63,7 @@ export function buildSpawnArgs(options: ClaudeSpawnOptions): string[] {
   // Both modes: permission bypass + MCP + tools
   args.push(
     '--dangerously-skip-permissions', '--permission-mode', 'bypassPermissions',
-    '--mcp-config', mcpConfig,
+    '--mcp-config', ...mcpConfigs,
     '--tools', options.tools || toolsDefault,
   );
   if (options.systemPrompt) args.push('--system-prompt', options.systemPrompt);
