@@ -1545,27 +1545,50 @@ export async function runInit(options: InitOptions = {}): Promise<void> {
 
   // 7. Gateway & profile auto-setup (detect from Claude/PI local configs)
   if (processStdin.isTTY) {
+    const loginHints = answers.backends.map(b => {
+      const info = BACKEND_INFO[b];
+      return `  • ${info.label}:  ${info.loginHint.replace(/^Run /, '').replace(/\.$/, '')}`;
+    }).join('\n');
+
     clack.note(
       [
         'Cortex can auto-detect your Claude Code and PI configurations',
         'to generate gateway.yaml and profiles.json automatically.',
         '',
         'Make sure you have logged into:',
-        '  • Claude Code:  claude login',
-        '  • PI:            pi login (if using PI)',
+        loginHints,
       ].join('\n'),
       'Gateway & Profile Setup',
     );
 
-    const ready = await clack.confirm({
-      message: 'Have you logged into Claude Code and/or PI? Ready to auto-detect?',
-      initialValue: true,
-    });
+    let gatewayDone = false;
+    while (!gatewayDone) {
+      const ready = await clack.confirm({
+        message: 'Have you logged in and are ready to auto-detect?',
+        initialValue: true,
+      });
+      handleCancel(ready);
 
-    if (!clack.isCancel(ready) && ready) {
-      await runGatewaySetup(answers.backends, paths, options.gatewayConfigDir, answers);
-    } else {
-      clack.log.info('Skipped. Run `cortex setup-gateway` later to auto-configure.');
+      if (ready) {
+        await runGatewaySetup(answers.backends, paths, options.gatewayConfigDir, answers);
+        gatewayDone = true;
+      } else {
+        // User hasn't logged in yet — let them choose to go log in or skip entirely
+        clack.log.info(`Please log in now. Once done, come back and select "Yes".\n${loginHints}`);
+        const action = await clack.select({
+          message: 'What would you like to do?',
+          options: [
+            { value: 'retry', label: 'I\'ve logged in, retry detection' },
+            { value: 'skip', label: 'Skip for now (run `cortex setup-gateway` later)' },
+          ],
+        });
+        handleCancel(action);
+        if (action === 'skip') {
+          clack.log.info('Skipped. Run `cortex setup-gateway` later to auto-configure.');
+          gatewayDone = true;
+        }
+        // action === 'retry' → loop continues, re-prompt the confirm
+      }
     }
   } else {
     // Non-interactive: auto-detect silently, passing stdin-supplied choices
