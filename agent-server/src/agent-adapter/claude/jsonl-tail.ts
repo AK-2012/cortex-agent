@@ -18,10 +18,23 @@ interface PerMessageUsage {
   model: string;
 }
 
-/** Tool names that signal AskUserQuestion semantics (native + TUI-mode MCP replacement). */
+/**
+ * Tool names that signal AskUserQuestion semantics worth translating into an ACTIONABLE
+ * `ask_user_question` NormalizedEvent (which drives the post-hoc Slack posting machinery:
+ * facade.onAskUserQuestion + lifecycle.sendMessages).
+ *
+ * Only the NATIVE `AskUserQuestion` belongs here. The TUI-mode MCP replacement
+ * `mcp__cortex-tui-bridge__cortex_ask_user` is deliberately EXCLUDED: it is self-contained — it
+ * posts the Slack card, blocks, and returns the answer inline through its own webhook
+ * (tui-ask.ts:82 → /hook/ask-user-question → ask-user.requested → hook-bridge-subscribers). The
+ * jsonl normalizer is a passive transcript observer; synthesizing an actionable event for an
+ * already-resolved tool double-/triple-posts the same question (the stray `Answer (0/1)` cards,
+ * one titled `undefined` because this path drops the header). It still surfaces as a plain
+ * `tool_use` event below, so the `cortex_ask_user ×1` tool trace renders normally. This mirrors
+ * print mode, where extractAskUserQuestions (event-parser.ts) matches only the native tool too.
+ */
 const ASK_USER_TOOL_NAMES = new Set([
   'AskUserQuestion',
-  'mcp__cortex-tui-bridge__cortex_ask_user',
 ]);
 
 /** Tool names that signal "enter plan mode" semantics (native + TUI-mode MCP replacement). */

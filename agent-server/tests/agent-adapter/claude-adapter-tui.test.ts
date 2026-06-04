@@ -326,12 +326,17 @@ test('result carries enteredPlanMode + planFilePath when plan tools observed', a
   assert.equal(result.planFilePath, '/home/x/plan/foo.md');
 });
 
-test('result collects askUserQuestions from MCP cortex_ask_user invocations (questions[] shape)', async (t) => {
+test('result does NOT collect askUserQuestions from self-resolving MCP cortex_ask_user (no re-post)', async (t) => {
+  // cortex_ask_user posts + blocks + collects the answer through its own webhook within the turn,
+  // so the turn result must NOT carry askUserQuestions — otherwise lifecycle.sendMessages re-posts
+  // the already-answered question (the stray Slack cards). The invocation still surfaces as a
+  // tool_use via onToolUse for the tool trace.
   const { deps, tails } = makeDeps();
   const sess = makeSession(deps);
   t.after(() => sess.kill());
 
-  const turnPromise = sess.sendMessage('ask me', {});
+  const tools: Array<{ name: string }> = [];
+  const turnPromise = sess.sendMessage('ask me', { onToolUse: (name) => tools.push({ name }) });
   await new Promise(r => setImmediate(r));
   const tail = tails[0];
 
@@ -350,11 +355,8 @@ test('result collects askUserQuestions from MCP cortex_ask_user invocations (que
   tail.finishTurn();
 
   const result = await turnPromise;
-  assert.equal(result.askUserQuestions.length, 1);
-  assert.equal(result.askUserQuestions[0].toolUseId, 'tu_1');
-  assert.equal(result.askUserQuestions[0].questions.length, 2);
-  assert.equal(result.askUserQuestions[0].questions[0].question, 'Pick one');
-  assert.deepEqual(result.askUserQuestions[0].questions[0].options, ['A', 'B']);
+  assert.equal(result.askUserQuestions.length, 0);
+  assert.deepEqual(tools.map(x => x.name), ['mcp__cortex-tui-bridge__cortex_ask_user']);
 });
 
 // =====================================================================================

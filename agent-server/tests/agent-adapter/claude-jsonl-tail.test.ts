@@ -137,7 +137,11 @@ test('Normalizer emits ask_user_question for native AskUserQuestion tool_use', (
   assert.equal((asks[0] as any).questions.length, 1);
 });
 
-test('Normalizer emits ask_user_question for cortex_ask_user MCP tool (canonical questions[] shape)', () => {
+test('Normalizer does NOT emit ask_user_question for cortex_ask_user MCP tool (self-resolving)', () => {
+  // The TUI MCP bridge tool posts + blocks + collects the answer through its own webhook, so the
+  // normalizer must NOT synthesize an actionable ask_user_question event (that would re-post the
+  // already-answered question via facade.onAskUserQuestion / lifecycle.sendMessages). It must still
+  // surface as a plain tool_use so the `cortex_ask_user ×1` trace renders.
   const n = new JsonlEventNormalizer();
   const out = n.consume({
     type: 'assistant',
@@ -155,20 +159,22 @@ test('Normalizer emits ask_user_question for cortex_ask_user MCP tool (canonical
     },
   });
   const asks = out.filter(e => e.type === 'ask_user_question');
-  assert.equal(asks.length, 1);
-  assert.equal((asks[0] as any).questions.length, 2);
-  assert.equal((asks[0] as any).questions[0].question, 'Q1?');
-  assert.deepEqual((asks[0] as any).questions[0].options, ['A', 'B']);
+  assert.equal(asks.length, 0);
+  const toolUses = out.filter(e => e.type === 'tool_use');
+  assert.equal(toolUses.length, 1);
+  assert.equal((toolUses[0] as any).name, 'mcp__cortex-tui-bridge__cortex_ask_user');
 });
 
-test('Normalizer falls back to legacy flat question shape for backward-compat', () => {
+test('Normalizer falls back to legacy flat question shape for native AskUserQuestion', () => {
+  // Defensive backward-compat branch in extractQuestionsFromInput. Exercised via the native tool,
+  // which is the one that still translates to an actionable ask_user_question event.
   const n = new JsonlEventNormalizer();
   const out = n.consume({
     type: 'assistant',
     message: {
       id: 'msg_legacy',
       content: [{
-        type: 'tool_use', id: 'tu_1', name: 'mcp__cortex-tui-bridge__cortex_ask_user',
+        type: 'tool_use', id: 'tu_1', name: 'AskUserQuestion',
         input: { question: 'Single Q?', options: ['X', 'Y'], multi_select: true },
       }],
     },
