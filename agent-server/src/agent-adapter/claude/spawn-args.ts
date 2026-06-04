@@ -3,7 +3,7 @@
 // pos:    Construct Claude CLI argv and process environment variables
 // >>> If I am updated, update my header comment and the parent folder's CORTEX.md <<<
 
-import { DEFAULT_TOOLS, MCP_CONFIG, CORE_MCP_CONFIG, TUI_MCP_CONFIG, TUI_TOOLS } from './defaults.js';
+import { DEFAULT_TOOLS, MCP_CONFIG, CORE_MCP_CONFIG, TUI_MCP_CONFIG, TUI_TOOLS, TUI_STRIP_TOOLS } from './defaults.js';
 // CORE_MCP_CONFIG is the thread/core marker: callers set mcpConfigPath to it for template thread
 // sessions (remote_* only). buildSpawnArgs uses identity against it to decide whether to layer the
 // TUI bridge server on top.
@@ -60,11 +60,19 @@ export function buildSpawnArgs(options: ClaudeSpawnOptions): string[] {
       '--verbose',
     );
   }
+  // TUI mode: strip native interaction tools (AskUserQuestion / EnterPlanMode / ExitPlanMode)
+  // from ALL sessions (user messages and threads alike). These tools require stdin/stdout
+  // interaction that tmux-pasted TUI sessions cannot provide.
+  let effectiveTools = options.tools || toolsDefault;
+  if (mode === 'tui' && options.tools) {
+    effectiveTools = options.tools.split(',').filter(t => !TUI_STRIP_TOOLS.has(t)).join(',');
+  }
+
   // Both modes: permission bypass + MCP + tools
   args.push(
     '--dangerously-skip-permissions', '--permission-mode', 'bypassPermissions',
     '--mcp-config', ...mcpConfigs,
-    '--tools', options.tools || toolsDefault,
+    '--tools', effectiveTools,
   );
   if (options.systemPrompt) args.push('--system-prompt', options.systemPrompt);
   if (options.appendSystemPrompt) args.push('--append-system-prompt', options.appendSystemPrompt);

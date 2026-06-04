@@ -137,9 +137,9 @@ test("buildSpawnArgs mode='tui' — thread/core session (mcpConfigPath=CORE_MCP_
   assert.ok(!args.includes(TUI_TOOLS), 'thread tui must not whitelist the bridge tools');
 });
 
-test("buildSpawnArgs mode='tui' — explicit tools/mcpConfigPath override defaults", () => {
+test("buildSpawnArgs mode='tui' — explicit tools have interaction tools stripped", () => {
   const args = buildSpawnArgs({
-    tools: 'Bash,Read',
+    tools: 'Bash,Read,AskUserQuestion,EnterPlanMode,ExitPlanMode,Write',
     systemPrompt: null,
     appendSystemPrompt: null,
     model: null,
@@ -149,11 +149,37 @@ test("buildSpawnArgs mode='tui' — explicit tools/mcpConfigPath override defaul
     needsResume: false,
     sessionId: 'u',
     mode: 'tui',
-    mcpConfigPath: '/custom/mcp.json',
   });
-  assert.ok(args.includes('Bash,Read'));
-  assert.ok(args.includes('/custom/mcp.json'));
-  assert.ok(!args.includes(TUI_TOOLS), 'explicit tools should not be silently merged with defaults');
+  const toolsArg = args[args.indexOf('--tools') + 1];
+  const tools = toolsArg.split(',');
+  assert.ok(!tools.includes('AskUserQuestion'), 'AskUserQuestion must be stripped in TUI mode');
+  assert.ok(!tools.includes('EnterPlanMode'), 'EnterPlanMode must be stripped in TUI mode');
+  assert.ok(!tools.includes('ExitPlanMode'), 'ExitPlanMode must be stripped in TUI mode');
+  assert.ok(tools.includes('Bash'));
+  assert.ok(tools.includes('Read'));
+  assert.ok(tools.includes('Write'));
+});
+
+test("buildSpawnArgs mode='tui' — thread/core session also strips interaction tools from explicit list", () => {
+  const args = buildSpawnArgs({
+    tools: DEFAULT_TOOLS,
+    systemPrompt: null,
+    appendSystemPrompt: null,
+    model: null,
+    claudeAgent: null,
+    pluginDirs: null,
+    outputStyle: null,
+    needsResume: false,
+    sessionId: 'u',
+    mode: 'tui',
+    mcpConfigPath: CORE_MCP_CONFIG,
+  });
+  const toolsArg = args[args.indexOf('--tools') + 1];
+  const tools = toolsArg.split(',');
+  assert.ok(!tools.includes('AskUserQuestion'), 'thread tui must also strip AskUserQuestion');
+  assert.ok(!tools.includes('EnterPlanMode'), 'thread tui must also strip EnterPlanMode');
+  assert.ok(!tools.includes('ExitPlanMode'), 'thread tui must also strip ExitPlanMode');
+  assert.ok(tools.includes('Bash'));
 });
 
 test("buildSpawnArgs mode='tui' — needsResume uses --resume instead of --session-id", () => {

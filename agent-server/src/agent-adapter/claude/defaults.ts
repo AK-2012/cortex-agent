@@ -62,6 +62,10 @@ export const TUI_TOOLS = [
   'mcp__cortex-tui-bridge__cortex_ask_user',
 ].join(',');
 
+/** Native interaction tools that must be stripped in TUI mode (all sessions, including threads).
+ *  These tools require stdin/stdout interaction that TUI mode cannot provide. */
+export const TUI_STRIP_TOOLS = new Set(['AskUserQuestion', 'EnterPlanMode', 'ExitPlanMode']);
+
 /** DR-0012: tmux session name prefix for TUI-mode Claude processes. */
 export const TUI_TMUX_NAME_PREFIX = 'cortex-claude-';
 
