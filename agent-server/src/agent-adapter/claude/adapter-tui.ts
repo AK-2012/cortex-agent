@@ -17,6 +17,9 @@ import {
   TURN_IDLE_TIMEOUT,
   JSONL_FIRST_EVENT_TIMEOUT,
   PASTE_SUBMIT_DELAY_MS,
+  PANE_READY_TIMEOUT,
+  PANE_READY_POLL_MS,
+  PANE_READY_MARKER,
 } from './defaults.js';
 import { buildSpawnArgs, buildClaudeEnv, type CortexAgentContext } from './spawn-args.js';
 import { buildPrompt, mergeSubstantialOutput } from './event-parser.js';
@@ -49,6 +52,12 @@ export interface TuiSessionDeps {
   /** Delay (ms) between pasting the prompt and sending Enter. Tests set 0 to submit synchronously.
    *  Defaults to PASTE_SUBMIT_DELAY_MS (needed so Claude's Ink TUI registers the paste). */
   pasteSubmitDelayMs?: number;
+  /** Max time (ms) to poll capture-pane for the Claude TUI readiness marker after a fresh spawn,
+   *  before the first paste. Tests set 0 to skip the wait (mocked tmux never renders a pane).
+   *  Defaults to PANE_READY_TIMEOUT. */
+  paneReadyTimeoutMs?: number;
+  /** Poll interval (ms) for the pane-readiness wait. Defaults to PANE_READY_POLL_MS. */
+  paneReadyPollMs?: number;
 }
 
 export interface ClaudeTuiSessionConfig {
@@ -142,6 +151,8 @@ export class ClaudeTuiSession {
   private readonly tailFactory: (p: string) => JsonlTailLike;
   private readonly firstEventTimeoutMs: number;
   private readonly pasteSubmitDelayMs: number;
+  private readonly paneReadyTimeoutMs: number;
+  private readonly paneReadyPollMs: number;
   private readonly config: ClaudeTuiSessionConfig;
 
   private tail: JsonlTailLike | null = null;
@@ -166,6 +177,8 @@ export class ClaudeTuiSession {
     this.tailFactory = config.deps.tailFactory;
     this.firstEventTimeoutMs = config.deps.firstEventTimeoutMs ?? JSONL_FIRST_EVENT_TIMEOUT;
     this.pasteSubmitDelayMs = config.deps.pasteSubmitDelayMs ?? PASTE_SUBMIT_DELAY_MS;
+    this.paneReadyTimeoutMs = config.deps.paneReadyTimeoutMs ?? PANE_READY_TIMEOUT;
+    this.paneReadyPollMs = config.deps.paneReadyPollMs ?? PANE_READY_POLL_MS;
 
     this.tmuxName = `${TUI_TMUX_NAME_PREFIX}${this.sessionId}`;
     this.jsonlPath = computeJsonlPath(this.cwd, this.sessionId);
@@ -257,6 +270,11 @@ export class ClaudeTuiSession {
     this.tail.on('event', (raw) => this.handleRawEvent(raw));
     await this.tail.start();
 
+    // Claude's Ink TUI boots asynchronously and only accepts input once its prompt UI is drawn.
+    // Block here until capture-pane shows a readiness marker, otherwise the first paste lands in a
+    // not-yet-ready terminal and the submit Enter is a no-op (no jsonl → first-event watchdog kill).
+    await this.waitForPaneReady();
+
     this.alive = true;
     this.resetIdleTimer();
     this.maxTimer = setTimeout(() => {
@@ -266,6 +284,24 @@ export class ClaudeTuiSession {
     // Long-lived timers must not keep the event loop alive (so node:test cleanly exits when
     // tests don't explicitly kill every session). Cleared on close/kill regardless.
     if (typeof this.maxTimer.unref === 'function') this.maxTimer.unref();
+  }
+
+  /**
+   * Poll capture-pane until the Claude TUI prompt is interactive (or the timeout elapses). Returns
+   * as soon as {@link PANE_READY_MARKER} appears. On timeout it logs and returns anyway — better to
+   * attempt the paste than to hard-fail, and the first-event watchdog still bounds a dead session.
+   * Tests pass paneReadyTimeoutMs=0 to skip entirely (mocked tmux renders no pane).
+   */
+  private async waitForPaneReady(): Promise<void> {
+    if (this.paneReadyTimeoutMs <= 0) return;
+    const deadline = Date.now() + this.paneReadyTimeoutMs;
+    while (Date.now() < deadline) {
+      let pane = '';
+      try { pane = this.tmux.capturePane(this.tmuxName); } catch { /* pane not ready yet */ }
+      if (PANE_READY_MARKER.test(pane)) return;
+      await new Promise(r => setTimeout(r, this.paneReadyPollMs));
+    }
+    log.warn(`TUI session ${this.sessionId.substring(0, 8)} pane not ready within ${this.paneReadyTimeoutMs}ms — pasting anyway`);
   }
 
   // -----------------------------------------------------------------------------

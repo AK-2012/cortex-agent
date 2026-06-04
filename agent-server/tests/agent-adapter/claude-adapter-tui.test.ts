@@ -6,6 +6,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'events';
+import * as fs from 'fs';
 
 import { ClaudeTuiSession, type TuiSessionDeps } from '../../src/agent-adapter/claude/adapter-tui.js';
 import type { TmuxExecResult } from '../../src/agent-adapter/claude/tmux-control.js';
@@ -15,6 +16,17 @@ import { TmuxControl } from '../../src/agent-adapter/claude/tmux-control.js';
 
 interface TmuxCallLog {
   args: string[];
+}
+
+/** The claude argv (and env) no longer ride on the tmux command line — newSession stages them into
+ *  a self-deleting bash launcher and tmux runs `-- bash <launcherPath>` (DR-0012 command-length fix).
+ *  Command-shape assertions read the launcher back off disk; substring checks still match because
+ *  each arg is single-quoted inside the `exec …` line. Mock exec never runs bash, so we unlink here. */
+function launcherScriptFor(call: TmuxCallLog): string {
+  const p = call.args[call.args.length - 1];
+  const content = fs.readFileSync(p, 'utf8');
+  try { fs.unlinkSync(p); } catch { /* best effort */ }
+  return content;
 }
 
 function makeRecordingExec(): { exec: (args: string[]) => TmuxExecResult; calls: TmuxCallLog[] } {
@@ -66,6 +78,7 @@ function makeDeps(): {
     },
     waitForJsonlMs: 0, // skip the file-wait poll in tests
     pasteSubmitDelayMs: 0, // submit synchronously in tests (no Ink TUI to settle)
+    paneReadyTimeoutMs: 0, // skip pane-readiness poll in tests (mocked tmux renders no pane)
   };
   return { deps, tmuxCalls, tails };
 }
@@ -100,10 +113,11 @@ test('first sendMessage spawns tmux with --session-id and starts the jsonl tail'
   // Session name follows TUI_TMUX_NAME_PREFIX convention
   const tIdx = newSessCall!.args.indexOf('-s');
   assert.match(newSessCall!.args[tIdx + 1], /^cortex-claude-/);
-  // Command must include claude + --session-id <sid>
-  assert.ok(newSessCall!.args.includes('claude'), 'must spawn claude');
-  assert.ok(newSessCall!.args.includes('--session-id'), 'first-time spawn uses --session-id');
-  assert.ok(newSessCall!.args.includes('sid-aaaa-bbbb'));
+  // Command (staged in the launcher) must include claude + --session-id <sid>
+  const script = launcherScriptFor(newSessCall!);
+  assert.ok(script.includes('claude'), 'must spawn claude');
+  assert.ok(script.includes('--session-id'), 'first-time spawn uses --session-id');
+  assert.ok(script.includes('sid-aaaa-bbbb'));
   // Jsonl tail attached
   assert.equal(tails.length, 1, 'one jsonl tail per session');
   assert.equal(tails[0].started, true);
@@ -122,8 +136,9 @@ test('first sendMessage with needsResume=true uses --resume instead of --session
   await new Promise(r => setImmediate(r));
 
   const newSessCall = tmuxCalls.find(c => c.args[0] === 'new-session');
-  assert.ok(newSessCall!.args.includes('--resume'));
-  assert.ok(!newSessCall!.args.includes('--session-id'));
+  const script = launcherScriptFor(newSessCall!);
+  assert.ok(script.includes('--resume'));
+  assert.ok(!script.includes('--session-id'));
 
   tails[0].finishTurn();
   await turnPromise;
@@ -161,6 +176,7 @@ test('sendMessage delays Enter after paste so the Ink TUI registers the brackete
     tailFactory: (path: string) => { const tl = new MockTail(path); tails.push(tl); return tl as any; },
     waitForJsonlMs: 0,
     pasteSubmitDelayMs: 80,
+    paneReadyTimeoutMs: 0,
   };
   const sess = makeSession(deps);
   t.after(() => sess.kill());
@@ -505,7 +521,7 @@ test('when tmux dies between turns, second sendMessage re-spawns with --resume',
   const p1 = sess.sendMessage('q1', {});
   await new Promise(r => setImmediate(r));
   const newSess1 = tmuxCalls.find(c => c.args[0] === 'new-session');
-  assert.ok(newSess1!.args.includes('--session-id'), 'turn 1 must use --session-id');
+  assert.ok(launcherScriptFor(newSess1!).includes('--session-id'), 'turn 1 must use --session-id');
   tails[0].finishTurn();
   await p1;
 
@@ -519,7 +535,7 @@ test('when tmux dies between turns, second sendMessage re-spawns with --resume',
   await new Promise(r => setImmediate(r));
   const newSessCalls = tmuxCalls.filter(c => c.args[0] === 'new-session');
   assert.equal(newSessCalls.length, 2, 'must spawn again after tmux died');
-  assert.ok(newSessCalls[1].args.includes('--resume'), 'recovery spawn must use --resume, not --session-id');
+  assert.ok(launcherScriptFor(newSessCalls[1]).includes('--resume'), 'recovery spawn must use --resume, not --session-id');
 
   tails[tails.length - 1].finishTurn();
   await p2;
@@ -584,6 +600,7 @@ test('first-turn tail.start() failure does not wedge the session — next sendMe
     },
     waitForJsonlMs: 0,
     pasteSubmitDelayMs: 0,
+    paneReadyTimeoutMs: 0,
   };
   const sess = makeSession(deps);
   t.after(() => sess.kill());
@@ -601,7 +618,7 @@ test('first-turn tail.start() failure does not wedge the session — next sendMe
   const killIdx = tmuxCalls.findIndex(c => c.args[0] === 'kill-session');
   const secondNewIdx = tmuxCalls.map(c => c.args[0]).lastIndexOf('new-session');
   assert.ok(killIdx !== -1 && killIdx < secondNewIdx, 'orphan tmux session must be killed before the second new-session');
-  assert.ok(newSessCalls[1].args.includes('--resume'), 'respawn after first-spawn must use --resume (jsonl persists)');
+  assert.ok(launcherScriptFor(newSessCalls[1]).includes('--resume'), 'respawn after first-spawn must use --resume (jsonl persists)');
 
   tails[tails.length - 1].finishTurn();
   await p2;
@@ -615,6 +632,7 @@ test('first-event watchdog rejects the turn when no jsonl output arrives within 
     tailFactory: (path: string) => { const tl = new MockTail(path); tails.push(tl); return tl as any; },
     waitForJsonlMs: 0,
     pasteSubmitDelayMs: 0,
+    paneReadyTimeoutMs: 0,
     firstEventTimeoutMs: 60, // tiny fast-fail window for the test
   };
   const sess = makeSession(deps);

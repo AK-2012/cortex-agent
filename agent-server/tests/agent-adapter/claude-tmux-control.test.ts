@@ -45,7 +45,11 @@ test('hasSession returns false when tmux has-session exits non-zero', () => {
 
 // --- newSession ---
 
-test('newSession builds detached argv with cwd and command', () => {
+// newSession stages env + command into a self-deleting bash launcher (DR-0012 command-length fix);
+// tmux only ever sees `-- bash <launcherPath>`. These tests read the staged launcher off disk via
+// the captured path (mock exec never runs bash, so the script is not self-deleted — the test cleans it).
+
+test('newSession builds detached argv that runs a bash launcher (env/command off the command line)', () => {
   const { exec, calls } = makeMockExec([{ status: 0 }]);
   const t = new TmuxControl(exec);
   t.newSession({
@@ -53,47 +57,64 @@ test('newSession builds detached argv with cwd and command', () => {
     command: ['claude', '--session-id', 'uuid-1'],
     cwd: '/some/dir',
   });
-  // Expected: tmux new-session -d -s <name> -c <cwd> -x 200 -y 50 -- <cmd...>
-  assert.deepEqual(calls[0].args, [
+  const args = calls[0].args;
+  // Prefix is fixed; final two tokens are `bash <launcherPath>`.
+  assert.deepEqual(args.slice(0, 11), [
     'new-session', '-d', '-s', 'cortex-claude-aaa',
     '-c', '/some/dir',
     '-x', '200', '-y', '50',
     '--',
-    'claude', '--session-id', 'uuid-1',
   ]);
+  assert.equal(args[11], 'bash');
+  const launcherPath = args[12];
+  assert.ok(/cortex-tmux-launch-[0-9a-f]+\.sh$/.test(launcherPath), 'last arg is the launcher script path');
+  // No env/command leaks onto the tmux command line.
+  assert.ok(!args.includes('-e'), 'env must not be passed via -e');
+  assert.ok(!args.includes('claude'), 'command must not be inlined on the tmux command line');
+  // Launcher content: exports env and execs the command.
+  const script = fs.readFileSync(launcherPath, 'utf8');
+  assert.match(script, /^#!\/usr\/bin\/env bash/);
+  assert.match(script, /rm -f "\$0"/);
+  assert.match(script, /exec 'claude' '--session-id' 'uuid-1'/);
+  fs.unlinkSync(launcherPath);
 });
 
-test('newSession honors custom dimensions and env vars (-e KEY=VAL)', () => {
+test('newSession honors custom dimensions and exports env in the launcher (quoted, identifier-only)', () => {
   const { exec, calls } = makeMockExec([{ status: 0 }]);
   const t = new TmuxControl(exec);
   t.newSession({
     name: 'cortex-claude-aaa',
     command: ['claude'],
     cwd: '/tmp',
-    env: { FOO: 'bar', BAZ: 'qux' },
+    // include a tricky value (quote + newline) and an invalid shell-identifier key that must be skipped
+    env: { FOO: 'bar', BAZ: "qu'x\nline2", 'BASH_FUNC_x%%': 'fn' },
     cols: 120,
     rows: 40,
   });
   const args = calls[0].args;
   assert.ok(args.includes('-x') && args[args.indexOf('-x') + 1] === '120');
   assert.ok(args.includes('-y') && args[args.indexOf('-y') + 1] === '40');
-  // env keys come in as `-e KEY=VAL` pairs (order-stable from Object.entries)
-  const eIdx = args.indexOf('-e');
-  assert.ok(eIdx > -1, 'should include -e flag');
-  // Each env var should produce one -e flag
-  const envFlags = args.filter(a => a === '-e').length;
-  assert.equal(envFlags, 2);
-  assert.ok(args.includes('FOO=bar'));
-  assert.ok(args.includes('BAZ=qux'));
+  const launcherPath = args[args.length - 1];
+  const script = fs.readFileSync(launcherPath, 'utf8');
+  assert.match(script, /export FOO='bar'/);
+  // single-quote escape: ' -> '\'' , newline preserved verbatim inside the quotes
+  assert.match(script, /export BAZ='qu'\\''x\nline2'/);
+  // invalid identifier key is skipped, not exported
+  assert.ok(!script.includes('BASH_FUNC_x'), 'non-identifier env keys must be skipped');
+  fs.unlinkSync(launcherPath);
 });
 
-test('newSession throws when tmux exits non-zero', () => {
-  const { exec } = makeMockExec([{ status: 1, stderr: 'duplicate session' }]);
+test('newSession throws when tmux exits non-zero and cleans up the staged launcher', () => {
+  const captured: string[][] = [];
+  const exec = (args: string[]) => { captured.push(args); return { stdout: '', stderr: 'duplicate session', status: 1 }; };
   const t = new TmuxControl(exec);
   assert.throws(
     () => t.newSession({ name: 'dup', command: ['claude'], cwd: '/tmp' }),
     /tmux new-session failed.*duplicate session/,
   );
+  // On failure the launcher must be unlinked (bash never ran to self-delete it).
+  const launcherPath = captured[0][captured[0].length - 1];
+  assert.ok(!fs.existsSync(launcherPath), 'failed spawn must clean up the staged launcher');
 });
 
 // --- killSession ---
@@ -172,6 +193,7 @@ test('pasteText invokes load-buffer with a named buffer, paste-buffer with -d to
   const loadArgs = calls[0].args;
   assert.ok(loadArgs.includes('-b'), 'load-buffer must use named buffer (-b)');
   assert.equal(calls[1].args[0], 'paste-buffer');
+  assert.ok(calls[1].args.includes('-p'), 'paste-buffer must use -p (bracketed paste) so Claude registers the paste');
   assert.ok(calls[1].args.includes('-d'), 'paste-buffer must use -d to free buffer after paste');
   assert.ok(calls[1].args.includes('-t'), 'paste-buffer must target the session');
 });

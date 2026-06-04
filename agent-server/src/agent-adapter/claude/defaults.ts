@@ -20,6 +20,18 @@ export const JSONL_FIRST_EVENT_TIMEOUT = 30 * 1000;
  *  never submitted. A short settle delay lets the paste register before the submit keystroke.
  *  Verified empirically (2.1.160): 0ms → never submits; ~300ms+ → reliable. */
 export const PASTE_SUBMIT_DELAY_MS = 400;
+/** DR-0012: after spawning the tmux session, Claude's Ink TUI takes several seconds to boot and
+ *  start accepting input. Pasting before then drops the prompt into a not-yet-ready terminal, so
+ *  the submit Enter does nothing and no jsonl is ever written (the turn then dies on the
+ *  first-event watchdog). We poll capture-pane for a readiness marker before the first paste.
+ *  Verified empirically (2.1.162): paste at ~0s → never submits; paste after the prompt UI is
+ *  drawn (~5-6s) → reliable. */
+export const PANE_READY_TIMEOUT = 25 * 1000;
+export const PANE_READY_POLL_MS = 250;
+/** Markers that prove the Claude TUI prompt is interactive and ready to receive a paste. The
+ *  bottom status line ("bypass permissions on …") and the shortcuts hint only render once the
+ *  Ink app has finished its initial layout. */
+export const PANE_READY_MARKER = /bypass permissions on|\? for shortcuts/;
 
 export const LOGS_DIR = path.join(DATA_DIR, 'logs', 'sessions');
 mkdirSync(LOGS_DIR, { recursive: true });
