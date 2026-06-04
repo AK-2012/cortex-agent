@@ -106,6 +106,34 @@ export class FeishuAdapter implements PlatformAdapter {
     });
   }
 
+  // --- Conduit prefixing ---
+  // The `feishu:` prefix is this adapter's canonical external form for conduits.
+  // Outbound conduits (MessageRef.conduit, getProjectConduits values, incoming
+  // file conduits, triggerId) carry the prefix; inbound conduits (Destination,
+  // bindProjectConduit hint, triggerId) are unwrapped before calling the Feishu
+  // SDK or reading/writing the bare chat_id registry. This lets multiple platform
+  // adapters coexist behind CompositeAdapter.
+  private static readonly PREFIX = 'feishu:';
+
+  /** Add the `feishu:` prefix (idempotent; passes through empty strings). */
+  private _wrap(bare: string): string {
+    if (!bare) return bare;
+    return bare.startsWith(FeishuAdapter.PREFIX) ? bare : FeishuAdapter.PREFIX + bare;
+  }
+
+  /** Strip the `feishu:` prefix (tolerates already-bare values for back-compat). */
+  private _unwrap(prefixed: string): string {
+    if (!prefixed) return prefixed;
+    return prefixed.startsWith(FeishuAdapter.PREFIX)
+      ? prefixed.slice(FeishuAdapter.PREFIX.length)
+      : prefixed;
+  }
+
+  /** True if this conduit belongs to the Feishu adapter. */
+  ownsConduit(conduit: string): boolean {
+    return conduit.startsWith(FeishuAdapter.PREFIX);
+  }
+
   // --- Lifecycle ---
 
   async start(): Promise<void> {
@@ -161,7 +189,7 @@ export class FeishuAdapter implements PlatformAdapter {
     });
 
     const messageId = (res as any)?.data?.message_id || '';
-    return { conduit: resolved.channel, messageId };
+    return { conduit: this._wrap(resolved.channel), messageId };
   }
 
   async updateMessage(ref: MessageRef, content: MessageContent): Promise<void> {
@@ -218,7 +246,7 @@ export class FeishuAdapter implements PlatformAdapter {
         },
       });
       const messageId = (res as any)?.data?.message_id || '';
-      return { conduit: resolved.channel, messageId, threadId };
+      return { conduit: this._wrap(resolved.channel), messageId, threadId };
     }
 
     const res = await this.client.im.v1.message.create({
@@ -231,13 +259,13 @@ export class FeishuAdapter implements PlatformAdapter {
     });
 
     const messageId = (res as any)?.data?.message_id || '';
-    return { conduit: resolved.channel, messageId };
+    return { conduit: this._wrap(resolved.channel), messageId };
   }
 
   async openModal(triggerId: string, modal: ModalDefinition): Promise<void> {
     // Feishu has no native modal. Degrade to posting a card with an embedded
-    // form container to the channel. triggerId format: "chatId:messageId"
-    const [channel] = triggerId.split(':');
+    // form container to the channel. triggerId format: "feishu:chatId:messageId"
+    const [channel] = this._unwrap(triggerId).split(':');
     if (!channel) return;
 
     const cardJson = this.modalToFeishuCard(modal);
@@ -366,7 +394,8 @@ export class FeishuAdapter implements PlatformAdapter {
   }
 
   async bindProjectConduit(projectId: string, conduitHint: string): Promise<void> {
-    await this._getConduitsStore().set(projectId, conduitHint);
+    // Registry stores bare chat_ids; strip the prefix before persisting.
+    await this._getConduitsStore().set(projectId, this._unwrap(conduitHint));
   }
 
   async unbindProjectConduit(projectId: string): Promise<void> {
@@ -374,13 +403,18 @@ export class FeishuAdapter implements PlatformAdapter {
   }
 
   async getProjectConduits(): Promise<Record<string, string>> {
-    return this._getConduitsStore().getAll();
+    // Registry stores bare chat_ids; expose prefixed conduits externally.
+    const all = await this._getConduitsStore().getAll();
+    return Object.fromEntries(
+      Object.entries(all).map(([project, ch]) => [project, this._wrap(ch)]),
+    );
   }
 
   async resolveInboundProject(conduit: string): Promise<string | null> {
+    const bare = this._unwrap(conduit);
     const conduits = await this._getConduitsStore().getAll();
     for (const [project, ch] of Object.entries(conduits)) {
-      if (ch === conduit) return project;
+      if (ch === bare) return project;
     }
     return null;
   }
@@ -393,10 +427,11 @@ export class FeishuAdapter implements PlatformAdapter {
   private async resolveDestination(dest: Destination): Promise<{ channel: string | null; kind: string }> {
     switch (dest.type) {
       case 'interactive-reply':
-        return { channel: dest.conduit, kind: 'interactive-reply' };
+        return { channel: this._unwrap(dest.conduit), kind: 'interactive-reply' };
       case 'project-report': {
-        const conduits = await this.getProjectConduits();
-        const channel = conduits[dest.projectId];
+        // Read bare chat_ids directly from the store (getProjectConduits wraps
+        // for external callers; the SDK needs the bare chat_id).
+        const channel = await this._getConduitsStore().get(dest.projectId);
         if (!channel) {
           log.warn(`No conduit registered for project "${dest.projectId}"; dropping project-report`);
           return { channel: null, kind: 'project-report-noop' };
@@ -446,14 +481,14 @@ export class FeishuAdapter implements PlatformAdapter {
       : (typeof message.content === 'string' && !message.content.startsWith('{') ? message.content : '');
 
     const ref: MessageRef = {
-      conduit: chatId,
+      conduit: this._wrap(chatId),
       messageId,
       threadId: rootId || parentId || undefined,
     };
 
     // Extract file references from the parsed content. The id (file_key/image_key)
     // plus message_id + resourceType are needed by downloadFile (messageResource.get).
-    const files = this.extractInboundFiles(messageType, parsed, messageId);
+    const files = this.extractInboundFiles(messageType, parsed, messageId, chatId);
 
     // TODO: Parse Feishu forwarded/merged messages (merge_forward msg type) into
     // IncomingAttachment[]. Feishu's format differs from Slack's msg.attachments.
@@ -489,9 +524,9 @@ export class FeishuAdapter implements PlatformAdapter {
    * message_id + resourceType are stashed in `raw` so downloadFile() can call
    * im.v1.messageResource.get (which requires both message_id and a type param).
    */
-  private extractInboundFiles(messageType: string, parsed: any, messageId: string): PlatformFileRef[] | undefined {
+  private extractInboundFiles(messageType: string, parsed: any, messageId: string, chatId: string): PlatformFileRef[] | undefined {
     const mk = (id: string, name: string, mimetype: string, resourceType: 'file' | 'image'): PlatformFileRef[] => [
-      { id, name, mimetype, url: '', raw: { message_id: messageId, resourceType } },
+      { id, name, mimetype, url: '', conduit: this._wrap(chatId), raw: { message_id: messageId, resourceType } },
     ];
 
     switch (messageType) {
@@ -555,10 +590,10 @@ export class FeishuAdapter implements PlatformAdapter {
       await handler({
         actionId,
         value: typeof actionValue === 'string' ? actionValue : JSON.stringify(actionValue),
-        triggerId: `${chatId}:${messageId}`,
-        messageRef: messageId ? { conduit: chatId, messageId } : undefined,
+        triggerId: this._wrap(`${chatId}:${messageId}`),
+        messageRef: messageId ? { conduit: this._wrap(chatId), messageId } : undefined,
         userId,
-        channelId: chatId,
+        channelId: this._wrap(chatId),
       });
       return { toast: { type: 'success', content: 'OK' } };
     }
@@ -600,7 +635,7 @@ export class FeishuAdapter implements PlatformAdapter {
     });
 
     const messageId = (res as any)?.data?.message_id || '';
-    return { conduit, messageId, threadId: threadMessageId };
+    return { conduit: this._wrap(conduit), messageId, threadId: threadMessageId };
   }
 
   /** Convert RichBlock[] to Feishu card schema 2.0 elements. */

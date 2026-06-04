@@ -462,6 +462,11 @@ export class TuiGatewayAdapter implements PlatformAdapter, TuiAdapterControls {
     return state?.projectId ?? null;
   }
 
+  /** TUI conduits are `tui-<uuid>` and triggerIds are `tui:<conduitId>:<uuid>`. */
+  ownsConduit(conduit: string): boolean {
+    return conduit.startsWith('tui-') || conduit.startsWith('tui:');
+  }
+
   // ── Helpers: utilities ──────────────────────────────────────────
 
   /** Expose connections for testing and notification routing. */
@@ -820,6 +825,7 @@ export class TuiGatewayAdapter implements PlatformAdapter, TuiAdapterControls {
       name: a.name,
       mimetype: a.mimeType,
       url: a.path,
+      conduit: conn.conduitId,
       raw: a,
     }));
 

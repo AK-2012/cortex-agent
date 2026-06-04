@@ -130,6 +130,34 @@ export class SlackAdapter implements PlatformAdapter {
     return v ? Number(v) : def;
   }
 
+  // --- Conduit prefixing ---
+  // The `slack:` prefix is this adapter's canonical external form for conduits.
+  // Outbound conduits (MessageRef.conduit, getProjectConduits values, incoming
+  // file conduits, triggerId) carry the prefix; inbound conduits (Destination,
+  // ref passed to update/delete, bindProjectConduit hint, triggerId) are
+  // unwrapped before calling the Slack SDK or reading/writing the bare-id
+  // registry. This lets multiple platform adapters coexist behind CompositeAdapter.
+  private static readonly PREFIX = 'slack:';
+
+  /** Add the `slack:` prefix (idempotent; passes through empty strings). */
+  private _wrap(bare: string): string {
+    if (!bare) return bare;
+    return bare.startsWith(SlackAdapter.PREFIX) ? bare : SlackAdapter.PREFIX + bare;
+  }
+
+  /** Strip the `slack:` prefix (tolerates already-bare values for back-compat). */
+  private _unwrap(prefixed: string): string {
+    if (!prefixed) return prefixed;
+    return prefixed.startsWith(SlackAdapter.PREFIX)
+      ? prefixed.slice(SlackAdapter.PREFIX.length)
+      : prefixed;
+  }
+
+  /** True if this conduit belongs to the Slack adapter. */
+  ownsConduit(conduit: string): boolean {
+    return conduit.startsWith(SlackAdapter.PREFIX);
+  }
+
   // --- Lifecycle ---
 
   async start(): Promise<void> {
@@ -154,7 +182,7 @@ export class SlackAdapter implements PlatformAdapter {
           if (editedMsg.bot_id || editedMsg.subtype === 'bot_message') return;
           if (editedMsg.text === previousMsg.text) return;
           await this.editHandler({
-            originalRef: { conduit: msg.channel, messageId: editedMsg.ts },
+            originalRef: { conduit: this._wrap(msg.channel), messageId: editedMsg.ts },
             newText: editedMsg.text || '',
             raw: msg,
           });
@@ -179,7 +207,7 @@ export class SlackAdapter implements PlatformAdapter {
       }
 
       const ref: MessageRef = {
-        conduit: msg.channel,
+        conduit: this._wrap(msg.channel),
         messageId: msg.ts,
         threadId: msg.thread_ts || undefined,
       };
@@ -188,6 +216,7 @@ export class SlackAdapter implements PlatformAdapter {
         name: f.name,
         mimetype: f.mimetype,
         url: f.url_private,
+        conduit: this._wrap(msg.channel),
         raw: f,
       }));
       const attachments = msg.attachments?.map((att: any) => ({
@@ -235,13 +264,13 @@ export class SlackAdapter implements PlatformAdapter {
       await handler({
         actionId,
         value: action.value,
-        triggerId: body.trigger_id,
+        triggerId: this._wrap(body.trigger_id),
         messageRef: body.message?.ts ? {
-          conduit: body.channel?.id || '',
+          conduit: this._wrap(body.channel?.id || ''),
           messageId: body.message.ts,
         } : undefined,
         userId: body.user?.id || '',
-        channelId: body.channel?.id || '',
+        channelId: this._wrap(body.channel?.id || ''),
       });
     });
   }
@@ -313,7 +342,7 @@ export class SlackAdapter implements PlatformAdapter {
       this.client.chat.postMessage(payload)
     );
     return {
-      conduit: resolved.channel,
+      conduit: this._wrap(resolved.channel),
       messageId: result.ts!,
       threadId: opts?.threadId,
     };
@@ -335,7 +364,8 @@ export class SlackAdapter implements PlatformAdapter {
    * instead of recursing, which avoids coalescing confusion.
    */
   async updateMessage(ref: MessageRef, content: MessageContent): Promise<void> {
-    const key = `${ref.conduit}:${ref.messageId}`;
+    const channel = this._unwrap(ref.conduit);
+    const key = `${channel}:${ref.messageId}`;
     const existing = this.pendingEdits.get(key);
 
     if (existing) {
@@ -361,7 +391,7 @@ export class SlackAdapter implements PlatformAdapter {
     // whether new content arrived during the send.
     while (this.pendingEdits.has(key)) {
       try {
-        await this.rateLimiter.acquire('chat.update', ref.conduit);
+        await this.rateLimiter.acquire('chat.update', channel);
 
         const entry = this.pendingEdits.get(key);
         if (!entry) { resolve!(); return; } // cleaned up (deleteMessage / eviction)
@@ -370,7 +400,7 @@ export class SlackAdapter implements PlatformAdapter {
 
         const blocks = snapshot.richBlocks ? this.richBlocksToSlack(snapshot.richBlocks) : undefined;
         await this.client.chat.update({
-          channel: ref.conduit,
+          channel,
           ts: ref.messageId,
           text: snapshot.text,
           ...(blocks && { blocks }),
@@ -387,7 +417,7 @@ export class SlackAdapter implements PlatformAdapter {
       } catch (e: any) {
         const retryAfterSec = Number(e?.retryAfter ?? e?.headers?.['retry-after']);
         if (Number.isFinite(retryAfterSec) && retryAfterSec > 0) {
-          this.rateLimiter.reportThrottled('chat.update', ref.conduit, retryAfterSec);
+          this.rateLimiter.reportThrottled('chat.update', channel, retryAfterSec);
           // Entry stays in the map with latest coalesced content — just loop.
           continue;
         }
@@ -418,15 +448,16 @@ export class SlackAdapter implements PlatformAdapter {
   async deleteMessage(ref: MessageRef): Promise<void> {
     // Clean up any pending edit for this message so coalescing doesn't
     // try to update a deleted message.
-    const key = `${ref.conduit}:${ref.messageId}`;
+    const channel = this._unwrap(ref.conduit);
+    const key = `${channel}:${ref.messageId}`;
     const pending = this.pendingEdits.get(key);
     if (pending) {
       this.pendingEdits.delete(key);
       pending.resolve();
     }
-    await this.rateLimitedCall('chat.delete', ref.conduit, () =>
+    await this.rateLimitedCall('chat.delete', channel, () =>
       this.client.chat.delete({
-        channel: ref.conduit,
+        channel,
         ts: ref.messageId,
       })
     );
@@ -455,7 +486,7 @@ export class SlackAdapter implements PlatformAdapter {
       })
     );
     return {
-      conduit: resolved.channel,
+      conduit: this._wrap(resolved.channel),
       messageId: result.ts!,
       threadId: opts?.threadId,
     };
@@ -466,7 +497,7 @@ export class SlackAdapter implements PlatformAdapter {
   async openModal(triggerId: string, modal: ModalDefinition): Promise<void> {
     await this.rateLimitedCall('views.open', undefined, () =>
       this.client.views.open({
-        trigger_id: triggerId,
+        trigger_id: this._unwrap(triggerId),
         view: this.modalToSlack(modal) as any,
       })
     );
@@ -475,9 +506,10 @@ export class SlackAdapter implements PlatformAdapter {
   // --- Queue backpressure ---
 
   private async _addHourglassReaction(ref: MessageRef): Promise<void> {
-    await this.rateLimitedCall('reactions.add', ref.conduit, () =>
+    const channel = this._unwrap(ref.conduit);
+    await this.rateLimitedCall('reactions.add', channel, () =>
       this.client.reactions.add({
-        channel: ref.conduit,
+        channel,
         name: 'hourglass',
         timestamp: ref.messageId,
       })
@@ -571,7 +603,7 @@ export class SlackAdapter implements PlatformAdapter {
   async getPermalink(ref: MessageRef): Promise<string | null> {
     try {
       const result = await this.client.chat.getPermalink({
-        channel: ref.conduit,
+        channel: this._unwrap(ref.conduit),
         message_ts: ref.messageId,
       });
       return result?.permalink || null;
@@ -620,7 +652,8 @@ export class SlackAdapter implements PlatformAdapter {
   // --- Project conduit mapping ---
 
   async bindProjectConduit(projectId: string, conduitHint: string): Promise<void> {
-    await this._getConduitsStore().set(projectId, conduitHint);
+    // Registry stores bare ids; strip the prefix before persisting.
+    await this._getConduitsStore().set(projectId, this._unwrap(conduitHint));
   }
 
   async unbindProjectConduit(projectId: string): Promise<void> {
@@ -628,13 +661,18 @@ export class SlackAdapter implements PlatformAdapter {
   }
 
   async getProjectConduits(): Promise<Record<string, string>> {
-    return this._getConduitsStore().getAll();
+    // Registry stores bare ids; expose prefixed conduits externally.
+    const all = await this._getConduitsStore().getAll();
+    return Object.fromEntries(
+      Object.entries(all).map(([project, ch]) => [project, this._wrap(ch)]),
+    );
   }
 
   async resolveInboundProject(conduit: string): Promise<string | null> {
+    const bare = this._unwrap(conduit);
     const conduits = await this._getConduitsStore().getAll();
     for (const [project, ch] of Object.entries(conduits)) {
-      if (ch === conduit) return project;
+      if (ch === bare) return project;
     }
     return null;
   }
@@ -656,10 +694,11 @@ export class SlackAdapter implements PlatformAdapter {
   private async resolveDestination(dest: Destination): Promise<{ channel: string | null; kind: string }> {
     switch (dest.type) {
       case 'interactive-reply':
-        return { channel: dest.conduit, kind: 'interactive-reply' };
+        return { channel: this._unwrap(dest.conduit), kind: 'interactive-reply' };
       case 'project-report': {
-        const conduits = await this.getProjectConduits();
-        const channel = conduits[dest.projectId];
+        // Read bare ids directly from the store (getProjectConduits wraps for
+        // external callers; the SDK needs the bare channel).
+        const channel = await this._getConduitsStore().get(dest.projectId);
         if (!channel) {
           log.warn(`No conduit registered for project "${dest.projectId}"; dropping project-report`);
           return { channel: null, kind: 'project-report-noop' };

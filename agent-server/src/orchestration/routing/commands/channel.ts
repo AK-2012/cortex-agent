@@ -7,6 +7,18 @@ import { projectDirRepo } from '@store/project-dir-repo.js';
 import { Icons } from '../../../core/icons.js';
 import { getMachineRegistry } from '@domain/tasks/dispatch-utils.js';
 
+/**
+ * Render a (possibly platform-prefixed) conduit for display.
+ * Slack channels become a `<#id>` mention; other platforms (Feishu/TUI) show
+ * the bare id in code formatting since `<#…>` is Slack-only syntax.
+ */
+function displayConduit(conduit: string): string {
+  if (conduit.startsWith('slack:')) return `<#${conduit.slice('slack:'.length)}>`;
+  const colon = conduit.indexOf(':');
+  const bare = colon === -1 ? conduit : conduit.slice(colon + 1);
+  return `\`${bare}\``;
+}
+
 export async function handleProjectsCmd(channel: string, adapter: PlatformAdapter): Promise<void> {
   const dest: Destination = { type: 'interactive-reply', conduit: channel, sessionId: '' };
   const projects = projectStore.list().map(p => p.id);
@@ -17,7 +29,7 @@ export async function handleProjectsCmd(channel: string, adapter: PlatformAdapte
   const registrations = await adapter.getProjectConduits();
   const lines = projects.map(p => {
     const ch = registrations[p];
-    const status = ch ? ` → <#${ch}>` : '';
+    const status = ch ? ` → ${displayConduit(ch)}` : '';
     return `• \`${p}\`${status}`;
   });
   await adapter.postMessage(dest, { text: `*Projects*\n${lines.join('\n')}` });

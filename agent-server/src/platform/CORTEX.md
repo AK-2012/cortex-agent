@@ -7,7 +7,7 @@ Specific SDK calls are encapsulated in the adapters/ subdirectory.
 |---|---|---|
 | `adapters/` | subdirectory | Concrete platform adapter implementations |
 | `index.ts` | export | Re-export interfaces, types, and factory |
-| `adapter.ts` | interface | PlatformAdapter interface + capability declaration (gains `openOutputStream` + `bindProjectConduit`/`unbindProjectConduit`/`getProjectConduits` in S1) |
+| `adapter.ts` | interface | PlatformAdapter interface + capability declaration (`openOutputStream`, project conduit methods, `ownsConduit` for multi-platform routing) |
 | `types.ts` | types | MessageRef/RichBlock/ModalDefinition, etc. |
 | `output-stream.ts` | interface | OutputStream / MutableRegion / OpenOutputStreamOpts types |
 | `output-stream-chunk.ts` | utility | Shared length-based chunking (`chunkText`, `needsSplit`, `countTables`, `countHorizontalRules`) |
@@ -16,4 +16,4 @@ Specific SDK calls are encapsulated in the adapters/ subdirectory.
 | `tool-trace.ts` | UI helper | tool_use compact traces rendered via OutputStream openMutable/update |
 | `testing.ts` | testing | MockAdapter in-memory mock implementation + MockOutputStream typed segment trail recorder |
 | `tui/` | subdirectory | TUI protocol types + wire format (M4: TuiFrame union + guards + parseFrame/encodeFrame) |
-| `adapters/index.ts` | factory | `createPrimaryAdapterFromEnv` + `decideTuiEnabled` + `tuiPort` — TUI auto-enable, composite vs bare vs primary-only selection |
+| `adapters/index.ts` | factory | `createPrimaryAdaptersFromEnv` (comma-list CORTEX_PLATFORM) + `createAdapterFromEnv` — multi-platform composition + TUI auto-enable |

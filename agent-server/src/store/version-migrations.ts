@@ -126,6 +126,54 @@ const migrations: Migration[] = [
       return data;
     },
   },
+  // M3: Prefix session-store conduits with their platform namespace.
+  // The multi-platform release made each adapter expose conduits in a canonical
+  // prefixed form (`slack:C123`, `feishu:oc_xxx`) so Slack + Feishu + TUI can be
+  // online simultaneously behind CompositeAdapter. sessions.json keys are
+  // `backend:channel` (e.g. `claude:C123`) or legacy bare `channel`; after the
+  // change, lookups use the prefixed conduit, so the old keys no longer resolve.
+  // This migration rewrites the channel segment to its prefixed form so existing
+  // sessions survive the upgrade. The platform is inferred from CORTEX_PLATFORM —
+  // only run when EXACTLY ONE of slack/feishu is configured, since bare channels
+  // cannot otherwise be attributed to a platform. TUI conduits (`tui-`/`tui:`)
+  // and already-prefixed keys are left untouched (idempotent).
+  {
+    filePath: 'data/sessions.json',
+    version: '2026.6.4',
+    migrate(data: unknown): unknown {
+      if (typeof data !== 'object' || data === null || Array.isArray(data)) return data;
+
+      const platforms = (process.env.CORTEX_PLATFORM || 'slack')
+        .split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
+      const single = platforms.length === 1 ? platforms[0] : null;
+      if (single !== 'slack' && single !== 'feishu') return data; // can't attribute bare channels
+      const prefix = `${single}:`;
+
+      const isPrefixed = (s: string): boolean => s.startsWith('slack:') || s.startsWith('feishu:');
+      const isTui = (s: string): boolean => s.startsWith('tui-') || s.startsWith('tui:');
+
+      const src = data as Record<string, unknown>;
+      const out: Record<string, unknown> = {};
+      for (const [key, val] of Object.entries(src)) {
+        // Already-migrated legacy bare key (`slack:C2`) or a TUI conduit
+        // (`tui-abc`): the whole key is already in canonical form. Backends are
+        // claude/pi/tui — never `slack`/`feishu` — so a leading platform prefix
+        // unambiguously means an already-prefixed bare key, not `backend:channel`.
+        if (isPrefixed(key) || isTui(key)) { out[key] = val; continue; }
+        const colon = key.indexOf(':');
+        if (colon === -1) {
+          // Legacy bare-channel key.
+          out[`${prefix}${key}`] = val;
+        } else {
+          // `backend:channel` key — prefix the channel segment only.
+          const backend = key.slice(0, colon);
+          const channel = key.slice(colon + 1);
+          out[isTui(channel) || isPrefixed(channel) ? key : `${backend}:${prefix}${channel}`] = val;
+        }
+      }
+      return out;
+    },
+  },
 ];
 
 // ── Versions file I/O ──────────────────────────────────────────

@@ -1,0 +1,116 @@
+// input:  Node test runner + SlackAdapter conduit prefixing
+// output: Verify `slack:` prefix is added on outbound conduits and stripped on inbound
+// pos:    Regression tests for multi-platform conduit prefixing (Slack + Feishu + TUI coexistence)
+// >>> If I am updated, update my header comment and the parent folder's CORTEX.md <<<
+
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { SlackAdapter } from '../src/platform/adapters/slack.js';
+import type { ActionContext, MessageContext } from '../src/platform/types.js';
+
+/** Build a SlackAdapter without invoking the real constructor (no Bolt App). */
+function makeAdapter(): any {
+  const a = Object.create(SlackAdapter.prototype) as any;
+  a.config = { botToken: 'xoxb-test', signingSecret: 'sig', appToken: 'xapp-test' };
+  a.pendingEdits = new Map();
+  a._adminAutoDetected = false;
+  return a;
+}
+
+// ── ownsConduit ───────────────────────────────────────────────────
+
+test('SlackAdapter.ownsConduit: only matches slack: prefix', () => {
+  const a = makeAdapter();
+  assert.equal(a.ownsConduit('slack:C1'), true);
+  assert.equal(a.ownsConduit('feishu:oc_1'), false);
+  assert.equal(a.ownsConduit('tui-abc'), false);
+  assert.equal(a.ownsConduit('C1'), false);
+});
+
+// ── postMessage returns a prefixed conduit; SDK sees the bare channel ──
+
+test('SlackAdapter.postMessage: wraps returned conduit, calls SDK with bare channel', async () => {
+  const a = makeAdapter();
+  let sentChannel: string | undefined;
+  a.rateLimiter = { acquire: async () => {}, reportThrottled: () => {} };
+  a.client = {
+    chat: {
+      postMessage: async (payload: any) => { sentChannel = payload.channel; return { ts: '111' }; },
+    },
+  };
+  const ref = await a.postMessage(
+    { type: 'interactive-reply', conduit: 'slack:C123', sessionId: '' },
+    { text: 'hi' },
+  );
+  assert.equal(sentChannel, 'C123');           // SDK gets the bare channel
+  assert.equal(ref.conduit, 'slack:C123');     // returned ref is prefixed
+  assert.equal(ref.messageId, '111');
+});
+
+// ── inbound onMessage produces a prefixed conduit + file conduit ──
+
+test('SlackAdapter.onMessage: inbound ref + files carry slack: prefix', async () => {
+  const a = makeAdapter();
+  let registeredCb: ((args: { event: any; client: any }) => Promise<void>) | null = null;
+  a.app = { event: (_e: string, cb: any) => { registeredCb = cb; } };
+  const captured: MessageContext[] = [];
+  a.onMessage(async (ctx: MessageContext) => { captured.push(ctx); });
+
+  await registeredCb!({
+    event: {
+      type: 'message', channel: 'C9', ts: '222', user: 'U1', text: 'yo',
+      files: [{ id: 'F1', name: 'a.pdf', mimetype: 'application/pdf', url_private: 'u' }],
+    },
+    client: {},
+  });
+
+  assert.equal(captured.length, 1);
+  assert.equal(captured[0].message.ref.conduit, 'slack:C9');
+  assert.equal(captured[0].message.files?.[0].conduit, 'slack:C9');
+});
+
+// ── onAction wraps channelId / messageRef.conduit / triggerId ──
+
+test('SlackAdapter.onAction: channelId, messageRef.conduit and triggerId are prefixed', async () => {
+  const a = makeAdapter();
+  let registered: ((args: any) => Promise<void>) | null = null;
+  a.app = { action: (_id: string, cb: any) => { registered = cb; } };
+  let ctx: ActionContext | null = null;
+  a.onAction('btn', async (c: ActionContext) => { ctx = c; });
+
+  await registered!({
+    ack: async () => {},
+    action: { value: 'v' },
+    body: { trigger_id: 'tg', channel: { id: 'C7' }, message: { ts: '333' }, user: { id: 'U2' } },
+  });
+
+  assert.ok(ctx);
+  assert.equal(ctx!.channelId, 'slack:C7');
+  assert.equal(ctx!.messageRef?.conduit, 'slack:C7');
+  assert.equal(ctx!.triggerId, 'slack:tg');
+});
+
+// ── project conduit registry: store stays bare, surface is prefixed ──
+
+test('SlackAdapter project conduits: store bare, expose prefixed, resolve unwraps', async () => {
+  const a = makeAdapter();
+  const backing: Record<string, string> = {};
+  a._conduitsStore = {
+    set: async (p: string, ch: string) => { backing[p] = ch; },
+    remove: async (p: string) => { delete backing[p]; },
+    get: async (p: string) => backing[p] ?? null,
+    getAll: async () => ({ ...backing }),
+  };
+
+  // bindProjectConduit strips the prefix before persisting
+  await a.bindProjectConduit('proj1', 'slack:C500');
+  assert.equal(backing.proj1, 'C500');
+
+  // getProjectConduits exposes the prefixed form
+  const all = await a.getProjectConduits();
+  assert.equal(all.proj1, 'slack:C500');
+
+  // resolveInboundProject accepts a prefixed conduit and matches the bare store
+  assert.equal(await a.resolveInboundProject('slack:C500'), 'proj1');
+  assert.equal(await a.resolveInboundProject('slack:C999'), null);
+});

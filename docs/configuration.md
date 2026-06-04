@@ -78,15 +78,29 @@ Only `CORTEX_PLATFORM` and your platform credentials are required.
 | `CORTEX_RESTART_REASON` | — | Reason string for restart notification |
 | `CORTEX_CLIENT_PORT` | `3002` | WebSocket port for cortex-client manager |
 
-### Platform (Slack)
+### Platform
+
+`CORTEX_PLATFORM` selects the messaging platform(s). It accepts a single value
+(`slack`, `feishu`) or a **comma-separated list** to run several at once
+(`slack,feishu`). Each platform whose credentials are present is brought online;
+the optional TUI gateway (`CORTEX_TUI`) is added on top. With multiple platforms,
+messages route by platform and system notices fan out to each platform's admin
+channel.
 
 | Variable | Required | Purpose |
 |---|---|---|
-| `CORTEX_PLATFORM` | yes | `slack` (default) |
-| `SLACK_BOT_TOKEN` | yes | Slack Bot OAuth token (`xoxb-...`) |
-| `SLACK_SIGNING_SECRET` | yes | Slack app signing secret |
-| `SLACK_APP_TOKEN` | yes | Slack app-level token for Socket Mode (`xapp-...`) |
-| `CORTEX_ADMIN_CHANNEL` | no | Admin DM channel ID (auto-detected at runtime) |
+| `CORTEX_PLATFORM` | yes | `slack` (default). Comma list for multi-platform, e.g. `slack,feishu` |
+| `SLACK_BOT_TOKEN` | for slack | Slack Bot OAuth token (`xoxb-...`) |
+| `SLACK_SIGNING_SECRET` | for slack | Slack app signing secret |
+| `SLACK_APP_TOKEN` | for slack | Slack app-level token for Socket Mode (`xapp-...`) |
+| `FEISHU_APP_ID` | for feishu | Feishu app ID (`cli_...`) |
+| `FEISHU_APP_SECRET` | for feishu | Feishu app secret |
+| `FEISHU_ENCRYPT_KEY` | no | Feishu event encrypt key (optional with long-connection) |
+| `FEISHU_VERIFICATION_TOKEN` | no | Feishu event verification token (optional) |
+| `FEISHU_DOMAIN` | no | `feishu` (default) or `lark` for the international edition |
+| `CORTEX_ADMIN_CHANNEL` | no | Default admin channel for system notices (Slack DM auto-detected at runtime) |
+| `SLACK_ADMIN_CHANNEL` | no | Per-platform admin channel override (falls back to `CORTEX_ADMIN_CHANNEL`) |
+| `FEISHU_ADMIN_CHANNEL` | no | Per-platform admin chat_id (`oc_...`); falls back to `CORTEX_ADMIN_CHANNEL` |
 
 ### API
 

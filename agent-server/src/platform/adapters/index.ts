@@ -1,6 +1,6 @@
 // input:  ../adapter.js, ./slack.js, ./feishu.js, ../testing.js, ./tui/index.js, ./composite-adapter.js
-// output: PlatformType + AdapterConfig + createAdapter factory + createAdapterFromEnv + createPrimaryAdapterFromEnv
-// pos:    Select the specific adapter based on CORTEX_PLATFORM / CORTEX_TUI
+// output: PlatformType + AdapterConfig + createAdapter factory + createAdapterFromEnv + createPrimaryAdapters(FromEnv)
+// pos:    Select & compose adapters based on CORTEX_PLATFORM (comma list) / CORTEX_TUI
 // >>> If I am updated, update my header comment and the parent folder's CORTEX.md <<<
 
 import type { PlatformAdapter } from '../adapter.js';
@@ -49,13 +49,10 @@ export interface AdapterOverrides {}
 // ─── Primary adapter from env (existing detection logic factored out) ───
 
 /**
- * Detect and create a primary (Slack / Feishu / test) adapter from environment
- * variables. Returns `null` when no primary platform is configured — allowing
- * the caller (createAdapterFromEnv) to fall back to TUI-only mode.
+ * Build a single primary adapter by platform name from environment variables.
+ * Returns `null` when that platform's credentials are not configured.
  */
-export function createPrimaryAdapterFromEnv(): PlatformAdapter | null {
-  const platform = (process.env.CORTEX_PLATFORM || 'slack') as PlatformType;
-
+function buildPrimaryAdapter(platform: string): PlatformAdapter | null {
   if (platform === 'slack') {
     const botToken = process.env.SLACK_BOT_TOKEN;
     const signingSecret = process.env.SLACK_SIGNING_SECRET;
@@ -69,7 +66,7 @@ export function createPrimaryAdapterFromEnv(): PlatformAdapter | null {
       botToken,
       signingSecret,
       appToken,
-      adminChannel: process.env.CORTEX_ADMIN_CHANNEL || undefined,
+      adminChannel: process.env.SLACK_ADMIN_CHANNEL || process.env.CORTEX_ADMIN_CHANNEL || undefined,
     });
   }
 
@@ -86,7 +83,7 @@ export function createPrimaryAdapterFromEnv(): PlatformAdapter | null {
       appSecret,
       encryptKey: process.env.FEISHU_ENCRYPT_KEY || undefined,
       verificationToken: process.env.FEISHU_VERIFICATION_TOKEN || undefined,
-      adminChannel: process.env.CORTEX_ADMIN_CHANNEL || undefined,
+      adminChannel: process.env.FEISHU_ADMIN_CHANNEL || process.env.CORTEX_ADMIN_CHANNEL || undefined,
       domain: (process.env.FEISHU_DOMAIN as 'feishu' | 'lark') || undefined,
     });
   }
@@ -96,6 +93,35 @@ export function createPrimaryAdapterFromEnv(): PlatformAdapter | null {
   }
 
   return null;
+}
+
+/**
+ * Detect and create all primary (Slack / Feishu / test) adapters from
+ * environment variables. `CORTEX_PLATFORM` is a comma-separated list (e.g.
+ * `slack,feishu`); a single value is fully back-compatible. Platforms whose
+ * credentials are missing are silently skipped. Returns an empty array when no
+ * primary platform is configured — the caller falls back to TUI-only mode.
+ */
+export function createPrimaryAdaptersFromEnv(): PlatformAdapter[] {
+  const raw = process.env.CORTEX_PLATFORM || 'slack';
+  const names = raw.split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
+  const adapters: PlatformAdapter[] = [];
+  const seen = new Set<string>();
+  for (const name of names) {
+    if (seen.has(name)) continue;
+    seen.add(name);
+    const adapter = buildPrimaryAdapter(name);
+    if (adapter) adapters.push(adapter);
+  }
+  return adapters;
+}
+
+/**
+ * Back-compat shim: return the first configured primary adapter, or null.
+ * Prefer createPrimaryAdaptersFromEnv() for multi-platform support.
+ */
+export function createPrimaryAdapterFromEnv(): PlatformAdapter | null {
+  return createPrimaryAdaptersFromEnv()[0] ?? null;
 }
 
 // ─── TUI auto-enable logic ─────────────────────────────────────────────
@@ -123,29 +149,26 @@ function tuiPort(): number {
 /**
  * Create a PlatformAdapter from environment variables.
  *
- * Four branches:
- *   no primary + TUI disabled → throw
- *   no primary + TUI enabled  → TuiGatewayAdapter only
- *   primary   + TUI disabled → primary adapter only
- *   primary   + TUI enabled  → CompositeAdapter(primary, gateway)
+ * Assembles all configured primary adapters (Slack/Feishu/test, per the
+ * comma-separated `CORTEX_PLATFORM`) plus an optional TUI gateway:
+ *   no adapters            → throw
+ *   exactly one adapter    → return it directly
+ *   two or more adapters   → CompositeAdapter([...])
  */
 export function createAdapterFromEnv(): PlatformAdapter {
-  const primary = createPrimaryAdapterFromEnv();
-  const tuiEnabled = decideTuiEnabled();
+  const primaries = createPrimaryAdaptersFromEnv();
+  const tui = decideTuiEnabled() ? new TuiGatewayAdapter({ port: tuiPort() }) : null;
+  const all: PlatformAdapter[] = [...primaries, ...(tui ? [tui] : [])];
 
-  if (!primary && !tuiEnabled) {
+  if (all.length === 0) {
     throw new Error(
       'No platform configured. Set Slack/Feishu environment variables or enable CORTEX_TUI=1.',
     );
   }
-  if (!primary && tuiEnabled) {
-    return new TuiGatewayAdapter({ port: tuiPort() });
+  if (all.length === 1) {
+    return all[0];
   }
-  if (primary && !tuiEnabled) {
-    return primary;
-  }
-  // primary + tuiEnabled
-  return new CompositeAdapter(primary, new TuiGatewayAdapter({ port: tuiPort() }));
+  return new CompositeAdapter(all);
 }
 
 export { SlackAdapter } from './slack.js';

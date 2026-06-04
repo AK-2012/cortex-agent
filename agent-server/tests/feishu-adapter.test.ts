@@ -74,7 +74,11 @@ test('Feishu extractInboundFiles: text message has no files', () => {
 
 test('Feishu resolveDestination: project-report uses bound conduit', async () => {
   const a = makeAdapter();
-  a._conduitsStore = { getAll: async () => ({ proj1: 'oc_bound' }) };
+  // resolveDestination reads the bare chat_id directly via store.get().
+  a._conduitsStore = {
+    get: async (id: string) => (id === 'proj1' ? 'oc_bound' : null),
+    getAll: async () => ({ proj1: 'oc_bound' }),
+  };
   const dest: Destination = { type: 'project-report', projectId: 'proj1', trigger: 't' };
   const r = await a.resolveDestination(dest);
   assert.deepEqual(r, { channel: 'oc_bound', kind: 'project-report' });
@@ -82,7 +86,7 @@ test('Feishu resolveDestination: project-report uses bound conduit', async () =>
 
 test('Feishu resolveDestination: unbound project-report is dropped (channel=null)', async () => {
   const a = makeAdapter();
-  a._conduitsStore = { getAll: async () => ({}) };
+  a._conduitsStore = { get: async () => null, getAll: async () => ({}) };
   const dest: Destination = { type: 'project-report', projectId: 'missing', trigger: 't' };
   const r = await a.resolveDestination(dest);
   assert.equal(r.channel, null);
@@ -131,9 +135,11 @@ test('Feishu postMessage in thread returns resolved conduit', async () => {
   a.client = {
     im: { v1: { message: { reply: async () => ({ data: { message_id: 'om_reply' } }) } } },
   };
-  const dest: Destination = { type: 'interactive-reply', conduit: 'oc_chat', sessionId: '' };
+  // interactive-reply may carry the prefixed conduit; the returned ref is also
+  // exposed in canonical prefixed form (`feishu:oc_chat`).
+  const dest: Destination = { type: 'interactive-reply', conduit: 'feishu:oc_chat', sessionId: '' };
   const ref = await a.postMessage(dest, { text: 'hi' }, { threadId: 'om_root' });
-  assert.equal(ref.conduit, 'oc_chat');
+  assert.equal(ref.conduit, 'feishu:oc_chat');
   assert.equal(ref.messageId, 'om_reply');
   assert.equal(ref.threadId, 'om_root');
 });

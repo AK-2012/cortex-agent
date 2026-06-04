@@ -283,6 +283,15 @@ export class MockAdapter implements PlatformAdapter {
     return null;
   }
 
+  /** Default ownership: anything not owned by the TUI gateway. Override per-test
+   *  via `ownsConduitFn` to simulate platform-specific routing. */
+  ownsConduitFn: ((conduit: string) => boolean) | null = null;
+
+  ownsConduit(conduit: string): boolean {
+    if (this.ownsConduitFn) return this.ownsConduitFn(conduit);
+    return !conduit.startsWith('tui-') && !conduit.startsWith('tui:');
+  }
+
   // --- Test helpers ---
 
   /** Simulate an inbound message for testing event handlers. */

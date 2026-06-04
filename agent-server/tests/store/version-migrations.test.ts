@@ -404,6 +404,66 @@ test('runMigrations - profiles.json migration is idempotent / no-op when already
   assert.deepEqual(second, first);
 });
 
+// ── M3: sessions.json conduit prefixing ────────────────────────
+
+async function runSessionsMigration(
+  idx: number,
+  platform: string | undefined,
+  sessions: Record<string, string>,
+): Promise<Record<string, string>> {
+  const { dataDir, storeDir, defaultsDir } = setupDirs(idx);
+  await writeJson(path.join(storeDir, 'sessions.json'), sessions);
+  const saved = process.env.CORTEX_PLATFORM;
+  if (platform === undefined) delete process.env.CORTEX_PLATFORM;
+  else process.env.CORTEX_PLATFORM = platform;
+  try {
+    await runMigrations({ dataDir, defaultsDir, storeDir });
+  } finally {
+    if (saved === undefined) delete process.env.CORTEX_PLATFORM;
+    else process.env.CORTEX_PLATFORM = saved;
+  }
+  return await readJson(path.join(storeDir, 'sessions.json')) as Record<string, string>;
+}
+
+test('runMigrations - sessions.json: prefixes backend:channel and legacy bare keys (slack)', async () => {
+  const out = await runSessionsMigration(_testIdx++, 'slack', {
+    'claude:C123': 's-claude',
+    'pi:D456': 's-pi',
+    'C789': 's-legacy',          // legacy bare channel
+    'tui:tui-abc': 's-tui',      // TUI key — must be left untouched
+    'claude:tui-def': 's-tui2',  // TUI conduit under a backend — untouched
+  });
+  assert.equal(out['claude:slack:C123'], 's-claude');
+  assert.equal(out['pi:slack:D456'], 's-pi');
+  assert.equal(out['slack:C789'], 's-legacy');
+  assert.equal(out['tui:tui-abc'], 's-tui');
+  assert.equal(out['claude:tui-def'], 's-tui2');
+  // Old un-prefixed keys are gone
+  assert.equal(out['claude:C123'], undefined);
+  assert.equal(out['C789'], undefined);
+});
+
+test('runMigrations - sessions.json: prefixes with feishu when configured', async () => {
+  const out = await runSessionsMigration(_testIdx++, 'feishu', {
+    'claude:oc_1': 'f1',
+    'oc_2': 'f2',
+  });
+  assert.equal(out['claude:feishu:oc_1'], 'f1');
+  assert.equal(out['feishu:oc_2'], 'f2');
+});
+
+test('runMigrations - sessions.json: is idempotent (already-prefixed keys untouched)', async () => {
+  const already = { 'claude:slack:C1': 'x', 'slack:C2': 'y' };
+  const out = await runSessionsMigration(_testIdx++, 'slack', already);
+  assert.deepEqual(out, already);
+});
+
+test('runMigrations - sessions.json: skipped when multiple platforms configured', async () => {
+  const input = { 'claude:C1': 'x', 'C2': 'y' };
+  const out = await runSessionsMigration(_testIdx++, 'slack,feishu', input);
+  assert.deepEqual(out, input, 'bare channels cannot be attributed → no-op');
+});
+
 test('runMigrations - no defaults file, still runs (migration function handles undefined)', async () => {
   const idx = _testIdx++;
   const { dataDir, storeDir, configDir, defaultsDir } = setupDirs(idx);

@@ -79,4 +79,10 @@ export interface PlatformAdapter {
    *  the project it is currently bound to, or null if unbound. Used by the
    *  orchestration layer to attach inbound messages to their project. */
   resolveInboundProject(conduit: string): Promise<string | null>;
+
+  /** True if the given (prefixed) conduit belongs to this adapter. Used by
+   *  CompositeAdapter to route outbound operations to the right sub-adapter when
+   *  multiple platforms are online simultaneously. Each adapter owns a conduit
+   *  namespace by prefix: Slack `slack:`, Feishu `feishu:`, TUI `tui-`/`tui:`. */
+  ownsConduit(conduit: string): boolean;
 }

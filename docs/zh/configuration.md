@@ -67,15 +67,24 @@ $CORTEX_HOME/
 | `CORTEX_RESTART_REASON` | — | 重启通知的原因字符串 |
 | `CORTEX_CLIENT_PORT` | `3002` | cortex-client 管理器的 WebSocket 端口 |
 
-### 平台（Slack）
+### 平台
+
+`CORTEX_PLATFORM` 选择消息平台，可填单个值（`slack`、`feishu`），也可填**逗号列表**让多个平台同时在线（`slack,feishu`）。每个凭据齐全的平台都会启动，可选的 TUI 网关（`CORTEX_TUI`）叠加其上。多平台时消息按平台路由，系统通知扇出到各平台各自的 admin channel。
 
 | 变量 | 必需 | 用途 |
 |---|---|---|
-| `CORTEX_PLATFORM` | 是 | `slack`（默认） |
-| `SLACK_BOT_TOKEN` | 是 | Slack Bot OAuth 令牌（`xoxb-...`） |
-| `SLACK_SIGNING_SECRET` | 是 | Slack 应用签名密钥 |
-| `SLACK_APP_TOKEN` | 是 | Socket Mode 的 Slack 应用级令牌（`xapp-...`） |
-| `CORTEX_ADMIN_CHANNEL` | 否 | 管理私信频道 ID（运行时自动检测） |
+| `CORTEX_PLATFORM` | 是 | `slack`（默认）。多平台填逗号列表，如 `slack,feishu` |
+| `SLACK_BOT_TOKEN` | slack 需要 | Slack Bot OAuth 令牌（`xoxb-...`） |
+| `SLACK_SIGNING_SECRET` | slack 需要 | Slack 应用签名密钥 |
+| `SLACK_APP_TOKEN` | slack 需要 | Socket Mode 的 Slack 应用级令牌（`xapp-...`） |
+| `FEISHU_APP_ID` | feishu 需要 | 飞书应用 ID（`cli_...`） |
+| `FEISHU_APP_SECRET` | feishu 需要 | 飞书应用密钥 |
+| `FEISHU_ENCRYPT_KEY` | 否 | 飞书事件加密密钥（长连接模式下可选） |
+| `FEISHU_VERIFICATION_TOKEN` | 否 | 飞书事件验证令牌（可选） |
+| `FEISHU_DOMAIN` | 否 | `feishu`（默认）或国际版 `lark` |
+| `CORTEX_ADMIN_CHANNEL` | 否 | 系统通知的默认 admin channel（Slack 私信运行时自动检测） |
+| `SLACK_ADMIN_CHANNEL` | 否 | Slack 平台 admin channel 覆盖（回退到 `CORTEX_ADMIN_CHANNEL`） |
+| `FEISHU_ADMIN_CHANNEL` | 否 | 飞书 admin chat_id（`oc_...`），回退到 `CORTEX_ADMIN_CHANNEL` |
 
 ### API
 

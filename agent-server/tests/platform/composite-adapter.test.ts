@@ -64,7 +64,7 @@ test.afterEach(() => {
 test('CompositeAdapter: project-report fan-out to primary and gateway', async () => {
   const primary = new MockAdapter({ adminChannel: 'C-admin' });
   const gateway = new TuiGatewayAdapter({ port: 0, host: '127.0.0.1' });
-  const composite = new CompositeAdapter(primary, gateway);
+  const composite = new CompositeAdapter([primary, gateway]);
 
   // Set up TUI connection with correct project binding
   const sentFrames: any[] = [];
@@ -103,7 +103,7 @@ test('CompositeAdapter: project-report fan-out to primary and gateway', async ()
 test('CompositeAdapter: project-report fans out to gateway with cross-project TUI connection', async () => {
   const primary = new MockAdapter({ adminChannel: 'C-admin' });
   const gateway = new TuiGatewayAdapter({ port: 0, host: '127.0.0.1' });
-  const composite = new CompositeAdapter(primary, gateway);
+  const composite = new CompositeAdapter([primary, gateway]);
 
   // TUI connection in project-a only
   const sentFrames: any[] = [];
@@ -147,7 +147,7 @@ test('CompositeAdapter: project-report fans out to gateway with cross-project TU
 test('CompositeAdapter: interactive-reply to Slack conduit does NOT hit gateway', async () => {
   const primary = new MockAdapter({ adminChannel: 'C-admin' });
   const gateway = new TuiGatewayAdapter({ port: 0, host: '127.0.0.1' });
-  const composite = new CompositeAdapter(primary, gateway);
+  const composite = new CompositeAdapter([primary, gateway]);
 
   // Set up TUI connection
   const sentFrames: any[] = [];
@@ -174,7 +174,7 @@ test('CompositeAdapter: interactive-reply to Slack conduit does NOT hit gateway'
 test('CompositeAdapter: interactive-reply to TUI conduit does NOT hit primary', async () => {
   const primary = new MockAdapter({ adminChannel: 'C-admin' });
   const gateway = new TuiGatewayAdapter({ port: 0, host: '127.0.0.1' });
-  const composite = new CompositeAdapter(primary, gateway);
+  const composite = new CompositeAdapter([primary, gateway]);
 
   // Set up TUI connection
   const sentFrames: any[] = [];
@@ -204,7 +204,7 @@ test('CompositeAdapter: interactive-reply to TUI conduit does NOT hit primary', 
 test('CompositeAdapter: system-notice goes to primary only', async () => {
   const primary = new MockAdapter({ adminChannel: 'C-admin' });
   const gateway = new TuiGatewayAdapter({ port: 0, host: '127.0.0.1' });
-  const composite = new CompositeAdapter(primary, gateway);
+  const composite = new CompositeAdapter([primary, gateway]);
 
   const sentFrames: any[] = [];
   const mockWs = {
@@ -232,7 +232,7 @@ test('CompositeAdapter: system-notice goes to primary only', async () => {
 test('CompositeAdapter: openModal routes by triggerId prefix', async () => {
   const primary = new MockAdapter({ adminChannel: 'C-admin' });
   const gateway = new TuiGatewayAdapter({ port: 0, host: '127.0.0.1' });
-  const composite = new CompositeAdapter(primary, gateway);
+  const composite = new CompositeAdapter([primary, gateway]);
 
   const modal = {
     callbackId: 'test-modal',
@@ -266,7 +266,7 @@ test('CompositeAdapter: capabilities merge union/intersection/min correctly', as
     },
   });
   const gateway = new TuiGatewayAdapter({ port: 0, host: '127.0.0.1' });
-  const composite = new CompositeAdapter(primary, gateway);
+  const composite = new CompositeAdapter([primary, gateway]);
 
   const c = composite.capabilities;
 
@@ -289,9 +289,100 @@ test('CompositeAdapter: modals=false when one side lacks it (intersection)', asy
     capabilities: { modals: false },
   });
   const gateway = new TuiGatewayAdapter({ port: 0, host: '127.0.0.1' });
-  const composite = new CompositeAdapter(primary, gateway);
+  const composite = new CompositeAdapter([primary, gateway]);
 
   assert.equal(composite.capabilities.modals, false);
+});
+
+// ── Test: N-ary routing (Slack + Feishu + TUI) ────────────────────
+
+/** A MockAdapter that owns a specific conduit prefix (simulates Slack/Feishu). */
+function prefixAdapter(prefix: string): MockAdapter {
+  const a = new MockAdapter({ adminChannel: `${prefix}admin` });
+  a.ownsConduitFn = (c: string) => c.startsWith(prefix);
+  return a;
+}
+
+test('CompositeAdapter: routes update/delete/permalink/markQueued by conduit prefix', async () => {
+  const slack = prefixAdapter('slack:');
+  const feishu = prefixAdapter('feishu:');
+  const composite = new CompositeAdapter([slack, feishu]);
+
+  await composite.updateMessage({ conduit: 'slack:C1', messageId: 'm1' }, { text: 'u' });
+  await composite.updateMessage({ conduit: 'feishu:oc_1', messageId: 'm2' }, { text: 'u' });
+  await composite.deleteMessage({ conduit: 'feishu:oc_2', messageId: 'm3' });
+  await composite.markQueued({ conduit: 'slack:C2', messageId: 'm4' });
+  const link = await composite.getPermalink({ conduit: 'feishu:oc_3', messageId: 'm5' });
+
+  assert.equal(slack.updated.length, 1);
+  assert.equal(slack.updated[0].ref.conduit, 'slack:C1');
+  assert.equal(feishu.updated.length, 1);
+  assert.equal(feishu.updated[0].ref.conduit, 'feishu:oc_1');
+  assert.equal(slack.deleted.length, 0);
+  assert.equal(feishu.deleted.length, 1);
+  assert.equal(slack.marksQueued.length, 1);
+  assert.equal(feishu.marksQueued.length, 0);
+  assert.ok(link?.includes('feishu:oc_3'));
+});
+
+test('CompositeAdapter: interactive-reply routes to the owning platform only', async () => {
+  const slack = prefixAdapter('slack:');
+  const feishu = prefixAdapter('feishu:');
+  const composite = new CompositeAdapter([slack, feishu]);
+
+  await composite.postMessage({ type: 'interactive-reply', conduit: 'feishu:oc_9', sessionId: '' }, { text: 'hi' });
+
+  assert.equal(slack.posted.length, 0);
+  assert.equal(feishu.posted.length, 1);
+});
+
+test('CompositeAdapter: system-notice fans out to all real primaries (not TUI)', async () => {
+  const slack = prefixAdapter('slack:');
+  const feishu = prefixAdapter('feishu:');
+  const gateway = new TuiGatewayAdapter({ port: 0, host: '127.0.0.1' });
+  const composite = new CompositeAdapter([slack, feishu, gateway]);
+
+  await composite.postMessage({ type: 'system-notice' }, { text: 'boot' });
+
+  assert.equal(slack.posted.length, 1);
+  assert.equal(feishu.posted.length, 1);
+  assert.equal(slack.posted[0].destination.type, 'system-notice');
+});
+
+test('CompositeAdapter: downloadFile routes by fileRef.conduit, falls back to first', async () => {
+  const slack = prefixAdapter('slack:');
+  const feishu = prefixAdapter('feishu:');
+  const composite = new CompositeAdapter([slack, feishu]);
+
+  const r1 = await composite.downloadFile(
+    { id: 'F1', name: 'a', mimetype: 'text/plain', url: '', conduit: 'feishu:oc_1', raw: {} },
+    '/tmp',
+  );
+  assert.ok(r1.localPath.includes('F1'));
+
+  // No conduit → first adapter handles it (slack here).
+  const r2 = await composite.downloadFile(
+    { id: 'F2', name: 'b', mimetype: 'text/plain', url: '', raw: {} },
+    '/tmp',
+  );
+  assert.ok(r2.localPath.includes('F2'));
+});
+
+test('CompositeAdapter: getProjectConduits merges all sub-adapters', async () => {
+  const slack = prefixAdapter('slack:');
+  const feishu = prefixAdapter('feishu:');
+  const composite = new CompositeAdapter([slack, feishu]);
+
+  await composite.bindProjectConduit('proj-a', 'slack:C1');
+  await composite.bindProjectConduit('proj-b', 'feishu:oc_1');
+
+  // bind routed to the owning adapter
+  assert.deepEqual(await slack.getProjectConduits(), { 'proj-a': 'slack:C1' });
+  assert.deepEqual(await feishu.getProjectConduits(), { 'proj-b': 'feishu:oc_1' });
+
+  const merged = await composite.getProjectConduits();
+  assert.equal(merged['proj-a'], 'slack:C1');
+  assert.equal(merged['proj-b'], 'feishu:oc_1');
 });
 
 // ── Test: extractTuiAdapter ───────────────────────────────────────
@@ -299,7 +390,7 @@ test('CompositeAdapter: modals=false when one side lacks it (intersection)', asy
 test('extractTuiAdapter: returns gateway from CompositeAdapter', () => {
   const primary = new MockAdapter({ adminChannel: 'C-admin' });
   const gateway = new TuiGatewayAdapter({ port: 0, host: '127.0.0.1' });
-  const composite = new CompositeAdapter(primary, gateway);
+  const composite = new CompositeAdapter([primary, gateway]);
 
   const extracted = extractTuiAdapter(composite);
   assert.ok(extracted !== null);

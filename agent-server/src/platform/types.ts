@@ -39,6 +39,10 @@ export interface PlatformFileRef {
   name: string;
   mimetype: string;
   url: string;
+  /** Prefixed conduit the file originated from (e.g. `slack:C0xxx`, `feishu:oc_xxx`,
+   *  `tui-xxxx`). Lets CompositeAdapter route downloadFile to the owning adapter
+   *  when multiple platforms are online. Optional for back-compat. */
+  conduit?: string;
   raw: unknown;
 }
 
