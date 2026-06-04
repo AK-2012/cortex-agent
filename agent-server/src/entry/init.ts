@@ -1439,8 +1439,8 @@ async function runGatewaySetup(
   gatewayConfigDir?: string,
   answers?: Pick<InitAnswers, 'planChoice' | 'executeChoice' | 'extraProfiles'>,
 ): Promise<void> {
-  // Discover endpoints from Claude/PI local configs
-  const endpoints = discoverEndpoints();
+  // Discover endpoints from Claude/PI local configs — filtered by user-selected backends
+  const endpoints = discoverEndpoints(backends);
 
   if (endpoints.length === 0) {
     clack.log.warn('No backends discovered. Make sure you have logged into Claude Code and/or PI first.');

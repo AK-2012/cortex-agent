@@ -3,7 +3,7 @@
 //         — spawns pi --list-models, produces gateway.yaml content
 // pos:    init-time gateway config auto-generation. PI model metadata is owned by the PI agent
 //         (we shell out to `pi --list-models` rather than maintain provider/model whitelists).
-//         Claude plan mode is always assumed (user must have claude login), no credential scanning.
+//         Claude plan mode is included when the backends filter includes 'claude' (or is omitted).
 
 import { writeFileSync, copyFileSync, mkdirSync, existsSync } from 'fs';
 import { execSync } from 'child_process';
@@ -147,44 +147,52 @@ function scanPIViaListModels(): PiDiscoveredModel[] {
 /**
  * Scan Claude Code and PI configurations and return discovered endpoints.
  *
- * - Claude Code plan mode: always generated if logged in (OAuth bearer passthrough).
- * - Claude Code api mode: generated only if ANTHROPIC_API_KEY env var is set.
- * - PI providers: discovered via `pi --list-models`. Each provider becomes one endpoint with
- *   `mode = endpoint = provider name`. `gatewayManaged` is true only if the provider has a known
- *   upstream URL in PI_PROVIDER_UPSTREAM (otherwise profile is generated but gateway.yaml entry
- *   is skipped).
+ * @param backends - Optional filter: when provided, only discover endpoints for the listed backends
+ *   (e.g. `['claude']`, `['pi']`, `['claude', 'pi']`). When omitted, all backends are discovered.
+ *
+ * - Claude Code plan mode: generated when 'claude' is in backends (or backends is omitted).
+ * - Claude Code api mode: generated only if ANTHROPIC_API_KEY env var is set and 'claude' is included.
+ * - PI providers: discovered via `pi --list-models` when 'pi' is in backends (or backends is omitted).
+ *   Each provider becomes one endpoint with `mode = endpoint = provider name`. `gatewayManaged`
+ *   is true only if the provider has a known upstream URL in PI_PROVIDER_UPSTREAM (otherwise profile
+ *   is generated but gateway.yaml entry is skipped).
  */
-export function discoverEndpoints(): DiscoveredEndpoint[] {
+export function discoverEndpoints(backends?: string[]): DiscoveredEndpoint[] {
   const endpoints: DiscoveredEndpoint[] = [];
 
-  // ── Claude Code → Anthropic plan mode (always on) ──
-  endpoints.push({
-    mode: 'plan',
-    endpoint: 'anthropic',
-    base_url: 'https://api.anthropic.com',
-    auth_style: 'bearer',
-    keys: [],
-    passthrough: true,
-    models: ANTHROPIC_MODELS,
-    gatewayManaged: true,
-  });
-
-  // api mode — only if ANTHROPIC_API_KEY is set
-  if (process.env.ANTHROPIC_API_KEY) {
+  // ── Claude Code → Anthropic plan mode ──
+  // Skip if backends filter is provided and 'claude' is not included.
+  const includeClaude = !backends || backends.includes('claude');
+  if (includeClaude) {
     endpoints.push({
-      mode: 'api',
+      mode: 'plan',
       endpoint: 'anthropic',
       base_url: 'https://api.anthropic.com',
-      auth_style: 'anthropic',
-      keys: ['$ANTHROPIC_API_KEY'],
+      auth_style: 'bearer',
+      keys: [],
       passthrough: true,
       models: ANTHROPIC_MODELS,
       gatewayManaged: true,
     });
+
+    // api mode — only if ANTHROPIC_API_KEY is set
+    if (process.env.ANTHROPIC_API_KEY) {
+      endpoints.push({
+        mode: 'api',
+        endpoint: 'anthropic',
+        base_url: 'https://api.anthropic.com',
+        auth_style: 'anthropic',
+        keys: ['$ANTHROPIC_API_KEY'],
+        passthrough: true,
+        models: ANTHROPIC_MODELS,
+        gatewayManaged: true,
+      });
+    }
   }
 
   // ── PI → per-provider endpoints (one mode per provider) ──
-  const piModels = scanPIViaListModels();
+  const includePi = !backends || backends.includes('pi');
+  const piModels = includePi ? scanPIViaListModels() : [];
   // Group models by provider name
   const byProvider = new Map<string, string[]>();
   for (const { provider, model } of piModels) {
