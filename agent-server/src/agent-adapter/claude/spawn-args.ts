@@ -105,6 +105,9 @@ export interface CortexAgentContext {
   executionId?: string | null;
   /** When true, load only core MCP server (remote_* tools). */
   useCoreMcp?: boolean;
+  /** Recursion depth of the owning thread, surfaced as CORTEX_THREAD_DEPTH so the thread_start
+   *  MCP tool can forward it and the daemon-side depth guard can cap nested thread spawning. */
+  threadDepth?: number | null;
 }
 
 export function buildClaudeEnv(
@@ -143,7 +146,9 @@ export function buildClaudeEnv(
   delete env.CORTEX_PROFILE;
   delete env.CORTEX_PROJECT;
   delete env.CORTEX_SESSION_NAME;
+  delete env.CORTEX_THREAD_DEPTH;
   if (context?.threadId) env.CORTEX_THREAD_ID = context.threadId;
+  if (context?.threadDepth != null) env.CORTEX_THREAD_DEPTH = String(context.threadDepth);
   if (context?.profile) env.CORTEX_PROFILE = context.profile;
   if (context?.project) env.CORTEX_PROJECT = context.project;
   if (context?.sessionName) env.CORTEX_SESSION_NAME = context.sessionName;

@@ -1,6 +1,6 @@
-// input:  GitHub push, task-op, remote cmd, hook HTTP events
+// input:  GitHub push, task-op, thread-op, remote cmd, hook HTTP events
 // output: startWebhookServer
-// pos:    GitHub/task-op/hook webhook HTTP entry point
+// pos:    GitHub/task-op/thread-op/hook webhook HTTP entry point
 // >>> If I am updated, update my header comment and the parent folder's CORTEX.md <<<
 
 import { createLogger } from '@core/log.js';
@@ -11,6 +11,13 @@ import { taskMutator } from '@domain/tasks/mutator.js';
 import { sendCommand, isDeviceOnline, getOnlineDevices } from '@domain/remote/client-manager.js';
 import { registerAskQuestion, registerPlanApproval } from './hook-bridge.js';
 import { getCurrentPlanFilePath } from '@domain/agents/index.js';
+import { ctx as jobCtx } from '@domain/scheduling/job-registry.js';
+import { createThread, cancelThread, readArtifact, listTemplates, listAgents } from '@domain/threads/index.js';
+import { runThread } from '@domain/threads/runner.js';
+import { threadStore } from '@store/thread-repo.js';
+import { fireThreadCallback } from '../thread-callback.js';
+import type { Destination } from '@platform/index.js';
+import type { RunThreadOptions } from '@core/types/thread-types.js';
 
 const log = createLogger('webhook');
 
@@ -132,6 +139,127 @@ function createWebhookHandler({
         } catch (e) {
           log.error(`task-op error: ${e.message}`);
           res.writeHead(500); res.end(JSON.stringify({ success: false, message: e.message }));
+        }
+      });
+      return;
+    }
+
+    // --- Thread operation (from MCP sidecar → thread system) ---
+    // Local-only, no secret (same trust model as /webhook/remote-command). thread_start is
+    // fire-and-forget: createThread + runThread().catch() without await, returning the threadId.
+    if (req.method === 'POST' && req.url === '/webhook/thread-op') {
+      readJsonBody(req, async (error, _body, data) => {
+        if (error) { res.writeHead(400); res.end('Bad JSON'); return; }
+        const reply = (obj: any) => {
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify(obj));
+        };
+        try {
+          const action = data.action;
+          if (action === 'start') {
+            const { template, agent, message } = data;
+            if ((template && agent) || (!template && !agent)) {
+              return reply({ success: false, error: 'provide exactly one of template or agent' });
+            }
+            if (!message) return reply({ success: false, error: 'message required' });
+            const maxDepth = parseInt(process.env.CORTEX_THREAD_MAX_DEPTH || '5', 10) || 5;
+            const curDepth = Number(data.depth) || 0;
+            if (curDepth >= maxDepth) {
+              return reply({ success: false, error: `max thread depth (${maxDepth}) reached — cannot spawn nested thread at depth ${curDepth}` });
+            }
+            if (!jobCtx.adapter) {
+              return reply({ success: false, error: 'no platform adapter available (daemon not fully initialized)' });
+            }
+            const projectId = data.projectId || 'general';
+            const channel = data.channel || projectId;
+            const thread = createThread(channel, {
+              templateName: template || null,
+              agentName: agent || null,
+              userMessage: message,
+              userMessageTs: `mcp_${Date.now()}`,
+              projectId,
+              metadata: {
+                trigger: 'mcp-thread',
+                depth: curDepth + 1,
+                parentSessionId: data.parentSessionId || null,
+                parentThreadId: data.parentThreadId || null,
+                parentChannel: data.parentChannel || null,
+                parentProfile: data.parentProfile || null,
+              },
+            });
+            const dest: Destination = { type: 'project-report', projectId, trigger: 'mcp-thread', sessionId: '' };
+            const runOpts: RunThreadOptions = {
+              adapter: jobCtx.adapter,
+              channel,
+              destination: dest,
+              threadAnchorId: null,
+              statusMsg: null,
+              startTime: Date.now(),
+              onProgress: null,
+              onToolUse: null,
+            };
+            runThread(thread.id, runOpts)
+              .catch((e) => log.error(`mcp-thread ${thread.id} failed: ${(e as Error).message}`))
+              .finally(() => { void fireThreadCallback(thread.id).catch((e) => log.error(`thread-callback ${thread.id}: ${(e as Error).message}`)); });
+            log.info(`thread-op start ${thread.id} (${template || agent}, depth ${curDepth + 1})`);
+            return reply({ success: true, data: { threadId: thread.id, status: 'running' } });
+          }
+          if (action === 'status') {
+            const t = threadStore.get(data.threadId);
+            if (!t) return reply({ success: false, error: 'thread not found' });
+            return reply({ success: true, data: {
+              threadId: t.id, status: t.status, activeAgent: t.activeAgent, stepCount: t.steps.length,
+              totalCostUsd: t.totalCostUsd, abortReason: t.abortReason, artifactPath: t.artifactPath,
+              createdAt: t.createdAt, updatedAt: t.updatedAt, endedAt: t.endedAt, error: t.error,
+            } });
+          }
+          if (action === 'result') {
+            const t = threadStore.get(data.threadId);
+            if (!t) return reply({ success: false, error: 'thread not found' });
+            const terminal = ['completed', 'failed', 'cancelled', 'aborted'].includes(t.status);
+            const artifact = readArtifact(t.id);
+            const finalOutput = t.steps.length ? t.steps[t.steps.length - 1].output : null;
+            return reply({ success: true, data: {
+              threadId: t.id, status: t.status, terminal,
+              ...(terminal ? {} : { note: 'thread still running — result is partial' }),
+              artifact, finalOutput,
+            } });
+          }
+          if (action === 'list') {
+            return reply({ success: true, data: {
+              templates: listTemplates().map((t) => ({ name: t.name, description: t.description })),
+              agents: listAgents().map((a) => ({ name: a.name, description: a.description })),
+            } });
+          }
+          if (action === 'list-threads') {
+            const scope = data.scope || 'mine';
+            let threads = threadStore.getAll();
+            if (scope === 'project') {
+              const pid = data.projectId || 'general';
+              threads = threads.filter((t) => t.projectId === pid);
+            } else {
+              // 'mine': threads spawned from the caller's session
+              const sid = data.parentSessionId || null;
+              threads = sid ? threads.filter((t) => t.metadata?.parentSessionId === sid) : [];
+            }
+            threads = threads.sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
+            const limit = Number(data.limit) || 50;
+            const out = threads.slice(0, limit).map((t) => ({
+              threadId: t.id, status: t.status, templateName: t.templateName, activeAgent: t.activeAgent,
+              stepCount: t.steps.length, totalCostUsd: t.totalCostUsd,
+              createdAt: t.createdAt, updatedAt: t.updatedAt,
+              trigger: t.metadata?.trigger ?? null, depth: t.metadata?.depth ?? null,
+            }));
+            return reply({ success: true, data: { scope, count: out.length, threads: out } });
+          }
+          if (action === 'cancel') {
+            const cancelled = await cancelThread(data.threadId);
+            return reply({ success: true, data: { cancelled } });
+          }
+          return reply({ success: false, error: `unknown action: ${action}` });
+        } catch (e) {
+          log.error(`thread-op error: ${(e as Error).message}`);
+          reply({ success: false, error: (e as Error).message });
         }
       });
       return;

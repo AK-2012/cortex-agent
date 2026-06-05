@@ -280,6 +280,7 @@ async function executeAndAwaitAgent(
     project: threadStore.get(threadId)?.projectId,
     trigger: meta?.trigger || undefined,
     threadId,
+    threadDepth: meta?.depth ?? 0,
     useCoreMcp: true,
     sessionName: stepCtx.sessionName,
     claudeAgent: agentConfig.claudeAgent || null,

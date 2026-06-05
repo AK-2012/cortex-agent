@@ -10,7 +10,7 @@ External callers should import from index.ts, not reference sub-files directly.
 | `template-loader.ts` | config | loadConfig / startConfigWatcher / stopConfigWatcher / getTemplate / getAgent / listTemplates / listTemplateNames / listAgents / resolveFileRef |
 | `prompt-builder.ts` | build | buildStepPrompt / buildConversationPrompt / resolveSystemVars / resolveAgentSlotConfig / resolveTemplateAgents / formatEndpoint / pickStepTemplate / THREAD_PROTOCOL_PREAMBLE |
 | `state-machine.ts` | state machine | createThread / addAgentToThread / resolveNextStep / evaluateTransitions / recordStepResult / completeThread / failThread / cancelThread / abortThread / detectAbortMarker |
-| `runner.ts` | runtime | runThread / continueThread / buildThreadSummary — thread execution engine, registers handle via runningExecutions |
+| `runner.ts` | runtime | runThread / continueThread / buildThreadSummary — thread execution engine, registers handle via runningExecutions. Also invoked fire-and-forget by the `/webhook/thread-op` MCP bridge (thread_start), so any agent can spawn a thread (depth-capped via metadata.depth + CORTEX_THREAD_DEPTH). |
 | `hook-runner.ts` | hook | executeLifecycleHook — lifecycle hook script executor + hook agent runner |
 | `index.ts` | entry | barrel re-export, the only import point for all external callers |
 

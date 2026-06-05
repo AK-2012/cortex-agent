@@ -51,6 +51,9 @@ export interface RunAgentOptions {
   /** When true, load only core MCP server (remote_* tools). Used by template thread sessions.
    *  Default (undefined/false) loads full MCP config with cortex-ext tools. */
   useCoreMcp?: boolean;
+  /** Recursion depth of the owning thread, surfaced to the spawned agent as CORTEX_THREAD_DEPTH
+   *  so the thread_start MCP tool can forward it for the depth guard. */
+  threadDepth?: number | null;
   onProgress?: ((progress: any) => void) | null;
   onAssistantMessage?: ((msg: string) => void) | null;
   onToolUse?: ((name: string, input: any) => void) | null;
@@ -93,8 +96,9 @@ function buildSpawnConfig(
     sessionName: options.sessionName ?? null,
     executionId: options.executionId ?? null,
     useCoreMcp: options.useCoreMcp ?? undefined,
+    threadDepth: options.threadDepth ?? null,
   };
-  const hasContext = !!(ctx.threadId || ctx.profile || ctx.project || ctx.sessionName || ctx.executionId || ctx.useCoreMcp);
+  const hasContext = !!(ctx.threadId || ctx.profile || ctx.project || ctx.sessionName || ctx.executionId || ctx.useCoreMcp || ctx.threadDepth != null);
 
   // Load global rules (no paths frontmatter) and inject as appendSystemPrompt.
   // Scoped rules (with paths) are handled by the Read/Grep PostToolUse hook.

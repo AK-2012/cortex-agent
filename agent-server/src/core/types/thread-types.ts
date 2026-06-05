@@ -259,8 +259,21 @@ export interface ThreadRecord {
 /** Caller-provided metadata stored on ThreadRecord, used by thread-runner for execution registry etc. */
 export interface ThreadMetadata {
   scheduleTaskId?: string | null;    // schedule task association
-  trigger?: string | null;           // execution trigger: 'scheduled' | 'task-dispatch' | 'user' | ...
+  trigger?: string | null;           // execution trigger: 'scheduled' | 'task-dispatch' | 'user' | 'mcp-thread' | ...
   profileOverride?: string | null;   // override agent's configured profile at runtime
+  /** Recursion depth: 0 for top-level (direct-agent-spawned) threads, incremented per nested
+   *  thread_start via the MCP thread-op bridge. Surfaced to spawned agents as CORTEX_THREAD_DEPTH
+   *  so the depth guard can cap runaway agent→thread→agent recursion. */
+  depth?: number;
+  /** Identity of the agent that spawned this thread via the MCP thread_start bridge, so an agent
+   *  can later enumerate the threads it started (thread_list scope=mine). Null for threads not
+   *  spawned by an agent (Slack / scheduler / dispatch). */
+  parentSessionId?: string | null;
+  parentThreadId?: string | null;
+  /** Parent's channel + profile, captured at spawn time so the completion callback can wake the
+   *  parent (interactive parent → resume its channel session) or address a notice to it. */
+  parentChannel?: string | null;
+  parentProfile?: string | null;
   /** Messages buffered while a step was executing, to be included in the next step's prompt. */
   pendingMessages?: string[];        // Phase 6: dispatch message buffering
 }
