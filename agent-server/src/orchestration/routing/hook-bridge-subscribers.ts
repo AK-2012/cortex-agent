@@ -26,6 +26,21 @@ export function registerHookBridgeSubscribers(
     try {
       const group = askUserQuestion.createHookGroup(ev.requestId, ev.channel, ev.sessionId, ev.questions, ev.extensionUiId, ev.threadId ?? null);
       askUserQuestion.registerHookResolver(ev.requestId, (data) => resolveHookRequest(ev.requestId, data));
+
+      // Inline-modal platforms (Feishu) render the question form as an inline card,
+      // so the intermediate "Answer" summary card + click is redundant — post the
+      // form directly. Slack requires a user click (trigger_id) to open a modal, so
+      // it keeps the summary card + Answer button below. The conduit prefix is the
+      // reliable per-channel signal under a multi-platform CompositeAdapter (merged
+      // capabilities can't distinguish channels).
+      if (ev.channel.startsWith('feishu:')) {
+        // Flush any pending streamed text so the form lands after it, in order.
+        const fstream = (getStreamingCallback(ev.channel) as any)?.stream as OutputStream | undefined;
+        await fstream?.flush?.().catch(() => {});
+        await adapter.openModal(ev.channel, askUserQuestion.buildQuestionModalDefinition(group));
+        return;
+      }
+
       // streamingCb is fetched only to extract the stream reference — not invoked directly for AskUser
       const streamingCb = getStreamingCallback(ev.channel);
       const stream = (streamingCb as any)?.stream as OutputStream | undefined;

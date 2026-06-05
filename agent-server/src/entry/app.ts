@@ -69,6 +69,33 @@ dotenv.config({ path: path.join(CONFIG_DIR, '.env') });
 
 const log = createLogger('app');
 
+// --- Crash safety net ---
+// A single failed outbound post while handling an inbound message must never take
+// down the whole server. Detached per-conduit queue work (conduit-queue.ts) and
+// platform-adapter callbacks can reject without an observer; without these
+// handlers an unhandled rejection terminates the process (exit code 1). Log the
+// full stack and keep running. Mirrors the daemon's own guards (daemon.ts).
+// Re-entrancy guard prevents an infinite loop if log.error() itself throws.
+let _inExceptionHandler = false;
+process.on('unhandledRejection', (reason) => {
+  if (_inExceptionHandler) return;
+  _inExceptionHandler = true;
+  try {
+    log.error(`unhandledRejection: ${reason instanceof Error ? reason.stack : String(reason)}`);
+  } catch { /* swallow secondary failure */ } finally {
+    _inExceptionHandler = false;
+  }
+});
+process.on('uncaughtException', (err) => {
+  if (_inExceptionHandler) return;
+  _inExceptionHandler = true;
+  try {
+    log.error(`uncaughtException: ${err?.stack ?? err}`);
+  } catch { /* swallow secondary failure */ } finally {
+    _inExceptionHandler = false;
+  }
+});
+
 // --- EventBus + logger ---
 const bus = new EventBus();
 createEventLogger(bus);

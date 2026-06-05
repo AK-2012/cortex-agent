@@ -510,17 +510,19 @@ test('SlackOutputStream: postInteractive seals mutable region', async () => {
 // FeishuOutputStream tests
 // =========================================================================
 
-test('FeishuOutputStream: emitText creates separate post each time (no aggregation)', async () => {
+test('FeishuOutputStream: consecutive emitText coalesce into one card', async () => {
   const adapter = new MockAdapter();
   const stream = feishuStream(adapter);
   stream.emitText('first');
   stream.emitText('second');
   await stream.flush();
 
-  assert.equal(adapter.posted.length, 2, 'each emitText creates a new post');
-  assert.equal(adapter.updated.length, 0, 'no updates (no aggregation)');
+  // Coalescing parity with Slack: the first emit posts the card, the second
+  // patches it rather than posting a new message.
+  assert.equal(adapter.posted.length, 1, 'only one card is posted');
+  assert.equal(adapter.updated.length, 1, 'second emit patches the card');
   assert.equal(adapter.posted[0].content.text, 'first');
-  assert.equal(adapter.posted[1].content.text, 'second');
+  assert.equal(adapter.updated[0].content.text, 'first\nsecond');
 });
 
 test('FeishuOutputStream: exceeding maxMessageLength forces chunks', async () => {
@@ -530,19 +532,21 @@ test('FeishuOutputStream: exceeding maxMessageLength forces chunks', async () =>
   stream.emitText('y'.repeat(80));
   await stream.flush();
 
-  // Each emitText should be a separate post since Feishu doesn't aggregate
+  // Coalescing the two 80-char emits exceeds the 100-char limit, so the stream
+  // splits the content across two messages (the overflow threads under the first).
   assert.equal(adapter.posted.length, 2);
 });
 
-test('FeishuOutputStream: openMutable returns no-op MutableRegion', async () => {
+test('FeishuOutputStream: openMutable patches the card, never posts a new message', async () => {
   const adapter = new MockAdapter();
   const stream = feishuStream(adapter);
   stream.emitText('base');
   const region = stream.openMutable('mutable text');
-  region.update('this should be a no-op');
+  region.update('region update');
   await stream.flush();
 
-  // Feishu has no messageEdit — only the emitText post should exist
+  // Tool-trace regions render via card patch (im.v1.message.patch), so no extra
+  // top-level message is posted — only the single 'base' card.
   assert.equal(adapter.posted.length, 1);
   assert.equal(adapter.posted[0].content.text, 'base');
 });
@@ -569,7 +573,7 @@ test('FeishuOutputStream: getRefs and getParentRef', async () => {
   await stream.flush();
 
   const refs = stream.getRefs();
-  assert.equal(refs.length, 2);
+  assert.equal(refs.length, 1, 'short emits coalesce into a single card');
   const parent = stream.getParentRef();
   assert.ok(parent);
   assert.equal(parent!.messageId, refs[0].messageId);

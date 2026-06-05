@@ -27,7 +27,7 @@ import type {
 import * as fs from 'fs';
 import * as path from 'path';
 import { createLogger } from '@core/log.js';
-import { STORE_DIR } from '@core/paths.js';
+import { STORE_DIR, CONFIG_DIR } from '@core/paths.js';
 import type { OutputStream, OpenOutputStreamOpts } from '../output-stream.js';
 import { FeishuOutputStream } from './feishu-output-stream.js';
 import { ProjectConduitsStore } from './project-conduits.js';
@@ -57,17 +57,24 @@ export class FeishuAdapter implements PlatformAdapter {
   };
 
   private client: lark.Client;
-  private wsClient: lark.WSClient;
+  // Lazily created in start(): the lark WSClient holds an open libuv handle the
+  // moment it is constructed, which keeps the process alive even before start().
+  // Unit tests instantiate the adapter without start()ing it, so building it
+  // eagerly here would hang the test runner's event loop on exit.
+  private wsClient: lark.WSClient | null = null;
+  private readonly domain: lark.Domain;
   private eventDispatcher: lark.EventDispatcher;
   private config: FeishuAdapterConfig;
 
   private messageHandler: ((ctx: MessageContext) => Promise<void>) | null = null;
   private actionHandlers = new Map<string, (ctx: ActionContext) => Promise<void>>();
   private modalHandlers = new Map<string, (ctx: ModalSubmitContext) => Promise<void>>();
+  private _adminAutoDetected = false;
 
   constructor(config: FeishuAdapterConfig) {
     this.config = config;
     const domain = config.domain === 'lark' ? lark.Domain.Lark : lark.Domain.Feishu;
+    this.domain = domain;
 
     this.client = new lark.Client({
       appId: config.appId,
@@ -96,13 +103,6 @@ export class FeishuAdapter implements PlatformAdapter {
       'card.action.trigger': async (data: any) => {
         return await this.handleCardAction(data);
       },
-    });
-
-    this.wsClient = new lark.WSClient({
-      appId: config.appId,
-      appSecret: config.appSecret,
-      domain,
-      loggerLevel: lark.LoggerLevel.info,
     });
   }
 
@@ -137,13 +137,23 @@ export class FeishuAdapter implements PlatformAdapter {
   // --- Lifecycle ---
 
   async start(): Promise<void> {
+    // Construct the WSClient here (not in the constructor): it opens a libuv
+    // handle on creation, so deferring it until start() keeps adapter
+    // instantiation side-effect-free (see wsClient field comment).
+    this.wsClient = new lark.WSClient({
+      appId: this.config.appId,
+      appSecret: this.config.appSecret,
+      domain: this.domain,
+      loggerLevel: lark.LoggerLevel.info,
+    });
     await this.wsClient.start({
       eventDispatcher: this.eventDispatcher,
     });
   }
 
   async stop(): Promise<void> {
-    this.wsClient.close();
+    this.wsClient?.close();
+    this.wsClient = null;
   }
 
   // --- Event registration ---
@@ -222,11 +232,8 @@ export class FeishuAdapter implements PlatformAdapter {
       ? this.richBlocksToFeishuElements(content.richBlocks)
       : [];
 
-    // Add action buttons
-    elements.push({
-      tag: 'action',
-      actions: content.actions.map(a => this.actionElementToFeishu(a)),
-    });
+    // Add action buttons (schema 2.0: column_set, not the removed `action` tag).
+    elements.push(this.buttonsToColumnSet(content.actions));
 
     const cardJson = {
       schema: '2.0',
@@ -286,7 +293,10 @@ export class FeishuAdapter implements PlatformAdapter {
     try {
       await this.client.im.v1.messageReaction.create({
         path: { message_id: ref.messageId },
-        data: { reaction_type: { emoji_type: 'hourglass' } },
+        // Feishu has no 'hourglass' emoji_type (err 231001 "reaction type is
+        // invalid"). 'OnIt' (处理中) is a valid type and the right semantic fit
+        // for a "queued / working on it" indicator.
+        data: { reaction_type: { emoji_type: 'OnIt' } },
       });
     } catch {
       // Best-effort: emoji name may not map to Feishu's emoji set
@@ -453,6 +463,33 @@ export class FeishuAdapter implements PlatformAdapter {
   // Internal: Inbound event handlers
   // =========================================================================
 
+  /**
+   * Upsert FEISHU_ADMIN_CHANNEL=<chatId> into <CONFIG_DIR>/.env so the detected
+   * admin DM survives restarts. Mirrors SlackAdapter._persistAdminChannel.
+   */
+  private async _persistAdminChannel(chatId: string): Promise<void> {
+    const envPath = path.join(CONFIG_DIR, '.env');
+    let content = '';
+    try {
+      content = await fs.promises.readFile(envPath, 'utf-8');
+    } catch {
+      // File doesn't exist yet — will be created.
+    }
+    const lines = content.split('\n');
+    let found = false;
+    for (let i = 0; i < lines.length; i++) {
+      if (lines[i].startsWith('FEISHU_ADMIN_CHANNEL=')) {
+        lines[i] = `FEISHU_ADMIN_CHANNEL=${chatId}`;
+        found = true;
+        break;
+      }
+    }
+    if (!found) lines.push(`FEISHU_ADMIN_CHANNEL=${chatId}`);
+    await fs.promises.mkdir(CONFIG_DIR, { recursive: true });
+    await fs.promises.writeFile(envPath, lines.join('\n'), 'utf-8');
+    log.info(`FEISHU_ADMIN_CHANNEL=${chatId} written to ${envPath}`);
+  }
+
   private async handleIncomingMessage(data: any): Promise<void> {
     if (!this.messageHandler) return;
 
@@ -466,6 +503,25 @@ export class FeishuAdapter implements PlatformAdapter {
     const rootId = message.root_id || undefined;
     const parentId = message.parent_id || undefined;
     const messageType = message.message_type || '';
+    const chatType = message.chat_type || ''; // 'p2p' (DM) | 'group'
+
+    // Auto-detect the admin channel from a DM when FEISHU_ADMIN_CHANNEL is not
+    // configured. Mirrors the Slack adapter: the first p2p (DM) message from a
+    // non-bot user is registered as the admin channel, persisted to .env, and set
+    // on process.env. Feishu deliberately does NOT fall back to CORTEX_ADMIN_CHANNEL
+    // (that is a Slack channel id).
+    if (!this.config.adminChannel && !this._adminAutoDetected && chatType === 'p2p' && !isBot && chatId) {
+      this._adminAutoDetected = true;
+      this.config.adminChannel = chatId;
+      process.env.FEISHU_ADMIN_CHANNEL = chatId;
+      log.info(`Admin channel auto-detected from DM: ${chatId}`);
+      // Persist to .env and notify (fire-and-forget, non-blocking).
+      this._persistAdminChannel(chatId).catch(e =>
+        log.warn(`Failed to persist FEISHU_ADMIN_CHANNEL to .env: ${(e as Error).message}`));
+      this.postMessage({ type: 'system-notice' }, {
+        text: `👋 This DM has been auto-registered as the Cortex admin channel. \`FEISHU_ADMIN_CHANNEL=${chatId}\` has been written to \`.env\`. System notifications (startup, rate-limit, disk alerts) will be sent here.`,
+      }).catch(e => log.warn(`Failed to send admin auto-detect notification: ${(e as Error).message}`));
+    }
 
     // Parse message content (JSON string). For file/image/media/audio messages,
     // the resource key (file_key/image_key) lives inside this JSON — NOT on the
@@ -606,11 +662,11 @@ export class FeishuAdapter implements PlatformAdapter {
   // =========================================================================
 
   private buildMessagePayload(content: MessageContent): { msgType: string; msgContent: string } {
-    if (content.richBlocks && content.richBlocks.length > 0) {
-      const cardJson = this.buildCardJson(content);
-      return { msgType: 'interactive', msgContent: JSON.stringify(cardJson) };
-    }
-    return { msgType: 'text', msgContent: JSON.stringify({ text: content.text }) };
+    // Always send an interactive card. For text-only content buildCardJson emits a
+    // `markdown` element, so agent markdown (bold, lists, code blocks, tables,
+    // links) renders in Feishu instead of showing as raw text. Plain `msg_type:text`
+    // does not render markdown at all.
+    return { msgType: 'interactive', msgContent: JSON.stringify(this.buildCardJson(content)) };
   }
 
   private buildCardJson(content: MessageContent): any {
@@ -626,15 +682,29 @@ export class FeishuAdapter implements PlatformAdapter {
 
   private async replyInThread(threadMessageId: string, content: MessageContent, conduit: string): Promise<MessageRef> {
     const { msgType, msgContent } = this.buildMessagePayload(content);
-    const res = await this.client.im.v1.message.reply({
+    // reply_in_thread:true collects replies into a real Feishu 话题 thread (Slack-
+    // style: first message in channel, the rest under it) instead of inline quoted
+    // replies in the main timeline. Some chats reject thread replies (err 230071 /
+    // 230072 — group disallows / aggregated message); fall back to a plain reply so
+    // output is never lost.
+    const reply = (replyInThread: boolean) => this.client.im.v1.message.reply({
       path: { message_id: threadMessageId },
-      data: {
-        msg_type: msgType,
-        content: msgContent,
-      },
+      data: { msg_type: msgType, content: msgContent, reply_in_thread: replyInThread },
     });
+    let res: any;
+    try {
+      res = await reply(true);
+    } catch (e) {
+      const code = (e as any)?.response?.data?.code;
+      if (code === 230071 || code === 230072) {
+        log.warn(`Feishu chat rejects thread replies (code ${code}); falling back to plain reply`);
+        res = await reply(false);
+      } else {
+        throw e;
+      }
+    }
 
-    const messageId = (res as any)?.data?.message_id || '';
+    const messageId = res?.data?.message_id || '';
     return { conduit: this._wrap(conduit), messageId, threadId: threadMessageId };
   }
 
@@ -653,31 +723,56 @@ export class FeishuAdapter implements PlatformAdapter {
             },
           };
         case 'context':
-          return {
-            tag: 'note',
-            elements: [{ tag: 'plain_text', content: block.text }],
-          };
+          // Feishu card schema 2.0 removed the `note` tag (err 200861
+          // "unsupported tag note"). Render context text as a markdown element.
+          return { tag: 'markdown', content: block.text };
         case 'divider':
           return { tag: 'hr' };
         case 'actions':
-          return {
-            tag: 'action',
-            actions: block.elements.map(e => this.actionElementToFeishu(e)),
-          };
+          // Schema 2.0: no `action` container — render buttons via column_set.
+          return this.buttonsToColumnSet(block.elements);
         default:
           return { tag: 'markdown', content: (block as any).text || '' };
       }
     });
   }
 
-  /** Convert a ButtonElement to Feishu card button JSON. */
+  /**
+   * Convert a ButtonElement to a Feishu card **schema 2.0** button.
+   *
+   * Card 2.0 buttons carry their interaction in a `behaviors` callback (the old
+   * top-level `value` field is form-only in 2.0). `name` is preserved so
+   * handleCardAction's `action.name` lookup keeps working; the callback `value`
+   * delivers `{ actionId, value }`, which arrives as `event.action.value`.
+   */
   private actionElementToFeishu(el: ActionElement): any {
     return {
       tag: 'button',
       text: { tag: 'plain_text', content: el.text },
       type: el.style === 'danger' ? 'danger' : el.style === 'primary' ? 'primary' : 'default',
       name: el.actionId,
-      value: { actionId: el.actionId, value: el.value },
+      behaviors: [{ type: 'callback', value: { actionId: el.actionId, value: el.value } }],
+    };
+  }
+
+  /**
+   * Lay buttons out as a wrapping `column_set` (one auto-width column per button).
+   * Feishu card schema 2.0 removed the `action` container tag (error 200861:
+   * "unsupported tag action"), so buttons must be direct body elements.
+   * `flex_mode: 'flow'` + per-column `width: 'auto'` makes the buttons size to
+   * their text and wrap onto multiple rows — without `flow` many buttons get
+   * crushed into one unreadable row.
+   */
+  private buttonsToColumnSet(elements: ActionElement[]): any {
+    return {
+      tag: 'column_set',
+      flex_mode: 'flow',
+      horizontal_spacing: '8px',
+      columns: elements.map(e => ({
+        tag: 'column',
+        width: 'auto',
+        elements: [this.actionElementToFeishu(e)],
+      })),
     };
   }
 
@@ -741,12 +836,25 @@ export class FeishuAdapter implements PlatformAdapter {
     // modal handler, which is registered under modal.callbackId. So the button
     // name MUST equal callbackId (not a literal "submit"), otherwise the
     // submission is silently dropped.
+    //
+    // The button's `value` arrives as `event.action.value` and becomes
+    // privateMetadata in handleCardAction. It MUST carry modal.privateMetadata
+    // (e.g. { groupId } for AskUserQuestion) — without it the modal handler has
+    // no context to resolve the submission. NOTE: `behaviors` and
+    // `action_type:'form_submit'` are mutually exclusive in Feishu card 2.0
+    // (adding behaviors makes Feishu no longer recognise the submit button), so
+    // the metadata must travel via the top-level `value` field, not a callback.
+    let submitValue: Record<string, unknown> | undefined;
+    if (modal.privateMetadata) {
+      try { submitValue = JSON.parse(modal.privateMetadata); } catch { submitValue = undefined; }
+    }
     formElements.push({
       tag: 'button',
       text: { tag: 'plain_text', content: modal.submitLabel || 'Submit' },
       type: 'primary',
       name: modal.callbackId,
       action_type: 'form_submit',
+      ...(submitValue ? { value: submitValue } : {}),
     });
 
     return {
@@ -757,7 +865,11 @@ export class FeishuAdapter implements PlatformAdapter {
       body: {
         elements: [{
           tag: 'form',
-          name: modal.callbackId,
+          // Feishu requires every `name` in a card to be unique. The submit button
+          // already uses modal.callbackId (it must — that arrives as
+          // event.action.name), so the form container needs a distinct name or
+          // Feishu rejects the card (err 11310: "name duplicate").
+          name: `${modal.callbackId}__form`,
           elements: formElements,
         }],
       },

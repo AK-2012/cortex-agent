@@ -143,3 +143,188 @@ test('Feishu postMessage in thread returns resolved conduit', async () => {
   assert.equal(ref.messageId, 'om_reply');
   assert.equal(ref.threadId, 'om_root');
 });
+
+test('Feishu replyInThread sets reply_in_thread:true (real 话题 thread)', async () => {
+  const a = makeAdapter();
+  let seen: any = null;
+  a.client = {
+    im: { v1: { message: { reply: async (payload: any) => { seen = payload; return { data: { message_id: 'om_reply' } }; } } } },
+  };
+  const dest: Destination = { type: 'interactive-reply', conduit: 'feishu:oc_chat', sessionId: '' };
+  await a.postMessage(dest, { text: 'hi' }, { threadId: 'om_root' });
+  assert.equal(seen.data.reply_in_thread, true);
+  assert.equal(seen.path.message_id, 'om_root');
+});
+
+test('Feishu replyInThread falls back to plain reply when chat rejects threads (230071)', async () => {
+  const a = makeAdapter();
+  const calls: boolean[] = [];
+  a.client = {
+    im: { v1: { message: { reply: async (payload: any) => {
+      calls.push(payload.data.reply_in_thread);
+      if (payload.data.reply_in_thread) {
+        const err: any = new Error('thread not supported');
+        err.response = { data: { code: 230071 } };
+        throw err;
+      }
+      return { data: { message_id: 'om_plain' } };
+    } } } },
+  };
+  const dest: Destination = { type: 'interactive-reply', conduit: 'feishu:oc_chat', sessionId: '' };
+  const ref = await a.postMessage(dest, { text: 'hi' }, { threadId: 'om_root' });
+  assert.deepEqual(calls, [true, false], 'tries thread first, then plain reply');
+  assert.equal(ref.messageId, 'om_plain');
+});
+
+// =========================================================================
+// Admin channel auto-detection from the first p2p (DM) message
+// =========================================================================
+
+function makeInbound(chatType: string, chatId: string, senderType = 'user') {
+  return {
+    sender: { sender_type: senderType, sender_id: { open_id: 'ou_user' } },
+    message: {
+      chat_id: chatId,
+      chat_type: chatType,
+      message_id: 'om_1',
+      message_type: 'text',
+      content: JSON.stringify({ text: 'hello' }),
+    },
+  };
+}
+
+test('Feishu admin auto-detect: first p2p DM registers + persists admin chat_id', async () => {
+  delete process.env.FEISHU_ADMIN_CHANNEL;
+  const a = makeAdapter();
+  let persisted: string | null = null;
+  let noticeText: string | null = null;
+  a._persistAdminChannel = async (id: string) => { persisted = id; };
+  a.postMessage = async (_dest: Destination, content: any) => { noticeText = content.text; return { conduit: '', messageId: '' }; };
+  a.onMessage(async () => {});
+
+  await a.handleIncomingMessage(makeInbound('p2p', 'oc_admin'));
+
+  assert.equal(a.config.adminChannel, 'oc_admin');
+  assert.equal(process.env.FEISHU_ADMIN_CHANNEL, 'oc_admin');
+  assert.equal(persisted, 'oc_admin');
+  assert.ok(noticeText && noticeText.includes('oc_admin'));
+  delete process.env.FEISHU_ADMIN_CHANNEL;
+});
+
+test('Feishu admin auto-detect: only fires once', async () => {
+  delete process.env.FEISHU_ADMIN_CHANNEL;
+  const a = makeAdapter();
+  let persistCount = 0;
+  a._persistAdminChannel = async () => { persistCount++; };
+  a.postMessage = async () => ({ conduit: '', messageId: '' });
+  a.onMessage(async () => {});
+
+  await a.handleIncomingMessage(makeInbound('p2p', 'oc_first'));
+  await a.handleIncomingMessage(makeInbound('p2p', 'oc_second'));
+
+  assert.equal(a.config.adminChannel, 'oc_first');
+  assert.equal(persistCount, 1);
+  delete process.env.FEISHU_ADMIN_CHANNEL;
+});
+
+// =========================================================================
+// Card schema 2.0: action buttons must NOT use the removed `action` tag
+// (Feishu err 200861 "unsupported tag action"); use column_set + behaviors.
+// =========================================================================
+
+test('Feishu buildCardJson: actions render as column_set buttons (no `action` tag)', () => {
+  const a = makeAdapter();
+  const card = a.buildCardJson({
+    text: 'processing',
+    richBlocks: [
+      { type: 'section', text: 'Processing…', format: 'markdown' },
+      { type: 'actions', elements: [
+        { type: 'button', text: 'Cancel', actionId: 'status_cancel', value: '{}', style: 'danger' },
+        { type: 'button', text: 'New', actionId: 'status_new', value: 'oc_x' },
+      ] },
+    ],
+  });
+  assert.equal(card.schema, '2.0');
+  const tags = card.body.elements.map((e: any) => e.tag);
+  assert.ok(!tags.includes('action'), 'must not emit the removed `action` container tag');
+  assert.ok(tags.includes('column_set'), 'buttons render via column_set');
+
+  // Schema 2.0 also removed `note`: context blocks must render as markdown.
+  const withCtx = a.buildCardJson({
+    text: 'x',
+    richBlocks: [
+      { type: 'section', text: 'Q' },
+      { type: 'context', text: 'opt1 · opt2' },
+      { type: 'divider' },
+    ],
+  });
+  const ctxTags = withCtx.body.elements.map((e: any) => e.tag);
+  assert.ok(!ctxTags.includes('note'), 'must not emit the removed `note` tag');
+  assert.ok(ctxTags.includes('markdown'), 'context renders as markdown');
+  assert.ok(ctxTags.includes('hr'), 'divider renders as hr');
+  const colset = card.body.elements.find((e: any) => e.tag === 'column_set');
+  assert.equal(colset.columns.length, 2);
+  // flow + auto-width so buttons wrap and stay readable (not crushed into one row).
+  assert.equal(colset.flex_mode, 'flow');
+  assert.equal(colset.columns[0].width, 'auto');
+  const btn = colset.columns[0].elements[0];
+  assert.equal(btn.tag, 'button');
+  assert.equal(btn.name, 'status_cancel');
+  assert.equal(btn.type, 'danger');
+  // Callback payload travels via behaviors (schema 2.0), readable as action.value.
+  assert.deepEqual(btn.behaviors, [{ type: 'callback', value: { actionId: 'status_cancel', value: '{}' } }]);
+});
+
+test('Feishu buildMessagePayload: text-only renders as a markdown card (not plain text)', () => {
+  const a = makeAdapter();
+  const { msgType, msgContent } = a.buildMessagePayload({ text: '**bold** and `code`' });
+  assert.equal(msgType, 'interactive');
+  const card = JSON.parse(msgContent);
+  assert.equal(card.schema, '2.0');
+  assert.deepEqual(card.body.elements, [{ tag: 'markdown', content: '**bold** and `code`' }]);
+});
+
+test('Feishu modalToFeishuCard: form name is distinct from submit button name (no duplicate)', () => {
+  const a = makeAdapter();
+  const card = a.modalToFeishuCard({
+    title: 'Q', callbackId: 'cb_ask', submitLabel: 'Submit',
+    fields: [
+      { type: 'select', blockId: 'q1', actionId: 'a1', options: [{ label: 'A', value: 'a' }] },
+    ],
+  });
+  const form = card.body.elements[0];
+  assert.equal(form.tag, 'form');
+  const submit = form.elements.find((e: any) => e.tag === 'button' && e.action_type === 'form_submit');
+  // Submit button name MUST equal callbackId (it arrives as event.action.name);
+  // the form container name MUST differ, or Feishu rejects the card (err 11310).
+  assert.equal(submit.name, 'cb_ask');
+  assert.notEqual(form.name, submit.name);
+});
+
+test('Feishu modalToFeishuCard: submit button carries privateMetadata as value (groupId round-trip)', () => {
+  const a = makeAdapter();
+  const card = a.modalToFeishuCard({
+    title: 'Q', callbackId: 'ask_user_question_modal_submit',
+    privateMetadata: JSON.stringify({ groupId: 'sid:rid' }),
+    fields: [{ type: 'select', blockId: 'q_0', actionId: 'selection', options: [{ label: 'A', value: '0' }] }],
+  });
+  const form = card.body.elements[0];
+  const submit = form.elements.find((e: any) => e.action_type === 'form_submit');
+  // value arrives as event.action.value → privateMetadata → groupId in handleModalSubmit.
+  assert.deepEqual(submit.value, { groupId: 'sid:rid' });
+  // behaviors must NOT be present: it's mutually exclusive with form_submit in Feishu 2.0.
+  assert.equal(submit.behaviors, undefined);
+});
+
+test('Feishu admin auto-detect: group messages do not register an admin channel', async () => {
+  delete process.env.FEISHU_ADMIN_CHANNEL;
+  const a = makeAdapter();
+  a._persistAdminChannel = async () => {};
+  a.postMessage = async () => ({ conduit: '', messageId: '' });
+  a.onMessage(async () => {});
+
+  await a.handleIncomingMessage(makeInbound('group', 'oc_group'));
+
+  assert.equal(a.config.adminChannel, undefined);
+  assert.equal(process.env.FEISHU_ADMIN_CHANNEL, undefined);
+});

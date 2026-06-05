@@ -83,7 +83,10 @@ function buildPrimaryAdapter(platform: string): PlatformAdapter | null {
       appSecret,
       encryptKey: process.env.FEISHU_ENCRYPT_KEY || undefined,
       verificationToken: process.env.FEISHU_VERIFICATION_TOKEN || undefined,
-      adminChannel: process.env.FEISHU_ADMIN_CHANNEL || process.env.CORTEX_ADMIN_CHANNEL || undefined,
+      // Feishu must NOT inherit CORTEX_ADMIN_CHANNEL (that is a Slack channel id).
+      // The admin/DM channel is auto-detected from the first p2p message and
+      // persisted as FEISHU_ADMIN_CHANNEL (see FeishuAdapter.handleIncomingMessage).
+      adminChannel: process.env.FEISHU_ADMIN_CHANNEL || undefined,
       domain: (process.env.FEISHU_DOMAIN as 'feishu' | 'lark') || undefined,
     });
   }
