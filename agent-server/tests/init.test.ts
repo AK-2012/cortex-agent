@@ -214,6 +214,22 @@ test('generateDotEnvContent omits optional feishu fields when undefined', () => 
   assert.doesNotMatch(content, /FEISHU_DOMAIN/);
 });
 
+test('generateDotEnvContent defaults FEISHU_AUTH_MODE=bot and omits redirect URI', () => {
+  const content = generateDotEnvContent(FEISHU_ANSWERS);
+  assert.match(content, /^FEISHU_AUTH_MODE=bot/m);
+  assert.doesNotMatch(content, /FEISHU_REDIRECT_URI/);
+});
+
+test('generateDotEnvContent writes FEISHU_AUTH_MODE=user and redirect URI when user mode', () => {
+  const userMode: InitAnswers = {
+    ...FEISHU_ANSWERS,
+    feishuConfig: { ...FEISHU_ANSWERS.feishuConfig!, authMode: 'user', redirectUri: 'https://app/cb' },
+  };
+  const content = generateDotEnvContent(userMode);
+  assert.match(content, /^FEISHU_AUTH_MODE=user/m);
+  assert.match(content, /^FEISHU_REDIRECT_URI=https:\/\/app\/cb/m);
+});
+
 test('SLACK_APP_MANIFEST is a non-empty JSON string with expected fields', () => {
   const manifest = SLACK_APP_MANIFEST;
   assert.ok(manifest.length > 0, 'manifest should not be empty');

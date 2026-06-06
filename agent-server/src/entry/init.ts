@@ -81,6 +81,10 @@ export interface FeishuInitConfig {
   encryptKey?: string;
   verificationToken?: string;
   domain?: 'feishu' | 'lark';
+  /** Identity for MCP document operations: 'bot' (default) or the operator's 'user' account. */
+  authMode?: 'bot' | 'user';
+  /** OAuth redirect URI (required for user mode; must be registered in the Feishu app console). */
+  redirectUri?: string;
 }
 
 export interface GatewayUsageConfig {
@@ -169,6 +173,11 @@ export function generateDotEnvContent(answers: InitAnswers): string {
       }
       if (answers.feishuConfig.domain) {
         lines.push(`FEISHU_DOMAIN=${answers.feishuConfig.domain}`);
+      }
+      // Identity for MCP doc operations (binary, no fallback). Messaging is always bot.
+      lines.push(`FEISHU_AUTH_MODE=${answers.feishuConfig.authMode ?? 'bot'}`);
+      if (answers.feishuConfig.authMode === 'user' && answers.feishuConfig.redirectUri) {
+        lines.push(`FEISHU_REDIRECT_URI=${answers.feishuConfig.redirectUri}`);
       }
     }
   }
@@ -763,6 +772,12 @@ async function collectFeishuConfig(): Promise<FeishuInitConfig> {
       '3. Get App ID and App Secret from "Credentials & Basic Info"',
       '4. Enable bot events and subscribe to: im.message.receive_v1',
       '5. Publish the app and get it approved by your admin',
+      '',
+      'Identity for MCP document operations (docx/wiki/bitable/sheets/drive):',
+      '  - bot:  documents are created/owned by the app (default).',
+      '  - user: documents are created/owned by YOUR Feishu account. Messaging stays as the bot.',
+      '          For user mode, also register an OAuth redirect URL and grant the offline_access',
+      '          + docx/drive/wiki/bitable/sheets scopes, then run `cortex feishu login` afterward.',
     ].join('\n'),
     'Feishu App Setup Guide',
   );
@@ -806,12 +821,36 @@ async function collectFeishuConfig(): Promise<FeishuInitConfig> {
     ? (domainVal as 'feishu' | 'lark')
     : undefined;
 
+  const authMode = await clack.select({
+    message: 'Identity for MCP document operations:',
+    options: [
+      { value: 'bot' as const, label: 'bot', hint: 'documents owned by the app (default)' },
+      { value: 'user' as const, label: 'user', hint: 'documents owned by your Feishu account' },
+    ],
+    initialValue: 'bot' as const,
+  });
+  handleCancel(authMode);
+
+  let redirectUri: string | undefined;
+  if (authMode === 'user') {
+    const redirectRaw = await clack.text({
+      message: 'FEISHU_REDIRECT_URI (must be registered in the Feishu app console):',
+      validate(value) {
+        if (!value) return 'Redirect URI is required for user mode.';
+      },
+    });
+    handleCancel(redirectRaw);
+    redirectUri = (redirectRaw as string).trim();
+  }
+
   return {
     appId: appId as string,
     appSecret: appSecret as string,
     encryptKey: (encryptKeyRaw as string).trim() || undefined,
     verificationToken: (verificationTokenRaw as string).trim() || undefined,
     domain,
+    authMode: authMode as 'bot' | 'user',
+    redirectUri,
   };
 }
 

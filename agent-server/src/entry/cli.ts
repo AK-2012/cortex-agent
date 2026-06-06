@@ -34,6 +34,7 @@ import {
   runInit,
 } from './init.js';
 import type { ConfigStatus } from './init.js';
+import { cmdFeishu } from './feishu-login.js';
 import { discoverEndpoints, generateGatewayYaml, writeGatewayYaml, dryRunGatewayYaml } from '@core/gateway-generator.js';
 import { generateProfiles, writeProfilesJson } from '@core/profile-generator.js';
 import { CORTEX_VERSION } from '@core/version.js';
@@ -192,6 +193,7 @@ export function getCliHelp(): string {
       { name: 'task', description: 'Task system CLI (delegate to cortex-task)' },
       { name: 'install latest', description: 'Install the latest version of Cortex from npm' },
       { name: 'config', description: 'Show resolved paths and initialization status' },
+      { name: 'feishu', description: 'Manage Feishu user-identity login (login / status / logout)' },
       { name: 'setup-gateway', description: 'Auto-detect Claude/PI configs and generate gateway.yaml + profiles.json' },
       { name: 'tui', description: 'Start the Terminal UI (TUI) client for local interaction' },
     ],
@@ -557,6 +559,9 @@ export async function runCli(argv: string[]): Promise<CliResult> {
 
     case 'config':
       return { exitCode: 0, stdout: getConfigOutput(), stderr: '' };
+
+    case 'feishu':
+      return cmdFeishu(rest);
 
     case 'restart': {
       const trigger = path.join(STORE_DIR, '.restart');

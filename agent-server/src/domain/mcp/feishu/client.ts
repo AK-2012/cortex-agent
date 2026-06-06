@@ -1,9 +1,13 @@
-// input:  @larksuiteoapi/node-sdk, env (FEISHU_APP_ID/SECRET/DOMAIN)
-// output: buildFeishuClient() → lark.Client | null (null when unconfigured)
-// pos:    Shared Feishu OpenAPI client for all feishu_* MCP doc tools
+// input:  @larksuiteoapi/node-sdk, env (FEISHU_APP_ID/SECRET/DOMAIN/AUTH_MODE), user-auth
+// output: buildFeishuClientFromEnv() → lark.Client | null (null when unconfigured);
+//         wrapWithUserToken() to act as a Feishu user (FEISHU_AUTH_MODE=user)
+// pos:    Shared Feishu OpenAPI client for all feishu_* MCP doc tools. In user mode every
+//         leaf API call is auto-tagged with the operator's user_access_token; messaging
+//         (platform/adapters/feishu.ts) is separate and always stays bot/app identity.
 // >>> If I am updated, update my header comment and the parent folder's CORTEX.md <<<
 
 import * as lark from '@larksuiteoapi/node-sdk';
+import { getValidUserAccessToken, type FeishuDomain } from './user-auth.js';
 
 export type LarkClient = lark.Client;
 
@@ -43,17 +47,56 @@ export function createFeishuClient(config: FeishuClientConfig): LarkClient {
 }
 
 /**
+ * Wrap a lark client so EVERY leaf API call (e.g. client.docx.v1.document.create)
+ * is automatically tagged with a freshly-resolved user_access_token via
+ * lark.withUserAccessToken — without editing each of the ~35 tool call sites.
+ *
+ * A recursive Proxy descends the resource tree (returning child proxies for objects)
+ * and, on a method call, resolves the token first then invokes the real method with the
+ * token option appended. The token is fetched per call so refreshes are picked up, and a
+ * failing provider rejects the call (surfaced by guard()) — it never falls back to bot auth.
+ */
+export function wrapWithUserToken(client: LarkClient, getToken: () => Promise<string>): LarkClient {
+  const wrap = (target: any): any =>
+    new Proxy(target, {
+      get(t, prop, receiver) {
+        const value = Reflect.get(t, prop, receiver);
+        if (typeof value === 'function') {
+          return (payload: unknown, options?: { lark?: Record<string | symbol, unknown> }) =>
+            getToken().then((token) => {
+              const tokenOpt = lark.withUserAccessToken(token);
+              const merged = { ...(options ?? {}), lark: { ...(options?.lark ?? {}), ...tokenOpt.lark } };
+              return value.call(t, payload, merged);
+            });
+        }
+        if (value && typeof value === 'object') return wrap(value);
+        return value;
+      },
+    });
+  return wrap(client) as LarkClient;
+}
+
+/**
  * Build a client from environment variables. Returns null when credentials are
  * absent so the server can register tools that fail with a friendly message
  * rather than crashing at startup.
+ *
+ * FEISHU_AUTH_MODE selects identity for document operations (binary, no fallback):
+ *   - 'bot' (default): app/tenant identity (docs owned by the bot).
+ *   - 'user': the operator's Feishu account (docs owned by the user). App credentials are
+ *     still required (used to refresh the user token). A missing/expired user token makes
+ *     doc tools fail with a re-login hint rather than silently reverting to bot identity.
  */
 export function buildFeishuClientFromEnv(env: NodeJS.ProcessEnv = process.env): LarkClient | null {
   const appId = env.FEISHU_APP_ID;
   const appSecret = env.FEISHU_APP_SECRET;
   if (!appId || !appSecret) return null;
-  return createFeishuClient({
-    appId,
-    appSecret,
-    domain: (env.FEISHU_DOMAIN as 'feishu' | 'lark') || undefined,
-  });
+  const domain = (env.FEISHU_DOMAIN as FeishuDomain) || undefined;
+  const client = createFeishuClient({ appId, appSecret, domain });
+  if (env.FEISHU_AUTH_MODE === 'user') {
+    return wrapWithUserToken(client, () =>
+      getValidUserAccessToken({ appId, appSecret, domain }),
+    );
+  }
+  return client;
 }
