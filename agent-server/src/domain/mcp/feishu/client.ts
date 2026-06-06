@@ -13,6 +13,21 @@ export interface FeishuClientConfig {
   domain?: 'feishu' | 'lark';
 }
 
+/**
+ * Logger that routes ALL lark SDK output to stderr. CRITICAL for the cortex-feishu MCP server:
+ * it speaks the MCP JSON-RPC protocol over stdout, but the lark SDK logs via console.log (stdout)
+ * by default. Any SDK info/error log emitted during a tool call (e.g. a Feishu API permission
+ * error) would otherwise interleave with the protocol stream and corrupt the response. Console.error
+ * writes to stderr, which the MCP transport ignores.
+ */
+export const stderrLogger = {
+  error: (...m: unknown[]): void => console.error('[lark:error]', ...m),
+  warn: (...m: unknown[]): void => console.error('[lark:warn]', ...m),
+  info: (...m: unknown[]): void => console.error('[lark:info]', ...m),
+  debug: (...m: unknown[]): void => console.error('[lark:debug]', ...m),
+  trace: (...m: unknown[]): void => console.error('[lark:trace]', ...m),
+};
+
 /** Construct a Feishu OpenAPI client (mirrors FeishuAdapter's constructor). */
 export function createFeishuClient(config: FeishuClientConfig): LarkClient {
   const domain = config.domain === 'lark' ? lark.Domain.Lark : lark.Domain.Feishu;
@@ -21,6 +36,9 @@ export function createFeishuClient(config: FeishuClientConfig): LarkClient {
     appSecret: config.appSecret,
     appType: lark.AppType.SelfBuild,
     domain,
+    // Force SDK logs to stderr — stdout carries the MCP JSON-RPC protocol (see stderrLogger).
+    logger: stderrLogger,
+    loggerLevel: lark.LoggerLevel.warn,
   });
 }
 

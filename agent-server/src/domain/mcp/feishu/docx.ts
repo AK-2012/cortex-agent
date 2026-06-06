@@ -9,6 +9,7 @@ import { markdownToBlocks, type BlockDescriptor } from './markdown-to-blocks.js'
 import { summarizeBlocks } from './blocks-to-text.js';
 import { guard, ok, unwrap, type FeishuToolDeps } from './types.js';
 import { BLOCK_TYPE_KEY } from './block-types.js';
+import { resolveDriveUrl, setLinkShare, type LinkShareLevel } from './drive.js';
 
 const REV = -1; // document_revision_id: -1 = latest
 
@@ -34,17 +35,25 @@ function elementsOf(block: BlockDescriptor): unknown[] {
 export function registerDocxTools(server: McpServer, deps: FeishuToolDeps): void {
   server.tool(
     'feishu_docx_create',
-    'Create a new Feishu cloud document (docx). Returns document_id + url. The doc starts empty — use feishu_docx_append to add markdown content.',
+    'Create a new Feishu cloud document (docx). Returns document_id + the canonical url. By default the doc is link-shared to the tenant (anyone in the org with the link can edit) so a human can open it — without sharing, app-created docs are owned by the bot and invisible in users\' drives. The doc starts empty — use feishu_docx_append to add markdown content.',
     {
       title: z.string().optional().describe('Document title'),
-      folder_token: z.string().optional().describe('Drive folder token to create the doc in (root if omitted)'),
+      folder_token: z.string().optional().describe('Drive folder token to create the doc in (root of the app space if omitted)'),
+      share: z.enum(['tenant_edit', 'tenant_view', 'none']).optional().describe('Link-share level (default tenant_edit). none = keep private to the app (invisible to users).'),
     },
-    async ({ title, folder_token }) =>
+    async ({ title, folder_token, share }) =>
       guard(deps.client, async (client) => {
         const res = await client.docx.v1.document.create({ data: { title, folder_token } } as any);
         const doc = unwrap<{ document?: { document_id?: string; title?: string } }>(res);
         const id = doc.document?.document_id ?? '';
-        return ok({ document_id: id, title: doc.document?.title ?? title, url: docUrl(id) });
+        const level: LinkShareLevel = share ?? 'tenant_edit';
+        let shared = false;
+        if (level !== 'none') {
+          try { shared = await setLinkShare(client, id, 'docx', level); }
+          catch { /* best-effort: doc is already created; report shared:false */ }
+        }
+        const url = (await resolveDriveUrl(client, id, 'docx')) ?? docUrl(id);
+        return ok({ document_id: id, title: doc.document?.title ?? title, url, shared });
       }),
   );
 

@@ -5,7 +5,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { buildFullConfig, buildCoreConfig, buildTuiConfig } from '../../src/core/config-generator.js';
+import { buildFullConfig, buildCoreConfig, buildTuiConfig, buildFeishuConfig } from '../../src/core/config-generator.js';
 
 // ─── buildFullConfig ────────────────────────────────────────────
 
@@ -69,4 +69,24 @@ test('buildTuiConfig points to tui-server.js (absolute path)', () => {
   assert.equal(config.mcpServers['cortex-tui-bridge'].command, 'node');
   assert.deepEqual(config.mcpServers['cortex-tui-bridge'].args, ['/test/dist/domain/mcp/tui-server.js']);
   assert.equal(config.mcpServers['cortex-tui-bridge'].cwd, '/test');
+});
+
+// ─── buildFeishuConfig (Feishu-originated sessions) ─────────────
+
+test('buildFeishuConfig returns only the cortex-feishu server', () => {
+  const config = buildFeishuConfig('/test/server') as any;
+  assert.ok(config.mcpServers);
+  const keys = Object.keys(config.mcpServers);
+  assert.equal(keys.length, 1, 'feishu config must isolate to a single server (layered on top of the base config)');
+  assert.ok(keys.includes('cortex-feishu'));
+  // Must NOT duplicate core/ext — those come from the base config it layers onto.
+  assert.ok(!keys.includes('cortex-core'), 'feishu config must not include cortex-core');
+  assert.ok(!keys.includes('cortex-ext'), 'feishu config must not include cortex-ext');
+});
+
+test('buildFeishuConfig points to feishu-server.js (absolute path)', () => {
+  const config = buildFeishuConfig('/test') as any;
+  assert.equal(config.mcpServers['cortex-feishu'].command, 'node');
+  assert.deepEqual(config.mcpServers['cortex-feishu'].args, ['/test/dist/domain/mcp/feishu-server.js']);
+  assert.equal(config.mcpServers['cortex-feishu'].cwd, '/test');
 });

@@ -62,6 +62,12 @@ Reference implementation: the `freshModuleWithCleanup(t)` helper in `tests/rate-
 | `interaction-handlers.test.ts` | Test | handleModalSubmit -> bus.publish('ask-user.answered') BLK-1 regression |
 | `platform-mock-adapter.test.ts` | Test | MockAdapter 17 method coverage |
 | `output-stream.test.ts` | Test | SlackOutputStream/FeishuOutputStream/MockOutputStream unit tests (46 cases) |
+| `feishu-docx-tools.test.ts` | Test | feishu_docx_* MCP tool handlers (mock lark client, no network) |
+| `feishu-wiki-tools.test.ts` | Test | feishu_wiki_* MCP tool handlers (knowledge-base spaces/nodes) |
+| `feishu-bitable-tools.test.ts` | Test | feishu_bitable_* MCP tool handlers (多维表格 app/table/field/record CRUD) |
+| `feishu-sheets-tools.test.ts` | Test | feishu_sheets_* MCP tool handlers (电子表格 create/read/write/append + raw v2 values requests) |
+| `feishu-drive-tools.test.ts` | Test | resolveDriveUrl/setLinkShare + feishu_drive_set_link_share (canonical URL + tenant link-share) |
+| `feishu-client.test.ts` | Test | stderrLogger routes all lark SDK logs to stderr (MCP stdout protocol safety) |
 | `composite-adapter.test.ts` | Test | CompositeAdapter fan-out routing, interactive-reply isolation, capability merging, extractTuiAdapter, FanOutOutputStream, project-report all-primary fan-out + per-platform DM fallback (18 cases) |
 | `message-router.test.ts` | Test | Message routing branches |
 | `session.test.ts` | Test | session.ts backend:channel CRUD |

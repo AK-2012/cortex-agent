@@ -13,7 +13,7 @@ import {
   SESSION_START_HOOKS,
 } from '../src/agent-adapter/claude/hooks-builder.js';
 import { summarizeToolInput } from '../src/agent-adapter/claude/tool-summarizers.js';
-import { DEFAULT_TOOLS, MCP_CONFIG, CORE_MCP_CONFIG, TUI_TOOLS, TUI_MCP_CONFIG } from '../src/agent-adapter/claude/defaults.js';
+import { DEFAULT_TOOLS, MCP_CONFIG, CORE_MCP_CONFIG, TUI_TOOLS, TUI_MCP_CONFIG, FEISHU_MCP_CONFIG } from '../src/agent-adapter/claude/defaults.js';
 import {
   extractAskUserQuestions,
   setActivePlanFile,
@@ -82,6 +82,60 @@ test('buildSpawnArgs with full options — system-prompt, append, model, agent, 
     '--resume', 'uuid-bbb',
   ];
   assert.deepEqual(args, expected);
+});
+
+// --- buildSpawnArgs: Feishu MCP layering (Feishu-originated sessions) ---
+
+test('buildSpawnArgs loadFeishuMcp — layers cortex-feishu config on top of the full MCP set', () => {
+  const args = buildSpawnArgs({
+    tools: null,
+    systemPrompt: null,
+    appendSystemPrompt: null,
+    model: null,
+    claudeAgent: null,
+    pluginDirs: null,
+    outputStyle: null,
+    needsResume: false,
+    sessionId: 'uuid-feishu',
+    loadFeishuMcp: true,
+  });
+  // --mcp-config is variadic: both the base full config and the feishu config are passed.
+  const i = args.indexOf('--mcp-config');
+  assert.ok(i >= 0, '--mcp-config present');
+  assert.equal(args[i + 1], MCP_CONFIG, 'base full config first');
+  assert.equal(args[i + 2], FEISHU_MCP_CONFIG, 'feishu config layered second');
+});
+
+test('buildSpawnArgs without loadFeishuMcp — does NOT load the cortex-feishu config', () => {
+  const args = buildSpawnArgs({
+    tools: null,
+    systemPrompt: null,
+    appendSystemPrompt: null,
+    model: null,
+    claudeAgent: null,
+    pluginDirs: null,
+    outputStyle: null,
+    needsResume: false,
+    sessionId: 'uuid-noFeishu',
+  });
+  assert.ok(!args.includes(FEISHU_MCP_CONFIG), 'non-feishu session must NOT load the cortex-feishu server');
+});
+
+test('buildSpawnArgs loadFeishuMcp — thread/core session (CORE_MCP_CONFIG) suppresses the feishu layer', () => {
+  const args = buildSpawnArgs({
+    tools: null,
+    systemPrompt: null,
+    appendSystemPrompt: null,
+    model: null,
+    claudeAgent: null,
+    pluginDirs: null,
+    outputStyle: null,
+    needsResume: false,
+    sessionId: 'uuid-feishu-thread',
+    mcpConfigPath: CORE_MCP_CONFIG,
+    loadFeishuMcp: true,
+  });
+  assert.ok(!args.includes(FEISHU_MCP_CONFIG), 'core/thread sessions must stay on the core server set only');
 });
 
 // --- buildSpawnArgs: TUI mode (DR-0012) ---

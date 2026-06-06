@@ -1,6 +1,6 @@
 // input:  PI ExtensionAPI, @modelcontextprotocol/sdk, core-server.ts + server.ts
-// output: Register Cortex MCP tools (core + ext) into the PI tool table and forward calls transparently
-// pos:    PI --extension bridging both Cortex MCP servers
+// output: Register Cortex MCP tools (core + ext, + feishu for Feishu-originated sessions) into the PI tool table and forward calls transparently
+// pos:    PI --extension bridging the Cortex MCP servers
 // >>> If I am updated, update my header comment and the parent folder's CORTEX.md <<<
 
 import type { ExtensionAPI } from './pi-ext-types.js';
@@ -16,10 +16,18 @@ import { fileURLToPath } from 'node:url';
 // eslint-disable-next-line no-undef
 const _dirname: string = (typeof __dirname === 'string' ? __dirname : null) ?? dirname(fileURLToPath(import.meta.url));
 // Once compiled, this file lives at dist/agent-adapter/pi/mcp-bridge.js; sibling MCP servers
-// live at dist/domain/mcp/{core-server,server}.js. Point at the compiled .js so the installed
-// package (which does not ship src/) can locate them.
+// live at dist/domain/mcp/{core-server,server,feishu-server}.js. Point at the compiled .js so the
+// installed package (which does not ship src/) can locate them.
 const CORE_SERVER_PATH = resolve(_dirname, '../../domain/mcp/core-server.js');
 const EXT_SERVER_PATH = resolve(_dirname, '../../domain/mcp/server.js');
+const FEISHU_SERVER_PATH = resolve(_dirname, '../../domain/mcp/feishu-server.js');
+
+/** The cortex-feishu server (Feishu document tools) is loaded only for sessions that originate from
+ *  Feishu. The PI adapter forwards the source channel into the subprocess env as SLACK_CHANNEL; the
+ *  FeishuAdapter tags its conduits with the `feishu:` prefix, so that prefix is the source marker. */
+export function shouldLoadFeishu(channel: string | undefined): boolean {
+  return !!channel && channel.startsWith('feishu:');
+}
 
 // --- Content type mapping ---
 
@@ -83,10 +91,13 @@ async function spawnMcpClient(serverPath: string, serverName: string): Promise<M
 export default async function mcpBridge(pi: ExtensionAPI): Promise<void> {
   let coreHandle: McpClientHandle | null = null;
   let extHandle: McpClientHandle | null = null;
+  let feishuHandle: McpClientHandle | null = null;
   let toolsRegistered = false;
 
+  // The source channel is forwarded by the PI adapter as SLACK_CHANNEL (see pi/adapter.ts spawn env).
+  const loadFeishu = shouldLoadFeishu(process.env.SLACK_CHANNEL);
+
   async function ensureAllConnected(): Promise<void> {
-    if (coreHandle && extHandle) return;
     // Spawn core server (remote_* tools) — always loaded
     if (!coreHandle) {
       coreHandle = await spawnMcpClient(CORE_SERVER_PATH, 'core').catch(() => null);
@@ -94,6 +105,10 @@ export default async function mcpBridge(pi: ExtensionAPI): Promise<void> {
     // Spawn ext server (everything else: Slack, cost, context, schedule)
     if (!extHandle) {
       extHandle = await spawnMcpClient(EXT_SERVER_PATH, 'ext').catch(() => null);
+    }
+    // Spawn feishu server (Feishu document tools) only for Feishu-originated sessions.
+    if (loadFeishu && !feishuHandle) {
+      feishuHandle = await spawnMcpClient(FEISHU_SERVER_PATH, 'feishu').catch(() => null);
     }
   }
 
@@ -145,6 +160,8 @@ export default async function mcpBridge(pi: ExtensionAPI): Promise<void> {
     if (coreHandle) await registerToolsFrom(coreHandle);
     // Register from ext server (Slack, cost, context, schedule)
     if (extHandle) await registerToolsFrom(extHandle);
+    // Register from feishu server (Feishu document tools) — Feishu-originated sessions only
+    if (feishuHandle) await registerToolsFrom(feishuHandle);
 
     toolsRegistered = true;
   });
@@ -152,19 +169,22 @@ export default async function mcpBridge(pi: ExtensionAPI): Promise<void> {
   // Clean up MCP subprocesses when the PI session ends.
   pi.on('session_shutdown', async (_event, _ctx) => {
     toolsRegistered = false;
-    for (const h of [coreHandle, extHandle]) {
+    for (const h of [coreHandle, extHandle, feishuHandle]) {
       if (h) {
         try { await h.transport.close(); } catch { /* best-effort */ }
       }
     }
     coreHandle = null;
     extHandle = null;
+    feishuHandle = null;
   });
 }
 
 // Exported for tests
 export const _test = {
   mapMcpContent,
+  shouldLoadFeishu,
   CORE_SERVER_PATH,
   EXT_SERVER_PATH,
+  FEISHU_SERVER_PATH,
 };

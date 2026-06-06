@@ -42,7 +42,13 @@ function makeMockClient() {
         },
       },
     },
-    drive: { v1: { file: { delete: rec('file.delete', {}) } } },
+    drive: {
+      v1: {
+        file: { delete: rec('file.delete', {}) },
+        meta: { batchQuery: rec('meta.batchQuery', { metas: [{ doc_token: 'doc1', url: 'https://tenant.feishu.cn/docx/doc1' }] }) },
+        permissionPublic: { patch: rec('perm.patch', {}) },
+      },
+    },
   };
   return { client: client as any, calls };
 }
@@ -65,13 +71,29 @@ test('registers all 8 docx tools', () => {
   }
 });
 
-test('create calls document.create and returns id + url', async () => {
+test('create calls document.create, link-shares to tenant, and returns the canonical url', async () => {
   const { tools, calls } = setup();
   const r = await tools.get('feishu_docx_create')!({ title: 'T', folder_token: 'fld' });
   assert.deepEqual(calls['doc.create'].data, { title: 'T', folder_token: 'fld' });
+  // default share = tenant_edit → permissionPublic.patch with tenant_editable
+  assert.deepEqual(calls['perm.patch'].path, { token: 'doc1' });
+  assert.equal(calls['perm.patch'].params.type, 'docx');
+  assert.equal(calls['perm.patch'].data.link_share_entity, 'tenant_editable');
   const out = JSON.parse(r.content[0].text);
   assert.equal(out.document_id, 'doc1');
-  assert.match(out.url, /\/docx\/doc1$/);
+  assert.equal(out.shared, true);
+  // canonical (tenant-subdomain) url from drive.meta, not a hand-built feishu.cn link
+  assert.equal(out.url, 'https://tenant.feishu.cn/docx/doc1');
+});
+
+test('create with share=none skips link-share and falls back to a constructed url', async () => {
+  const { tools, calls } = setup();
+  const r = await tools.get('feishu_docx_create')!({ title: 'T', share: 'none' });
+  assert.equal(calls['perm.patch'], undefined);
+  const out = JSON.parse(r.content[0].text);
+  assert.equal(out.shared, false);
+  // meta still resolves the canonical url
+  assert.equal(out.url, 'https://tenant.feishu.cn/docx/doc1');
 });
 
 test('append converts markdown to blocks and posts under document root', async () => {

@@ -1,6 +1,8 @@
 // input:  MCP SDK, feishu/ tool registration, lark client builder
-// output: cortex-feishu MCP stdio server — Feishu document tools (docx/wiki/bitable/sheets)
-// pos:    Standalone MCP server (peer of core-server.ts & server.ts); direct/main sessions only
+// output: cortex-feishu MCP stdio server — Feishu tools (docx/wiki/bitable/sheets + drive sharing)
+// pos:    Standalone MCP server (peer of core-server.ts & server.ts); loaded only for Feishu-originated
+//         sessions (channel carries the `feishu:` prefix) — Claude via mcp-config-feishu.json layering,
+//         PI via the mcp-bridge feishu handle. Not loaded for thread/core sessions.
 // >>> If I am updated, update my header comment and the parent folder's CORTEX.md <<<
 
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
