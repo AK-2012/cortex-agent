@@ -1,7 +1,9 @@
 // input:  node:test, FeishuAdapter
 // output: Unit tests for FeishuAdapter pure logic (form value normalization,
 //         inbound file extraction, project-report routing, thread reply conduit)
-// pos:    Regression tests for the 6 Feishu adapter bug fixes
+// pos:    Regression tests for Feishu adapter bug fixes, incl. interactive-card
+//         config.update_multi (post-click update persistence) + reply_in_thread
+//         threading (cards land inside the 话题 topic)
 // >>> If I am updated, update my header comment and the parent folder's CORTEX.md <<<
 
 import test from 'node:test';
@@ -284,6 +286,68 @@ test('Feishu buildCardJson: actions render as column_set buttons (no `action` ta
   assert.equal(btn.type, 'danger');
   // Callback payload travels via behaviors (schema 2.0), readable as action.value.
   assert.deepEqual(btn.behaviors, [{ type: 'callback', value: { actionId: 'status_cancel', value: '{}' } }]);
+});
+
+test('Feishu buildCardJson: cards carry config.update_multi so post-interaction updates persist', () => {
+  const a = makeAdapter();
+  const card = a.buildCardJson({ text: 'x', richBlocks: [{ type: 'section', text: 'Q' }] });
+  // Without update_multi the Feishu client rolls a card back to its pre-click state
+  // after a button callback (the "approved then reverts" bug).
+  assert.equal(card.config?.update_multi, true);
+});
+
+test('Feishu postInteractive: standalone card carries config.update_multi', async () => {
+  const a = makeAdapter();
+  let seen: any = null;
+  a.client = {
+    im: { v1: { message: { create: async (payload: any) => { seen = payload; return { data: { message_id: 'om_card' } }; } } } },
+  };
+  const dest: Destination = { type: 'interactive-reply', conduit: 'feishu:oc_chat', sessionId: '' };
+  await a.postInteractive(dest, {
+    text: 'Plan approval',
+    actions: [{ type: 'button', text: 'Approve', actionId: 'hook_plan_approve', value: 'req1' }],
+  });
+  const card = JSON.parse(seen.data.content);
+  assert.equal(card.config?.update_multi, true);
+});
+
+test('Feishu postInteractive: threaded card uses reply_in_thread:true (lands in 话题)', async () => {
+  const a = makeAdapter();
+  let seen: any = null;
+  a.client = {
+    im: { v1: { message: { reply: async (payload: any) => { seen = payload; return { data: { message_id: 'om_reply' } }; } } } },
+  };
+  const dest: Destination = { type: 'interactive-reply', conduit: 'feishu:oc_chat', sessionId: '' };
+  const ref = await a.postInteractive(dest, {
+    text: 'Plan approval',
+    actions: [{ type: 'button', text: 'Approve', actionId: 'hook_plan_approve', value: 'req1' }],
+  }, { threadId: 'om_root' });
+  assert.equal(seen.path.message_id, 'om_root');
+  assert.equal(seen.data.reply_in_thread, true, 'card must collect into the topic, not inline quote');
+  assert.equal(ref.threadId, 'om_root');
+});
+
+test('Feishu postInteractive: threaded card falls back to plain reply when chat rejects threads (230071)', async () => {
+  const a = makeAdapter();
+  const calls: boolean[] = [];
+  a.client = {
+    im: { v1: { message: { reply: async (payload: any) => {
+      calls.push(payload.data.reply_in_thread);
+      if (payload.data.reply_in_thread) {
+        const err: any = new Error('thread not supported');
+        err.response = { data: { code: 230071 } };
+        throw err;
+      }
+      return { data: { message_id: 'om_plain' } };
+    } } } },
+  };
+  const dest: Destination = { type: 'interactive-reply', conduit: 'feishu:oc_chat', sessionId: '' };
+  const ref = await a.postInteractive(dest, {
+    text: 'Plan approval',
+    actions: [{ type: 'button', text: 'Approve', actionId: 'hook_plan_approve', value: 'req1' }],
+  }, { threadId: 'om_root' });
+  assert.deepEqual(calls, [true, false], 'tries thread first, then plain reply');
+  assert.equal(ref.messageId, 'om_plain');
 });
 
 test('Feishu buildMessagePayload: text-only renders as a markdown card (not plain text)', () => {

@@ -87,10 +87,13 @@ export function registerHookBridgeSubscribers(
           actions: planApproval.actions,
         });
       } else {
+        // Fallback path (stream already finalized after the turn): pass threadId
+        // explicitly so the approval card lands inside the conversation topic via
+        // message.reply instead of being posted as a standalone message.
         await adapter.postInteractive(planDest, {
           text: 'Plan approval',
           ...planApproval,
-        });
+        }, { threadId: ev.threadId ?? undefined });
       }
     } catch (e) {
       log.error(`Failed to post plan: ${(e as Error).message}`);

@@ -241,17 +241,37 @@ export class FeishuAdapter implements PlatformAdapter {
         title: { tag: 'plain_text', content: content.text },
       },
       body: { elements },
+      // Shared card: lets server-side PATCH updates (e.g. "Plan approved") persist
+      // for all viewers after a button click. Without this Feishu treats the card as
+      // independent and rolls the UI back to its original state after the callback.
+      config: {
+        update_multi: true,
+      },
     };
 
     const threadId = opts?.threadId;
     if (threadId) {
-      const res = await this.client.im.v1.message.reply({
+      const cardContent = JSON.stringify(cardJson);
+      // reply_in_thread:true collects the card into a real Feishu 话题 thread (matching
+      // postMessage/replyInThread). Without it Feishu posts an inline quoted reply in the
+      // main timeline, so the card never lands inside the topic. Some chats reject thread
+      // replies (230071/230072) — fall back to a plain reply so the card is never lost.
+      const reply = (replyInThread: boolean) => this.client.im.v1.message.reply({
         path: { message_id: threadId },
-        data: {
-          msg_type: 'interactive',
-          content: JSON.stringify(cardJson),
-        },
+        data: { msg_type: 'interactive', content: cardContent, reply_in_thread: replyInThread },
       });
+      let res: any;
+      try {
+        res = await reply(true);
+      } catch (e) {
+        const code = (e as any)?.response?.data?.code;
+        if (code === 230071 || code === 230072) {
+          log.warn(`Feishu chat rejects thread replies (code ${code}); falling back to plain reply`);
+          res = await reply(false);
+        } else {
+          throw e;
+        }
+      }
       const messageId = (res as any)?.data?.message_id || '';
       return { conduit: this._wrap(resolved.channel), messageId, threadId };
     }
@@ -684,6 +704,11 @@ export class FeishuAdapter implements PlatformAdapter {
     return {
       schema: '2.0',
       body: { elements },
+      // Keep cards shareable/updatable so post-interaction PATCH updates persist
+      // instead of being rolled back by the Feishu client.
+      config: {
+        update_multi: true,
+      },
     };
   }
 
