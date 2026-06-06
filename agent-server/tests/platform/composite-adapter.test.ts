@@ -349,6 +349,52 @@ test('CompositeAdapter: system-notice fans out to all real primaries (not TUI)',
   assert.equal(slack.posted[0].destination.type, 'system-notice');
 });
 
+test('CompositeAdapter: project-report targets ALL real primaries (unbound primary falls back to its own DM)', async () => {
+  const slack = prefixAdapter('slack:');
+  const feishu = prefixAdapter('feishu:');
+  const composite = new CompositeAdapter([slack, feishu]);
+
+  // Bind the project ONLY in slack; feishu has no binding for it.
+  await slack.bindProjectConduit('proj-x', 'slack:C1');
+
+  await composite.postMessage(
+    { type: 'project-report', projectId: 'proj-x', trigger: 'test', sessionId: '' },
+    { text: 'report' },
+  );
+
+  // Slack posts to its bound channel; feishu is STILL targeted so it can
+  // independently fall back to its own admin DM (the bound→DM→drop decision
+  // happens inside the real adapter; MockAdapter here just records delivery).
+  assert.equal(slack.posted.length, 1, 'bound slack primary receives the report');
+  assert.equal(feishu.posted.length, 1, 'unbound feishu primary is still targeted for DM fallback');
+});
+
+test('CompositeAdapter: project-report does NOT target TUI gateway when it has no live conduit', async () => {
+  const primary = new MockAdapter({ adminChannel: 'C-admin' });
+  const gateway = new TuiGatewayAdapter({ port: 0, host: '127.0.0.1' });
+  const composite = new CompositeAdapter([primary, gateway]);
+
+  const sentFrames: any[] = [];
+  const mockWs = {
+    send: (data: string) => { sentFrames.push(JSON.parse(data)); },
+    close: () => {},
+    on: () => {},
+  } as unknown as WebSocket;
+  const conn = new TuiConnection('tui-none-1', mockWs, 'general');
+  gateway.connections.set('tui-none-1', conn);
+  // No setConduitState → gateway.getProjectConduits() is empty.
+
+  await composite.postMessage(
+    { type: 'project-report', projectId: 'orphan-proj', trigger: 'test', sessionId: '' },
+    { text: 'report' },
+  );
+
+  // Primary is always targeted (falls back to its admin DM internally);
+  // TUI gateway is NOT, since it has no admin-DM concept and no live conduit.
+  assert.equal(primary.posted.length, 1);
+  assert.equal(sentFrames.length, 0, 'gateway not targeted without a live conduit');
+});
+
 test('CompositeAdapter: downloadFile routes by fileRef.conduit, falls back to first', async () => {
   const slack = prefixAdapter('slack:');
   const feishu = prefixAdapter('feishu:');

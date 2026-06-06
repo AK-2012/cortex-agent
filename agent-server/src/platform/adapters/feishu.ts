@@ -442,11 +442,18 @@ export class FeishuAdapter implements PlatformAdapter {
         // Read bare chat_ids directly from the store (getProjectConduits wraps
         // for external callers; the SDK needs the bare chat_id).
         const channel = await this._getConduitsStore().get(dest.projectId);
-        if (!channel) {
-          log.warn(`No conduit registered for project "${dest.projectId}"; dropping project-report`);
-          return { channel: null, kind: 'project-report-noop' };
+        if (channel) {
+          return { channel, kind: 'project-report' };
         }
-        return { channel, kind: 'project-report' };
+        // Unbound project: fall back to this platform's admin DM so the report
+        // still surfaces here instead of being silently dropped. Each platform
+        // falls back independently (a project bound on another platform but not
+        // this one still reaches this platform's DM).
+        if (this.config.adminChannel) {
+          return { channel: this.config.adminChannel, kind: 'project-report-dm' };
+        }
+        log.warn(`No conduit or admin channel for project "${dest.projectId}"; dropping project-report`);
+        return { channel: null, kind: 'project-report-noop' };
       }
       case 'system-notice':
         if (!this.config.adminChannel) {

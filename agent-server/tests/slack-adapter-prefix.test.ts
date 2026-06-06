@@ -17,6 +17,33 @@ function makeAdapter(): any {
   return a;
 }
 
+// ── resolveDestination: project-report DM fallback ────────────────
+
+test('SlackAdapter.resolveDestination: project-report uses bound conduit', async () => {
+  const a = makeAdapter();
+  a._conduitsStore = { get: async (id: string) => (id === 'proj1' ? 'C_bound' : null) };
+  const r = await a.resolveDestination({ type: 'project-report', projectId: 'proj1', trigger: 't' });
+  assert.deepEqual(r, { channel: 'C_bound', kind: 'project-report' });
+});
+
+test('SlackAdapter.resolveDestination: unbound project-report falls back to admin DM when configured', async () => {
+  const a = makeAdapter();
+  a._conduitsStore = { get: async () => null };
+  a.config.adminChannel = 'C_admin';
+  const r = await a.resolveDestination({ type: 'project-report', projectId: 'missing', trigger: 't' });
+  assert.equal(r.channel, 'C_admin');
+  assert.equal(r.kind, 'project-report-dm');
+});
+
+test('SlackAdapter.resolveDestination: unbound project-report dropped when no admin channel', async () => {
+  const a = makeAdapter();
+  a._conduitsStore = { get: async () => null };
+  // config.adminChannel is undefined (makeAdapter sets only tokens)
+  const r = await a.resolveDestination({ type: 'project-report', projectId: 'missing', trigger: 't' });
+  assert.equal(r.channel, null);
+  assert.equal(r.kind, 'project-report-noop');
+});
+
 // ── ownsConduit ───────────────────────────────────────────────────
 
 test('SlackAdapter.ownsConduit: only matches slack: prefix', () => {

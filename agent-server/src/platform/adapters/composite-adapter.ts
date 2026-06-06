@@ -193,17 +193,20 @@ export class CompositeAdapter implements PlatformAdapter {
     }
   }
 
-  /** Resolve which sub-adapters should receive a project-report. */
-  private async _getTargetAdaptersForProjectReport(projectId: string): Promise<PlatformAdapter[]> {
+  /** Resolve which sub-adapters should receive a project-report.
+   *  Real primaries (Slack/Feishu) are ALWAYS targeted: each self-resolves to
+   *  the bound conduit, or falls back to its own admin DM, or drops internally
+   *  when neither exists. This makes every platform independently fall back to
+   *  its DM for projects it has no binding for. The TUI gateway has no admin-DM
+   *  concept, so it is targeted only when it has at least one live conduit (for
+   *  cross-project notification fan-out). */
+  private async _getTargetAdaptersForProjectReport(_projectId: string): Promise<PlatformAdapter[]> {
     const conduitMaps = await Promise.all(this._adapters.map(a => a.getProjectConduits()));
     const result: PlatformAdapter[] = [];
     this._adapters.forEach((adapter, i) => {
-      const conduits = conduitMaps[i];
-      if (conduits[projectId]) {
-        result.push(adapter);
-      } else if (adapter === this._tui && Object.keys(conduits).length > 0) {
-        // Include TUI for cross-project notification fan-out even when no TUI
-        // conduit matches the target projectId.
+      if (adapter === this._tui) {
+        if (Object.keys(conduitMaps[i]).length > 0) result.push(adapter);
+      } else {
         result.push(adapter);
       }
     });

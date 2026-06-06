@@ -84,9 +84,20 @@ test('Feishu resolveDestination: project-report uses bound conduit', async () =>
   assert.deepEqual(r, { channel: 'oc_bound', kind: 'project-report' });
 });
 
-test('Feishu resolveDestination: unbound project-report is dropped (channel=null)', async () => {
+test('Feishu resolveDestination: unbound project-report falls back to admin DM when configured', async () => {
   const a = makeAdapter();
   a._conduitsStore = { get: async () => null, getAll: async () => ({}) };
+  a.config.adminChannel = 'oc_admin';
+  const dest: Destination = { type: 'project-report', projectId: 'missing', trigger: 't' };
+  const r = await a.resolveDestination(dest);
+  assert.equal(r.channel, 'oc_admin');
+  assert.equal(r.kind, 'project-report-dm');
+});
+
+test('Feishu resolveDestination: unbound project-report dropped when no admin channel', async () => {
+  const a = makeAdapter();
+  a._conduitsStore = { get: async () => null, getAll: async () => ({}) };
+  // config.adminChannel is undefined (makeAdapter sets only appId/appSecret)
   const dest: Destination = { type: 'project-report', projectId: 'missing', trigger: 't' };
   const r = await a.resolveDestination(dest);
   assert.equal(r.channel, null);

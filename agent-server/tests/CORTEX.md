@@ -62,7 +62,7 @@ Reference implementation: the `freshModuleWithCleanup(t)` helper in `tests/rate-
 | `interaction-handlers.test.ts` | Test | handleModalSubmit -> bus.publish('ask-user.answered') BLK-1 regression |
 | `platform-mock-adapter.test.ts` | Test | MockAdapter 17 method coverage |
 | `output-stream.test.ts` | Test | SlackOutputStream/FeishuOutputStream/MockOutputStream unit tests (46 cases) |
-| `composite-adapter.test.ts` | Test | CompositeAdapter fan-out routing, interactive-reply isolation, capability merging, extractTuiAdapter, FanOutOutputStream (16 cases) |
+| `composite-adapter.test.ts` | Test | CompositeAdapter fan-out routing, interactive-reply isolation, capability merging, extractTuiAdapter, FanOutOutputStream, project-report all-primary fan-out + per-platform DM fallback (18 cases) |
 | `message-router.test.ts` | Test | Message routing branches |
 | `session.test.ts` | Test | session.ts backend:channel CRUD |
 | `session-hooks-profile-resolution.test.ts` | Test | resolveOnNewProfileName priority (registry > ledger) — regression for "Invalid signature in thinking block" caused by thread vs user session profile mismatch |
