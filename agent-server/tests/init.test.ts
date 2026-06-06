@@ -110,7 +110,7 @@ const MINIMAL_ANSWERS: InitAnswers = {
   backends: ['claude'],
   machineName: 'test-host',
   gpuCount: 0,
-  platform: 'none',
+  platforms: [],
   gatewayUsage: { enabled: false },
   installService: false,
 };
@@ -119,7 +119,7 @@ const SLACK_ANSWERS: InitAnswers = {
   backends: ['claude'],
   machineName: 'test-host',
   gpuCount: 0,
-  platform: 'slack',
+  platforms: ['slack'],
   slackConfig: {
     botToken: 'xoxb-test-bot-token',
     signingSecret: 'test-signing-secret',
@@ -134,13 +134,32 @@ const FEISHU_ANSWERS: InitAnswers = {
   backends: ['claude'],
   machineName: 'test-host',
   gpuCount: 0,
-  platform: 'feishu',
+  platforms: ['feishu'],
   feishuConfig: {
     appId: 'test-app-id',
     appSecret: 'test-app-secret',
     encryptKey: 'test-encrypt',
     verificationToken: 'test-verify',
     domain: 'feishu',
+  },
+  gatewayUsage: { enabled: false },
+  installService: false,
+};
+
+const MULTI_ANSWERS: InitAnswers = {
+  backends: ['claude'],
+  machineName: 'test-host',
+  gpuCount: 0,
+  platforms: ['slack', 'feishu'],
+  slackConfig: {
+    botToken: 'xoxb-test-bot-token',
+    signingSecret: 'test-signing-secret',
+    appToken: 'xapp-test-app-token',
+    adminChannel: 'D0TEST',
+  },
+  feishuConfig: {
+    appId: 'test-app-id',
+    appSecret: 'test-app-secret',
   },
   gatewayUsage: { enabled: false },
   installService: false,
@@ -202,7 +221,7 @@ test('generateDotEnvContent includes CORTEX_PLATFORM=feishu and tokens', () => {
 test('generateDotEnvContent omits optional feishu fields when undefined', () => {
   const minimalFeishu: InitAnswers = {
     ...MINIMAL_ANSWERS,
-    platform: 'feishu',
+    platforms: ['feishu'],
     feishuConfig: { appId: 'id', appSecret: 'sec' },
   };
   const content = generateDotEnvContent(minimalFeishu);
@@ -228,6 +247,20 @@ test('generateDotEnvContent writes FEISHU_AUTH_MODE=user and redirect URI when u
   const content = generateDotEnvContent(userMode);
   assert.match(content, /^FEISHU_AUTH_MODE=user/m);
   assert.match(content, /^FEISHU_REDIRECT_URI=https:\/\/app\/cb/m);
+});
+
+test('generateDotEnvContent writes comma-joined CORTEX_PLATFORM and both platforms for multi-select', () => {
+  const content = generateDotEnvContent(MULTI_ANSWERS);
+  assert.match(content, /^CORTEX_PLATFORM=slack,feishu/m);
+  // Slack block
+  assert.match(content, /^SLACK_BOT_TOKEN=xoxb-test-bot-token/m);
+  assert.match(content, /^SLACK_SIGNING_SECRET=test-signing-secret/m);
+  assert.match(content, /^SLACK_APP_TOKEN=xapp-test-app-token/m);
+  assert.match(content, /^CORTEX_ADMIN_CHANNEL=D0TEST/m);
+  // Feishu block
+  assert.match(content, /^FEISHU_APP_ID=test-app-id/m);
+  assert.match(content, /^FEISHU_APP_SECRET=test-app-secret/m);
+  assert.match(content, /^FEISHU_AUTH_MODE=bot/m);
 });
 
 test('SLACK_APP_MANIFEST is a non-empty JSON string with expected fields', () => {

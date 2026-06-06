@@ -1,8 +1,9 @@
 // input:  @clack/prompts, fs, path, os, yaml, @core/config-generator
 // output: runInit — interactive CORTEX_HOME initialization
-// pos:    cortex init subcommand — backend selection & install, gateway usage opt-in,
-//         creates directory structure, generates .env, copies default configs,
-//         auto-generates mcp-config.json and mode.json
+// pos:    cortex init subcommand — backend selection & install, multi-select interaction
+//         platforms (Slack/Feishu, walked one-by-one), gateway usage opt-in,
+//         creates directory structure, generates .env (CORTEX_PLATFORM as a comma list),
+//         copies default configs, auto-generates mcp-config.json and mode.json
 //
 // INSTALL_ROOT is computed from import.meta.url (agent-server dir, 2 levels up from dist/entry/).
 // DATA_DIR is resolved via the --home arg, $CORTEX_HOME env, or ~/.cortex/ default.
@@ -66,7 +67,10 @@ export function getResolvedPaths(homeDir?: string): InitPaths {
 // ─── Types ──────────────────────────────────────────────────────
 
 export type InitBackend = 'claude' | 'pi';
-export type InitPlatform = 'slack' | 'feishu' | 'none';
+/** A single selectable interaction platform. */
+export type PlatformChoice = 'slack' | 'feishu';
+/** @deprecated single-platform alias kept for back-compat; use PlatformChoice[]. */
+export type InitPlatform = PlatformChoice | 'none';
 
 export interface SlackInitConfig {
   botToken: string;
@@ -98,7 +102,8 @@ export interface InitAnswers {
   backends: InitBackend[];
   machineName: string;
   gpuCount: number;
-  platform: InitPlatform;
+  /** Selected interaction platforms (multi-select). Empty array = no platform (manual/skip). */
+  platforms: PlatformChoice[];
   slackConfig?: SlackInitConfig;
   feishuConfig?: FeishuInitConfig;
   gatewayUsage: GatewayUsageConfig;
@@ -149,11 +154,14 @@ export function generateDotEnvContent(answers: InitAnswers): string {
     `CORTEX_MACHINE=${answers.machineName}`,
   ];
 
-  if (answers.platform && answers.platform !== 'none') {
-    lines.push(`CORTEX_PLATFORM=${answers.platform}`);
+  // CORTEX_PLATFORM is a comma-separated list (runtime composes adapters via CompositeAdapter).
+  // Each platform's token block is emitted independently when its config is present, so a
+  // multi-select (e.g. slack + feishu) produces both blocks.
+  if (answers.platforms.length > 0) {
+    lines.push(`CORTEX_PLATFORM=${answers.platforms.join(',')}`);
     lines.push('');
 
-    if (answers.platform === 'slack' && answers.slackConfig) {
+    if (answers.slackConfig) {
       lines.push('# Slack configuration');
       lines.push(`SLACK_BOT_TOKEN=${answers.slackConfig.botToken}`);
       lines.push(`SLACK_SIGNING_SECRET=${answers.slackConfig.signingSecret}`);
@@ -161,7 +169,10 @@ export function generateDotEnvContent(answers: InitAnswers): string {
       if (answers.slackConfig.adminChannel) {
         lines.push(`CORTEX_ADMIN_CHANNEL=${answers.slackConfig.adminChannel}`);
       }
-    } else if (answers.platform === 'feishu' && answers.feishuConfig) {
+      lines.push('');
+    }
+
+    if (answers.feishuConfig) {
       lines.push('# Feishu configuration');
       lines.push(`FEISHU_APP_ID=${answers.feishuConfig.appId}`);
       lines.push(`FEISHU_APP_SECRET=${answers.feishuConfig.appSecret}`);
@@ -872,25 +883,30 @@ async function collectAnswersInteractive(paths: InitPaths): Promise<InitAnswers>
   });
   handleCancel(backends);
 
-  // Step 2: Platform selection
-  const platform = await clack.select({
-    message: 'Which interaction platform would you like to use?',
+  // Step 2: Platform selection (multi-select — Slack and Feishu can run simultaneously).
+  // Leave empty to skip and configure platforms later by editing .env manually.
+  const platformsSel = await clack.multiselect({
+    message: 'Which interaction platform(s) would you like to use? (space to toggle, enter to confirm, leave empty to skip)',
     options: [
-      { value: 'slack' as InitPlatform, label: 'Slack', hint: 'recommended' },
-      { value: 'none' as InitPlatform, label: 'Skip — configure later manually' },
+      { value: 'slack' as PlatformChoice, label: 'Slack', hint: 'recommended' },
+      { value: 'feishu' as PlatformChoice, label: 'Feishu (飞书)' },
     ],
+    required: false,
   });
-  handleCancel(platform);
+  handleCancel(platformsSel);
+  const platforms = platformsSel as PlatformChoice[];
 
-  // Step 2b: Platform-specific token input
+  // Step 2b: Platform-specific setup & token input — walk each selected platform in turn,
+  // showing its creation guide and collecting its credentials one at a time.
   let slackConfig: SlackInitConfig | undefined;
   let feishuConfig: FeishuInitConfig | undefined;
 
-  if (platform === 'slack') {
+  if (platforms.includes('slack')) {
     const envPath = path.join(paths.CONFIG_DIR, '.env');
     const existingSlackConfig = parseExistingEnvSlackConfig(envPath);
     slackConfig = await collectSlackConfig(existingSlackConfig ?? undefined);
-  } else if (platform === 'feishu') {
+  }
+  if (platforms.includes('feishu')) {
     feishuConfig = await collectFeishuConfig();
   }
 
@@ -965,7 +981,7 @@ async function collectAnswersInteractive(paths: InitPaths): Promise<InitAnswers>
     backends: backends as InitBackend[],
     machineName: machineName as string,
     gpuCount,
-    platform: platform as InitPlatform,
+    platforms,
     slackConfig,
     feishuConfig,
     gatewayUsage,
@@ -984,7 +1000,8 @@ async function collectAnswersNonInteractive(): Promise<InitAnswers> {
 
   // Line format:
   //   backends, platform, gatewayEnabled, name, org, email, installService
-  //   [+ platform-specific tokens: signingSecret, appToken, botToken, adminChannel (slack)]
+  //   [+ platform-specific token blocks, concatenated in fixed order: slack first, then feishu]
+  // `platform` is a comma-separated list (e.g. "slack,feishu"); single values are back-compat.
   const [backendsRaw, platformRaw, gatewayEnabledRaw, name, org, email, installServiceRaw] = lines;
 
   const backends = (backendsRaw || 'claude')
@@ -992,45 +1009,53 @@ async function collectAnswersNonInteractive(): Promise<InitAnswers> {
     .map(s => s.trim())
     .filter((s): s is InitBackend => s === 'claude' || s === 'pi');
 
-  const platform: InitPlatform = (platformRaw && ['slack', 'feishu'].includes(platformRaw))
-    ? platformRaw as InitPlatform
-    : 'none';
+  // Parse the platform list, keeping valid values in order and de-duplicating.
+  const platforms: PlatformChoice[] = [];
+  const seenPlatforms = new Set<string>();
+  for (const raw of (platformRaw || '').split(',')) {
+    const p = raw.trim().toLowerCase();
+    if ((p === 'slack' || p === 'feishu') && !seenPlatforms.has(p)) {
+      seenPlatforms.add(p);
+      platforms.push(p);
+    }
+  }
 
   const gatewayEnabled = gatewayEnabledRaw?.toLowerCase() === 'y';
 
   log.info('Cortex Initialization (non-interactive)');
 
-  // Parse platform-specific tokens from remaining lines (starting at index 7).
-  // After platform tokens, optional planChoice and executeChoice lines (format "mode:model";
-  // empty string → auto-infer). Index varies by platform:
-  //   none   → planChoice at 7, executeChoice at 8
-  //   slack  → planChoice at 11, executeChoice at 12
-  //   feishu → planChoice at 12, executeChoice at 13
+  // Parse platform token blocks from remaining lines (starting at index 7). Blocks are
+  // concatenated in fixed order — slack (4 lines), then feishu (5 lines) — regardless of the
+  // order given in the platform list. The profile-choice lines (optional "mode:model"; empty
+  // → auto-infer) follow whatever token lines were consumed. Single-platform layouts are
+  // back-compatible: slack-only → choices at 11; feishu-only → choices at 12.
   let slackConfig: SlackInitConfig | undefined;
   let feishuConfig: FeishuInitConfig | undefined;
-  let profileChoiceStart = 7;
+  let cursor = 7;
 
-  if (platform === 'slack' && lines.length >= 11) {
+  if (platforms.includes('slack') && lines.length >= cursor + 4) {
     slackConfig = {
-      signingSecret: lines[7] || '',
-      appToken: lines[8] || '',
-      botToken: lines[9] || '',
-      adminChannel: lines[10]?.trim() || undefined,
+      signingSecret: lines[cursor] || '',
+      appToken: lines[cursor + 1] || '',
+      botToken: lines[cursor + 2] || '',
+      adminChannel: lines[cursor + 3]?.trim() || undefined,
     };
-    profileChoiceStart = 11;
-  } else if (platform === 'feishu' && lines.length >= 12) {
-    const domainVal = (lines[11] || '').trim().toLowerCase();
+    cursor += 4;
+  }
+  if (platforms.includes('feishu') && lines.length >= cursor + 5) {
+    const domainVal = (lines[cursor + 4] || '').trim().toLowerCase();
     feishuConfig = {
-      appId: lines[7] || '',
-      appSecret: lines[8] || '',
-      encryptKey: lines[9]?.trim() || undefined,
-      verificationToken: lines[10]?.trim() || undefined,
+      appId: lines[cursor] || '',
+      appSecret: lines[cursor + 1] || '',
+      encryptKey: lines[cursor + 2]?.trim() || undefined,
+      verificationToken: lines[cursor + 3]?.trim() || undefined,
       domain: (domainVal === 'feishu' || domainVal === 'lark')
         ? (domainVal as 'feishu' | 'lark')
         : undefined,
     };
-    profileChoiceStart = 12;
+    cursor += 5;
   }
+  const profileChoiceStart = cursor;
 
   const planChoice = parseChoiceLine(lines[profileChoiceStart]);
   const executeChoice = parseChoiceLine(lines[profileChoiceStart + 1]);
@@ -1040,7 +1065,7 @@ async function collectAnswersNonInteractive(): Promise<InitAnswers> {
     backends: backends.length > 0 ? backends : ['claude'],
     machineName: os.hostname(),
     gpuCount: detectGpuCount(),
-    platform,
+    platforms,
     slackConfig,
     feishuConfig,
     gatewayUsage: gatewayEnabled
