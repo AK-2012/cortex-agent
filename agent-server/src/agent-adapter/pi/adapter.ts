@@ -369,19 +369,27 @@ class PISession {
           if (this.turnIdleTimer) { clearTimeout(this.turnIdleTimer); this.turnIdleTimer = null; }
           const t = this.pendingTurn;
           this.pendingTurn = null;
-          const result: AgentResult = {
-            sessionId: this.sessionId,
-            total_cost_usd: evt.totalCostUsd,
-            num_turns: evt.numTurns,
-            rateLimited: t.rateLimited,
-            rateLimitMessage: null,
-            planFilePath: t.planFilePath,
-            enteredPlanMode: false,
-            exitedPlanMode: t.planFilePath !== null,
-            askUserQuestions: t.askUserQuestions.length > 0 ? t.askUserQuestions : undefined,
-            finalOutput: null,
-          };
-          t.resolve(result);
+          if (evt.error) {
+            // Turn-level error (e.g. gateway "400 Unknown mode") — fail the turn so the lifecycle
+            // shows ❌ Error and posts the message, matching the Claude adapter's is_error path.
+            // Fall through (no continue) so turn_complete is still pushed to this.events and the
+            // facade event loop terminates cleanly, exactly like the fatal-error branch below.
+            t.reject(new Error(evt.error));
+          } else {
+            const result: AgentResult = {
+              sessionId: this.sessionId,
+              total_cost_usd: evt.totalCostUsd,
+              num_turns: evt.numTurns,
+              rateLimited: t.rateLimited,
+              rateLimitMessage: null,
+              planFilePath: t.planFilePath,
+              enteredPlanMode: false,
+              exitedPlanMode: t.planFilePath !== null,
+              askUserQuestions: t.askUserQuestions.length > 0 ? t.askUserQuestions : undefined,
+              finalOutput: null,
+            };
+            t.resolve(result);
+          }
         } else if (evt.type === 'error' && evt.fatal) {
           this.flushTextBuffer();
           if (this.turnIdleTimer) { clearTimeout(this.turnIdleTimer); this.turnIdleTimer = null; }

@@ -5,10 +5,22 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
+import * as fs from 'node:fs';
+import * as os from 'node:os';
+import * as nodePath from 'node:path';
+import { parse as yamlParse } from 'yaml';
+
 import {
   parsePiListModelsOutput,
   generateGatewayYaml,
+  readGatewayYaml,
+  discoveredToEndpointMap,
+  mergeGatewayConfig,
+  serializeGatewayYaml,
+  validateProfilesAgainstGateway,
   type DiscoveredEndpoint,
+  type ParsedGateway,
+  type EndpointMap,
 } from '../../src/core/gateway-generator.js';
 
 // ─── parsePiListModelsOutput ───────────────────────────────────
@@ -185,4 +197,202 @@ test('generateGatewayYaml: renders multi PI providers in separate sections', () 
   assert.match(yamlContent, /^anthropic:/m);
   assert.match(yamlContent, /^deepseek:/m);
   assert.match(yamlContent, /^openai-codex:/m);
+});
+
+// ─── readGatewayYaml ───────────────────────────────────────────
+
+function tmpDir(): string {
+  return fs.mkdtempSync(nodePath.join(os.tmpdir(), 'gw-test-'));
+}
+
+test('readGatewayYaml: returns null for missing file', () => {
+  assert.equal(readGatewayYaml(nodePath.join(tmpDir(), 'nope.yaml')), null);
+});
+
+test('readGatewayYaml: parses nested endpoint→mode tree + reserved top keys', () => {
+  const dir = tmpDir();
+  const p = nodePath.join(dir, 'gateway.yaml');
+  fs.writeFileSync(p, [
+    'port: 9880',
+    'mode: plan',
+    'status_check: true',
+    'anthropic:',
+    '  plan:',
+    '    base_url: https://api.anthropic.com',
+    '    auth_style: bearer',
+    '  qwen-ksu:',
+    '    base_url: http://127.0.0.1:8100',
+    '    auth_style: anthropic',
+    '    keys:',
+    '      - dummy',
+    'deepseek:',
+    '  deepseek:',
+    '    base_url: https://relay.example/',
+    '    auth_style: openai',
+  ].join('\n'));
+  const parsed = readGatewayYaml(p)!;
+  assert.equal(parsed.top.port, 9880);
+  assert.equal(parsed.top.mode, 'plan');
+  assert.equal(parsed.endpoints.anthropic.plan.base_url, 'https://api.anthropic.com');
+  assert.deepEqual(parsed.endpoints.anthropic['qwen-ksu'].keys, ['dummy']);
+  assert.equal(parsed.endpoints.deepseek.deepseek.auth_style, 'openai');
+});
+
+test('readGatewayYaml: flat endpoint maps to synthetic default mode', () => {
+  const dir = tmpDir();
+  const p = nodePath.join(dir, 'gateway.yaml');
+  fs.writeFileSync(p, ['port: 9880', 'mode: api', 'myep:', '  base_url: https://x.test', '  auth_style: bearer'].join('\n'));
+  const parsed = readGatewayYaml(p)!;
+  assert.equal(parsed.endpoints.myep.default.base_url, 'https://x.test');
+});
+
+test('readGatewayYaml: returns null on malformed YAML', () => {
+  const dir = tmpDir();
+  const p = nodePath.join(dir, 'gateway.yaml');
+  fs.writeFileSync(p, 'a:\n  b: c\n :::not yaml:::\n  - [');
+  assert.equal(readGatewayYaml(p), null);
+});
+
+// ─── mergeGatewayConfig ─────────────────────────────────────────
+
+function existingWithCustoms(): ParsedGateway {
+  return {
+    top: { port: 9880, mode: 'plan', status_check: true },
+    endpoints: {
+      anthropic: {
+        plan: { base_url: 'https://OLD.anthropic', auth_style: 'bearer' },
+        anthropic: { base_url: 'https://relay.example/anthropic', auth_style: 'anthropic', keys: ['sk-relay'] },
+        'qwen-ksu': { base_url: 'http://127.0.0.1:8100', auth_style: 'anthropic', keys: ['dummy'] },
+      },
+      deepseek: {
+        deepseek: { base_url: 'https://relay.example/', auth_style: 'openai', keys: ['sk-relay'] },
+      },
+    },
+  };
+}
+
+test('mergeGatewayConfig: add-only — preserves existing pairs (incl. customized discovered providers) and adds new ones', () => {
+  const discovered = [
+    // existing pair: must NOT clobber the user's relay URL/key even though discovery reports canonical upstream
+    ep({ mode: 'deepseek', endpoint: 'deepseek', base_url: 'https://api.deepseek.com', auth_style: 'bearer' }),
+    // existing pair: plan must stay as the user's existing value (add-only never overwrites)
+    ep({ mode: 'plan', endpoint: 'anthropic', base_url: 'https://api.anthropic.com', auth_style: 'bearer' }),
+    // brand-new pair: should be added
+    ep({ mode: 'openai', endpoint: 'openai', base_url: 'https://api.openai.com/v1', auth_style: 'bearer' }),
+  ];
+  const result = mergeGatewayConfig(discovered, existingWithCustoms());
+
+  // existing customized deepseek route preserved verbatim — relay URL + secret key intact
+  assert.equal(result.endpoints.deepseek.deepseek.base_url, 'https://relay.example/');
+  assert.deepEqual(result.endpoints.deepseek.deepseek.keys, ['sk-relay']);
+  // existing plan preserved (not overwritten by discovery)
+  assert.equal(result.endpoints.anthropic.plan.base_url, 'https://OLD.anthropic');
+  // hand-added customs preserved
+  assert.deepEqual(result.endpoints.anthropic.anthropic.keys, ['sk-relay']);
+  assert.deepEqual(result.endpoints.anthropic['qwen-ksu'].keys, ['dummy']);
+  // brand-new discovered pair added
+  assert.equal(result.endpoints.openai.openai.base_url, 'https://api.openai.com/v1');
+
+  // droppedFromDiscovery flags existing modes NOT in this discovery (relay anthropic + qwen-ksu),
+  // but NOT deepseek (rediscovered) and NOT anthropic/plan (claude builtin).
+  const dropped = result.droppedFromDiscovery.map((d) => `${d.mode}/${d.endpoint}`).sort();
+  assert.deepEqual(dropped, ['anthropic/anthropic', 'qwen-ksu/anthropic']);
+});
+
+test('mergeGatewayConfig: empty discovery keeps all previous PI modes (transient pi failure)', () => {
+  const result = mergeGatewayConfig([], existingWithCustoms());
+  assert.ok(result.endpoints.deepseek.deepseek, 'deepseek survived empty discovery');
+  assert.ok(result.endpoints.anthropic['qwen-ksu'], 'qwen-ksu survived empty discovery');
+});
+
+test('mergeGatewayConfig: existing=null equals pure discovery map', () => {
+  const discovered = [
+    ep({ mode: 'plan', endpoint: 'anthropic', base_url: 'https://api.anthropic.com' }),
+    ep({ mode: 'deepseek', endpoint: 'deepseek', base_url: 'https://api.deepseek.com' }),
+  ];
+  const result = mergeGatewayConfig(discovered, null);
+  assert.deepEqual(result.endpoints, discoveredToEndpointMap(discovered));
+  assert.equal(result.droppedFromDiscovery.length, 0);
+});
+
+test('mergeGatewayConfig: keeps existing-still-valid active mode', () => {
+  const result = mergeGatewayConfig(
+    [ep({ mode: 'plan', endpoint: 'anthropic' })],
+    { top: { mode: 'api', port: 9880, status_check: true }, endpoints: { anthropic: { api: { base_url: 'x', auth_style: 'anthropic' } } } },
+  );
+  assert.equal(result.top.mode, 'api');
+});
+
+// ─── serializeGatewayYaml round-trip ────────────────────────────
+
+test('serializeGatewayYaml: round-trips custom + discovered through yaml.parse', () => {
+  const result = mergeGatewayConfig(
+    [ep({ mode: 'openai', endpoint: 'openai', base_url: 'https://api.openai.com/v1' })],
+    existingWithCustoms(),
+  );
+  const text = serializeGatewayYaml(result);
+  const reparsed: any = yamlParse(text);
+  assert.equal(reparsed.port, 9880);
+  assert.equal(reparsed.anthropic.plan.base_url, 'https://OLD.anthropic'); // preserved (add-only)
+  assert.equal(reparsed.anthropic.anthropic.keys[0], 'sk-relay');
+  assert.equal(reparsed.deepseek.deepseek.auth_style, 'openai');
+  assert.equal(reparsed.openai.openai.base_url, 'https://api.openai.com/v1'); // added
+});
+
+test('serializeGatewayYaml: flat (default) mode re-serializes flat', () => {
+  const result = mergeGatewayConfig([], { top: { port: 9880, mode: 'default', status_check: true }, endpoints: { myep: { default: { base_url: 'https://x.test', auth_style: 'bearer' } } } });
+  const reparsed: any = yamlParse(serializeGatewayYaml(result));
+  assert.equal(reparsed.myep.base_url, 'https://x.test');
+  assert.equal(reparsed.myep.default, undefined);
+});
+
+// ─── validateProfilesAgainstGateway ─────────────────────────────
+
+function writeProfiles(dir: string, profiles: unknown): void {
+  fs.writeFileSync(nodePath.join(dir, 'profiles.json'), JSON.stringify({ defaultProfile: 'plan', profiles }, null, 2));
+}
+
+const GW: EndpointMap = {
+  anthropic: { plan: { base_url: 'x', auth_style: 'bearer' }, anthropic: { base_url: 'x', auth_style: 'anthropic' } },
+  deepseek: { deepseek: { base_url: 'x', auth_style: 'openai' } },
+};
+
+test('validateProfilesAgainstGateway: flags pi profile with missing gateway mode', () => {
+  const dir = tmpDir();
+  writeProfiles(dir, {
+    plan: { model: 'm', backend: 'claude', mode: 'plan' },
+    'deepseek-flash': { model: 'm', backend: 'pi', mode: 'qwen-ksu', provider: 'deepseek' },
+  });
+  const issues = validateProfilesAgainstGateway(GW, dir);
+  assert.equal(issues.length, 1);
+  assert.equal(issues[0].profile, 'deepseek-flash');
+  assert.match(issues[0].reason, /qwen-ksu/);
+});
+
+test('validateProfilesAgainstGateway: passes when all modes exist', () => {
+  const dir = tmpDir();
+  writeProfiles(dir, {
+    plan: { model: 'm', backend: 'claude', mode: 'plan' },
+    'deepseek-flash': { model: 'm', backend: 'pi', mode: 'deepseek', provider: 'deepseek' },
+    execute: { model: 'm', backend: 'pi', mode: 'anthropic', provider: 'anthropic' },
+  });
+  assert.deepEqual(validateProfilesAgainstGateway(GW, dir), []);
+});
+
+test('validateProfilesAgainstGateway: checks fallback entries too', () => {
+  const dir = tmpDir();
+  writeProfiles(dir, {
+    codex: { model: 'm', backend: 'codex', mode: 'plan', fallback: [{ model: 'm', backend: 'pi', mode: 'nope', provider: 'deepseek' }] },
+  });
+  const issues = validateProfilesAgainstGateway(GW, dir);
+  assert.equal(issues.length, 1);
+  assert.match(issues[0].profile, /fallback/);
+});
+
+test('validateProfilesAgainstGateway: regression — deepseek survives empty discovery then validates', () => {
+  const dir = tmpDir();
+  // existing gateway had deepseek; discovery returns empty → merge keeps it
+  const merged = mergeGatewayConfig([], { top: { mode: 'plan', port: 9880, status_check: true }, endpoints: { deepseek: { deepseek: { base_url: 'x', auth_style: 'openai' } } } });
+  writeProfiles(dir, { 'deepseek-flash': { model: 'm', backend: 'pi', mode: 'deepseek', provider: 'deepseek' } });
+  assert.deepEqual(validateProfilesAgainstGateway(merged.endpoints, dir), []);
 });

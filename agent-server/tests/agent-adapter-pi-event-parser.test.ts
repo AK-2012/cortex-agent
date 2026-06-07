@@ -483,6 +483,38 @@ test('turn_complete: agent_end no messages field', () => {
   assert.deepEqual(events[0], { type: 'turn_complete', numTurns: 0, totalCostUsd: null });
 });
 
+test('turn_complete: assistant stopReason "error" surfaces errorMessage on turn_complete', () => {
+  const state = freshState();
+  const events = piRpcLineToNormalized(
+    line({ type: 'agent_end', messages: [
+      { role: 'assistant', provider: 'deepseek', model: 'deepseek-v4-flash', stopReason: 'error', errorMessage: '400 Unknown mode: deepseek' },
+    ] }),
+    state,
+  );
+  const tc = events.find((e) => e.type === 'turn_complete') as any;
+  assert.ok(tc, 'turn_complete emitted');
+  assert.equal(tc.error, '400 Unknown mode: deepseek');
+});
+
+test('turn_complete: stopReason "error" without errorMessage falls back to generic message', () => {
+  const state = freshState();
+  const events = piRpcLineToNormalized(
+    line({ type: 'agent_end', messages: [{ role: 'assistant', stopReason: 'error' }] }),
+    state,
+  );
+  const tc = events.find((e) => e.type === 'turn_complete') as any;
+  assert.equal(tc.error, 'PI agent reported an error during execution');
+});
+
+test('turn_complete: successful turn has no error field', () => {
+  const state = freshState();
+  const events = piRpcLineToNormalized(
+    line({ type: 'agent_end', messages: [{ role: 'assistant', usage: { cost: { total: 0.01 } } }] }),
+    state,
+  );
+  assert.deepEqual(events[0], { type: 'turn_complete', numTurns: 1, totalCostUsd: 0.01 });
+});
+
 // ---------------------------------------------------------------------------
 // 8b. cost_record — agent_end with provider/model (task 1e0b)
 // ---------------------------------------------------------------------------

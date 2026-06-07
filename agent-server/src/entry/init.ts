@@ -19,7 +19,7 @@ import { stdin as processStdin } from 'process';
 import * as clack from '@clack/prompts';
 import * as yaml from 'yaml';
 import { buildFullConfig, buildCoreConfig, buildTuiConfig } from '@core/config-generator.js';
-import { discoverEndpoints, generateGatewayYaml, writeGatewayYaml, dryRunGatewayYaml } from '@core/gateway-generator.js';
+import { discoverEndpoints, writeMergedGatewayYaml, validateProfilesAgainstGateway } from '@core/gateway-generator.js';
 import { generateProfiles, mergeProfilesJson, writeProfilesJson, listChoices } from '@core/profile-generator.js';
 import { mergeThreadTemplates } from '@domain/threads/index.js';
 import type { ModelChoice } from '@core/profile-generator.js';
@@ -1519,10 +1519,16 @@ async function runGatewaySetup(
   clack.log.success(`Discovered ${endpoints.length} endpoint modes:\n${summary}`);
 
   // Generate gateway.yaml — scoped to gatewayConfigDir when provided (test/alt env),
-  // otherwise defaults to ~/.aistatus/gateway.yaml (production).
-  const yamlContent = generateGatewayYaml(endpoints);
-  const gatewayPath = writeGatewayYaml(yamlContent, gatewayConfigDir);
+  // otherwise defaults to ~/.aistatus/gateway.yaml (production). Merge-aware: preserves
+  // hand-maintained modes/keys and never drops previously-configured modes if discovery
+  // under-reports (e.g. a transient `pi --list-models` failure).
+  const { path: gatewayPath, result: mergeResult } = writeMergedGatewayYaml(endpoints, gatewayConfigDir);
   clack.log.success(`Gateway config written to ${gatewayPath}`);
+  if (mergeResult.droppedFromDiscovery.length > 0) {
+    const list = mergeResult.droppedFromDiscovery.map(p => `${p.mode}/${p.endpoint}`).join(', ');
+    clack.log.warn(`Preserved ${mergeResult.droppedFromDiscovery.length} existing gateway mode(s) that discovery did not report: ${list}`);
+    clack.log.info('If these should have been auto-detected, check `pi /login` / `pi --list-models` and re-run.');
+  }
 
   // Resolve plan/execute choices + fallback chains + extra profiles + overwrite intent.
   let planChoice = answers?.planChoice;
@@ -1564,6 +1570,15 @@ async function runGatewaySetup(
   const profiles = generateProfiles(endpoints, { planChoice, executeChoice, planFallback, executeFallback, extraProfiles });
   const profileNames = Object.keys(profiles.profiles).join(', ');
   clack.log.info(`Generated profiles: ${profileNames} (default: ${profiles.defaultProfile})`);
+
+  // Validate profile ↔ gateway mode coupling. A profile referencing a non-existent gateway mode is
+  // exactly what produces a silent `400 Unknown mode: <x>` at runtime. Non-fatal — warn only.
+  const issues = validateProfilesAgainstGateway(mergeResult.endpoints, paths.CONFIG_DIR);
+  if (issues.length > 0) {
+    const lines = issues.map(i => `  - ${i.profile}: ${i.reason}`).join('\n');
+    clack.log.warn(`${issues.length} profile(s) reference a gateway mode that is not configured:\n${lines}`);
+    clack.log.info('These would fail at runtime with "Unknown mode". Add the mode to gateway.yaml or fix the profile.');
+  }
 }
 
 // ─── Main entry point ────────────────────────────────────────────

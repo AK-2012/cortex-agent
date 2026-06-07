@@ -35,7 +35,7 @@ import {
 } from './init.js';
 import type { ConfigStatus } from './init.js';
 import { cmdFeishu } from './feishu-login.js';
-import { discoverEndpoints, generateGatewayYaml, writeGatewayYaml, dryRunGatewayYaml } from '@core/gateway-generator.js';
+import { discoverEndpoints, writeMergedGatewayYaml, validateProfilesAgainstGateway, dryRunGatewayYaml } from '@core/gateway-generator.js';
 import { generateProfiles, writeProfilesJson } from '@core/profile-generator.js';
 import { CORTEX_VERSION } from '@core/version.js';
 
@@ -595,20 +595,30 @@ export async function runCli(argv: string[]): Promise<CliResult> {
         if (endpoints.length === 0) {
           return { exitCode: 0, stdout: 'No backends discovered. Log into Claude Code and/or PI first.\n', stderr: '' };
         }
-        const yaml = generateGatewayYaml(endpoints);
-        const gatewayPath = writeGatewayYaml(yaml, outputDir);
+        const { path: gatewayPath, result: mergeResult } = writeMergedGatewayYaml(endpoints, outputDir);
         const profilesPath = writeProfilesJson(endpoints, outputDir);
         const profiles = generateProfiles(endpoints);
         const profileNames = Object.keys(profiles.profiles).join(', ');
+        const issues = validateProfilesAgainstGateway(mergeResult.endpoints, outputDir);
+        const stdoutLines = [
+          outputDir ? `[TEST MODE] Output directory: ${outputDir}` : '',
+          `Gateway config: ${gatewayPath}`,
+          `Profiles: ${profilesPath}`,
+          `Discovered ${endpoints.length} endpoint modes`,
+          `Generated profiles: ${profileNames} (default: ${profiles.defaultProfile})`,
+        ];
+        if (mergeResult.droppedFromDiscovery.length > 0) {
+          const list = mergeResult.droppedFromDiscovery.map(p => `${p.mode}/${p.endpoint}`).join(', ');
+          stdoutLines.push(`WARNING: preserved ${mergeResult.droppedFromDiscovery.length} existing gateway mode(s) not reported by discovery: ${list}`);
+          stdoutLines.push('  (if these should auto-detect, check `pi /login` / `pi --list-models`)');
+        }
+        if (issues.length > 0) {
+          stdoutLines.push(`WARNING: ${issues.length} profile(s) reference an unconfigured gateway mode (would fail with "Unknown mode"):`);
+          for (const i of issues) stdoutLines.push(`  - ${i.profile}: ${i.reason}`);
+        }
         return {
           exitCode: 0,
-          stdout: [
-            outputDir ? `[TEST MODE] Output directory: ${outputDir}` : '',
-            `Gateway config: ${gatewayPath}`,
-            `Profiles: ${profilesPath}`,
-            `Discovered ${endpoints.length} endpoint modes`,
-            `Generated profiles: ${profileNames} (default: ${profiles.defaultProfile})`,
-          ].filter(Boolean).join('\n'),
+          stdout: stdoutLines.filter(Boolean).join('\n'),
           stderr: '',
         };
       } catch (err: any) {

@@ -278,11 +278,19 @@ function handleAgentEnd(ev: Record<string, unknown>): NormalizedEvent[] {
   let model = '';
   let tokensIn = 0;
   let tokensOut = 0;
+  // Turn-level error: PI marks a failed assistant message with stopReason "error" (e.g. a gateway
+  // 400). This mirrors Claude's result.is_error — captured here so the adapter can fail the turn
+  // instead of silently resolving it as success.
+  let turnError: string | null = null;
 
   for (const msg of msgs) {
     const mr = asRecord(msg);
     if (mr['role'] !== 'assistant') continue;
     numTurns++;
+    if (turnError === null && mr['stopReason'] === 'error') {
+      const em = mr['errorMessage'];
+      turnError = typeof em === 'string' && em.length > 0 ? em : 'PI agent reported an error during execution';
+    }
     // First assistant message with a non-empty provider wins
     if (provider === '' && typeof mr['provider'] === 'string' && mr['provider'].length > 0) {
       provider = mr['provider'];
@@ -312,7 +320,13 @@ function handleAgentEnd(ev: Record<string, unknown>): NormalizedEvent[] {
   if (provider !== '') {
     result.push({ type: 'cost_record', provider, model, tokens_in: tokensIn, tokens_out: tokensOut, cost_usd: totalCostUsd });
   }
-  result.push({ type: 'turn_complete', numTurns, totalCostUsd });
+  // Only attach `error` when the turn actually failed, so success events stay minimal and existing
+  // deepEqual assertions on turn_complete keep passing.
+  result.push(
+    turnError !== null
+      ? { type: 'turn_complete', numTurns, totalCostUsd, error: turnError }
+      : { type: 'turn_complete', numTurns, totalCostUsd },
+  );
   return result;
 }
 

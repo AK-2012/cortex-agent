@@ -1,17 +1,59 @@
-// input:  fs, path, os, `pi --list-models` output
-// output: discoverEndpoints / generateGatewayYaml / writeGatewayYaml / parsePiListModelsOutput
-//         — spawns pi --list-models, produces gateway.yaml content
+// input:  fs, path, os, yaml, `pi --list-models` output
+// output: discoverEndpoints / generateGatewayYaml / parsePiListModelsOutput
+//         + merge-aware: readGatewayYaml / discoveredToEndpointMap / mergeGatewayConfig /
+//           serializeGatewayYaml / writeMergedGatewayYaml / validateProfilesAgainstGateway
+//         — spawns pi --list-models, produces & merges gateway.yaml (add-only: never clobbers
+//           hand-maintained modes/keys), validates profile↔gateway mode coupling
 // pos:    init-time gateway config auto-generation. PI model metadata is owned by the PI agent
 //         (we shell out to `pi --list-models` rather than maintain provider/model whitelists).
 //         Claude plan mode is included when the backends filter includes 'claude' (or is omitted).
 
-import { writeFileSync, copyFileSync, mkdirSync, existsSync } from 'fs';
+import { writeFileSync, copyFileSync, mkdirSync, existsSync, readFileSync } from 'fs';
 import { execSync } from 'child_process';
 import * as path from 'path';
 import * as os from 'os';
+import { parse as yamlParse, stringify as yamlStringify } from 'yaml';
 import { createLogger } from './log.js';
 
 const log = createLogger('gateway-generator');
+
+// ─── Merge support types (DR: stop init clobbering hand-maintained gateway.yaml) ──
+
+/** endpoint name → mode name → raw endpoint config object. */
+export type EndpointMap = Record<string, Record<string, Record<string, unknown>>>;
+
+/** Parsed existing gateway.yaml split into reserved top-level fields and the endpoint/mode tree. */
+export interface ParsedGateway {
+  /** Reserved top-level keys preserved verbatim: port, mode, status_check, auth, host, endpoint_modes, endpoints. */
+  top: Record<string, unknown>;
+  endpoints: EndpointMap;
+}
+
+export interface MergeGatewayResult {
+  endpoints: EndpointMap;
+  top: Record<string, unknown>;
+  /** Existing (endpoint, mode) pairs NOT produced by this discovery — kept verbatim. */
+  preservedCustom: Array<{ endpoint: string; mode: string }>;
+  /** Subset of preservedCustom that looks like it should have been rediscovered (i.e. not
+   *  anthropic/plan|api) — surfaced as a warning so a failed `pi --list-models` is visible. */
+  droppedFromDiscovery: Array<{ endpoint: string; mode: string }>;
+}
+
+export interface GatewayValidationIssue {
+  profile: string;
+  mode: string;
+  provider?: string;
+  reason: string;
+}
+
+/** aistatus reserved top-level keys (mirror of node_modules/aistatus fromDict RESERVED_KEYS). */
+const GATEWAY_RESERVED_KEYS = new Set(['host', 'port', 'mode', 'auth', 'status_check', 'endpoint_modes', 'endpoints']);
+
+/** Keys that, when present directly on an endpoint value, mark it as a "flat" (single-mode) config. */
+const FLAT_ENDPOINT_KEYS = ['keys', 'base_url', 'auth_style', 'passthrough', 'fallbacks', 'model_fallbacks'];
+
+/** Synthetic mode name used to hold a flat endpoint config (aistatus assigns these to mode "default"). */
+const FLAT_MODE = 'default';
 
 // ─── Types ────────────────────────────────────────────────────────
 
@@ -309,6 +351,8 @@ export function generateGatewayYaml(endpoints: DiscoveredEndpoint[], defaultMode
  * Write gateway.yaml to the specified path or ~/.aistatus/gateway.yaml.
  * If file already exists and outputDir is not specified, backs it up as gateway.yaml.bak before overwriting.
  * When outputDir is provided, writes to <outputDir>/gateway.yaml without backup.
+ *
+ * @deprecated Use writeMergedGatewayYaml — full overwrite drops hand-maintained custom modes.
  */
 export function writeGatewayYaml(yamlContent: string, outputDir?: string): string {
   const configDir = outputDir || path.join(os.homedir(), '.aistatus');
@@ -330,6 +374,278 @@ export function writeGatewayYaml(yamlContent: string, outputDir?: string): strin
   log.info(`Written gateway.yaml to ${configPath}`);
 
   return configPath;
+}
+
+// ─── Merge-aware generation (preserve hand-maintained modes) ──────────────────
+
+function isPlainObject(v: unknown): v is Record<string, unknown> {
+  return !!v && typeof v === 'object' && !Array.isArray(v);
+}
+
+function isFlatEndpointConfig(v: Record<string, unknown>): boolean {
+  return FLAT_ENDPOINT_KEYS.some((k) => k in v);
+}
+
+function deepCopy<T>(v: T): T {
+  return JSON.parse(JSON.stringify(v)) as T;
+}
+
+/**
+ * Parse an existing gateway.yaml into reserved top-level fields + the endpoint/mode tree.
+ * Returns null if the file is absent or unparseable (caller degrades to full generation).
+ */
+export function readGatewayYaml(filePath: string): ParsedGateway | null {
+  if (!existsSync(filePath)) return null;
+  let raw: unknown;
+  try {
+    raw = yamlParse(readFileSync(filePath, 'utf-8'));
+  } catch (e) {
+    log.warn(`Failed to parse existing gateway.yaml (${filePath}): ${(e as Error).message} — regenerating from scratch`);
+    return null;
+  }
+  if (!isPlainObject(raw)) return null;
+
+  const top: Record<string, unknown> = {};
+  const endpoints: EndpointMap = {};
+  for (const [key, val] of Object.entries(raw)) {
+    if (GATEWAY_RESERVED_KEYS.has(key)) {
+      top[key] = val;
+      continue;
+    }
+    if (!isPlainObject(val)) continue; // ignore stray scalars
+    if (isFlatEndpointConfig(val)) {
+      endpoints[key] ??= {};
+      endpoints[key][FLAT_MODE] = val;
+      continue;
+    }
+    for (const [modeName, modeVal] of Object.entries(val)) {
+      if (!isPlainObject(modeVal)) continue;
+      endpoints[key] ??= {};
+      endpoints[key][modeName] = modeVal;
+    }
+  }
+  return { top, endpoints };
+}
+
+/** Build an endpoint/mode tree from freshly discovered endpoints (gatewayManaged only). */
+export function discoveredToEndpointMap(endpoints: DiscoveredEndpoint[]): EndpointMap {
+  const map: EndpointMap = {};
+  for (const ep of endpoints) {
+    if (ep.gatewayManaged === false) continue;
+    const cfg: Record<string, unknown> = { base_url: ep.base_url, auth_style: ep.auth_style };
+    if (ep.keys.length > 0) {
+      cfg.keys = [...ep.keys];
+      if (ep.passthrough) cfg.passthrough = true;
+    }
+    map[ep.endpoint] ??= {};
+    map[ep.endpoint][ep.mode] = cfg;
+  }
+  return map;
+}
+
+/**
+ * Merge freshly discovered endpoints over an existing gateway config.
+ *
+ * Add-only at the (endpoint, mode) PAIR level (mirrors mergeProfilesJson overwrite=false): a pair
+ * absent from the existing file is added from discovery; any pair that already exists is preserved
+ * verbatim — its base_url, auth_style and (critically) managed keys are never clobbered. This both
+ * fixes the original bug (a missing mode gets added) and protects hand-customized routes, e.g. a
+ * `deepseek` mode pointed at a private relay with a secret key, even though `pi --list-models`
+ * reports the canonical upstream for that provider. A failed/empty discovery therefore can never
+ * drop or alter previously-configured modes. To intentionally update an existing route's URL/keys,
+ * edit gateway.yaml directly.
+ */
+export function mergeGatewayConfig(
+  discovered: DiscoveredEndpoint[],
+  existing: ParsedGateway | null,
+  defaultMode?: string,
+): MergeGatewayResult {
+  const disc = discoveredToEndpointMap(discovered);
+  const merged: EndpointMap = existing ? deepCopy(existing.endpoints) : {};
+
+  const preservedCustom: Array<{ endpoint: string; mode: string }> = [];
+  const droppedFromDiscovery: Array<{ endpoint: string; mode: string }> = [];
+
+  // Classify existing pairs against the fresh discovery set (for reporting only — nothing is
+  // overwritten). A pair not present in this discovery is "custom"; if it also isn't a Claude
+  // builtin (anthropic/plan|api), surface it as droppedFromDiscovery so a failed/under-reporting
+  // `pi --list-models` is visible rather than silently keeping stale routes.
+  for (const [endpoint, modes] of Object.entries(merged)) {
+    for (const mode of Object.keys(modes)) {
+      const isDiscoveryOwned = !!disc[endpoint]?.[mode];
+      if (!isDiscoveryOwned) {
+        preservedCustom.push({ endpoint, mode });
+        const isClaudeBuiltin = endpoint === 'anthropic' && (mode === 'plan' || mode === 'api');
+        if (!isClaudeBuiltin) droppedFromDiscovery.push({ endpoint, mode });
+      }
+    }
+  }
+
+  // Add-only: fill in pairs discovery found that aren't already present. Existing pairs (incl. their
+  // keys/base_url) are left untouched.
+  for (const [endpoint, modes] of Object.entries(disc)) {
+    merged[endpoint] ??= {};
+    for (const [mode, cfg] of Object.entries(modes)) {
+      if (!merged[endpoint][mode]) merged[endpoint][mode] = cfg;
+    }
+  }
+
+  // Resolve active billing mode: explicit override → existing-still-valid → first discovered → 'api'.
+  const availableModes = new Set<string>();
+  for (const modes of Object.values(merged)) for (const m of Object.keys(modes)) availableModes.add(m);
+  const existingMode = typeof existing?.top.mode === 'string' ? (existing.top.mode as string) : undefined;
+  const firstDiscovered = discovered.find((e) => e.gatewayManaged !== false)?.mode;
+  const activeMode = defaultMode && availableModes.has(defaultMode)
+    ? defaultMode
+    : existingMode && availableModes.has(existingMode)
+      ? existingMode
+      : firstDiscovered && availableModes.has(firstDiscovered)
+        ? firstDiscovered
+        : (availableModes.values().next().value ?? 'api');
+
+  const top: Record<string, unknown> = existing ? deepCopy(existing.top) : {};
+  top.port = top.port ?? 9880;
+  top.mode = activeMode;
+  top.status_check = top.status_check ?? true;
+
+  return { endpoints: merged, top, preservedCustom, droppedFromDiscovery };
+}
+
+/** Serialize a merged gateway config back to YAML (re-serializes; inline comments in custom blocks are not retained). */
+export function serializeGatewayYaml(result: MergeGatewayResult): string {
+  const obj: Record<string, unknown> = {};
+  // Ordered, well-known top-level fields first.
+  obj.port = result.top.port ?? 9880;
+  obj.mode = result.top.mode;
+  obj.status_check = result.top.status_check ?? true;
+  if (result.top.host !== undefined) obj.host = result.top.host;
+  if (result.top.auth !== undefined) obj.auth = result.top.auth;
+  if (result.top.endpoint_modes !== undefined) obj.endpoint_modes = result.top.endpoint_modes;
+  if (result.top.endpoints !== undefined) obj.endpoints = result.top.endpoints;
+
+  for (const [endpoint, modes] of Object.entries(result.endpoints)) {
+    const modeNames = Object.keys(modes);
+    // Flat endpoint: only the synthetic `default` mode → emit config directly under the endpoint.
+    if (modeNames.length === 1 && modeNames[0] === FLAT_MODE) {
+      obj[endpoint] = modes[FLAT_MODE];
+    } else {
+      obj[endpoint] = modes;
+    }
+  }
+
+  const header = [
+    '# aistatus gateway — managed by cortex (merge mode).',
+    `# Generated: ${new Date().toISOString()}`,
+    '#',
+    '# `cortex init` / `cortex setup-gateway` ADD newly discovered modes; existing modes and their',
+    '# keys are preserved as-is (never overwritten). Edit a route here to change its URL/keys.',
+    '# NOTE: inline comments inside existing blocks are not retained across regeneration.',
+    '#',
+    '# Docs: https://aistatus.cc/docs',
+    '',
+  ].join('\n');
+
+  return header + yamlStringify(obj, { lineWidth: 0 });
+}
+
+/**
+ * Read existing gateway.yaml, merge discovery over it, and write the result. Always backs up an
+ * existing file to .bak first (including when outputDir is given, since merge now touches real data).
+ */
+export function writeMergedGatewayYaml(
+  discovered: DiscoveredEndpoint[],
+  outputDir?: string,
+  defaultMode?: string,
+): { path: string; result: MergeGatewayResult } {
+  const configDir = outputDir || path.join(os.homedir(), '.aistatus');
+  const configPath = path.join(configDir, 'gateway.yaml');
+
+  const existing = readGatewayYaml(configPath);
+  const result = mergeGatewayConfig(discovered, existing, defaultMode);
+  const content = serializeGatewayYaml(result);
+
+  if (existsSync(configPath)) {
+    try {
+      copyFileSync(configPath, configPath + '.bak');
+      log.info(`Backed up existing gateway.yaml to ${configPath}.bak`);
+    } catch (e) {
+      log.warn(`Failed to backup existing gateway.yaml: ${(e as Error).message}`);
+    }
+  }
+
+  mkdirSync(configDir, { recursive: true });
+  writeFileSync(configPath, content, 'utf-8');
+  log.info(`Written merged gateway.yaml to ${configPath}`);
+
+  return { path: configPath, result };
+}
+
+/**
+ * Validate that every profile (and its fallback chain) in profiles.json references a gateway mode
+ * that actually exists in the merged endpoint map. Pure + non-fatal — returns the list of problems
+ * so the caller can warn loudly. This is what catches the `400 Unknown mode: <x>` class of bug.
+ */
+export function validateProfilesAgainstGateway(
+  mergedEndpoints: EndpointMap,
+  profilesConfigDir?: string,
+): GatewayValidationIssue[] {
+  const profilesPath = profilesConfigDir
+    ? path.join(profilesConfigDir, 'profiles.json')
+    : path.join(os.homedir(), '.cortex', 'config', 'profiles.json');
+
+  let parsed: unknown;
+  try {
+    if (!existsSync(profilesPath)) return [];
+    parsed = JSON.parse(readFileSync(profilesPath, 'utf-8'));
+  } catch (e) {
+    log.warn(`Failed to read profiles.json for validation: ${(e as Error).message}`);
+    return [];
+  }
+  if (!isPlainObject(parsed) || !isPlainObject(parsed.profiles)) return [];
+
+  const modeExistsAnywhere = (mode: string): boolean =>
+    Object.values(mergedEndpoints).some((modes) => mode in modes);
+
+  const issues: GatewayValidationIssue[] = [];
+
+  const checkEntry = (entry: Record<string, unknown>, label: string): void => {
+    const backend = typeof entry.backend === 'string' ? entry.backend : undefined;
+    const mode = typeof entry.mode === 'string' ? entry.mode : undefined;
+    const provider = typeof entry.provider === 'string' ? entry.provider : undefined;
+
+    // No mode → PI uses direct /<provider> routing (no gateway mode indirection); nothing to check.
+    if (!mode) return;
+
+    let endpoint: string | undefined;
+    if (backend === 'claude') endpoint = 'anthropic';
+    else if (backend === 'pi') endpoint = provider;
+    else return; // codex / unknown backends don't route through gateway modes here
+
+    if (backend === 'pi' && !provider) {
+      issues.push({ profile: label, mode, reason: `pi profile is missing a provider (cannot resolve gateway endpoint)` });
+      return;
+    }
+
+    if (!endpoint || !mergedEndpoints[endpoint]?.[mode]) {
+      const reason = !modeExistsAnywhere(mode)
+        ? `mode "${mode}" is not configured in gateway.yaml`
+        : `endpoint "${endpoint}" is not configured under mode "${mode}"`;
+      issues.push({ profile: label, mode, provider, reason });
+    }
+  };
+
+  for (const [name, profileVal] of Object.entries(parsed.profiles as Record<string, unknown>)) {
+    if (!isPlainObject(profileVal)) continue;
+    checkEntry(profileVal, name);
+    const fallback = profileVal.fallback;
+    if (Array.isArray(fallback)) {
+      fallback.forEach((fb, i) => {
+        if (isPlainObject(fb)) checkEntry(fb, `${name} (fallback #${i + 1})`);
+      });
+    }
+  }
+
+  return issues;
 }
 
 /**

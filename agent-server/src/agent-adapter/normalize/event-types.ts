@@ -20,5 +20,5 @@ export type NormalizedEvent =
   | { type: 'rate_limit'; raw: unknown }
   | { type: 'cost_record'; provider: string; model: string; tokens_in: number; tokens_out: number; cost_usd: number | null }
   | { type: 'turn_progress'; numTurns: number }
-  | { type: 'turn_complete'; numTurns: number; totalCostUsd: number | null }
+  | { type: 'turn_complete'; numTurns: number; totalCostUsd: number | null; error?: string | null }
   | { type: 'error'; message: string; fatal: boolean };
