@@ -56,7 +56,6 @@ import { buildTranscriptReplay } from './tui-transcript.js';
 import { registerConduitProvider } from '@store/session-repo.js';
 import { sessionStore } from '@store/session-registry-repo.js';
 import { conversationLedger } from '@store/conversation-ledger-repo.js';
-import { projectStore } from '@domain/projects/index.js';
 import { enqueue, conduitQueues } from '@orch/conduit-queue.js';
 import { createLogger } from '@core/log.js';
 import type { EventBus, Subscription } from '@events/index.js';
