@@ -48,6 +48,7 @@ function makeMockClient() {
       v1: {
         meta: { batchQuery: rec('meta', { metas: [{ doc_token: 'app1', url: 'https://tenant.feishu.cn/base/app1' }] }) },
         permissionPublic: { patch: rec('perm.patch', {}) },
+        file: { delete: rec('file.delete', {}) },
       },
     },
   };
@@ -61,13 +62,13 @@ function setup() {
   return { tools, calls };
 }
 
-test('registers all 10 bitable tools', () => {
+test('registers all 11 bitable tools', () => {
   const { tools } = setup();
   for (const n of [
     'feishu_bitable_create_app', 'feishu_bitable_list_tables', 'feishu_bitable_create_table',
     'feishu_bitable_delete_table', 'feishu_bitable_list_fields', 'feishu_bitable_create_field',
     'feishu_bitable_list_records', 'feishu_bitable_create_records', 'feishu_bitable_update_records',
-    'feishu_bitable_delete_records',
+    'feishu_bitable_delete_records', 'feishu_bitable_delete_app',
   ]) {
     assert.ok(tools.has(n), `missing ${n}`);
   }
@@ -172,6 +173,14 @@ test('delete_records wraps record_ids into data.records', async () => {
   const { tools, calls } = setup();
   await tools.get('feishu_bitable_delete_records')!({ app_token: 'app1', table_id: 't1', record_ids: ['r1', 'r2'] });
   assert.deepEqual(calls['record.batchDelete'].data.records, ['r1', 'r2']);
+});
+
+test('delete_app trashes the whole base via drive file.delete (type bitable)', async () => {
+  const { tools, calls } = setup();
+  const r = await tools.get('feishu_bitable_delete_app')!({ app_token: 'app1' });
+  assert.equal(calls['file.delete'].path.file_token, 'app1');
+  assert.equal(calls['file.delete'].params.type, 'bitable');
+  assert.equal(JSON.parse(r.content[0].text).deleted, true);
 });
 
 test('no client → friendly isError result', async () => {

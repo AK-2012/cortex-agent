@@ -66,12 +66,20 @@ const REQUIRED_SCOPE = 'offline_access';
 
 /**
  * Default user scopes requested at login when neither --scope nor FEISHU_USER_SCOPE is set.
- * Covers every resource the feishu_* MCP doc tools touch: new-version docs, sheets, bitable,
- * wiki, and drive (file creation + link-share). Scopes the app has not opened in the console
- * are ignored by Feishu at consent time — the device authorization request still succeeds
- * (verified) — so listing the full set here never breaks login.
+ * Chosen to keep the WHOLE set review-free (免审) — so a developer can `cortex feishu login` and
+ * click "开通并授权" without any scope tripping Feishu's review gate. Verified empirically:
+ *   - docx:document / sheets:spreadsheet / bitable:app / wiki:wiki — create/read/write content
+ *     (link-share via permissionPublic also works on these resource scopes alone).
+ *   - space:document:delete — whole-file delete (drive.v1.file.delete accepts this in place of
+ *     the broad, review-gated drive:drive).
+ * Intentionally omitted: drive:drive (broad, review-gated) and drive:drive:readonly (review-gated;
+ * there is no 免审 read:meta alternative). The only casualty is docx canonical-URL resolution via
+ * meta.batchQuery — callers fall back to a constructed https://feishu.cn/docx/<id> link, which
+ * still redirects to the doc for its owner. Add drive:drive:readonly via --scope if you accept a
+ * review step and want the canonical tenant-subdomain URL. Unopened scopes are ignored at consent.
  */
-export const DEFAULT_DOC_SCOPE = 'docx:document sheets:spreadsheet bitable:app wiki:wiki drive:drive';
+export const DEFAULT_DOC_SCOPE =
+  'docx:document sheets:spreadsheet bitable:app wiki:wiki space:document:delete';
 
 /** Default location of the on-disk token store (alongside .env in CONFIG_DIR). */
 export function userTokenPath(): string {

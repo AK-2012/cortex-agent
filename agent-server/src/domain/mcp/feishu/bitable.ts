@@ -226,4 +226,21 @@ export function registerBitableTools(server: McpServer, deps: FeishuToolDeps): v
         return ok({ app_token, table_id, deleted: data.records ?? record_ids });
       }),
   );
+
+  server.tool(
+    'feishu_bitable_delete_app',
+    'Delete (trash) an ENTIRE bitable app — the whole base and every table in it, not a single table. Moves it to the drive recycle bin (recoverable there). Use feishu_bitable_delete_table to drop one table instead. Requires the user to own the file (or have manage rights).',
+    {
+      app_token: z.string().describe('The bitable app_token of the base to delete'),
+    },
+    async ({ app_token }) =>
+      guard(deps.client, async (client) => {
+        const res = await client.drive.v1.file.delete({
+          path: { file_token: app_token },
+          params: { type: 'bitable' },
+        } as any);
+        unwrap(res);
+        return ok({ app_token, deleted: true });
+      }),
+  );
 }

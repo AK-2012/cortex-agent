@@ -90,7 +90,7 @@ function scopeCapturingFetch(sink: { scope: string }): FetchLike {
   };
 }
 
-test('bare login requests the default doc scopes (docx/sheets/bitable/wiki/drive)', async () => {
+test('bare login requests the default doc scopes (docx/sheets/bitable/wiki, no drive)', async () => {
   const sink = { scope: '' };
   const file = tmpFile();
   const res = await cmdFeishu(['login'], {
@@ -98,9 +98,11 @@ test('bare login requests the default doc scopes (docx/sheets/bitable/wiki/drive
     fetchImpl: scopeCapturingFetch(sink), sleep: async () => {},
   });
   assert.equal(res.exitCode, 0, res.stderr);
-  for (const s of ['docx:document', 'sheets:spreadsheet', 'bitable:app', 'wiki:wiki', 'drive:drive', 'offline_access']) {
+  for (const s of ['docx:document', 'sheets:spreadsheet', 'bitable:app', 'wiki:wiki', 'space:document:delete', 'offline_access']) {
     assert.ok(sink.scope.includes(s), `expected requested scope to include ${s}, got: ${sink.scope}`);
   }
+  // The default set is all-免审: no drive:drive (broad) and no drive:drive:readonly (review-gated).
+  assert.ok(!sink.scope.includes('drive:drive'), `no drive:* scope should be requested by default: ${sink.scope}`);
   rmSync(path.dirname(file), { recursive: true, force: true });
 });
 

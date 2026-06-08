@@ -52,6 +52,7 @@ function makeMockClient() {
       v1: {
         meta: { batchQuery: rec('meta', { metas: [{ doc_token: 'ss1', url: 'https://tenant.feishu.cn/sheets/ss1' }] }) },
         permissionPublic: { patch: rec('perm.patch', {}) },
+        file: { delete: rec('file.delete', {}) },
       },
     },
   };
@@ -65,12 +66,12 @@ function setup() {
   return { tools, calls };
 }
 
-test('registers all 7 sheets tools', () => {
+test('registers all 8 sheets tools', () => {
   const { tools } = setup();
   for (const n of [
     'feishu_sheets_create', 'feishu_sheets_get', 'feishu_sheets_read_range',
     'feishu_sheets_write_range', 'feishu_sheets_append_rows', 'feishu_sheets_add_sheet',
-    'feishu_sheets_delete_sheet',
+    'feishu_sheets_delete_sheet', 'feishu_sheets_delete',
   ]) {
     assert.ok(tools.has(n), `missing ${n}`);
   }
@@ -148,6 +149,14 @@ test('delete_sheet issues sheets_batch_update with deleteSheet request', async (
   await tools.get('feishu_sheets_delete_sheet')!({ spreadsheet_token: 'ss1', sheet_id: 'sh1' });
   const key = 'POST /open-apis/sheets/v2/spreadsheets/ss1/sheets_batch_update';
   assert.deepEqual(calls[key].data.requests, [{ deleteSheet: { sheetId: 'sh1' } }]);
+});
+
+test('delete trashes the whole spreadsheet via drive file.delete (type sheet)', async () => {
+  const { tools, calls } = setup();
+  const r = await tools.get('feishu_sheets_delete')!({ spreadsheet_token: 'ss1' });
+  assert.equal(calls['file.delete'].path.file_token, 'ss1');
+  assert.equal(calls['file.delete'].params.type, 'sheet');
+  assert.equal(JSON.parse(r.content[0].text).deleted, true);
 });
 
 test('no client → friendly isError result', async () => {

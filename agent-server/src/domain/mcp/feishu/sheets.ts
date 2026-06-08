@@ -158,4 +158,21 @@ export function registerSheetsTools(server: McpServer, deps: FeishuToolDeps): vo
         return ok({ spreadsheet_token, sheet_id, deleted: true, replies: data.replies ?? [] });
       }),
   );
+
+  server.tool(
+    'feishu_sheets_delete',
+    'Delete (trash) an ENTIRE spreadsheet — the whole file, not a worksheet. Moves it to the drive recycle bin (recoverable there). Use feishu_sheets_delete_sheet to drop a single worksheet instead. Requires the user to own the file (or have manage rights).',
+    {
+      spreadsheet_token: z.string().describe('The spreadsheet_token of the file to delete'),
+    },
+    async ({ spreadsheet_token }) =>
+      guard(deps.client, async (client) => {
+        const res = await client.drive.v1.file.delete({
+          path: { file_token: spreadsheet_token },
+          params: { type: 'sheet' },
+        } as any);
+        unwrap(res);
+        return ok({ spreadsheet_token, deleted: true });
+      }),
+  );
 }
