@@ -7,8 +7,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as os from 'os';
 import * as path from 'path';
-import { mkdtempSync, rmSync, existsSync } from 'fs';
-import { cmdFeishu } from '../src/entry/feishu-login.js';
+import { mkdtempSync, rmSync, existsSync, readFileSync, writeFileSync } from 'fs';
+import { cmdFeishu, upsertEnvVar } from '../src/entry/feishu-login.js';
 import { saveUserToken, loadUserToken, type FetchLike } from '../src/domain/mcp/feishu/user-auth.js';
 
 function tmpFile(): string {
@@ -27,17 +27,17 @@ test('login fails clearly when app credentials are missing', async () => {
   assert.match(res.stderr, /FEISHU_APP_ID/);
 });
 
-test('login fails when no redirect URI is configured', async () => {
-  const res = await cmdFeishu(['login'], {
+test('manual login fails when no redirect URI is configured', async () => {
+  const res = await cmdFeishu(['login', '--manual'], {
     env: { FEISHU_APP_ID: 'id', FEISHU_APP_SECRET: 'sec' }, loadDotenv: false, tokenFile: tmpFile(),
   });
   assert.equal(res.exitCode, 1);
   assert.match(res.stderr, /redirect/i);
 });
 
-test('login happy path exchanges the pasted code and persists the token', async () => {
+test('manual login exchanges the pasted code and persists the token', async () => {
   const file = tmpFile();
-  const res = await cmdFeishu(['login'], {
+  const res = await cmdFeishu(['login', '--manual'], {
     env: { ...creds }, loadDotenv: false, tokenFile: file,
     now: () => 1000,
     prompt: async () => 'https://app/cb?code=THECODE&state=x',
@@ -49,8 +49,101 @@ test('login happy path exchanges the pasted code and persists the token', async 
   rmSync(path.dirname(file), { recursive: true, force: true });
 });
 
-test('login rejects an unparseable code input', async () => {
+// First call (device_authorization endpoint) returns the device code; later token
+// polls return the access token. Lets the default device flow run end-to-end.
+function deviceFetch(): FetchLike {
+  return async (url) => ({
+    ok: true, status: 200,
+    json: async () =>
+      url.includes('device_authorization')
+        ? { device_code: 'DC', user_code: 'UC', verification_uri: 'https://app/v', verification_uri_complete: 'https://app/v?code=UC', expires_in: 300, interval: 1 }
+        : { code: 0, access_token: 'AT', refresh_token: 'RT', expires_in: 7200, refresh_token_expires_in: 2592000, scope: 'offline_access docx:document' },
+  });
+}
+
+test('login writes FEISHU_AUTH_MODE=user into the dotenv on success', async () => {
+  const dir = mkdtempSync(path.join(os.tmpdir(), 'feishu-env-'));
+  const file = path.join(dir, 'feishu-user-token.json');
+  const envFile = path.join(dir, '.env');
+  writeFileSync(envFile, 'FEISHU_APP_ID=id\nFEISHU_APP_SECRET=sec\n');
   const res = await cmdFeishu(['login'], {
+    env: { ...creds }, tokenFile: file, envFile, now: () => 1000,
+    fetchImpl: deviceFetch(), sleep: async () => {},
+  });
+  assert.equal(res.exitCode, 0, res.stderr);
+  const env = readFileSync(envFile, 'utf8');
+  assert.match(env, /^FEISHU_AUTH_MODE=user$/m);
+  assert.match(env, /FEISHU_APP_ID=id/); // pre-existing lines preserved
+  assert.equal(loadUserToken(file)?.access_token, 'AT');
+  assert.match(res.stdout, /written to/i);
+  rmSync(dir, { recursive: true, force: true });
+});
+
+// Capture the scope sent to the device_authorization endpoint, then complete the flow.
+function scopeCapturingFetch(sink: { scope: string }): FetchLike {
+  return async (url, init) => {
+    if (url.includes('device_authorization')) {
+      sink.scope = new URLSearchParams(init.body).get('scope') ?? '';
+      return { ok: true, status: 200, json: async () => ({ device_code: 'DC', user_code: 'UC', verification_uri: 'https://app/v', verification_uri_complete: 'https://app/v', expires_in: 300, interval: 1 }) };
+    }
+    return { ok: true, status: 200, json: async () => ({ code: 0, access_token: 'AT', refresh_token: 'RT', expires_in: 7200, refresh_token_expires_in: 2592000, scope: 'offline_access docx:document' }) };
+  };
+}
+
+test('bare login requests the default doc scopes (docx/sheets/bitable/wiki/drive)', async () => {
+  const sink = { scope: '' };
+  const file = tmpFile();
+  const res = await cmdFeishu(['login'], {
+    env: { ...creds }, loadDotenv: false, tokenFile: file, now: () => 1000,
+    fetchImpl: scopeCapturingFetch(sink), sleep: async () => {},
+  });
+  assert.equal(res.exitCode, 0, res.stderr);
+  for (const s of ['docx:document', 'sheets:spreadsheet', 'bitable:app', 'wiki:wiki', 'drive:drive', 'offline_access']) {
+    assert.ok(sink.scope.includes(s), `expected requested scope to include ${s}, got: ${sink.scope}`);
+  }
+  rmSync(path.dirname(file), { recursive: true, force: true });
+});
+
+test('--scope overrides the default scope set (only offline_access auto-added)', async () => {
+  const sink = { scope: '' };
+  const file = tmpFile();
+  const res = await cmdFeishu(['login', '--scope', 'custom:one custom:two'], {
+    env: { ...creds }, loadDotenv: false, tokenFile: file, now: () => 1000,
+    fetchImpl: scopeCapturingFetch(sink), sleep: async () => {},
+  });
+  assert.equal(res.exitCode, 0, res.stderr);
+  assert.ok(sink.scope.includes('custom:one') && sink.scope.includes('custom:two'));
+  assert.ok(sink.scope.includes('offline_access'));
+  assert.ok(!sink.scope.includes('docx:document'), `default scopes should not leak when overridden: ${sink.scope}`);
+  rmSync(path.dirname(file), { recursive: true, force: true });
+});
+
+test('login with loadDotenv:false does not touch any .env', async () => {
+  const dir = mkdtempSync(path.join(os.tmpdir(), 'feishu-noenv-'));
+  const file = path.join(dir, 'feishu-user-token.json');
+  const envFile = path.join(dir, '.env');
+  const res = await cmdFeishu(['login'], {
+    env: { ...creds }, tokenFile: file, envFile, loadDotenv: false, now: () => 1000,
+    fetchImpl: deviceFetch(), sleep: async () => {},
+  });
+  assert.equal(res.exitCode, 0, res.stderr);
+  assert.ok(!existsSync(envFile));
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test('upsertEnvVar replaces an existing key and appends a missing one', () => {
+  const dir = mkdtempSync(path.join(os.tmpdir(), 'feishu-upsert-'));
+  const file = path.join(dir, '.env');
+  writeFileSync(file, 'A=1\nFEISHU_AUTH_MODE=bot\nB=2\n');
+  upsertEnvVar(file, 'FEISHU_AUTH_MODE', 'user');
+  assert.equal(readFileSync(file, 'utf8'), 'A=1\nFEISHU_AUTH_MODE=user\nB=2\n');
+  upsertEnvVar(file, 'C', '3');
+  assert.match(readFileSync(file, 'utf8'), /^C=3$/m);
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test('manual login rejects an unparseable code input', async () => {
+  const res = await cmdFeishu(['login', '--manual'], {
     env: { ...creds }, loadDotenv: false, tokenFile: tmpFile(),
     prompt: async () => '   ',
     fetchImpl: okFetch({}),

@@ -64,6 +64,15 @@ const DEVICE_GRANT = 'urn:ietf:params:oauth:grant-type:device_code';
 /** offline_access is required for the token endpoint to return a refresh_token. */
 const REQUIRED_SCOPE = 'offline_access';
 
+/**
+ * Default user scopes requested at login when neither --scope nor FEISHU_USER_SCOPE is set.
+ * Covers every resource the feishu_* MCP doc tools touch: new-version docs, sheets, bitable,
+ * wiki, and drive (file creation + link-share). Scopes the app has not opened in the console
+ * are ignored by Feishu at consent time — the device authorization request still succeeds
+ * (verified) — so listing the full set here never breaks login.
+ */
+export const DEFAULT_DOC_SCOPE = 'docx:document sheets:spreadsheet bitable:app wiki:wiki drive:drive';
+
 /** Default location of the on-disk token store (alongside .env in CONFIG_DIR). */
 export function userTokenPath(): string {
   return path.join(CONFIG_DIR, 'feishu-user-token.json');

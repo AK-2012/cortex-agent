@@ -8,6 +8,7 @@
 import * as readline from 'readline';
 import * as path from 'path';
 import * as dotenv from 'dotenv';
+import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs';
 import { CONFIG_DIR } from '@core/utils.js';
 import {
   buildAuthorizeUrl,
@@ -19,6 +20,7 @@ import {
   loadUserToken,
   clearUserToken,
   userTokenPath,
+  DEFAULT_DOC_SCOPE,
   type FeishuDomain,
   type FetchLike,
 } from '@domain/mcp/feishu/user-auth.js';
@@ -40,6 +42,29 @@ export interface FeishuCliDeps {
   sleep?: (ms: number) => Promise<void>;
   /** When true (default), merge CONFIG_DIR/.env into env so credentials are available. */
   loadDotenv?: boolean;
+  /** dotenv file that a successful login flips to FEISHU_AUTH_MODE=user (default: CONFIG_DIR/.env). */
+  envFile?: string;
+}
+
+/**
+ * Idempotently set KEY=value in a dotenv file: rewrite the line if KEY already
+ * exists, append it otherwise, creating the file (and parent dir) when missing.
+ * The rest of the file is preserved so hand-written credentials stay intact.
+ */
+export function upsertEnvVar(file: string, key: string, value: string): void {
+  const line = `${key}=${value}`;
+  const existing = existsSync(file) ? readFileSync(file, 'utf8') : '';
+  const lines = existing === '' ? [] : existing.replace(/\n+$/, '').split('\n');
+  const re = new RegExp(`^\\s*${key}\\s*=`);
+  const idx = lines.findIndex((l) => re.test(l));
+  if (idx >= 0) {
+    if (lines[idx] === line) return; // already set — skip the write
+    lines[idx] = line;
+  } else {
+    lines.push(line);
+  }
+  mkdirSync(path.dirname(file), { recursive: true });
+  writeFileSync(file, lines.join('\n') + '\n');
 }
 
 export function getFeishuHelp(): string {
@@ -54,7 +79,9 @@ export function getFeishuHelp(): string {
     '  logout   Delete the stored user token',
     '',
     'Options:',
-    '  --scope <scopes>       Space-separated extra scopes (offline_access is always added)',
+    '  --scope <scopes>       Override the requested scopes (default: the doc scopes the MCP',
+    '                         tools need — docx/sheets/bitable/wiki/drive; offline_access is',
+    '                         always added). Scopes not opened in the app console are ignored.',
     '  --manual               Use the legacy authorize-URL + paste-the-code flow instead',
     '  --redirect-uri <url>   Redirect URI for --manual only (default: $FEISHU_REDIRECT_URI)',
     '  --help, -h             Show this help',
@@ -97,10 +124,29 @@ export async function cmdFeishu(args: string[], deps: FeishuCliDeps = {}): Promi
       if (!appId || !appSecret) {
         return { exitCode: 1, stdout: '', stderr: 'Missing FEISHU_APP_ID / FEISHU_APP_SECRET. Run `cortex init` or set them in the .env first.\n' };
       }
-      const scope = flag(args, '--scope') ?? env.FEISHU_USER_SCOPE;
+      // Default to the full doc-tool scope set so a bare `cortex feishu login` already
+      // requests everything the MCP tools need; --scope / FEISHU_USER_SCOPE override it.
+      const scope = flag(args, '--scope') ?? env.FEISHU_USER_SCOPE ?? DEFAULT_DOC_SCOPE;
       const region = domain === 'lark' ? 'lark (larksuite.com)' : 'feishu (feishu.cn)';
 
-      const successResult = (tok: { scope?: string; access_expires_at: number; refresh_expires_at: number }): CliResult => ({
+      // Flip the dotenv to user mode so doc tools act as this account after the next
+      // restart — without it the login succeeds but the MCP server keeps bot identity.
+      // Skipped when loadDotenv is off (tests) so the real .env is never touched there.
+      const envFile = deps.envFile ?? path.join(CONFIG_DIR, '.env');
+      const persistAuthMode = (): boolean => {
+        if (deps.loadDotenv === false) return false;
+        try {
+          upsertEnvVar(envFile, 'FEISHU_AUTH_MODE', 'user');
+          return true;
+        } catch {
+          return false;
+        }
+      };
+
+      const successResult = (
+        tok: { scope?: string; access_expires_at: number; refresh_expires_at: number },
+        wroteEnv: boolean,
+      ): CliResult => ({
         exitCode: 0, stderr: '',
         stdout: [
           '',
@@ -111,7 +157,9 @@ export async function cmdFeishu(args: string[], deps: FeishuCliDeps = {}): Promi
           `  refresh expires:${fmtExpiry(tok.refresh_expires_at)}`,
           `  token file:     ${tokenFile}`,
           '',
-          'Set FEISHU_AUTH_MODE=user in your .env and restart Cortex for doc tools to use this identity.',
+          wroteEnv
+            ? `FEISHU_AUTH_MODE=user written to ${envFile} — restart Cortex for doc tools to use this identity.`
+            : 'Set FEISHU_AUTH_MODE=user in your .env and restart Cortex for doc tools to use this identity.',
           '',
         ].join('\n'),
       });
@@ -144,7 +192,7 @@ export async function cmdFeishu(args: string[], deps: FeishuCliDeps = {}): Promi
         try {
           const tok = await exchangeCode({ appId, appSecret, code, redirectUri, domain, fetchImpl: deps.fetchImpl, now: deps.now });
           saveUserToken(tok, tokenFile);
-          return successResult(tok);
+          return successResult(tok, persistAuthMode());
         } catch (e) {
           return { exitCode: 1, stdout: '', stderr: `Login failed: ${(e as Error).message}\n` };
         }
@@ -175,7 +223,7 @@ export async function cmdFeishu(args: string[], deps: FeishuCliDeps = {}): Promi
           onPending: () => process.stdout.write('.'),
         });
         saveUserToken(tok, tokenFile);
-        return successResult(tok);
+        return successResult(tok, persistAuthMode());
       } catch (e) {
         return { exitCode: 1, stdout: '', stderr: `\nLogin failed: ${(e as Error).message}\n` };
       }
