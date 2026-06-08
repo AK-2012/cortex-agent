@@ -10,7 +10,15 @@ import { TuiGatewayAdapter } from '../../src/platform/adapters/tui/tui-gateway.j
 import { sendProjectReport, sendSystemNotice } from '../../src/platform/adapters/tui/tui-notifications.js';
 import { sessionStore } from '../../src/store/session-registry-repo.js';
 import { conversationLedger } from '../../src/store/conversation-ledger-repo.js';
+import { createTuiSessionService } from '../../src/domain/tui-session/index.js';
+import { enqueue, conduitQueues } from '../../src/orchestration/conduit-queue.js';
 import type { TuiFrame } from '../../src/platform/tui/protocol.js';
+
+/** Inject the real session service + conduit-queue port into a gateway (post-B4 DI). */
+function wireTestDeps(adapter: TuiGatewayAdapter): void {
+  adapter.setSessionService(createTuiSessionService({ sessionStore, conversationLedger }));
+  adapter.setConduitQueue({ enqueue, remove: (id) => conduitQueues.delete(id) });
+}
 
 // ── Helpers ────────────────────────────────────────────────────────────
 
@@ -83,6 +91,7 @@ async function startEphemeralGateway(): Promise<{
 }> {
   const adapter = new TuiGatewayAdapter({ port: 0, host: '127.0.0.1' });
   await adapter.start();
+  wireTestDeps(adapter);
   const wss = (adapter as any)._wss;
   if (!wss) throw new Error('Gateway failed to start (EADDRINUSE on ephemeral port)');
   const addr = wss.address();
@@ -707,6 +716,7 @@ test('ui.subscribe without UiService returns error', async (t) => {
 test('sendProjectReport routes per activeSession equality', async (t) => {
   const adapter = new TuiGatewayAdapter({ port: 0, host: '127.0.0.1' });
   await adapter.start();
+  wireTestDeps(adapter);
   const actualPort = (adapter as any)._wss.address().port;
   t.after(() => adapter.stop());
 
@@ -752,6 +762,7 @@ test('sendProjectReport routes per activeSession equality', async (t) => {
 test('sendProjectReport delivers cross-project notification frames', async (t) => {
   const adapter = new TuiGatewayAdapter({ port: 0, host: '127.0.0.1' });
   await adapter.start();
+  wireTestDeps(adapter);
   const actualPort = (adapter as any)._wss.address().port;
   t.after(() => adapter.stop());
 
@@ -798,6 +809,7 @@ test('sendProjectReport delivers cross-project notification frames', async (t) =
 test('sendSystemNotice fans out to all connections', async (t) => {
   const adapter = new TuiGatewayAdapter({ port: 0, host: '127.0.0.1' });
   await adapter.start();
+  wireTestDeps(adapter);
   const actualPort = (adapter as any)._wss.address().port;
   t.after(() => adapter.stop());
 
@@ -919,6 +931,7 @@ test('postMessage on noop adapter returns empty ref', async () => {
 test('postMessage sends chat.post to matching project and notification to cross-project connections', async (t) => {
   const adapter = new TuiGatewayAdapter({ port: 0, host: '127.0.0.1' });
   await adapter.start();
+  wireTestDeps(adapter);
   const actualPort = (adapter as any)._wss.address().port;
   t.after(() => adapter.stop());
 

@@ -52,7 +52,7 @@ export interface TuiSessionDeps {
         sessionId: string;
         channel: string;
         backend: string;
-        kind: string;
+        kind: 'local' | 'scheduled';
         projectId: string;
       },
     ): Promise<void>;

@@ -14,3 +14,13 @@ export interface TranscriptData {
   channel: string;
   turns: TranscriptTurn[];
 }
+
+/**
+ * Per-conduit serial work queue port. The concrete impl (app.ts) wraps the shared
+ * @orch/conduit-queue singletons so TUI message work serializes with the rest of
+ * the pipeline on the same conduit key.
+ */
+export interface ConduitQueuePort {
+  enqueue(conduitId: string, fn: () => Promise<void>): boolean;
+  remove(conduitId: string): void;
+}

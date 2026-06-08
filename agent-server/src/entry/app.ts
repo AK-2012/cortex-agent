@@ -26,7 +26,7 @@ import { startClientManager, stopClientManager, startAllRemoteClients } from '@d
 import { checkAndUpdateClients, formatUpdateSlackMessage } from '@domain/remote/client-hot-reload.js';
 import { checkServerUpdate } from '@domain/system/server-update-check.js';
 import { threadStore } from '@store/thread-repo.js';
-import { sessionRepo } from '@store/session-repo.js';
+import { sessionRepo, registerConduitProvider } from '@store/session-repo.js';
 import { conversationLedger } from '@store/conversation-ledger-repo.js';
 import { executionRepo } from '@store/execution-repo.js';
 import { loadConfig as loadThreadConfig, startConfigWatcher as startThreadConfigWatcher, setAdminNotifier as setConfigNotifier } from '@domain/threads/index.js';
@@ -63,6 +63,8 @@ import { startDispatchReconciler } from '@orch/dispatch-reconciler.js';
 import { ensurePIAgentDirs } from '../agent-adapter/pi/agent-dir.js';
 import { initOutboundQueue, getOutboundQueue } from '@store/outbound-queue.js';
 import { createUiService } from '@domain/ui-service/index.js';
+import { createTuiSessionService } from '@domain/tui-session/index.js';
+import { enqueue, conduitQueues } from '@orch/conduit-queue.js';
 import { getCostSummary } from '@domain/costs/cost-tracker.js';
 
 dotenv.config({ path: path.join(CONFIG_DIR, '.env') });
@@ -118,9 +120,20 @@ startMachineRegistryWatcher();
 // --- Create platform adapter (replaces direct Slack App instantiation) ---
 const adapter: PlatformAdapter = createAdapterFromEnv();
 
-// Wire EventBus into the TUI gateway before start() so it can subscribe
-// to bus events during its own start() lifecycle.
-extractTuiAdapter(adapter)?.setBus(bus);
+// Wire EventBus + injected dependencies into the TUI gateway before start() so it can
+// subscribe to bus events and resolve sessions during its own start()/handshake lifecycle.
+const tuiGateway = extractTuiAdapter(adapter);
+if (tuiGateway) {
+  tuiGateway.setBus(bus);
+  // Session lifecycle service (transport-agnostic; gateway delegates handshake/switch to it).
+  tuiGateway.setSessionService(createTuiSessionService({ sessionStore, conversationLedger }));
+  // Conduit-queue port — MUST wrap the shared @orch/conduit-queue singletons so TUI message
+  // work serializes with the rest of the pipeline on the same conduit key.
+  tuiGateway.setConduitQueue({ enqueue, remove: (id) => conduitQueues.delete(id) });
+  // Conduit provider inversion: store-layer session lookup resolves ephemeral TUI conduits
+  // via the gateway's in-memory state (previously the gateway imported the store directly).
+  registerConduitProvider((conduitId) => tuiGateway.lookupConduit(conduitId));
+}
 
 // --- Wire hot-reload admin notifiers ---
 const notifyAdmin = (text: string) => {

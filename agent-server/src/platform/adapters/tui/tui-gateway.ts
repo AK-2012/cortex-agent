@@ -53,12 +53,8 @@ import {
 } from './tui-conduit-state.js';
 import { sendProjectReport, sendSystemNotice } from './tui-notifications.js';
 import { buildTranscriptReplay } from './tui-transcript.js';
-import { registerConduitProvider } from '@store/session-repo.js';
-import { sessionStore } from '@store/session-registry-repo.js';
-import { conversationLedger } from '@store/conversation-ledger-repo.js';
-import { enqueue, conduitQueues } from '@orch/conduit-queue.js';
 import { createLogger } from '@core/log.js';
-import type { TranscriptData, TranscriptTurn } from './ports.js';
+import type { TranscriptData, ConduitQueuePort } from './ports.js';
 import type { EventBus, Subscription } from '@events/index.js';
 
 const log = createLogger('tui-gateway');
@@ -69,6 +65,29 @@ interface UiServiceHandle {
   query(scope: string, params: Record<string, unknown>): Promise<{ ok: boolean; data?: unknown; code?: string; message?: string }>;
   mutate(op: string, args: Record<string, unknown>): Promise<{ ok: boolean; data?: unknown; code?: string; message?: string }>;
   subscribe(filter: { events: string[]; projectId?: string | null }): AsyncIterable<{ type: string; ts: string; payload: unknown }> & { close(): void };
+}
+
+// ── Minimal session-service interface (avoids coupling to the domain type) ──
+// The concrete implementation lives in @domain/tui-session; app.ts injects it.
+
+interface TuiHandshakeResult {
+  sessionId: string;
+  sessionName: string;
+  projectId: string;
+  isFresh: boolean;
+  emitNotFoundError: boolean;
+  transcript: TranscriptData | null;
+}
+interface TuiSwitchResult {
+  sessionId: string;
+  sessionName: string;
+  projectId: string;
+  isFresh: boolean;
+  transcript: TranscriptData | null;
+}
+interface TuiSessionServiceHandle {
+  resolveHandshake(opts: { conduitId: string; projectId: string; resumeSessionId?: string | null }): Promise<TuiHandshakeResult>;
+  switchSession(opts: { conduitId: string; projectId: string; sessionId?: string | null }): Promise<TuiSwitchResult>;
 }
 
 // ── Constants ─────
@@ -88,6 +107,8 @@ function makeMessageId(): string {
 export interface TuiAdapterControls {
   setBus(bus: EventBus): void;
   setUiService(service: unknown): void;
+  setSessionService(service: TuiSessionServiceHandle): void;
+  setConduitQueue(queue: ConduitQueuePort): void;
 }
 
 export class TuiGatewayAdapter implements PlatformAdapter, TuiAdapterControls {
@@ -110,6 +131,8 @@ export class TuiGatewayAdapter implements PlatformAdapter, TuiAdapterControls {
   private _connections = new Map<string, TuiConnection>();
   private _bus: EventBus | null = null;
   private _uiService: unknown = null;
+  private _sessionService: TuiSessionServiceHandle | null = null;
+  private _conduitQueue: ConduitQueuePort | null = null;
   private _busSubscriptions: Subscription[] = [];
 
   // PlatformAdapter handler registrations
@@ -133,16 +156,27 @@ export class TuiGatewayAdapter implements PlatformAdapter, TuiAdapterControls {
     this._uiService = service;
   }
 
+  setSessionService(service: TuiSessionServiceHandle): void {
+    this._sessionService = service;
+  }
+
+  setConduitQueue(queue: ConduitQueuePort): void {
+    this._conduitQueue = queue;
+  }
+
+  /**
+   * Resolve in-memory session/project binding for a TUI conduit. Registered as a
+   * conduit provider by app.ts so session lookups can resolve ephemeral TUI conduits.
+   */
+  lookupConduit(conduitId: string): { sessionId: string; projectId: string } | null {
+    const state = getConduitState(conduitId);
+    if (!state) return null;
+    return { sessionId: state.sessionId ?? '', projectId: state.projectId };
+  }
+
   // ── Lifecycle ───────────────────────────────────────────────────
 
   async start(): Promise<void> {
-    // Register conduit provider for session lookup
-    registerConduitProvider((conduitId: string, _backend: string) => {
-      const state = getConduitState(conduitId);
-      if (!state) return null;
-      return { sessionId: state.sessionId ?? '', projectId: state.projectId };
-    });
-
     // Bind WebSocket server — listen on 'listening' / 'error' for async binding
     this._wss = new WebSocketServer({ port: this._port, host: this._host });
 
@@ -647,113 +681,39 @@ export class TuiGatewayAdapter implements PlatformAdapter, TuiAdapterControls {
     conn.activeProjectId = projectId;
     setConduitState(conn.conduitId, { sessionId: null, projectId, backend: 'tui' });
 
-    // Handle session resume or fresh
-    if (frame.resume?.sessionId) {
-      const sessionName = await sessionStore.lookupBySessionId(frame.resume.sessionId);
-      if (sessionName) {
-        // Session found — attach with replay
-        const session = await sessionStore.getById(frame.resume.sessionId);
-        const activeProjectId = session?.projectId ?? projectId;
-        conn.activeSessionId = frame.resume.sessionId;
-        conn.activeProjectId = activeProjectId;
-        setConduitState(conn.conduitId, {
-          sessionId: frame.resume.sessionId,
-          projectId: activeProjectId,
-          backend: 'tui',
-        });
-
-        // Send session.switched
-        conn.send({
-          type: 'session.switched',
-          id: '',
-          projectId: activeProjectId,
-          sessionId: frame.resume.sessionId,
-          sessionName,
-          isFresh: false,
-          seq: 1,
-        });
-
-        // Transcript replay
-        const data = await this._assembleTranscript(frame.resume.sessionId);
-        const replay = data ? buildTranscriptReplay(data) : null;
-        if (replay) {
-          conn.send(replay);
-        }
-      } else {
-        // Session not found — send error + fresh fallback
-        conn.send({
-          type: 'error',
-          code: 4003,
-          message: `Session ${frame.resume.sessionId} not found, creating fresh session`,
-        });
-        await this._createFreshSession(conn, projectId);
-      }
-    } else {
-      // Fresh session
-      await this._createFreshSession(conn, projectId);
+    // Handle session resume or fresh — delegated to the injected session service
+    if (!this._sessionService) {
+      conn.send({ type: 'error', code: 4500, message: 'Session service unavailable' });
+      return;
     }
-  }
-
-  private async _createFreshSession(conn: TuiConnection, projectId: string, requestId = ''): Promise<void> {
-    const sessionName = await sessionStore.generateSessionName();
-    const sessionId = crypto.randomUUID();
-    await sessionStore.registerSession(sessionName, {
-      sessionId,
-      channel: conn.conduitId,
-      backend: 'tui',
-      kind: 'local',
+    const res = await this._sessionService.resolveHandshake({
+      conduitId: conn.conduitId,
       projectId,
+      resumeSessionId: frame.resume?.sessionId ?? null,
     });
-
-    await conversationLedger.initConversation(conn.conduitId, {
-      sessionId,
-      sessionName,
-      backend: 'tui',
-    });
-
-    conn.activeSessionId = sessionId;
-    conn.activeProjectId = projectId;
-    setConduitState(conn.conduitId, { sessionId, projectId, backend: 'tui' });
-
+    if (res.emitNotFoundError) {
+      conn.send({
+        type: 'error',
+        code: 4003,
+        message: `Session ${frame.resume?.sessionId} not found, creating fresh session`,
+      });
+    }
+    conn.activeSessionId = res.sessionId;
+    conn.activeProjectId = res.projectId;
+    setConduitState(conn.conduitId, { sessionId: res.sessionId, projectId: res.projectId, backend: 'tui' });
     conn.send({
       type: 'session.switched',
-      id: requestId,
-      projectId,
-      sessionId,
-      sessionName,
-      isFresh: true,
+      id: '',
+      projectId: res.projectId,
+      sessionId: res.sessionId,
+      sessionName: res.sessionName,
+      isFresh: res.isFresh,
       seq: 1,
     });
-  }
-
-  /**
-   * Fetch transcript data for a session from the stores.
-   * Temporary — will be removed when store access is moved out of the gateway.
-   */
-  private async _assembleTranscript(sessionId: string): Promise<TranscriptData | null> {
-    const sessionName = await sessionStore.lookupBySessionId(sessionId);
-    if (!sessionName) return null;
-
-    const session = await sessionStore.getById(sessionId);
-    if (!session) return null;
-
-    const channel = session.channel;
-    const conv = await conversationLedger.getConversation(channel);
-    if (!conv || conv.turns.length === 0) return null;
-
-    const turns: TranscriptTurn[] = conv.turns.map((turn: {
-      userMessageTs: string;
-      userMessageText: string;
-      responseMessageTimestamps: string[];
-      status: 'processing' | 'completed' | 'superseded';
-    }) => ({
-      userMessageTs: turn.userMessageTs,
-      userMessageText: turn.userMessageText,
-      responseMessageTimestamps: turn.responseMessageTimestamps,
-      status: turn.status,
-    }));
-
-    return { sessionId, channel, turns };
+    if (res.transcript) {
+      const replay = buildTranscriptReplay(res.transcript);
+      if (replay) conn.send(replay);
+    }
   }
 
   // ── Private: session switch ─────────────────────────────────────
@@ -762,80 +722,30 @@ export class TuiGatewayAdapter implements PlatformAdapter, TuiAdapterControls {
     if (!isSessionSwitch(frame)) return;
     const { id, projectId, sessionId } = frame;
 
-    if (sessionId) {
-      // Attach to existing session
-      const sessionName = await sessionStore.lookupBySessionId(sessionId);
-      const session = sessionId ? await sessionStore.getById(sessionId) : null;
-      const resolvedProjectId = session?.projectId ?? projectId;
-
-      if (sessionName) {
-        conn.activeSessionId = sessionId;
-        conn.activeProjectId = resolvedProjectId;
-        setConduitState(conn.conduitId, {
-          sessionId,
-          projectId: resolvedProjectId,
-          backend: 'tui',
-        });
-        await conversationLedger.switchSession(conn.conduitId, {
-          sessionId,
-          sessionName,
-          backend: 'tui',
-        });
-
-        conn.send({
-          type: 'session.switched',
-          id,
-          projectId: resolvedProjectId,
-          sessionId,
-          sessionName,
-          isFresh: false,
-          seq: 1,
-        });
-
-        // Transcript replay
-        const data = await this._assembleTranscript(sessionId);
-        const replay = data ? buildTranscriptReplay(data) : null;
-        if (replay) {
-          conn.send(replay);
-        }
-      } else {
-        // Session not found — create fresh
-        const newSessionName = await sessionStore.generateSessionName();
-        const newSessionId = crypto.randomUUID();
-        await sessionStore.registerSession(newSessionName, {
-          sessionId: newSessionId,
-          channel: conn.conduitId,
-          backend: 'tui',
-          kind: 'local',
-          projectId,
-        });
-        await conversationLedger.initConversation(conn.conduitId, {
-          sessionId: newSessionId,
-          sessionName: newSessionName,
-          backend: 'tui',
-        });
-
-        conn.activeSessionId = newSessionId;
-        conn.activeProjectId = projectId;
-        setConduitState(conn.conduitId, {
-          sessionId: newSessionId,
-          projectId,
-          backend: 'tui',
-        });
-
-        conn.send({
-          type: 'session.switched',
-          id,
-          projectId,
-          sessionId: newSessionId,
-          sessionName: newSessionName,
-          isFresh: true,
-          seq: 1,
-        });
-      }
-    } else {
-      // Fresh session in projectId
-      await this._createFreshSession(conn, projectId, id);
+    if (!this._sessionService) {
+      conn.send({ type: 'error', code: 4500, message: 'Session service unavailable', refId: id });
+      return;
+    }
+    const res = await this._sessionService.switchSession({
+      conduitId: conn.conduitId,
+      projectId,
+      sessionId: sessionId ?? null,
+    });
+    conn.activeSessionId = res.sessionId;
+    conn.activeProjectId = res.projectId;
+    setConduitState(conn.conduitId, { sessionId: res.sessionId, projectId: res.projectId, backend: 'tui' });
+    conn.send({
+      type: 'session.switched',
+      id,
+      projectId: res.projectId,
+      sessionId: res.sessionId,
+      sessionName: res.sessionName,
+      isFresh: res.isFresh,
+      seq: 1,
+    });
+    if (res.transcript) {
+      const replay = buildTranscriptReplay(res.transcript);
+      if (replay) conn.send(replay);
     }
   }
 
@@ -871,8 +781,8 @@ export class TuiGatewayAdapter implements PlatformAdapter, TuiAdapterControls {
       raw: frame,
     };
 
-    // Enqueue into per-conduit serial queue
-    enqueue(conn.conduitId, async () => {
+    // Enqueue into per-conduit serial queue (injected port wraps the shared singleton)
+    const run = async () => {
       const adapter = this;
       await this._messageHandler!({
         message: incoming,
@@ -884,7 +794,9 @@ export class TuiGatewayAdapter implements PlatformAdapter, TuiAdapterControls {
           );
         },
       });
-    });
+    };
+    if (this._conduitQueue) this._conduitQueue.enqueue(conn.conduitId, run);
+    else void run();
   }
 
   private async _handleMsgEdit(conn: TuiConnection, frame: TuiFrame): Promise<void> {
@@ -1154,7 +1066,7 @@ export class TuiGatewayAdapter implements PlatformAdapter, TuiAdapterControls {
     // Drop from registry
     this._connections.delete(conduitId);
     deleteConduitState(conduitId);
-    conduitQueues.delete(conduitId);
+    this._conduitQueue?.remove(conduitId);
 
     log.info(`TUI connection cleaned up: ${conduitId}`);
   }
