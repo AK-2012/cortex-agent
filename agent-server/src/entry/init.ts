@@ -87,8 +87,6 @@ export interface FeishuInitConfig {
   domain?: 'feishu' | 'lark';
   /** Identity for MCP document operations: 'bot' (default) or the operator's 'user' account. */
   authMode?: 'bot' | 'user';
-  /** OAuth redirect URI (required for user mode; must be registered in the Feishu app console). */
-  redirectUri?: string;
 }
 
 export interface GatewayUsageConfig {
@@ -186,10 +184,8 @@ export function generateDotEnvContent(answers: InitAnswers): string {
         lines.push(`FEISHU_DOMAIN=${answers.feishuConfig.domain}`);
       }
       // Identity for MCP doc operations (binary, no fallback). Messaging is always bot.
+      // user mode authorizes via `cortex feishu login` (OAuth device flow) — no redirect URI.
       lines.push(`FEISHU_AUTH_MODE=${answers.feishuConfig.authMode ?? 'bot'}`);
-      if (answers.feishuConfig.authMode === 'user' && answers.feishuConfig.redirectUri) {
-        lines.push(`FEISHU_REDIRECT_URI=${answers.feishuConfig.redirectUri}`);
-      }
     }
   }
 
@@ -787,8 +783,8 @@ async function collectFeishuConfig(): Promise<FeishuInitConfig> {
       'Identity for MCP document operations (docx/wiki/bitable/sheets/drive):',
       '  - bot:  documents are created/owned by the app (default).',
       '  - user: documents are created/owned by YOUR Feishu account. Messaging stays as the bot.',
-      '          For user mode, also register an OAuth redirect URL and grant the offline_access',
-      '          + docx/drive/wiki/bitable/sheets scopes, then run `cortex feishu login` afterward.',
+      '          After init, run `cortex feishu login` — it prints a URL to authorize in any',
+      '          browser (OAuth device flow). No redirect URL to register, nothing to paste back.',
     ].join('\n'),
     'Feishu App Setup Guide',
   );
@@ -842,16 +838,12 @@ async function collectFeishuConfig(): Promise<FeishuInitConfig> {
   });
   handleCancel(authMode);
 
-  let redirectUri: string | undefined;
   if (authMode === 'user') {
-    const redirectRaw = await clack.text({
-      message: 'FEISHU_REDIRECT_URI (must be registered in the Feishu app console):',
-      validate(value) {
-        if (!value) return 'Redirect URI is required for user mode.';
-      },
-    });
-    handleCancel(redirectRaw);
-    redirectUri = (redirectRaw as string).trim();
+    clack.note(
+      'After setup completes, run `cortex feishu login` to authorize your account.\n' +
+      'It prints a URL to open in any browser — no redirect URL, no copy-paste.',
+      'Feishu user login',
+    );
   }
 
   return {
@@ -861,7 +853,6 @@ async function collectFeishuConfig(): Promise<FeishuInitConfig> {
     verificationToken: (verificationTokenRaw as string).trim() || undefined,
     domain,
     authMode: authMode as 'bot' | 'user',
-    redirectUri,
   };
 }
 

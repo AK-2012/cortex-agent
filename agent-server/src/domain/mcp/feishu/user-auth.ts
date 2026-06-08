@@ -1,6 +1,8 @@
-// input:  Feishu OAuth v2 endpoints (authen/v2/oauth/token), CONFIG_DIR, global fetch
-// output: user_access_token acquisition (authorize URL + code exchange), refresh, on-disk store,
-//         and getValidUserAccessToken() (auto-refresh with a clear error when re-login is needed)
+// input:  Feishu OAuth v2 endpoints (authen/v2/oauth/token, accounts device_authorization),
+//         CONFIG_DIR, global fetch
+// output: user_access_token acquisition — device-authorization grant (default: requestDevice-
+//         Authorization + pollDeviceToken) and the legacy authorize-URL + code exchange (manual
+//         fallback) — plus refresh, on-disk store, and getValidUserAccessToken() (auto-refresh)
 // pos:    Powers FEISHU_AUTH_MODE=user — MCP doc tools act as the operator's Feishu account.
 //         Messaging (platform/adapters/feishu.ts) is unaffected; it stays app/bot identity.
 // >>> If I am updated, update my header comment and the parent folder's CORTEX.md <<<
@@ -54,6 +56,10 @@ export function hostsFor(domain?: FeishuDomain): OAuthHosts {
 
 const TOKEN_PATH = '/open-apis/authen/v2/oauth/token';
 const AUTHORIZE_PATH = '/open-apis/authen/v1/authorize';
+/** Device Authorization Grant (RFC 8628) endpoint — served by the accounts (authorize) host. */
+const DEVICE_AUTH_PATH = '/oauth/v1/device_authorization';
+/** grant_type for exchanging a device_code at the token endpoint. */
+const DEVICE_GRANT = 'urn:ietf:params:oauth:grant-type:device_code';
 
 /** offline_access is required for the token endpoint to return a refresh_token. */
 const REQUIRED_SCOPE = 'offline_access';
@@ -158,6 +164,132 @@ export async function exchangeCode(opts: {
   if (opts.redirectUri) body.redirect_uri = opts.redirectUri;
   const data = await postToken(hostsFor(opts.domain), body, fetchImpl);
   return toUserToken(data, now);
+}
+
+// ── Device Authorization Grant (RFC 8628) — the default login flow ───
+// No redirect_uri, no inbound callback: print a URL, the user authorizes on any
+// device, and we poll the token endpoint. Works headless / over SSH. Mirrors the
+// official larksuite/cli (internal/auth/device_flow.go).
+
+/** Response of the device-authorization request. */
+export interface DeviceAuthorization {
+  device_code: string;
+  user_code: string;
+  verification_uri: string;
+  /** verification_uri with user_code pre-filled (falls back to verification_uri). */
+  verification_uri_complete: string;
+  /** seconds until the device_code expires. */
+  expires_in: number;
+  /** seconds the client must wait between token polls. */
+  interval: number;
+}
+
+/** base64 of "appId:appSecret" for the HTTP Basic auth header. */
+function basicAuth(appId: string, appSecret: string): string {
+  return Buffer.from(`${appId}:${appSecret}`, 'utf8').toString('base64');
+}
+
+/** Encode a flat string map as application/x-www-form-urlencoded. */
+function formEncode(params: Record<string, string>): string {
+  return Object.entries(params)
+    .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`)
+    .join('&');
+}
+
+/**
+ * Request a device authorization code. The app (client_id/secret) authenticates via
+ * HTTP Basic; the body carries client_id + scope (offline_access is always included).
+ */
+export async function requestDeviceAuthorization(opts: {
+  appId: string;
+  appSecret: string;
+  scope?: string;
+  domain?: FeishuDomain;
+  fetchImpl?: FetchLike;
+}): Promise<DeviceAuthorization> {
+  const fetchImpl = opts.fetchImpl ?? (globalThis.fetch as unknown as FetchLike);
+  const hosts = hostsFor(opts.domain);
+  const res = await fetchImpl(hosts.authorizeBase + DEVICE_AUTH_PATH, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/x-www-form-urlencoded',
+      Authorization: `Basic ${basicAuth(opts.appId, opts.appSecret)}`,
+    },
+    body: formEncode({ client_id: opts.appId, scope: normalizeScope(opts.scope) }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok || data.error || !data.device_code) {
+    const msg = data.error_description || data.error || data.msg || `HTTP ${res.status}`;
+    throw new Error(`Feishu device authorization failed: ${msg}`);
+  }
+  const verificationUri = String(data.verification_uri ?? '');
+  return {
+    device_code: String(data.device_code),
+    user_code: String(data.user_code ?? ''),
+    verification_uri: verificationUri,
+    verification_uri_complete: String(data.verification_uri_complete || verificationUri),
+    expires_in: Number(data.expires_in ?? 300),
+    interval: Number(data.interval ?? 5),
+  };
+}
+
+/**
+ * Poll the token endpoint with the device_code until the user authorizes (success),
+ * the code is denied/expires (throws), or the deadline passes (throws). Honours the
+ * server-suggested interval and backs off on `slow_down`.
+ */
+export async function pollDeviceToken(opts: {
+  appId: string;
+  appSecret: string;
+  deviceCode: string;
+  interval?: number;
+  expiresIn?: number;
+  domain?: FeishuDomain;
+  fetchImpl?: FetchLike;
+  now?: () => number;
+  /** Injectable wait (defaults to setTimeout) — lets tests run the loop instantly. */
+  sleep?: (ms: number) => Promise<void>;
+  /** Called once per pending/slow_down poll (e.g. to print progress). */
+  onPending?: () => void;
+}): Promise<UserToken> {
+  const fetchImpl = opts.fetchImpl ?? (globalThis.fetch as unknown as FetchLike);
+  const sleep = opts.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
+  const clock = opts.now ?? Date.now;
+  const hosts = hostsFor(opts.domain);
+  const maxInterval = 60;
+  let interval = Math.max(1, opts.interval ?? 5);
+  const deadline = clock() + (opts.expiresIn ?? 300) * 1000;
+
+  for (;;) {
+    await sleep(interval * 1000);
+    const res = await fetchImpl(hosts.tokenBase + TOKEN_PATH, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: formEncode({
+        grant_type: DEVICE_GRANT,
+        device_code: opts.deviceCode,
+        client_id: opts.appId,
+        client_secret: opts.appSecret,
+      }),
+    });
+    const data = await res.json().catch(() => ({}));
+    const err: string | undefined = data.error;
+
+    if (!err && data.access_token) {
+      return toUserToken(data, clock());
+    }
+    if (err === 'authorization_pending') {
+      opts.onPending?.();
+    } else if (err === 'slow_down') {
+      interval = Math.min(maxInterval, interval + 5);
+      opts.onPending?.();
+    } else if (err) {
+      throw new Error(`Feishu device login failed: ${data.error_description || err}`);
+    }
+    if (clock() >= deadline) {
+      throw new Error('Feishu device login timed out before authorization completed.');
+    }
+  }
 }
 
 /** Refresh a user_access_token using the (rotating) refresh_token. */

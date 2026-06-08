@@ -1,7 +1,8 @@
 // input:  readline, dotenv, @core/utils (CONFIG_DIR), feishu/user-auth
 // output: cmdFeishu() — `cortex feishu login | status | logout` (user_access_token lifecycle)
-// pos:    CLI for FEISHU_AUTH_MODE=user. login runs the OAuth browser flow (paste code or
-//         callback URL); status/logout inspect/clear the on-disk token. Dispatched from cli.ts.
+// pos:    CLI for FEISHU_AUTH_MODE=user. login runs the OAuth device-authorization flow (print a
+//         URL, poll for the token); --manual keeps the legacy paste-the-code flow. status/logout
+//         inspect/clear the on-disk token. Dispatched from cli.ts.
 // >>> If I am updated, update my header comment and the parent folder's CORTEX.md <<<
 
 import * as readline from 'readline';
@@ -12,6 +13,8 @@ import {
   buildAuthorizeUrl,
   parseCodeFromInput,
   exchangeCode,
+  requestDeviceAuthorization,
+  pollDeviceToken,
   saveUserToken,
   loadUserToken,
   clearUserToken,
@@ -33,6 +36,8 @@ export interface FeishuCliDeps {
   now?: () => number;
   tokenFile?: string;
   fetchImpl?: FetchLike;
+  /** Injectable wait used by the device-flow poll (defaults to setTimeout). */
+  sleep?: (ms: number) => Promise<void>;
   /** When true (default), merge CONFIG_DIR/.env into env so credentials are available. */
   loadDotenv?: boolean;
 }
@@ -43,13 +48,15 @@ export function getFeishuHelp(): string {
     '',
     'Usage: cortex feishu <login|status|logout> [options]',
     '',
-    '  login    Authorize a Feishu user account via OAuth (paste the code or callback URL)',
+    '  login    Authorize a Feishu user account via the OAuth device flow',
+    '           (prints a URL to open in any browser — no redirect URI needed)',
     '  status   Show the current auth mode and stored user-token state',
     '  logout   Delete the stored user token',
     '',
     'Options:',
-    '  --redirect-uri <url>   OAuth redirect URI (default: $FEISHU_REDIRECT_URI)',
     '  --scope <scopes>       Space-separated extra scopes (offline_access is always added)',
+    '  --manual               Use the legacy authorize-URL + paste-the-code flow instead',
+    '  --redirect-uri <url>   Redirect URI for --manual only (default: $FEISHU_REDIRECT_URI)',
     '  --help, -h             Show this help',
   ].join('\n');
 }
@@ -90,52 +97,87 @@ export async function cmdFeishu(args: string[], deps: FeishuCliDeps = {}): Promi
       if (!appId || !appSecret) {
         return { exitCode: 1, stdout: '', stderr: 'Missing FEISHU_APP_ID / FEISHU_APP_SECRET. Run `cortex init` or set them in the .env first.\n' };
       }
-      const redirectUri = flag(args, '--redirect-uri') ?? env.FEISHU_REDIRECT_URI;
-      if (!redirectUri) {
-        return {
-          exitCode: 1, stdout: '',
-          stderr: 'No redirect URI. Set FEISHU_REDIRECT_URI (registered in the Feishu app console) or pass --redirect-uri.\n',
-        };
-      }
       const scope = flag(args, '--scope') ?? env.FEISHU_USER_SCOPE;
-      const url = buildAuthorizeUrl({ appId, redirectUri, scope, state: 'cortex', domain });
+      const region = domain === 'lark' ? 'lark (larksuite.com)' : 'feishu (feishu.cn)';
 
-      const out: string[] = [
-        '1) Open this URL in a browser and authorize:',
-        '',
-        `   ${url}`,
-        '',
-        '2) After authorizing you will be redirected to your redirect URI.',
-        '   Copy the authorization code (the `code` query param) — or the whole redirected URL.',
-        '',
-      ];
-      process.stdout.write(out.join('\n'));
+      const successResult = (tok: { scope?: string; access_expires_at: number; refresh_expires_at: number }): CliResult => ({
+        exitCode: 0, stderr: '',
+        stdout: [
+          '',
+          'Logged in as Feishu user.',
+          `  region:         ${region}`,
+          `  scope:          ${tok.scope ?? '(default)'}`,
+          `  access expires: ${fmtExpiry(tok.access_expires_at)}`,
+          `  refresh expires:${fmtExpiry(tok.refresh_expires_at)}`,
+          `  token file:     ${tokenFile}`,
+          '',
+          'Set FEISHU_AUTH_MODE=user in your .env and restart Cortex for doc tools to use this identity.',
+          '',
+        ].join('\n'),
+      });
 
-      const prompt = deps.prompt ?? readlinePrompt;
-      const answer = await prompt('Paste the code or callback URL: ');
-      const code = parseCodeFromInput(answer);
-      if (!code) {
-        return { exitCode: 1, stdout: '', stderr: 'Could not read an authorization code from the input.\n' };
+      // ── Manual fallback: legacy authorize-URL + paste-the-code flow ──
+      if (args.includes('--manual')) {
+        const redirectUri = flag(args, '--redirect-uri') ?? env.FEISHU_REDIRECT_URI;
+        if (!redirectUri) {
+          return {
+            exitCode: 1, stdout: '',
+            stderr: '--manual needs a redirect URI. Set FEISHU_REDIRECT_URI (registered in the Feishu app console) or pass --redirect-uri.\n',
+          };
+        }
+        const url = buildAuthorizeUrl({ appId, redirectUri, scope, state: 'cortex', domain });
+        process.stdout.write([
+          '1) Open this URL in a browser and authorize:',
+          '',
+          `   ${url}`,
+          '',
+          '2) After authorizing you will be redirected to your redirect URI.',
+          '   Copy the authorization code (the `code` query param) — or the whole redirected URL.',
+          '',
+        ].join('\n'));
+        const prompt = deps.prompt ?? readlinePrompt;
+        const answer = await prompt('Paste the code or callback URL: ');
+        const code = parseCodeFromInput(answer);
+        if (!code) {
+          return { exitCode: 1, stdout: '', stderr: 'Could not read an authorization code from the input.\n' };
+        }
+        try {
+          const tok = await exchangeCode({ appId, appSecret, code, redirectUri, domain, fetchImpl: deps.fetchImpl, now: deps.now });
+          saveUserToken(tok, tokenFile);
+          return successResult(tok);
+        } catch (e) {
+          return { exitCode: 1, stdout: '', stderr: `Login failed: ${(e as Error).message}\n` };
+        }
       }
+
+      // ── Default: OAuth 2.0 device authorization grant (no redirect URI) ──
+      let dev;
       try {
-        const tok = await exchangeCode({ appId, appSecret, code, redirectUri, domain, fetchImpl: deps.fetchImpl, now: deps.now });
-        saveUserToken(tok, tokenFile);
-        return {
-          exitCode: 0, stderr: '',
-          stdout: [
-            '',
-            'Logged in as Feishu user.',
-            `  scope:          ${tok.scope ?? '(default)'}`,
-            `  access expires: ${fmtExpiry(tok.access_expires_at)}`,
-            `  refresh expires:${fmtExpiry(tok.refresh_expires_at)}`,
-            `  token file:     ${tokenFile}`,
-            '',
-            'Set FEISHU_AUTH_MODE=user in your .env and restart Cortex for doc tools to use this identity.',
-            '',
-          ].join('\n'),
-        };
+        dev = await requestDeviceAuthorization({ appId, appSecret, scope, domain, fetchImpl: deps.fetchImpl });
       } catch (e) {
-        return { exitCode: 1, stdout: '', stderr: `Login failed: ${(e as Error).message}\n` };
+        return { exitCode: 1, stdout: '', stderr: `${(e as Error).message}\n` };
+      }
+      process.stdout.write([
+        `Authorizing a Feishu user account (region: ${region}).`,
+        '',
+        '1) Open this URL in a browser and confirm:',
+        '',
+        `   ${dev.verification_uri_complete}`,
+        ...(dev.user_code ? ['', `   verification code: ${dev.user_code}`] : []),
+        '',
+        '2) Waiting for authorization',
+      ].join('\n'));
+      try {
+        const tok = await pollDeviceToken({
+          appId, appSecret, deviceCode: dev.device_code,
+          interval: dev.interval, expiresIn: dev.expires_in,
+          domain, fetchImpl: deps.fetchImpl, now: deps.now, sleep: deps.sleep,
+          onPending: () => process.stdout.write('.'),
+        });
+        saveUserToken(tok, tokenFile);
+        return successResult(tok);
+      } catch (e) {
+        return { exitCode: 1, stdout: '', stderr: `\nLogin failed: ${(e as Error).message}\n` };
       }
     }
 

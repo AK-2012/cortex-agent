@@ -239,14 +239,14 @@ test('generateDotEnvContent defaults FEISHU_AUTH_MODE=bot and omits redirect URI
   assert.doesNotMatch(content, /FEISHU_REDIRECT_URI/);
 });
 
-test('generateDotEnvContent writes FEISHU_AUTH_MODE=user and redirect URI when user mode', () => {
+test('generateDotEnvContent writes FEISHU_AUTH_MODE=user with no redirect URI (device flow)', () => {
   const userMode: InitAnswers = {
     ...FEISHU_ANSWERS,
-    feishuConfig: { ...FEISHU_ANSWERS.feishuConfig!, authMode: 'user', redirectUri: 'https://app/cb' },
+    feishuConfig: { ...FEISHU_ANSWERS.feishuConfig!, authMode: 'user' },
   };
   const content = generateDotEnvContent(userMode);
   assert.match(content, /^FEISHU_AUTH_MODE=user/m);
-  assert.match(content, /^FEISHU_REDIRECT_URI=https:\/\/app\/cb/m);
+  assert.doesNotMatch(content, /FEISHU_REDIRECT_URI/);
 });
 
 test('generateDotEnvContent writes comma-joined CORTEX_PLATFORM and both platforms for multi-select', () => {
