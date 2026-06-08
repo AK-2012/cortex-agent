@@ -1004,3 +1004,125 @@ test('openOutputStream on noop adapter returns noop stream', async (t) => {
   assert.equal(stream.getRefs().length, 0);
   assert.equal(stream.getParentRef(), null);
 });
+
+// ── Resume / switch characterization (B0) ────────────────────────────
+
+test('handshake resume with unknown sessionId emits error 4003 then fresh session', async (t) => {
+  const { adapter, port, stop } = await startEphemeralGateway();
+  t.after(() => stop());
+
+  const ws = await wsConnect(port);
+  const coll = makeFrameCollector(ws);
+  t.after(() => ws.close());
+
+  // Send handshake.hello with a non-existent sessionId
+  const unknownSessionId = crypto.randomUUID();
+  sendFrame(ws, {
+    type: 'handshake.hello',
+    protocolVersion: 1,
+    clientName: 'test',
+    clientVersion: '1.0',
+    project: 'general',
+    resume: { sessionId: unknownSessionId },
+  });
+
+  // First: handshake.ack (always sent before resume logic)
+  const ack: any = await coll.read();
+  assert.equal(ack.type, 'handshake.ack');
+
+  // Then: error frame with code 4003
+  const error: any = await coll.read();
+  assert.equal(error.type, 'error');
+  assert.equal(error.code, 4003);
+  assert.ok(error.message.includes('not found'));
+
+  // Finally: session.switched with isFresh: true (fallback session created)
+  const switched: any = await coll.read();
+  assert.equal(switched.type, 'session.switched');
+  assert.equal(switched.isFresh, true);
+  assert.notEqual(switched.sessionId, unknownSessionId);
+});
+
+test('session.switch with unknown sessionId creates fresh session silently', async (t) => {
+  const { adapter, port, stop } = await startEphemeralGateway();
+  t.after(() => stop());
+
+  const ws = await wsConnect(port);
+  const coll = makeFrameCollector(ws);
+  t.after(() => ws.close());
+
+  // Normal handshake first
+  const { sessionId: initialSessionId } = await handshake(ws, coll);
+
+  // Drain any leftover frames
+  coll.drain();
+
+  // Send session.switch with a non-existent sessionId
+  const unknownSessionId = crypto.randomUUID();
+  sendFrame(ws, {
+    type: 'session.switch',
+    id: 's1',
+    projectId: 'general',
+    sessionId: unknownSessionId,
+  });
+
+  // Should get session.switched directly (no error frame)
+  const switched: any = await coll.read();
+  assert.equal(switched.type, 'session.switched');
+  assert.equal(switched.id, 's1');
+  assert.equal(switched.isFresh, true);
+  assert.notEqual(switched.sessionId, unknownSessionId);
+  assert.notEqual(switched.sessionId, initialSessionId);
+
+  // Verify no error frame follows
+  const maybeError = await coll.read(500).catch(() => null);
+  assert.equal(maybeError, null, 'no error frame emitted after switch-not-found');
+});
+
+test('handshake resume with known sessionId attaches to existing session', async (t) => {
+  const knownSessionId = crypto.randomUUID();
+  const sessionName = 'cortex-test-session-b0';
+
+  // Pre-seed session in sessionStore (against test's CORTEX_HOME)
+  await sessionStore.registerSession(sessionName, {
+    sessionId: knownSessionId,
+    channel: 'b0-test-channel',
+    backend: 'tui',
+    kind: 'local',
+    projectId: 'general',
+  });
+
+  // Pre-seed conversation ledger
+  await conversationLedger.initConversation('b0-test-channel', {
+    sessionId: knownSessionId,
+    sessionName,
+    backend: 'tui',
+  });
+
+  const { adapter, port, stop } = await startEphemeralGateway();
+  t.after(() => stop());
+
+  const ws = await wsConnect(port);
+  const coll = makeFrameCollector(ws);
+  t.after(() => ws.close());
+
+  // Send handshake.hello with resume.sessionId pointing to known session
+  sendFrame(ws, {
+    type: 'handshake.hello',
+    protocolVersion: 1,
+    clientName: 'test',
+    clientVersion: '1.0',
+    project: 'general',
+    resume: { sessionId: knownSessionId },
+  });
+
+  // Read handshake.ack
+  const ack: any = await coll.read();
+  assert.equal(ack.type, 'handshake.ack');
+
+  // Read session.switched — isFresh must be false
+  const switched: any = await coll.read();
+  assert.equal(switched.type, 'session.switched');
+  assert.equal(switched.sessionId, knownSessionId);
+  assert.equal(switched.isFresh, false);
+});
