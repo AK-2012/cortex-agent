@@ -431,6 +431,123 @@ test('CompositeAdapter: getProjectConduits merges all sub-adapters', async () =>
   assert.equal(merged['proj-b'], 'feishu:oc_1');
 });
 
+// ── Test: per-platform thread anchors (regression for cross-platform anchor leak) ──
+
+/** Make a project-report destination. */
+function projReport(projectId: string) {
+  return { type: 'project-report' as const, projectId, trigger: 'test', sessionId: '' };
+}
+
+test('CompositeAdapter.postMessage: aggregates per-platform sub-refs into parts[]', async () => {
+  const slack = prefixAdapter('slack:');
+  const feishu = prefixAdapter('feishu:');
+  // Project-report resolves to bare projectId in MockAdapter, so override to return
+  // platform-prefixed conduits (mirrors real adapters returning slack:/feishu: refs).
+  slack.postMessage = async () => ({ conduit: 'slack:C1', messageId: 'ts_slack' });
+  feishu.postMessage = async () => ({ conduit: 'feishu:oc_1', messageId: 'om_feishu' });
+  const composite = new CompositeAdapter([slack, feishu]);
+
+  const ref = await composite.postMessage(projReport('p'), { text: 'report' });
+
+  assert.equal(ref.conduit, 'slack:C1', 'top-level mirrors first sub-ref (back-compat)');
+  assert.equal(ref.messageId, 'ts_slack');
+  assert.equal(ref.parts?.length, 2, 'both platform sub-refs collected');
+  assert.equal(ref.parts?.[0].conduit, 'slack:C1');
+  assert.equal(ref.parts?.[1].conduit, 'feishu:oc_1');
+  assert.equal(ref.parts?.[1].messageId, 'om_feishu');
+});
+
+test('CompositeAdapter.postMessage: single non-empty sub-ref returned bare (no parts)', async () => {
+  const slack = prefixAdapter('slack:');
+  const feishu = prefixAdapter('feishu:');
+  slack.postMessage = async () => ({ conduit: 'slack:C1', messageId: 'ts_slack' });
+  feishu.postMessage = async () => ({ conduit: '', messageId: '' }); // dropped (e.g. no DM)
+  const composite = new CompositeAdapter([slack, feishu]);
+
+  const ref = await composite.postMessage(projReport('p'), { text: 'report' });
+  assert.equal(ref.messageId, 'ts_slack');
+  assert.equal(ref.parts, undefined, 'no parts[] when only one platform posted');
+});
+
+/** Spy each sub-adapter's openOutputStream, recording the opts it received. */
+function spyOpenStream(a: MockAdapter, sink: { opts?: any }): void {
+  a.openOutputStream = (_d, o) => { sink.opts = o; return new RecordingOutputStream(); };
+}
+
+test('CompositeAdapter.openOutputStream: routes each sub-stream its OWN platform anchor (parts[])', async () => {
+  const slack = prefixAdapter('slack:');
+  const feishu = prefixAdapter('feishu:');
+  const seenSlack: { opts?: any } = {};
+  const seenFeishu: { opts?: any } = {};
+  spyOpenStream(slack, seenSlack);
+  spyOpenStream(feishu, seenFeishu);
+  const composite = new CompositeAdapter([slack, feishu]);
+
+  composite.openOutputStream(projReport('p'), {
+    anchorRef: {
+      conduit: 'slack:C1', messageId: 'ts_slack',
+      parts: [
+        { conduit: 'slack:C1', messageId: 'ts_slack' },
+        { conduit: 'feishu:oc_1', messageId: 'om_feishu' },
+      ],
+    },
+  });
+
+  assert.equal(seenSlack.opts.threadId, 'ts_slack', 'slack stream anchors under its own ts');
+  assert.equal(seenFeishu.opts.threadId, 'om_feishu', 'feishu stream anchors under its own om_ id');
+  // The core regression: feishu must NEVER receive the Slack ts (caused Feishu 99992354 / HTTP 400).
+  assert.notEqual(seenFeishu.opts.threadId, 'ts_slack');
+  assert.equal(seenSlack.opts.anchorRef, undefined, 'anchorRef stripped before delegating');
+  assert.equal(seenFeishu.opts.anchorRef, undefined);
+});
+
+test('CompositeAdapter.openOutputStream: anchorRef without parts → only owning platform anchors', async () => {
+  const slack = prefixAdapter('slack:');
+  const feishu = prefixAdapter('feishu:');
+  const seenSlack: { opts?: any } = {};
+  const seenFeishu: { opts?: any } = {};
+  spyOpenStream(slack, seenSlack);
+  spyOpenStream(feishu, seenFeishu);
+  const composite = new CompositeAdapter([slack, feishu]);
+
+  composite.openOutputStream(projReport('p'), {
+    anchorRef: { conduit: 'slack:C1', messageId: 'ts_slack' },
+  });
+
+  assert.equal(seenSlack.opts.threadId, 'ts_slack');
+  assert.equal(seenFeishu.opts.threadId, null, 'non-owning platform self-anchors (null)');
+});
+
+test('CompositeAdapter.openOutputStream: no anchorRef → legacy threadId goes to first adapter only', async () => {
+  const slack = prefixAdapter('slack:');
+  const feishu = prefixAdapter('feishu:');
+  const seenSlack: { opts?: any } = {};
+  const seenFeishu: { opts?: any } = {};
+  spyOpenStream(slack, seenSlack);
+  spyOpenStream(feishu, seenFeishu);
+  const composite = new CompositeAdapter([slack, feishu]);
+
+  composite.openOutputStream(projReport('p'), { threadId: 'shared' });
+
+  assert.equal(seenSlack.opts.threadId, 'shared', 'first adapter keeps the bare threadId');
+  assert.equal(seenFeishu.opts.threadId, null, 'others self-anchor to avoid cross-platform leak');
+});
+
+test('CompositeAdapter.postInteractive: aggregates per-platform sub-refs into parts[]', async () => {
+  const slack = prefixAdapter('slack:');
+  const feishu = prefixAdapter('feishu:');
+  slack.postInteractive = async () => ({ conduit: 'slack:C1', messageId: 'ts_slack' });
+  feishu.postInteractive = async () => ({ conduit: 'feishu:oc_1', messageId: 'om_feishu' });
+  const composite = new CompositeAdapter([slack, feishu]);
+
+  const ref = await composite.postInteractive(
+    projReport('p'),
+    { text: 'q', actions: [] },
+  );
+  assert.equal(ref.parts?.length, 2);
+  assert.equal(ref.parts?.[1].messageId, 'om_feishu');
+});
+
 // ── Test: extractTuiAdapter ───────────────────────────────────────
 
 test('extractTuiAdapter: returns gateway from CompositeAdapter', () => {

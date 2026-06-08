@@ -106,6 +106,18 @@ function noopOutputStream(): OutputStream {
   };
 }
 
+// ── Composite ref aggregation ─────────────────────────────────────
+
+/** Build the MessageRef returned by a fan-out post. Top-level fields mirror the first
+ *  sub-ref (back-compat for callers that only read conduit/messageId). When more than one
+ *  platform posted, `parts[]` carries every sub-ref so a later openOutputStream can resolve
+ *  a per-platform thread anchor. A single sub-ref is returned bare (no parts). */
+function aggregateRefs(parts: MessageRef[]): MessageRef {
+  const first = parts[0];
+  if (!first) return { conduit: '', messageId: '' };
+  return parts.length > 1 ? { ...first, parts } : first;
+}
+
 // ── CompositeAdapter ──────────────────────────────────────────────
 
 /**
@@ -220,12 +232,12 @@ export class CompositeAdapter implements PlatformAdapter {
       ? await this._getTargetAdaptersForProjectReport(destination.projectId)
       : this._adaptersForDest(destination);
     if (adapters.length === 0) return { conduit: '', messageId: '' };
-    let first: MessageRef | null = null;
+    const parts: MessageRef[] = [];
     for (const adapter of adapters) {
       const ref = await adapter.postMessage(destination, content, opts);
-      if (!first && ref.messageId) first = ref;
+      if (ref.messageId) parts.push(ref);
     }
-    return first ?? { conduit: '', messageId: '' };
+    return aggregateRefs(parts);
   }
 
   async updateMessage(ref: MessageRef, content: MessageContent): Promise<void> {
@@ -241,12 +253,12 @@ export class CompositeAdapter implements PlatformAdapter {
       ? await this._getTargetAdaptersForProjectReport(destination.projectId)
       : this._adaptersForDest(destination);
     if (adapters.length === 0) return { conduit: '', messageId: '' };
-    let first: MessageRef | null = null;
+    const parts: MessageRef[] = [];
     for (const adapter of adapters) {
       const ref = await adapter.postInteractive(destination, content, opts);
-      if (!first && ref.messageId) first = ref;
+      if (ref.messageId) parts.push(ref);
     }
-    return first ?? { conduit: '', messageId: '' };
+    return aggregateRefs(parts);
   }
 
   async openModal(triggerId: string, modal: ModalDefinition): Promise<void> {
@@ -282,12 +294,38 @@ export class CompositeAdapter implements PlatformAdapter {
   openOutputStream(destination: Destination, opts?: OpenOutputStreamOpts): OutputStream {
     if (destination.type === 'project-report') {
       // Open a sub-stream per sub-adapter; each handles its own conduit lookup.
-      return new FanOutOutputStream(this._adapters.map(a => a.openOutputStream(destination, opts)));
+      // The thread anchor is platform-specific (a Slack ts is not a valid Feishu
+      // open_message_id), so resolve a per-platform threadId for each sub-adapter
+      // from the composite anchor's parts[] instead of sharing one anchor across
+      // platforms. We open over ALL _adapters (unlike postMessage, which filters
+      // via _getTargetAdaptersForProjectReport); an adapter with no matching part
+      // resolves to threadId=null and self-anchors on its own first message.
+      return new FanOutOutputStream(this._adapters.map((a, i) => {
+        const threadId = this._resolveAnchorThreadId(a, i, opts);
+        const subOpts: OpenOutputStreamOpts = { ...opts, threadId, anchorRef: undefined };
+        return a.openOutputStream(destination, subOpts);
+      }));
     }
     const adapters = this._adaptersForDest(destination);
     if (adapters.length === 0) return noopOutputStream();
     if (adapters.length === 1) return adapters[0].openOutputStream(destination, opts);
     return new FanOutOutputStream(adapters.map(a => a.openOutputStream(destination, opts)));
+  }
+
+  /** Resolve the thread anchor messageId for one sub-adapter from the composite anchor.
+   *  - anchorRef.parts present → the part owned by this adapter (else null → self-anchor).
+   *  - anchorRef without parts → its messageId only if this adapter owns its conduit.
+   *  - no anchorRef → legacy behavior: the first adapter gets opts.threadId, the rest null
+   *    (the bare threadId belongs to whichever adapter produced the original `first` ref). */
+  private _resolveAnchorThreadId(adapter: PlatformAdapter, index: number, opts?: OpenOutputStreamOpts): string | null {
+    const anchor = opts?.anchorRef;
+    if (anchor?.parts?.length) {
+      return anchor.parts.find(p => adapter.ownsConduit(p.conduit))?.messageId ?? null;
+    }
+    if (anchor) {
+      return adapter.ownsConduit(anchor.conduit) ? anchor.messageId : null;
+    }
+    return index === 0 ? (opts?.threadId ?? null) : null;
   }
 
   // ── Project conduit mapping ─────────────────────────────────────

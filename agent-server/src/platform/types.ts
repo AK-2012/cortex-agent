@@ -12,6 +12,11 @@ export interface MessageRef {
   conduit: string;
   messageId: string;
   threadId?: string;
+  /** For composite (multi-platform) posts: the per-adapter sub-refs that this ref aggregates.
+   *  Each entry carries that platform's own conduit + messageId, so a downstream consumer can
+   *  pick the anchor that belongs to a given platform (messageIds are platform-specific:
+   *  a Slack ts is not a valid Feishu open_message_id). Absent for single-adapter refs. */
+  parts?: MessageRef[];
 }
 
 // --- Inbound Types ---

@@ -106,7 +106,9 @@ function initThreadContext(threadId: string, opts: RunThreadOptions): ThreadCont
   const template = thread.templateName ? (getTemplate(thread.templateName) || null) : null;
   // Aggregate agent output into an OutputStream. The caller supplies the Destination
   // (interactive-reply or project-report).
-  const stream = opts.adapter.openOutputStream(opts.destination, { threadId: opts.threadAnchorId });
+  // Pass the full statusMsg as anchorRef so CompositeAdapter can resolve a per-platform
+  // thread anchor for each sub-stream (a Slack ts must not be used as a Feishu message_id).
+  const stream = opts.adapter.openOutputStream(opts.destination, { threadId: opts.threadAnchorId, anchorRef: opts.statusMsg });
   return { thread, template, meta: thread.metadata, stream, lastAgentResult: null, totalNumTurns: 0 };
 }
 
