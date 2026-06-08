@@ -24,10 +24,11 @@ import {
   getAistatusConfigPath,
   generateSystemdUnit,
   generateLaunchdPlist,
+  runFeishuUserLogin,
   SLACK_APP_MANIFEST,
 } from '../src/entry/init.js';
 
-import type { InitAnswers } from '../src/entry/init.js';
+import type { InitAnswers, FeishuInitConfig } from '../src/entry/init.js';
 
 // ─── getResolvedPaths ───────────────────────────────────────────
 
@@ -532,4 +533,48 @@ test('generateLaunchdPlist contains correct ProgramArguments and env', () => {
   assert.match(plist, /<string>\/Users\/bob\/.cortex<\/string>/);
   assert.match(plist, /RunAtLoad/);
   assert.match(plist, /KeepAlive/);
+});
+
+// ─── runFeishuUserLogin ─────────────────────────────────────────
+
+test('runFeishuUserLogin passes credentials + token file to cmdFeishu login', async () => {
+  const calls: { args: string[]; deps: any }[] = [];
+  const fakeCmd = async (args: string[], deps: any) => {
+    calls.push({ args, deps });
+    return { exitCode: 0, stdout: 'logged in\n', stderr: '' };
+  };
+  const out: string[] = [];
+  const config: FeishuInitConfig = { appId: 'cli_x', appSecret: 'sec', domain: 'lark', authMode: 'user' };
+  const res = await runFeishuUserLogin(config, '/tmp/cfgdir', {
+    cmdFeishuImpl: fakeCmd as any,
+    stdout: (s) => out.push(s),
+  });
+
+  assert.equal(res.exitCode, 0);
+  assert.equal(calls.length, 1);
+  assert.deepEqual(calls[0].args, ['login']);
+  assert.equal(calls[0].deps.env.FEISHU_APP_ID, 'cli_x');
+  assert.equal(calls[0].deps.env.FEISHU_APP_SECRET, 'sec');
+  assert.equal(calls[0].deps.env.FEISHU_DOMAIN, 'lark');
+  assert.equal(calls[0].deps.tokenFile, path.join('/tmp/cfgdir', 'feishu-user-token.json'));
+  assert.equal(calls[0].deps.loadDotenv, false);
+  assert.ok(out.join('').includes('logged in'));
+});
+
+test('runFeishuUserLogin omits FEISHU_DOMAIN when unset and surfaces stderr on failure', async () => {
+  const seen: any[] = [];
+  const fakeCmd = async (_args: string[], deps: any) => {
+    seen.push(deps);
+    return { exitCode: 1, stdout: '', stderr: 'boom\n' };
+  };
+  const out: string[] = [];
+  const config: FeishuInitConfig = { appId: 'a', appSecret: 'b', authMode: 'user' };
+  const res = await runFeishuUserLogin(config, '/tmp/c', {
+    cmdFeishuImpl: fakeCmd as any,
+    stdout: (s) => out.push(s),
+  });
+
+  assert.equal(res.exitCode, 1);
+  assert.equal('FEISHU_DOMAIN' in seen[0].env, false);
+  assert.ok(out.join('').includes('boom'));
 });

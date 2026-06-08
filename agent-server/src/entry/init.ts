@@ -25,6 +25,7 @@ import { mergeThreadTemplates } from '@domain/threads/index.js';
 import type { ModelChoice } from '@core/profile-generator.js';
 import { createLogger } from '@core/log.js';
 import { INSTALL_ROOT, DEFAULTS_DIR } from '@core/utils.js';
+import { cmdFeishu, type CliResult } from './feishu-login.js';
 
 // ─── Path computation (DATA_DIR resolved locally to support --home override) ──
 
@@ -783,8 +784,8 @@ async function collectFeishuConfig(): Promise<FeishuInitConfig> {
       'Identity for MCP document operations (docx/wiki/bitable/sheets/drive):',
       '  - bot:  documents are created/owned by the app (default).',
       '  - user: documents are created/owned by YOUR Feishu account. Messaging stays as the bot.',
-      '          After init, run `cortex feishu login` — it prints a URL to authorize in any',
-      '          browser (OAuth device flow). No redirect URL to register, nothing to paste back.',
+      '          Pick user and init starts the login right away — it prints a URL to authorize in',
+      '          any browser (OAuth device flow). No redirect URL to register, nothing to paste back.',
     ].join('\n'),
     'Feishu App Setup Guide',
   );
@@ -838,14 +839,6 @@ async function collectFeishuConfig(): Promise<FeishuInitConfig> {
   });
   handleCancel(authMode);
 
-  if (authMode === 'user') {
-    clack.note(
-      'After setup completes, run `cortex feishu login` to authorize your account.\n' +
-      'It prints a URL to open in any browser — no redirect URL, no copy-paste.',
-      'Feishu user login',
-    );
-  }
-
   return {
     appId: appId as string,
     appSecret: appSecret as string,
@@ -854,6 +847,39 @@ async function collectFeishuConfig(): Promise<FeishuInitConfig> {
     domain,
     authMode: authMode as 'bot' | 'user',
   };
+}
+
+/**
+ * Run the Feishu user-identity login inline during init (OAuth device-authorization flow).
+ * Invoked right after the operator selects authMode='user' so they authorize in one sitting
+ * instead of having to run `cortex feishu login` afterwards.
+ *
+ * Credentials are passed via deps.env (no .env on disk yet at questionnaire time), and the token
+ * is written next to the .env (CONFIG_DIR/feishu-user-token.json) so it matches the --home target
+ * even when that differs from the module-level CONFIG_DIR. Best-effort: returns the CliResult and
+ * never throws, so a failed/abandoned login does not abort init — the operator can retry later.
+ */
+export async function runFeishuUserLogin(
+  config: FeishuInitConfig,
+  configDir: string,
+  deps: { cmdFeishuImpl?: typeof cmdFeishu; stdout?: (s: string) => void } = {},
+): Promise<CliResult> {
+  const cmd = deps.cmdFeishuImpl ?? cmdFeishu;
+  const out = deps.stdout ?? ((s: string) => process.stdout.write(s));
+
+  const env: NodeJS.ProcessEnv = {
+    ...process.env,
+    FEISHU_APP_ID: config.appId,
+    FEISHU_APP_SECRET: config.appSecret,
+  };
+  if (config.domain) env.FEISHU_DOMAIN = config.domain;
+
+  const tokenFile = path.join(configDir, 'feishu-user-token.json');
+  const result = await cmd(['login'], { env, tokenFile, loadDotenv: false });
+
+  if (result.stdout) out(result.stdout);
+  if (result.exitCode !== 0 && result.stderr) out(result.stderr);
+  return result;
 }
 
 async function collectAnswersInteractive(paths: InitPaths): Promise<InitAnswers> {
@@ -899,6 +925,18 @@ async function collectAnswersInteractive(paths: InitPaths): Promise<InitAnswers>
   }
   if (platforms.includes('feishu')) {
     feishuConfig = await collectFeishuConfig();
+    // user identity → continue straight into the device-flow login (rather than only printing a
+    // hint to run `cortex feishu login` later). Best-effort: a failed/abandoned login won't abort
+    // init — credentials are already captured in feishuConfig and the operator can retry.
+    if (feishuConfig.authMode === 'user') {
+      clack.log.info('Starting Feishu user login (OAuth device flow)...');
+      const res = await runFeishuUserLogin(feishuConfig, paths.CONFIG_DIR);
+      if (res.exitCode === 0) {
+        clack.log.success('Feishu user login complete.');
+      } else {
+        clack.log.warn('Feishu user login did not complete. Retry later with `cortex feishu login`.');
+      }
+    }
   }
 
   // Step 3: Machine identity
