@@ -129,6 +129,12 @@ $CORTEX_HOME/
 | `CORTEX_GPU_MONITOR_MOCK` | — | 用于测试的模拟 GPU 数据 JSON（覆盖真实的 nvidia-smi 查询） |
 | `CORTEX_SERVER_UPDATE_DISABLE` | — | 设置为 `1` 以禁用服务器自动更新检查（默认开启） |
 
+### 任务派发
+
+| 变量 | 默认值 | 用途 |
+|---|---|---|
+| `TASK_DISPATCH_MAX_CONCURRENT` | `max(4, cpus - 2)` | 允许并发运行的任务派发线程数上限。设置为正整数时直接使用该值（显式覆盖）。未设置（或值非法）时自动解析为 `max(4, os.cpus().length - 2)`——按「核数减 2」伸缩，并以 4 为下限保底。该值在守护进程启动时解析一次，更改需重启生效。 |
+
 ## profiles.json
 
 位于 `$CORTEX_HOME/config/profiles.json`。定义命名智能体配置，控制每个智能体会话使用的后端、模型和额外配置。可用后端对比参见 [backends.md](./backends.md)。

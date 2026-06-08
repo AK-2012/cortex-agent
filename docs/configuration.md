@@ -145,6 +145,12 @@ channel.
 | `CORTEX_GPU_MONITOR_MOCK` | — | Mock GPU data JSON for testing (overrides real nvidia-smi queries) |
 | `CORTEX_SERVER_UPDATE_DISABLE` | — | Set to `1` to disable the server auto-update check (enabled by default) |
 
+### Task dispatch
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `TASK_DISPATCH_MAX_CONCURRENT` | `max(4, cpus - 2)` | Max number of task-dispatch threads allowed to run concurrently. A positive integer is used as-is (explicit override). When unset (or invalid), it auto-resolves to `max(4, os.cpus().length - 2)` — scaling to all-but-2 cores, floored at 4. Resolved once at daemon startup; requires a restart to change. |
+
 ## profiles.json
 
 Located at `$CORTEX_HOME/config/profiles.json`. Defines named agent profiles

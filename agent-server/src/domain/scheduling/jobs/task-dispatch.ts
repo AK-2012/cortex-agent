@@ -2,6 +2,7 @@
 // output: taskDispatchRunner job runner — registers as 'task-dispatch'
 // pos:    programmatic task dispatch; provides cancelDispatchedTask for app.ts
 
+import * as os from 'node:os';
 import { register, ctx } from '../job-registry.js';
 import { createLogger } from '@core/log.js';
 import { Icons } from '../../../core/icons.js';
@@ -33,7 +34,26 @@ function sanitizeBlockReason(s: string): string {
 
 // --- Guards ---
 
-const TASK_DISPATCH_MAX_CONCURRENT = 4;
+// Max concurrent task dispatches. Resolution order:
+//   1. TASK_DISPATCH_MAX_CONCURRENT env var (explicit override — used as-is if a positive int)
+//   2. auto: max(4, os.cpus().length - 2) — scale to all-but-2 cores, floored at 4
+function resolveMaxConcurrent(): number {
+  const raw = process.env.TASK_DISPATCH_MAX_CONCURRENT;
+  if (raw !== undefined && raw.trim() !== '') {
+    const n = Number.parseInt(raw, 10);
+    if (Number.isFinite(n) && n > 0) {
+      log.info(`Max concurrent dispatch = ${n} (from TASK_DISPATCH_MAX_CONCURRENT env)`);
+      return n;
+    }
+    log.warn(`Invalid TASK_DISPATCH_MAX_CONCURRENT="${raw}" — falling back to auto`);
+  }
+  const cpus = os.cpus().length;
+  const auto = Math.max(4, cpus - 2);
+  log.info(`Max concurrent dispatch = ${auto} (auto: max(4, ${cpus} cpus - 2))`);
+  return auto;
+}
+
+const TASK_DISPATCH_MAX_CONCURRENT = resolveMaxConcurrent();
 
 function passDispatchGuards(): boolean {
   const runningExecutions = executionRegistry.getRunningExecutions();
