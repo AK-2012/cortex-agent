@@ -1,6 +1,7 @@
-// input:  sessionStore, conversationLedger, protocol types
-// output: buildTranscriptReplay() — assemble transcript replay for session attach
+// input:  protocol types + ports types
+// output: buildTranscriptReplay — pure synchronous formatter, TranscriptData → TranscriptReplay | null
 // pos:    TUI adapter — replays prior chat messages as TranscriptReplay frames
+//         ZERO @store/@domain/@orch imports (see ports.ts for boundary types)
 // >>> If I am updated, update the folder's CORTEX.md <<<
 
 import type {
@@ -9,37 +10,23 @@ import type {
   InteractivePost,
   TranscriptReplay,
 } from '../../tui/protocol.js';
-import { sessionStore } from '@store/session-registry-repo.js';
-import { conversationLedger } from '@store/conversation-ledger-repo.js';
-import { createLogger } from '@core/log.js';
-import type { MessageRef, MessageContent, RichBlock, ActionElement } from '../../types.js';
-
-const log = createLogger('tui-transcript');
+import type { MessageRef } from '../../types.js';
+import type { TranscriptData } from './ports.js';
 
 /**
- * Build a TranscriptReplay frame for the given session.
- * Fetches conversation ledger turns and converts them to replay items.
- * Returns null if the session has no recorded conversation.
+ * Build a TranscriptReplay frame from transcript data.
+ * Pure synchronous formatter — no store/IO dependencies.
+ * Returns null when there are no replayable items.
  */
-export async function buildTranscriptReplay(
-  sessionId: string,
-): Promise<TranscriptReplay | null> {
-  // Find the session record
-  const sessionName = await sessionStore.lookupBySessionId(sessionId);
-  if (!sessionName) return null;
-
-  // Find the session's channel from the registry
-  const session = await sessionStore.getById(sessionId);
-  if (!session) return null;
-
-  const channel = session.channel;
-  const conv = await conversationLedger.getConversation(channel);
-  if (!conv || conv.turns.length === 0) return null;
+export function buildTranscriptReplay(
+  data: TranscriptData,
+): TranscriptReplay | null {
+  const { sessionId, channel, turns } = data;
 
   const items: Array<ChatPost | ChatUpdate | InteractivePost> = [];
   let seq = 0;
 
-  for (const turn of conv.turns) {
+  for (const turn of turns) {
     // Skip processing turns
     if (turn.status === 'processing') continue;
 

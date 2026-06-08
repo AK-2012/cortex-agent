@@ -58,6 +58,7 @@ import { sessionStore } from '@store/session-registry-repo.js';
 import { conversationLedger } from '@store/conversation-ledger-repo.js';
 import { enqueue, conduitQueues } from '@orch/conduit-queue.js';
 import { createLogger } from '@core/log.js';
+import type { TranscriptData, TranscriptTurn } from './ports.js';
 import type { EventBus, Subscription } from '@events/index.js';
 
 const log = createLogger('tui-gateway');
@@ -673,7 +674,8 @@ export class TuiGatewayAdapter implements PlatformAdapter, TuiAdapterControls {
         });
 
         // Transcript replay
-        const replay = await buildTranscriptReplay(frame.resume.sessionId);
+        const data = await this._assembleTranscript(frame.resume.sessionId);
+        const replay = data ? buildTranscriptReplay(data) : null;
         if (replay) {
           conn.send(replay);
         }
@@ -724,6 +726,36 @@ export class TuiGatewayAdapter implements PlatformAdapter, TuiAdapterControls {
     });
   }
 
+  /**
+   * Fetch transcript data for a session from the stores.
+   * Temporary — will be removed when store access is moved out of the gateway.
+   */
+  private async _assembleTranscript(sessionId: string): Promise<TranscriptData | null> {
+    const sessionName = await sessionStore.lookupBySessionId(sessionId);
+    if (!sessionName) return null;
+
+    const session = await sessionStore.getById(sessionId);
+    if (!session) return null;
+
+    const channel = session.channel;
+    const conv = await conversationLedger.getConversation(channel);
+    if (!conv || conv.turns.length === 0) return null;
+
+    const turns: TranscriptTurn[] = conv.turns.map((turn: {
+      userMessageTs: string;
+      userMessageText: string;
+      responseMessageTimestamps: string[];
+      status: 'processing' | 'completed' | 'superseded';
+    }) => ({
+      userMessageTs: turn.userMessageTs,
+      userMessageText: turn.userMessageText,
+      responseMessageTimestamps: turn.responseMessageTimestamps,
+      status: turn.status,
+    }));
+
+    return { sessionId, channel, turns };
+  }
+
   // ── Private: session switch ─────────────────────────────────────
 
   private async _handleSessionSwitch(conn: TuiConnection, frame: TuiFrame): Promise<void> {
@@ -761,7 +793,8 @@ export class TuiGatewayAdapter implements PlatformAdapter, TuiAdapterControls {
         });
 
         // Transcript replay
-        const replay = await buildTranscriptReplay(sessionId);
+        const data = await this._assembleTranscript(sessionId);
+        const replay = data ? buildTranscriptReplay(data) : null;
         if (replay) {
           conn.send(replay);
         }
