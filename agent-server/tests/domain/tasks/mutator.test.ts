@@ -3,6 +3,7 @@
 // pos:    verifies domain/tasks/mutator.ts orchestrates mutations correctly
 // >>> If I am updated, update my header comment and CORTEX.md <<<
 
+import '../../_test-home.js'; // MUST be first: isolate CORTEX_HOME before paths.ts loads
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as fs from 'node:fs';

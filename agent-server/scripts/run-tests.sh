@@ -75,13 +75,26 @@ TEST_FILES=(
 )
 shopt -u nullglob
 
-# Filter out debug/shim files
+# Filter out debug/shim files and integration tests. Integration tests fork real
+# server subprocesses and need longer than the 15s unit-test timeout; running them
+# here would systematically time out and orphan the spawned app.ts process. They run
+# in a dedicated pass below with no 15s cap.
 FILTERED=()
+INTEGRATION=()
 for f in "${TEST_FILES[@]}"; do
   case "$(basename "$f")" in
     _shims-*|_combined*|_plan*) ;;
+    integration-*) INTEGRATION+=("$f") ;;
     *) FILTERED+=("$f") ;;
   esac
 done
 
-node --import tsx --test --test-force-exit --test-timeout=15000 "${FILTERED[@]}"
+# --import ./tests/_test-home.ts is a belt-and-suspenders isolation guard (no-op here
+# since CORTEX_HOME is already set above; protects ad-hoc invocations of this command).
+node --import tsx --import ./tests/_test-home.ts --test --test-force-exit --test-timeout=15000 "${FILTERED[@]}"
+
+# ── Integration tests (forked servers; longer timeout, run last) ─────
+if [[ ${#INTEGRATION[@]} -gt 0 ]]; then
+  echo "[run-tests] running integration tests"
+  node --import tsx --test --test-force-exit --test-timeout=120000 "${INTEGRATION[@]}"
+fi

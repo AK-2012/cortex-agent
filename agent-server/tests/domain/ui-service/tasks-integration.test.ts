@@ -2,6 +2,7 @@
 // lock-acquire → claim → release cycle with no lock leakage on error paths.
 // This test requires access to the real PROJECTS_DIR and filesystem.
 
+import '../../_test-home.js'; // MUST be first: isolate CORTEX_HOME before paths.ts loads
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as fs from 'node:fs';

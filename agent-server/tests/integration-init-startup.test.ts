@@ -2,9 +2,9 @@
 // output: Integration tests: init (non-interactive), server start/stop, config validation
 // pos:    End-to-end integration test for cortex init + start lifecycle via subprocess fork
 
-import test from 'node:test';
+import test, { after } from 'node:test';
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
+import { spawn, type ChildProcess } from 'node:child_process';
 import { mkdtempSync, existsSync, readFileSync, writeFileSync, rmSync, statSync } from 'node:fs';
 import * as path from 'node:path';
 import * as os from 'node:os';
@@ -24,6 +24,47 @@ function randomPort(): number {
   return 40000 + Math.floor(Math.random() * 25000);
 }
 
+// ─── Child-process lifecycle (leak guard) ─────────────────────────
+// Integration tests fork real cli.ts / app.ts processes. If a readiness assertion
+// throws, or the node:test per-test timeout fires (which abandons in-flight work),
+// the spawned child is NOT auto-killed and gets reparented to init — leaking long-
+// running server processes (the historical /tmp/cortex-int-* orphans). We track every
+// spawned child and force-kill the whole process group on test teardown AND on process
+// exit (the latter is the backstop for --test-force-exit / timeouts; it must be sync).
+
+const liveChildren = new Set<ChildProcess>();
+
+/** Spawn with a dedicated process group + tracking so we can reap the whole tree. */
+function trackedSpawn(executable: string, args: string[], options: Parameters<typeof spawn>[2]): ChildProcess {
+  const child = spawn(executable, args, { ...options, detached: true });
+  liveChildren.add(child);
+  child.on('close', () => liveChildren.delete(child));
+  return child;
+}
+
+/** Force-kill a child and any descendants via its process group. Best-effort, sync-safe. */
+function killTree(child: ChildProcess): void {
+  if (!child.pid) return;
+  try { process.kill(-child.pid, 'SIGKILL'); }
+  catch { try { child.kill('SIGKILL'); } catch { /* already gone */ } }
+}
+
+after(() => {
+  for (const c of liveChildren) killTree(c);
+  liveChildren.clear();
+});
+// Backstop: runs even under --test-force-exit / test timeout. Must be synchronous.
+function reapAll(): void {
+  for (const c of liveChildren) { if (c.pid) { try { process.kill(-c.pid, 'SIGKILL'); } catch { /* gone */ } } }
+}
+process.on('exit', reapAll);
+// Catchable signals (e.g. a `timeout` wrapper or Ctrl-C) don't trigger 'exit', so reap
+// explicitly then re-exit. SIGKILL is uncatchable — detached children would still orphan
+// there, which is why the standard run path relies on normal exit / --test-force-exit.
+for (const sig of ['SIGTERM', 'SIGINT', 'SIGHUP'] as const) {
+  process.on(sig, () => { reapAll(); process.exit(1); });
+}
+
 // ─── Helpers ──────────────────────────────────────────────────────
 
 function spawnWait(executable: string, args: string[], opts: {
@@ -33,7 +74,7 @@ function spawnWait(executable: string, args: string[], opts: {
   timeoutMs?: number;
 }): Promise<{ stdout: string; stderr: string; exitCode: number | null }> {
   return new Promise((resolve, reject) => {
-    const child = spawn(executable, args, {
+    const child = trackedSpawn(executable, args, {
       cwd: opts.cwd,
       env: { ...process.env, ...opts.env },
       stdio: ['pipe', 'pipe', 'pipe'],
@@ -185,6 +226,7 @@ test('Test 1: cortex init creates valid directory structure (non-interactive)', 
 
 test('Test 2: Server starts and shuts down cleanly in initialized environment', async () => {
   const tempDir = mkdtempSync(path.join(os.tmpdir(), 'cortex-int-'));
+  let child: ChildProcess | undefined;
   try {
     // Init first
     await cortexInit(tempDir, 'claude\nnone\nn\nn\nn\nn\n');
@@ -193,7 +235,7 @@ test('Test 2: Server starts and shuts down cleanly in initialized environment', 
     const webhookPort = String(randomPort());
     const clientPort = String(randomPort());
 
-    const child = spawn(NODE, [...TSX_FLAGS, APP_TS], {
+    child = trackedSpawn(NODE, [...TSX_FLAGS, APP_TS], {
       env: {
         ...process.env,
         CORTEX_HOME: tempDir,
@@ -246,6 +288,7 @@ test('Test 2: Server starts and shuts down cleanly in initialized environment', 
     // Assert startup messages appear in output
     assert.match(stdout, /Cortex agent is running/);
   } finally {
+    if (child) killTree(child);
     rmSync(tempDir, { recursive: true, force: true });
   }
 });

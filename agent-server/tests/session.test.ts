@@ -3,6 +3,7 @@
 // pos:    Verify session CRUD and legacy migration, all tests use async API
 // >>> If I am updated, update my header comment and the parent folder's CORTEX.md <<<
 
+import './_test-home.js'; // MUST be first: isolate CORTEX_HOME before paths.ts loads
 import test, { before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import * as fs from 'node:fs/promises';
