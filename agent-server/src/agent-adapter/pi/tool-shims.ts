@@ -1,5 +1,6 @@
 // input:  PI ExtensionAPI, @sinclair/typebox
-// output: Register ask_user_question / enter_plan_mode / exit_plan_mode / todo_write pseudo-tools
+// output: Register ask_user_question / enter_plan_mode / exit_plan_mode / todo_write pseudo-tools,
+//         gated by the agent's tool allowlist (CORTEX_PI_ALLOWED_TOOLS env) via makeToolGate
 // pos:    PI --extension bridge that exposes Cortex interaction flow to the LLM
 // >>> If I am updated, update my header comment and the parent folder's CORTEX.md <<<
 
@@ -8,7 +9,31 @@ import { Type } from '@sinclair/typebox';
 import * as path from 'path';
 import { mkdirSync } from 'fs';
 
+/**
+ * Build a predicate that decides whether a pseudo-tool (identified by its Claude-native label,
+ * e.g. "ExitPlanMode") may be registered, given the agent's tool allowlist.
+ *
+ * `allowedToolsEnv` mirrors the agent's `tools` config in Claude-native, comma-separated form —
+ * the PI adapter forwards it via the CORTEX_PI_ALLOWED_TOOLS env var, exactly the same allowlist
+ * the Claude backend passes to `--tools`. When unset/empty (interactive sessions, or callers that
+ * don't constrain tools) ALL pseudo-tools are allowed, preserving prior behavior.
+ *
+ * This is what stops thread-dispatched agents (coder, reviewer, …) from being handed
+ * AskUserQuestion / EnterPlanMode / ExitPlanMode — interaction tools that deadlock a headless
+ * thread because no human can ever answer the approval prompt.
+ */
+export function makeToolGate(allowedToolsEnv: string | undefined): (label: string) => boolean {
+  if (!allowedToolsEnv || allowedToolsEnv.trim() === '') return () => true;
+  const allowed = new Set(
+    allowedToolsEnv.split(',').map((t) => t.trim()).filter((t) => t.length > 0),
+  );
+  return (label: string): boolean => allowed.has(label);
+}
+
 export default function toolShims(pi: ExtensionAPI): void {
+  // Gate pseudo-tool registration on the agent's tool allowlist (Claude-native labels).
+  // Mirrors the Claude backend's `--tools` allowlist so PI honors the same per-agent tool scoping.
+  const allowed = makeToolGate(process.env.CORTEX_PI_ALLOWED_TOOLS);
   // ---------------------------------------------------------------------------
   // ask_user_question
   // ---------------------------------------------------------------------------
@@ -17,7 +42,7 @@ export default function toolShims(pi: ExtensionAPI): void {
   // blocking primitive; the Cortex adapter posts all questions to Slack from the
   // tool_use event (which carries the full input), then unblocks via
   // sendExtensionUiResponse when the user answers.
-  pi.registerTool({
+  if (allowed('AskUserQuestion')) pi.registerTool({
     name: 'ask_user_question',
     label: 'AskUserQuestion',
     description:
@@ -61,7 +86,7 @@ export default function toolShims(pi: ExtensionAPI): void {
   // tools, write the plan to a designated file, then call exit_plan_mode.
   // Non-interactive: returns the plan-mode instructions immediately.
   // The event-parser emits a plan_mode_entered NormalizedEvent for observability.
-  pi.registerTool({
+  if (allowed('EnterPlanMode')) pi.registerTool({
     name: 'enter_plan_mode',
     label: 'EnterPlanMode',
     description:
@@ -127,7 +152,7 @@ export default function toolShims(pi: ExtensionAPI): void {
   // user's approval (value='__APPROVED__') or rejection (value=<feedback> / cancelled).
   // On approval, PI is unblocked and continues to the implementation phase.
   // On rejection, returns a rejection message so PI can revise the plan.
-  pi.registerTool({
+  if (allowed('ExitPlanMode')) pi.registerTool({
     name: 'exit_plan_mode',
     label: 'ExitPlanMode',
     description:
@@ -164,7 +189,7 @@ export default function toolShims(pi: ExtensionAPI): void {
   // Non-interactive: just acknowledges the update and returns. The event-parser
   // emits a regular tool_use NormalizedEvent (no special NormalizedEvent type).
   // The LLM uses this to visibly manage its work checklist across steps.
-  pi.registerTool({
+  if (allowed('TodoWrite')) pi.registerTool({
     name: 'todo_write',
     label: 'TodoWrite',
     description:

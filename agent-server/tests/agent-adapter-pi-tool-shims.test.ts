@@ -7,6 +7,7 @@ import { join as pathJoin } from 'node:path';
 import { mkdirSync } from 'node:fs';
 import { PIAdapter } from '../src/agent-adapter/pi/adapter.js';
 import type { PIAgentProcess } from '../src/agent-adapter/pi/adapter.js';
+import toolShims, { makeToolGate } from '../src/agent-adapter/pi/tool-shims.js';
 
 const SESSION_DIR = pathJoin(tmpdir(), 'pi-shims-test-' + process.pid);
 mkdirSync(SESSION_DIR, { recursive: true });
@@ -185,6 +186,117 @@ test('H: clean exit before turn_complete', async () => {
   await Promise.resolve();
   await assert.rejects(turnPromise, /exited before turn_complete/i);
   await proc.close().catch(() => {});
+});
+
+// ─── Tool allowlist gating (thread agents must not get interaction tools) ───
+
+function makeMockPi() {
+  const registered: string[] = [];
+  const pi: any = {
+    on: () => {},
+    registerTool: (def: any) => { registered.push(def.name); },
+  };
+  return { pi, registered };
+}
+
+function makeCapturingSpawner() {
+  const calls: any[] = [];
+  const children: any[] = [];
+  return {
+    calls,
+    children,
+    spawn: (bin: string, args: string[], opts: any) => {
+      calls.push({ bin, args, opts });
+      const c = makeStubChild();
+      children.push(c);
+      return c;
+    },
+  };
+}
+
+const CODER_TOOLS = 'Agent,Bash,Edit,Glob,Grep,Read,Skill,TaskStop,TodoWrite,WebFetch,WebSearch,Write';
+
+test('I: makeToolGate — unset/empty env allows all pseudo-tools', () => {
+  for (const env of [undefined, '', '   ']) {
+    const gate = makeToolGate(env);
+    for (const label of ['AskUserQuestion', 'EnterPlanMode', 'ExitPlanMode', 'TodoWrite']) {
+      assert.equal(gate(label), true, `${label} should be allowed when env=${JSON.stringify(env)}`);
+    }
+  }
+});
+
+test('I2: makeToolGate — coder allowlist excludes the three interaction tools', () => {
+  const gate = makeToolGate(CODER_TOOLS);
+  assert.equal(gate('TodoWrite'), true);
+  assert.equal(gate('AskUserQuestion'), false);
+  assert.equal(gate('EnterPlanMode'), false);
+  assert.equal(gate('ExitPlanMode'), false);
+});
+
+test('I3: makeToolGate — trims surrounding whitespace in entries', () => {
+  const gate = makeToolGate(' Bash , TodoWrite ');
+  assert.equal(gate('Bash'), true);
+  assert.equal(gate('TodoWrite'), true);
+  assert.equal(gate('ExitPlanMode'), false);
+});
+
+test('J: toolShims registers only allowed pseudo-tools under a coder allowlist', () => {
+  const prev = process.env.CORTEX_PI_ALLOWED_TOOLS;
+  process.env.CORTEX_PI_ALLOWED_TOOLS = CODER_TOOLS;
+  try {
+    const { pi, registered } = makeMockPi();
+    toolShims(pi);
+    assert.ok(!registered.includes('ask_user_question'), 'ask_user_question must NOT be registered');
+    assert.ok(!registered.includes('enter_plan_mode'), 'enter_plan_mode must NOT be registered');
+    assert.ok(!registered.includes('exit_plan_mode'), 'exit_plan_mode must NOT be registered');
+    assert.ok(registered.includes('todo_write'), 'todo_write must remain registered');
+  } finally {
+    if (prev === undefined) delete process.env.CORTEX_PI_ALLOWED_TOOLS;
+    else process.env.CORTEX_PI_ALLOWED_TOOLS = prev;
+  }
+});
+
+test('J2: toolShims registers all four pseudo-tools when env is unset', () => {
+  const prev = process.env.CORTEX_PI_ALLOWED_TOOLS;
+  delete process.env.CORTEX_PI_ALLOWED_TOOLS;
+  try {
+    const { pi, registered } = makeMockPi();
+    toolShims(pi);
+    for (const n of ['ask_user_question', 'enter_plan_mode', 'exit_plan_mode', 'todo_write']) {
+      assert.ok(registered.includes(n), `${n} should be registered when no allowlist is set`);
+    }
+  } finally {
+    if (prev === undefined) delete process.env.CORTEX_PI_ALLOWED_TOOLS;
+    else process.env.CORTEX_PI_ALLOWED_TOOLS = prev;
+  }
+});
+
+test('K: spawn forwards rawTools allowlist to the subprocess env', async () => {
+  const s = makeCapturingSpawner();
+  const adapter = new PIAdapter(s.spawn as any, SESSION_DIR);
+  const proc = adapter.spawn({ sessionKey: 'kEnv', sessionId: null, resume: false, rawTools: CODER_TOOLS });
+  const child = s.children[0];
+  await bootstrap(child);
+  assert.equal(s.calls[0].opts.env.CORTEX_PI_ALLOWED_TOOLS, CODER_TOOLS);
+  child.emit('close', 0);
+  await proc.close();
+});
+
+test('K2: spawn omits CORTEX_PI_ALLOWED_TOOLS when rawTools is unset', async () => {
+  const prev = process.env.CORTEX_PI_ALLOWED_TOOLS;
+  delete process.env.CORTEX_PI_ALLOWED_TOOLS;
+  try {
+    const s = makeCapturingSpawner();
+    const adapter = new PIAdapter(s.spawn as any, SESSION_DIR);
+    const proc = adapter.spawn({ sessionKey: 'kEnv2', sessionId: null, resume: false });
+    const child = s.children[0];
+    await bootstrap(child);
+    assert.equal(s.calls[0].opts.env.CORTEX_PI_ALLOWED_TOOLS, undefined);
+    child.emit('close', 0);
+    await proc.close();
+  } finally {
+    if (prev !== undefined) process.env.CORTEX_PI_ALLOWED_TOOLS = prev;
+  }
 });
 
 console.error("All tests registered");

@@ -18,6 +18,7 @@ import { piRpcLineToNormalized, createPIEventParserState, type PIEventParserStat
 import { PI_AGENT_DIR, PI_SESSIONS_DIR, writeProvidersConfig, buildProviderOverrides, ensureAuthVisible } from './agent-dir.js';
 import { parsePiListModelsOutput } from '@core/gateway-generator.js';
 import { buildPrompt } from '../normalize/prompt-builder.js';
+import { fromCanonical } from '../normalize/tool-names.js';
 
 const log = createLogger('pi-adapter');
 
@@ -620,6 +621,15 @@ export class PIAdapter implements AgentAdapter {
 
     const env: Record<string, string | undefined> = { ...process.env, ...(config.env ?? {}), PI_CODING_AGENT_DIR: PI_AGENT_DIR };
     if (config.channel) env.SLACK_CHANNEL = config.channel;
+    // Forward the agent's tool allowlist (Claude-native names) so tool-shims.ts can gate which
+    // pseudo-tools it registers — mirroring the Claude backend's `--tools` allowlist. Without this,
+    // thread-dispatched agents (whose config excludes AskUserQuestion/EnterPlanMode/ExitPlanMode)
+    // would still be handed those interaction tools and deadlock on an approval no human can answer.
+    const allowedTools = config.rawTools
+      ?? (config.tools && config.tools.length > 0
+        ? config.tools.map((t) => fromCanonical('claude', t)).filter((n): n is string => !!n).join(',')
+        : undefined);
+    if (allowedTools) env.CORTEX_PI_ALLOWED_TOOLS = allowedTools;
     const cwd = config.cwd ?? DATA_DIR;
 
     const session = new PISession({
