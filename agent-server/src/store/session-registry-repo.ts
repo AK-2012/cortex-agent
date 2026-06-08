@@ -40,6 +40,11 @@ export class SessionRegistryRepo {
   private readonly _repo: JsonRepository<SessionRegistryData>;
   /** name → sessionId index keeping lookupSession O(1). */
   private _nameIndex = new Map<string, string>();
+  /** True once the name index has been fully rebuilt from the complete registry data.
+   *  Guards against the index being treated as authoritative when it only holds entries
+   *  added incrementally by registerSession() before any full build (which would make
+   *  lookupSession() miss every session created in a previous process lifetime). */
+  private _indexBuilt = false;
   /** Optional callback invoked when a session is pruned. Receives the sessionId. */
   private _onPruneSession: ((sessionId: string) => void) | null = null;
 
@@ -107,12 +112,16 @@ export class SessionRegistryRepo {
     for (const [sid, record] of Object.entries(data)) {
       this._nameIndex.set(record.name, sid);
     }
+    this._indexBuilt = true;
   }
 
-  /** Read registry data, rebuilding the name index from cache when empty. */
+  /** Read registry data, performing a one-time full rebuild of the name index.
+   *  Must NOT gate on _nameIndex.size: registerSession() populates the index
+   *  incrementally, so a non-empty-but-incomplete index would otherwise never be
+   *  fully rebuilt and lookups for pre-existing sessions would silently miss. */
   private async _readWithIndex(): Promise<SessionRegistryData> {
     const data = await this._repo.read();
-    if (this._nameIndex.size === 0) {
+    if (!this._indexBuilt) {
       this._rebuildNameIndex(data);
     }
     return data;
@@ -175,7 +184,13 @@ export class SessionRegistryRepo {
 
   async lookupSession(name: string): Promise<Session | null> {
     const registry = await this._readWithIndex();
-    const sid = this._nameIndex.get(name);
+    let sid = this._nameIndex.get(name);
+    if (!sid) {
+      // Defensive: if the index somehow drifted from the data (e.g. mutated by a
+      // concurrent path), do a full rebuild and retry once before declaring a miss.
+      this._rebuildNameIndex(registry);
+      sid = this._nameIndex.get(name);
+    }
     if (!sid) return null;
     return registry[sid] ?? null;
   }
@@ -281,6 +296,7 @@ export class SessionRegistryRepo {
   invalidate(): void {
     this._repo.invalidate();
     this._nameIndex.clear();
+    this._indexBuilt = false;
   }
 
   /** Wait for any in-flight mutate() to complete. For graceful SIGTERM drain. */
