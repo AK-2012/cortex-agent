@@ -35,6 +35,11 @@ export interface OutputStream {
 
 export interface OpenOutputStreamOpts {
   threadId?: string | null;
+  /** Anchor message to thread under. For composite (multi-platform) destinations this may carry
+   *  `parts[]` (per-platform sub-refs); CompositeAdapter resolves the right per-platform anchor for
+   *  each sub-stream so a platform never receives another platform's (incompatible) messageId.
+   *  Single adapters ignore this and rely on `threadId`. */
+  anchorRef?: MessageRef | null;
   onMessagePosted?: ((ref: MessageRef) => void) | null;
   durable?: DurableHooks | null;
 }
