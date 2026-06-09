@@ -1,35 +1,49 @@
 // input:  process env (CORTEX_HOME)
-// output: side effect — guarantees CORTEX_HOME points at an isolated temp dir for tests
-// pos:    test isolation guard — MUST be the first import in any test file that writes to
-//         STORE_DIR / DATA_DIR, so paths.ts binds DATA_DIR to a throwaway dir instead of
-//         the real ~/.cortex. No-op when CORTEX_HOME is already set (e.g. run-tests.sh).
+// output: side effect — guarantees CORTEX_HOME points at a per-process isolated temp dir
+// pos:    test isolation guard — globally --import'd by run-tests.sh (and importable directly),
+//         MUST run before paths.ts binds DATA_DIR.
 // >>> If I am updated, update my header comment <<<
 //
-// Why this exists: paths.ts resolves DATA_DIR = $CORTEX_HOME ?? ~/.cortex at IMPORT TIME.
-// A test run directly (e.g. `npx tsx --test tests/session.test.ts`) without CORTEX_HOME set
-// would therefore read/write the operator's live ~/.cortex/data — racing the running daemon
-// and leaking fixtures (C-concurrent-*, sid-*, …) into the real sessions.json. Importing this
-// module FIRST sets CORTEX_HOME to a fresh mkdtemp dir before paths.ts is evaluated, so every
-// store path lands in the throwaway dir. ESM evaluates imports in source order, so as long as
-// this is the first import the guarantee holds.
+// Why this exists: paths.ts resolves DATA_DIR = $CORTEX_HOME ?? ~/.cortex at IMPORT TIME, and
+// node's test runner executes test FILES in parallel processes. Two failure modes:
+//
+//   1. Run directly (e.g. `npx tsx --test tests/session.test.ts`) with CORTEX_HOME unset →
+//      tests would read/write the operator's live ~/.cortex/data, racing the running daemon
+//      and leaking fixtures (C-concurrent-*, sid-*, …) into the real sessions.json.
+//   2. Run via run-tests.sh, which exports ONE seeded CORTEX_HOME shared by every test-file
+//      process → parallel files race on shared on-disk state (TASKS.yaml, thread-templates.json,
+//      sessions.json, PROJECTS_DIR scans), causing intermittent, file-order-dependent failures.
+//
+// Both are fixed the same way: give each test-file process its OWN CORTEX_HOME before paths.ts
+// binds. When CORTEX_HOME is already set (case 2) we CLONE it so the per-process home keeps the
+// seeded config (profiles.json, machines.json, thread-templates.json, gateway, …); when unset
+// (case 1) we create a minimal empty skeleton. ESM evaluates imports in source order, so as long
+// as this is the first import (or the first --import) the guarantee holds.
 
-import { mkdtempSync, mkdirSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, rmSync, cpSync } from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 
-if (!process.env.CORTEX_HOME) {
-  const home = mkdtempSync(path.join(os.tmpdir(), 'cortex-test-home-'));
-  process.env.CORTEX_HOME = home;
-  // Seed the standard empty dir structure so store/task tests that write via a raw
-  // fs.writeFile (no mkdir, unlike atomicWrite which mkdir -p's) still work in isolation.
-  // This is NOT a full `cortex init` seed — tests needing seeded config must use run-tests.sh.
-  for (const d of ['data', 'config', 'context', path.join('context', 'projects'), 'tmp', path.join('tmp', 'threads')]) {
-    try { mkdirSync(path.join(home, d), { recursive: true }); } catch { /* best-effort */ }
-  }
-  // Best-effort cleanup when the test process exits (must be synchronous in 'exit').
-  process.on('exit', () => {
-    try { rmSync(home, { recursive: true, force: true }); } catch { /* best-effort */ }
-  });
+const _shared = process.env.CORTEX_HOME;
+const _home = mkdtempSync(path.join(os.tmpdir(), 'cortex-test-home-'));
+
+if (_shared) {
+  // Clone the shared seeded home so this process gets a private, fully-seeded copy.
+  // Best-effort: fall back to the empty skeleton below if the clone fails.
+  try { cpSync(_shared, _home, { recursive: true }); } catch { /* best-effort */ }
 }
+
+// Ensure the standard dir structure exists (covers the unset case and any seeded home missing a
+// dir — store/task tests that write via a raw fs.writeFile, no mkdir, rely on these existing).
+for (const d of ['data', 'config', 'context', path.join('context', 'projects'), 'tmp', path.join('tmp', 'threads')]) {
+  try { mkdirSync(path.join(_home, d), { recursive: true }); } catch { /* best-effort */ }
+}
+
+process.env.CORTEX_HOME = _home;
+
+// Best-effort cleanup when the test process exits (must be synchronous in 'exit').
+process.on('exit', () => {
+  try { rmSync(_home, { recursive: true, force: true }); } catch { /* best-effort */ }
+});
 
 export {};
