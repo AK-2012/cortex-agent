@@ -245,7 +245,10 @@ function createWebhookHandler({
                     }).catch(() => {});
                   }
                 }
-                void fireThreadCallback(id).catch((e) => log.error(`thread-callback ${id}: ${(e as Error).message}`));
+                // Return the promise so runThreadDetached holds the busy gate across this callback —
+                // it wakes the parent agent for a full turn, and a deferred restart firing mid-wake
+                // would drop the notification. The .catch keeps the returned promise non-rejecting.
+                return fireThreadCallback(id).catch((e) => log.error(`thread-callback ${id}: ${(e as Error).message}`));
               },
             });
             log.info(`thread-op start ${thread.id} (${template || agent}, depth ${curDepth + 1})`);

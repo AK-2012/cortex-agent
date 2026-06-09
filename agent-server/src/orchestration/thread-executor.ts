@@ -33,17 +33,21 @@ type Executor = (ctx: ThreadExecCtx) => Promise<void>;
  *  during the orchestrating session's turn would fire on the next idle and SIGTERM app.ts
  *  mid-thread, stamping it "Interrupted by server restart". This helper closes that gap.
  *
- *  track(+1) is synchronous so the daemon observes `busy` before it can act on any idle; track(-1)
- *  runs in `finally` so the gate never leaks. The thread runs detached: errors are logged (the
- *  caller already returned the threadId to the MCP client, which polls thread_status). `deps` is
- *  injectable for unit tests. */
+ *  track(+1) is synchronous so the daemon observes `busy` before it can act on any idle. The gate
+ *  is held across BOTH the run AND the onSettled callback: onSettled (the MCP completion callback)
+ *  may wake the parent agent for a full LLM turn, and `track(-1)` synchronously emits IPC `idle`.
+ *  If we released the gate before awaiting onSettled, a deferred restart would fire mid-callback and
+ *  SIGTERM app.ts, dropping the proactive completion notification. So we await onSettled first, then
+ *  release. track(-1) lives in an inner `finally` so the gate never leaks. The thread runs detached:
+ *  errors are logged (the caller already returned the threadId to the MCP client, which polls
+ *  thread_status). `deps` is injectable for unit tests. */
 export function runThreadDetached(
   threadId: string,
   runOpts: RunThreadOptions,
   deps: {
     run?: (id: string, opts: RunThreadOptions) => Promise<unknown>;
     track?: Tracker;
-    onSettled?: (threadId: string) => void;
+    onSettled?: (threadId: string) => void | Promise<void>;
   } = {},
 ): void {
   const run = deps.run ?? runThread;
@@ -51,10 +55,13 @@ export function runThreadDetached(
   track(+1);
   run(threadId, runOpts)
     .catch((e) => log.error(`detached thread ${threadId} failed: ${(e as Error).message}`))
-    .finally(() => {
-      track(-1);
-      try { deps.onSettled?.(threadId); }
+    .finally(async () => {
+      // Hold the busy gate across the settle callback (which may wake the parent agent for a full
+      // turn) so the daemon doesn't observe idle — and fire a deferred restart — mid-callback.
+      // track(-1) still always runs in the inner finally, so the gate never leaks.
+      try { await deps.onSettled?.(threadId); }
       catch (e) { log.error(`detached thread ${threadId} onSettled error: ${(e as Error).message}`); }
+      finally { track(-1); }
     });
 }
 
