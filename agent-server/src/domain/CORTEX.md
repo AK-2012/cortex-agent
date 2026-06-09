@@ -13,4 +13,5 @@ Currently only has threads/ subdirectory; subsequent S8-S11 will gradually add a
 | `scheduling/` | [S9] DONE | Scheduled task scheduling: job-registry + 4 job runners (scheduled-task / task-dispatch / memory-index-regen / task-archive) + jobs/target-dispatch.ts (4-way decision tree) |
 | `projects/` | [M1] DONE | Project domain: types + ProjectStore (list/get/exists/getDefault/resolveFromMessage, auto-scaffold general/, fs.watch cache invalidation) |
 | `ui-service/` | [M3] DONE | Transport-agnostic facade: query/mutate/subscribe over all domain stores and managers |
+| `sessions/` | [C1] DONE | Session lifecycle primitives: registerNamedSession, attachExistingSession, resetChannelSession — additive extraction from agent-runner + commands/session |
 | `tui-session/` | [B3] DONE | TUI session lifecycle: resolveHandshake, switchSession, transcript assembly — additive extraction from tui-gateway.ts |
