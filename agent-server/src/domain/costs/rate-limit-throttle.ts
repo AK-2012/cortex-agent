@@ -42,6 +42,15 @@ function formatResetTime(epochSec: number): string {
   });
 }
 
+function formatRemaining(epochSec: number): string {
+  const totalSec = Math.max(0, Math.round(epochSec - Date.now() / 1000));
+  const h = Math.floor(totalSec / 3600);
+  const m = Math.floor((totalSec % 3600) / 60);
+  if (h > 0) return `${h}h ${m}m`;
+  if (m > 0) return `${m}m`;
+  return `${totalSec}s`;
+}
+
 // --- Timer ---
 function clearThrottle(): void {
   _isThrottled = false;
@@ -125,8 +134,9 @@ async function handleRateLimitEvent(info: RateLimitInfo, mode?: string): Promise
   await _persistence.save({ resetsAt: _resetsAt, activatedAt: Date.now(), modes: [..._rateLimitedModes] });
 
   const resetStr = formatResetTime(_resetsAt);
+  const remainingStr = formatRemaining(_resetsAt);
   const modeNote = mode ? ` (mode: ${mode})` : '';
-  sendDM(`${Icons.warning} Rate limit throttle activated — utilization ${(info.utilization * 100).toFixed(0)}%${modeNote}.\nAuto-resume at ${resetStr}.`);
+  sendDM(`${Icons.warning} Rate limit throttle activated — utilization ${(info.utilization * 100).toFixed(0)}%${modeNote}.\nAuto-resume at ${resetStr} (in ${remainingStr}).`);
 }
 
 function isThrottled(): boolean {
