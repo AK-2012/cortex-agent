@@ -1,10 +1,13 @@
 // input:  domain/threads, thread-runner, orch/channel-queue, orch/busy-tracker
-// output: ThreadExecutor — handles thread-add / thread-continue / thread-start sub-paths [S8]
-// pos:    orch/ — sole thread-routing execution path
+// output: ThreadExecutor — handles thread-add / thread-continue / thread-start sub-paths [S8];
+//         runThreadDetached — fire-and-forget run that holds the busy gate for the whole pipeline
+// pos:    orch/ — sole thread-routing execution path; runThreadDetached is the MCP thread_start path
 // >>> If I am updated, update my header comment and the parent folder's CORTEX.md <<<
 
 import * as path from 'path';
 import type { Destination, PlatformAdapter, MessageRef, DownloadedFile, IncomingMessage, PlatformFileRef } from '@platform/index.js';
+import type { RunThreadOptions } from '@core/types/thread-types.js';
+import { createLogger } from '@core/log.js';
 import { Icons } from '../core/icons.js';
 import { conduitQueues, enqueue } from './conduit-queue.js';
 import { trackPendingTask } from './busy-tracker.js';
@@ -17,10 +20,43 @@ import { WORKSPACE_DIR } from '@core/utils.js';
 import { buildInteractiveCallbacks } from './agent-runner.js';
 
 const TEMP_DIR = WORKSPACE_DIR;
+const log = createLogger('thread-executor');
 
 type Enqueuer = (channel: string, fn: () => Promise<void>) => boolean;
 type Tracker = (delta: number) => void;
 type Executor = (ctx: ThreadExecCtx) => Promise<void>;
+
+/** Run a thread fire-and-forget while holding the daemon busy gate for the ENTIRE pipeline.
+ *  The Slack `!thread` path (ThreadExecutor.route), the scheduled-task path, and the task-dispatch
+ *  path all bracket runThread with trackPendingTask(±1). The MCP `thread_start` webhook path did
+ *  not — so a background thread was invisible to the busy/idle gate, and a deploy/restart deferred
+ *  during the orchestrating session's turn would fire on the next idle and SIGTERM app.ts
+ *  mid-thread, stamping it "Interrupted by server restart". This helper closes that gap.
+ *
+ *  track(+1) is synchronous so the daemon observes `busy` before it can act on any idle; track(-1)
+ *  runs in `finally` so the gate never leaks. The thread runs detached: errors are logged (the
+ *  caller already returned the threadId to the MCP client, which polls thread_status). `deps` is
+ *  injectable for unit tests. */
+export function runThreadDetached(
+  threadId: string,
+  runOpts: RunThreadOptions,
+  deps: {
+    run?: (id: string, opts: RunThreadOptions) => Promise<unknown>;
+    track?: Tracker;
+    onSettled?: (threadId: string) => void;
+  } = {},
+): void {
+  const run = deps.run ?? runThread;
+  const track = deps.track ?? trackPendingTask;
+  track(+1);
+  run(threadId, runOpts)
+    .catch((e) => log.error(`detached thread ${threadId} failed: ${(e as Error).message}`))
+    .finally(() => {
+      track(-1);
+      try { deps.onSettled?.(threadId); }
+      catch (e) { log.error(`detached thread ${threadId} onSettled error: ${(e as Error).message}`); }
+    });
+}
 
 export interface ThreadExecCtx {
   message: IncomingMessage;

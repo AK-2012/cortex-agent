@@ -13,7 +13,7 @@ import { registerAskQuestion, registerPlanApproval } from './hook-bridge.js';
 import { getCurrentPlanFilePath } from '@domain/agents/index.js';
 import { ctx as jobCtx } from '@domain/scheduling/job-registry.js';
 import { createThread, cancelThread, readArtifact, listTemplates, listAgents } from '@domain/threads/index.js';
-import { runThread } from '@domain/threads/runner.js';
+import { runThreadDetached } from '../thread-executor.js';
 import { threadStore } from '@store/thread-repo.js';
 import { fireThreadCallback } from '../thread-callback.js';
 import type { Destination } from '@platform/index.js';
@@ -198,9 +198,12 @@ function createWebhookHandler({
               onProgress: null,
               onToolUse: null,
             };
-            runThread(thread.id, runOpts)
-              .catch((e) => log.error(`mcp-thread ${thread.id} failed: ${(e as Error).message}`))
-              .finally(() => { void fireThreadCallback(thread.id).catch((e) => log.error(`thread-callback ${thread.id}: ${(e as Error).message}`)); });
+            // Hold the daemon busy gate for the WHOLE pipeline so a deferred rebuild/restart can't
+            // SIGTERM app.ts mid-thread and stamp it "Interrupted by server restart". (Bare runThread
+            // here was invisible to the busy/idle gate — see runThreadDetached.)
+            runThreadDetached(thread.id, runOpts, {
+              onSettled: (id) => { void fireThreadCallback(id).catch((e) => log.error(`thread-callback ${id}: ${(e as Error).message}`)); },
+            });
             log.info(`thread-op start ${thread.id} (${template || agent}, depth ${curDepth + 1})`);
             return reply({ success: true, data: { threadId: thread.id, status: 'running' } });
           }
