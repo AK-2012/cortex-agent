@@ -54,6 +54,8 @@ export interface TuiSessionDeps {
         backend: string;
         kind: 'local' | 'scheduled';
         projectId: string;
+        label?: string | null;
+        profileName?: string | null;
       },
     ): Promise<void>;
   };

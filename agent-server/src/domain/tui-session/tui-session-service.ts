@@ -4,6 +4,7 @@
 
 import * as crypto from 'node:crypto';
 import type { TuiSessionDeps, TuiSessionService, HandshakeResolution, SwitchResolution } from './types.js';
+import { registerNamedSession } from '@domain/sessions/session-lifecycle.js';
 import type { TranscriptData, TranscriptTurn } from '@platform/adapters/tui/ports.js';
 
 // ── Internal helpers ─────────────────────────────────────────────
@@ -13,13 +14,11 @@ async function createFresh(
   conduitId: string,
   projectId: string,
 ): Promise<SwitchResolution> {
-  const sessionName = await deps.sessionStore.generateSessionName();
   const sessionId = crypto.randomUUID();
-  await deps.sessionStore.registerSession(sessionName, {
+  const sessionName = await registerNamedSession(deps.sessionStore, {
     sessionId,
     channel: conduitId,
     backend: 'tui',
-    kind: 'local',
     projectId,
   });
   await deps.conversationLedger.initConversation(conduitId, {
