@@ -6,6 +6,7 @@ import { registerNamedSession, attachExistingSession, resetChannelSession, SESSI
 import type { SessionRegistryWriter } from '@domain/sessions/session-lifecycle.js';
 import { setSessionAsync, getSessionAsync } from '@domain/sessions/session.js';
 import { conversationLedger } from '@store/conversation-ledger-repo.js';
+import { getActiveProfile } from '@domain/agents/index.js';
 
 // ── registerNamedSession ────────────────────────────────────────
 
@@ -80,6 +81,17 @@ describe('attachExistingSession', () => {
     assert.strictEqual(conv!.sessionId, 'sid-attach');
     assert.strictEqual(conv!.sessionName, 'cortex-y');
     assert.strictEqual(conv!.backend, 'claude');
+  });
+
+  it('restores the active profile when profileName is provided', async () => {
+    const channel = 'c1-attach-profile';
+    await attachExistingSession(channel, {
+      sessionId: 'sid-attach-p', sessionName: 'cortex-p', backend: 'claude', profileName: 'qa',
+    });
+
+    assert.strictEqual(getActiveProfile(channel), 'qa', 'active profile restored to the session profile');
+    const conv = await conversationLedger.getConversation(channel);
+    assert.strictEqual(conv!.profileName, 'qa', 'ledger carries the restored profile');
   });
 });
 
