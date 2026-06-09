@@ -51,6 +51,7 @@ import { registerMessageHandler } from '@orch/routing/message-router.js';
 import { initRateLimitThrottle } from '@domain/costs/rate-limit-throttle.js';
 import { scheduleRepo } from '@store/schedule-repo.js';
 import { runMigrations } from '@store/version-migrations.js';
+import { syncManagedHooks } from '@store/hook-sync.js';
 import { costRepo } from '@store/cost-repo.js';
 import { profileRepo, startProfileWatcher, setAdminNotifier as setProfileNotifier } from '@store/profile-repo.js';
 import { sessionStore } from '@store/session-registry-repo.js';
@@ -220,6 +221,9 @@ process.on('SIGTERM', async () => {
   cleanupLogs();
   ensureMcpConfig();
   await runMigrations();
+  // Refresh version-stamped hooks in DATA_DIR/hooks from the shipped defaults. init's deployHooks
+  // only copies-if-missing, so without this an existing install never picks up hook code fixes.
+  await syncManagedHooks();
   // DR-0012 §3.6: clean up orphan TUI tmux sessions from a previous agent-server lifetime.
   // We can't re-adopt them (sessionKey↔tmux mapping was never persisted) so the honest move
   // is to kill any leftovers — otherwise a later session that reuses the same sessionId will

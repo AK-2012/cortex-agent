@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// @cortex-hook-version 2026.6.4  ← set to the current release version (agent-server/package.json) whenever you change this hook; syncManagedHooks then refreshes deployed installs
 // input:  stdin JSON — Claude Code hook event or PI hook-bridge payload
 // output: { hookSpecificOutput: { hookEventName, additionalContext, matched } }
 // pos:    Inject CORTEX.md / CORTEX.local.md ancestor chain into agent context
@@ -6,8 +7,11 @@
 //           PostToolUse (Read) — from tool_input.file_path/path
 //           SessionStart (startup|resume|clear|compact) — from payload.cwd
 //         Per-session disk-backed dedup cache (~/.cortex/tmp/cortexmd-cache/<sessionId>.json)
+//           — only files actually injected are marked seen; truncated files stay eligible so
+//             a later Read re-attempts them (they are never silently suppressed)
 //         markOnlyPaths: tool operating on a CORTEX.md itself → cache update only, no inject
-//         Total length guard at 9,500 chars with truncated annotation
+//         Total length guard at 9,500 chars; files that overflow the budget are turned into an
+//           explicit "Read EACH of these files now" instruction instead of a silent drop
 // >>> If I am updated, be sure to update my header comment and the CORTEX.md in the same folder <<<
 
 import { readFileSync, statSync, existsSync, mkdirSync, renameSync, writeFileSync } from 'fs';
@@ -123,35 +127,44 @@ function saveCache(sessionId, cache) {
 // ── context builder ──
 
 function buildContext(entries) {
-  if (entries.length === 0) return '';
+  if (entries.length === 0) return { text: '', includedPaths: [] };
 
-  // Build blocks in original order (leaf→root)
-  const blocks = entries.map(e =>
-    `<system-reminder>\nAuto-loaded CORTEX.md from ${HOSTNAME}:${e.path} (ancestor of accessed path). These instructions apply to files under this directory.\n\n${e.content}\n</system-reminder>`
-  );
-
-  const included = [];
+  // Walk entries in original order (leaf→root), inlining each as a block until the char
+  // budget is exhausted. Once exhausted, the remaining entries are NOT inlined — instead
+  // they are turned into an explicit read-instruction below, so their rules are never
+  // silently dropped (e.g. a root-level CORTEX.local.md carrying dev/safety rules).
+  const includedBlocks = [];
+  const includedPaths = [];
+  const truncated = [];
   let totalLen = 0;
+  let budgetExhausted = false;
 
-  for (const block of blocks) {
-    if (totalLen + block.length > MAX_CONTEXT_CHARS) break;
-    included.push(block);
+  for (const e of entries) {
+    const block = `<system-reminder>\nAuto-loaded CORTEX.md from ${HOSTNAME}:${e.path} (ancestor of accessed path). These instructions apply to files under this directory.\n\n${e.content}\n</system-reminder>`;
+    if (budgetExhausted || totalLen + block.length > MAX_CONTEXT_CHARS) {
+      budgetExhausted = true; // match prior behavior: stop inlining at the first overflow
+      truncated.push(e);
+      continue;
+    }
+    includedBlocks.push(block);
+    includedPaths.push(e.path);
     totalLen += block.length;
   }
 
-  const remaining = entries.length - included.length;
+  const parts = [...includedBlocks];
 
-  // No block fit within the limit — return empty rather than
-  // emitting a bare "[truncated, N more files at root]" message.
-  if (included.length === 0) return '';
-
-  let context = included.join('\n\n');
-
-  if (remaining > 0) {
-    context += `\n\n[truncated, ${remaining} more files at root]`;
+  // Overflow → actionable instruction. Reading these files delivers their content via the
+  // Read tool result; the markOnlyPaths branch then suppresses a duplicate inject.
+  if (truncated.length > 0) {
+    const list = truncated.map(e => `- ${e.path}`).join('\n');
+    parts.push(
+      `<system-reminder>\n⚠️ ${truncated.length} CORTEX rule file(s) were too large to inline here. ` +
+      `Read EACH of the following files now to load their rules before proceeding:\n${list}\n</system-reminder>`
+    );
   }
 
-  return context;
+  if (parts.length === 0) return { text: '', includedPaths: [] };
+  return { text: parts.join('\n\n'), includedPaths };
 }
 
 // ── main ──
@@ -213,23 +226,26 @@ function main() {
   const cache = loadCache(sessionId);
   const newEntries = entries.filter(e => cache.get(e.path) !== e.mtimeMs);
 
-  // Update cache with all scanned entries
-  for (const entry of entries) {
-    cache.set(entry.path, entry.mtimeMs);
-  }
-  saveCache(sessionId, cache);
-
   if (newEntries.length === 0) return;
 
   // Build context with truncation guard
-  const additionalContext = buildContext(newEntries);
+  const { text: additionalContext, includedPaths } = buildContext(newEntries);
   if (!additionalContext) return;
+
+  // Mark as seen ONLY the entries actually injected. Truncated entries stay "unseen" so a
+  // later Read re-attempts their injection (or re-emits the read-instruction) — they must
+  // never be silently suppressed by being cached before the truncation filter runs.
+  const injected = new Set(includedPaths);
+  for (const entry of entries) {
+    if (injected.has(entry.path)) cache.set(entry.path, entry.mtimeMs);
+  }
+  saveCache(sessionId, cache);
 
   process.stdout.write(JSON.stringify({
     hookSpecificOutput: {
       hookEventName,
       additionalContext,
-      matched: newEntries.map(e => e.path),
+      matched: includedPaths,
     },
   }));
 }

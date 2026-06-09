@@ -187,39 +187,52 @@ function sleep(ms: number): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
-// Test 6: Truncation — total > 9,500 chars → [truncated] annotation
+// Test 6: Truncation — files over the budget become a read-instruction (not a
+//         silent drop), and the truncated file is NOT marked seen so a later
+//         Read re-attempts it.
 // ---------------------------------------------------------------------------
 
-test('Truncation: content over 9500 chars gets [truncated] annotation', async (t) => {
+test('Truncation: overflow files become a "Read EACH" instruction listing their paths', async (t) => {
   const root = await mkTmp();
   t.after(() => rmTmp(root));
   const sessionId = `cortex-hook-test-6-${process.pid}-${Date.now()}`;
   t.after(() => removeCache(sessionId));
 
-  // Create 3 CORTEX.md files at different levels — each with 3000 chars of content
-  // Block overhead ≈ 180 chars → each block ≈ 3180 chars
-  // 2 blocks × 3180 = 6360 < 9500 ok, 3 blocks = 9540 > 9500 → truncated
+  // Create 3 CORTEX.md files at different levels — each with 3000 chars of content.
+  // Block overhead ≈ 180 chars → each block ≈ 3180 chars.
+  // leaf→root order = [l2(z), l1(y), root(x)]: 2 blocks × 3180 = 6360 < 9500 fit,
+  // the 3rd (root, x) overflows 9500 → truncated → listed in the read-instruction.
   const l1 = path.join(root, 'a');
   const l2 = path.join(l1, 'b');
   await fs.promises.mkdir(l2, { recursive: true });
 
-  await fs.promises.writeFile(path.join(root, 'CORTEX.md'), 'x'.repeat(3000));
+  const rootMd = path.join(root, 'CORTEX.md');
+  await fs.promises.writeFile(rootMd, 'x'.repeat(3000));
   await fs.promises.writeFile(path.join(l1, 'CORTEX.md'), 'y'.repeat(3000));
   await fs.promises.writeFile(path.join(l2, 'CORTEX.md'), 'z'.repeat(3000));
   await fs.promises.writeFile(path.join(l2, 'target.txt'), 'dummy');
 
-  const output = invokeHook({
+  const payload = {
     hook_event_name: 'PostToolUse',
     session_id: sessionId,
     tool_name: 'Read',
     tool_input: { file_path: path.join(l2, 'target.txt') },
     tool_use_id: 'tu-6',
-  });
+  };
+  const output = invokeHook(payload);
 
   const ctx = getAdditionalContext(output);
   assert.ok(ctx, 'truncation case should still produce context');
-  assert.ok(ctx!.includes('[truncated'), 'truncated annotation present');
-  assert.ok(ctx!.length <= 10_000, 'total context does not exceed 10k chars');
+  assert.ok(ctx!.includes('Read EACH'), 'overflow becomes an actionable read-instruction');
+  assert.ok(ctx!.includes(rootMd), 'the truncated file path is listed for the agent to Read');
+  assert.ok(!ctx!.includes('[truncated'), 'old silent-truncation annotation is gone');
+  assert.ok(ctx!.includes('y'.repeat(3000)), 'files that fit are still inlined');
+  assert.ok(!ctx!.includes('x'.repeat(3000)), 'the truncated file is NOT inlined');
+
+  // Layer 1: the truncated file was NOT marked seen, so a second Read still re-attempts it.
+  const out2 = invokeHook({ ...payload, tool_use_id: 'tu-6b' });
+  const ctx2 = getAdditionalContext(out2);
+  assert.ok(ctx2 && ctx2.includes(rootMd), 'truncated file is re-offered on a later Read (not suppressed)');
 });
 
 // ---------------------------------------------------------------------------

@@ -18,5 +18,7 @@ task-repo.ts responsibilities are limited to I/O + lock + git sync, does not car
 | `cost-repo.ts` | persistence | Cost record persistence |
 | `profile-repo.ts` | persistence | Agent profile persistence |
 | `task-repo.ts` | persistence | load/refresh/flush + read-only queries + runExclusive/commitAndPush. Pure I/O + mutex + git, no domain mutation forwarding |
+| `version-migrations.ts` | startup | `runMigrations()` — version-tracked JSON file migrations (CalVer in `data/versions.json`), run on startup before config load |
+| `hook-sync.ts` | startup | `syncManagedHooks()` — refresh version-stamped (`@cortex-hook-version`) hooks in `DATA_DIR/hooks` from defaults when shipped is newer; closes init's copy-if-missing gap so hook code fixes reach existing installs |
 
 Removed in the OutputStream refactor: `channel-repo.ts` (project→Slack channel mapping). The mapping is adapter-private and now lives in `platform/adapters/slack-project-conduits.ts`; the channel→project reverse lookup that used to live on `ProjectDirRepo.getChannelProject()` is now `PlatformAdapter.resolveInboundProject()`.
