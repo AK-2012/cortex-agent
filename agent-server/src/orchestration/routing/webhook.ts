@@ -14,9 +14,12 @@ import { getCurrentPlanFilePath } from '@domain/agents/index.js';
 import { ctx as jobCtx } from '@domain/scheduling/job-registry.js';
 import { createThread, cancelThread, readArtifact, listTemplates, listAgents } from '@domain/threads/index.js';
 import { runThreadDetached } from '../thread-executor.js';
+import { buildThreadSummary } from '@domain/threads/runner.js';
+import { Icons } from '@core/icons.js';
+import { buildStatusActionBlocks, buildSealedStatusActionBlocks, initStatusBlocks } from '../status-helpers.js';
 import { threadStore } from '@store/thread-repo.js';
 import { fireThreadCallback } from '../thread-callback.js';
-import type { Destination } from '@platform/index.js';
+import type { Destination, MessageRef } from '@platform/index.js';
 import type { RunThreadOptions } from '@core/types/thread-types.js';
 
 const log = createLogger('webhook');
@@ -171,6 +174,11 @@ function createWebhookHandler({
               return reply({ success: false, error: 'no platform adapter available (daemon not fully initialized)' });
             }
             const projectId = data.projectId || 'general';
+            // The originating conduit (the starter agent's SLACK_CHANNEL, forwarded by thread-ops.ts).
+            // When present we route output back to that channel with a live status message, mirroring
+            // the Slack `!thread` path (thread-executor handleThreadStart). When absent (non-Slack /
+            // channel-less context) we fall back to project-report routing (project conduit → admin DM).
+            const haveChannel = typeof data.channel === 'string' && data.channel.length > 0;
             const channel = data.channel || projectId;
             const thread = createThread(channel, {
               templateName: template || null,
@@ -187,13 +195,35 @@ function createWebhookHandler({
                 parentProfile: data.parentProfile || null,
               },
             });
-            const dest: Destination = { type: 'project-report', projectId, trigger: 'mcp-thread', sessionId: '' };
+
+            let dest: Destination;
+            let statusMsg: MessageRef | null = null;
+            if (haveChannel) {
+              dest = { type: 'interactive-reply', conduit: channel, sessionId: '' };
+              const label = template || agent;
+              const startText = `${Icons.processing} Starting thread (${template ? label : `agent:${label}`})...`;
+              try {
+                statusMsg = await jobCtx.adapter.postMessage(dest, { text: startText });
+                const blocksTemplate = { channel, sessionName: null, isDm: false, threadId: thread.id };
+                await jobCtx.adapter.updateMessage(statusMsg, {
+                  text: startText,
+                  richBlocks: buildStatusActionBlocks(startText, blocksTemplate),
+                }).catch(() => {});
+                initStatusBlocks(statusMsg, blocksTemplate);
+              } catch (e) {
+                log.warn(`thread-op start: status message post failed: ${(e as Error).message}`);
+                statusMsg = null;
+              }
+            } else {
+              dest = { type: 'project-report', projectId, trigger: 'mcp-thread', sessionId: '' };
+            }
+
             const runOpts: RunThreadOptions = {
               adapter: jobCtx.adapter,
               channel,
               destination: dest,
-              threadAnchorId: null,
-              statusMsg: null,
+              threadAnchorId: statusMsg ? statusMsg.messageId : null,
+              statusMsg,
               startTime: Date.now(),
               onProgress: null,
               onToolUse: null,
@@ -202,7 +232,21 @@ function createWebhookHandler({
             // SIGTERM app.ts mid-thread and stamp it "Interrupted by server restart". (Bare runThread
             // here was invisible to the busy/idle gate — see runThreadDetached.)
             runThreadDetached(thread.id, runOpts, {
-              onSettled: (id) => { void fireThreadCallback(id).catch((e) => log.error(`thread-callback ${id}: ${(e as Error).message}`)); },
+              onSettled: (id) => {
+                // Seal the live status message with a summary (interactive path only).
+                if (statusMsg) {
+                  const t = threadStore.get(id);
+                  if (t) {
+                    const totalNumTurns = t.steps.reduce((s, st) => s + (st.numTurns || 0), 0);
+                    const summaryText = buildThreadSummary({ thread: t, totalCostUsd: t.totalCostUsd, totalNumTurns, finalOutput: null, lastAgentResult: null, executionId: null });
+                    void jobCtx.adapter!.updateMessage(statusMsg, {
+                      text: summaryText,
+                      richBlocks: buildSealedStatusActionBlocks(summaryText, { channel, sessionName: null, isDm: false, threadId: t.id }),
+                    }).catch(() => {});
+                  }
+                }
+                void fireThreadCallback(id).catch((e) => log.error(`thread-callback ${id}: ${(e as Error).message}`));
+              },
             });
             log.info(`thread-op start ${thread.id} (${template || agent}, depth ${curDepth + 1})`);
             return reply({ success: true, data: { threadId: thread.id, status: 'running' } });
