@@ -3,12 +3,13 @@ import type { Destination, PlatformAdapter } from '@platform/index.js';
 import type { CommandResult } from './command-context.js';
 import { Icons } from '../../../core/icons.js';
 import type { CommandActionRouter } from '@orch/interactions/command-action-router.js';
-import { closeSession, getActiveBackend, getActiveProfile, setActiveProfile, resolveBackendForChannel } from '@domain/agents/index.js';
-import { deleteSessionAsync, setSessionAsync } from '@domain/sessions/session.js';
+import { closeSession, getActiveBackend, getActiveProfile } from '@domain/agents/index.js';
+
 import { fireAndForgetPreCloseHook } from '@domain/sessions/session-hooks.js';
 import { sessionStore } from '@store/session-registry-repo.js';
 import { conversationLedger } from '@store/conversation-ledger-repo.js';
-import * as sessionBackup from '@domain/sessions/session-backup.js';
+
+import { attachExistingSession, resetChannelSession } from '@domain/sessions/session-lifecycle.js';
 import { planApprovals } from '../../interactions/plan-approvals.js';
 
 const log = createLogger('session');
@@ -53,19 +54,8 @@ export async function handleNewCmd(
   }
 
   closeSession(channel);
-
-  const conv = await conversationLedger.getConversation(channel);
   const profileName = getActiveProfile(channel) || 'default';
-  if (conv) {
-    sessionBackup.cleanupAllBackups(conv.sessionId);
-    await conversationLedger.clearConversation(channel);
-  }
-  // Clear sessions for ALL backends, not just the current one — otherwise switching
-  // profiles after !newq can resurrect a stale session from the previous backend
-  // (e.g. !newq on PI backend leaves claude:C<channel> intact; switching to Claude
-  //  backend then tries to --resume a session whose claude-side file is gone).
-  const ALL_BACKENDS = ['claude', 'pi', 'codex'];
-  await Promise.all(ALL_BACKENDS.map(b => deleteSessionAsync(channel, b).catch(() => {})));
+  await resetChannelSession(channel);
   const cleared = planApprovals.clearByChannel(channel);
   if (cleared > 0) log.info('Cleared pending plan for channel:', channel);
   log.info('New conversation started in channel:', channel);
@@ -89,9 +79,7 @@ export function createResumeHandler(router?: CommandActionRouter) {
         }
         return;
       }
-      if (record.profileName) setActiveProfile(record.profileName, ctx.channelId);
-      await setSessionAsync(ctx.channelId, record.sessionId, record.backend);
-      await conversationLedger.switchSession(ctx.channelId, { sessionId: record.sessionId, sessionName: name, backend: record.backend, profileName: record.profileName });
+      await attachExistingSession(ctx.channelId, { sessionId: record.sessionId, sessionName: name, backend: record.backend, profileName: record.profileName });
       const profileNote = record.profileName ? ` (profile: ${record.profileName})` : '';
       if (ctx.messageRef) {
         await adapter.updateMessage(ctx.messageRef, {
@@ -120,9 +108,7 @@ export function createResumeHandler(router?: CommandActionRouter) {
         await adapter.postMessage(dest, { text: `${Icons.error} Session \`${name}\` not found. Run \`!resume\` to list sessions.` });
         return;
       }
-      if (record.profileName) setActiveProfile(record.profileName, channel);
-      await setSessionAsync(channel, record.sessionId, record.backend);
-      await conversationLedger.switchSession(channel, { sessionId: record.sessionId, sessionName: name, backend: record.backend, profileName: record.profileName });
+      await attachExistingSession(channel, { sessionId: record.sessionId, sessionName: name, backend: record.backend, profileName: record.profileName });
       const profileNote = record.profileName ? ` (profile: ${record.profileName})` : '';
       await adapter.postMessage(dest, { text: `${Icons.refresh} Switched to session \`${name}\`${profileNote}` });
       return;

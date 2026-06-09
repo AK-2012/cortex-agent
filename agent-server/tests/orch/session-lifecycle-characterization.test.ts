@@ -3,7 +3,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import { resolveSessionName } from '../../src/orchestration/agent-runner.js';
-import { handleNewCmd } from '../../src/orchestration/routing/commands/session.js';
+import { handleNewCmd, handleResumeCmd } from '../../src/orchestration/routing/commands/session.js';
 import { sessionStore } from '../../src/store/session-registry-repo.js';
 import { getSessionAsync, setSessionAsync } from '../../src/domain/sessions/session.js';
 import { conversationLedger } from '../../src/store/conversation-ledger-repo.js';
@@ -105,3 +105,38 @@ test('handleNewCmd clears sessions for all backends and the ledger', async () =>
   );
   assert(hasNewConv);
 });
+
+// ── handleResumeCmd test ──────────────────────────────────────────────────────
+
+test('handleResumeCmd (arg path) attaches to an existing session', async () => {
+  const sid = crypto.randomUUID();
+  const channel = 'c4-resume';
+
+  await sessionStore.registerSession('cortex-resume-c4', {
+    sessionId: sid,
+    channel,
+    backend: 'claude',
+    kind: 'local',
+    projectId: 'general',
+  });
+
+  const adapter = new MockAdapter({ adminChannel: 'admin' });
+
+  await handleResumeCmd(channel, adapter, '!resume cortex-resume-c4');
+
+  // Assert: sessions.json points at the resumed session
+  const stored = await getSessionAsync(channel, 'claude');
+  assert.equal(stored, sid);
+
+  // Assert: conversation ledger switched to the resumed session
+  const conv = await conversationLedger.getConversation(channel);
+  assert.equal(conv?.sessionId, sid);
+  assert.equal(conv?.sessionName, 'cortex-resume-c4');
+
+  // Assert: adapter posted a "Switched to session" message
+  const hasSwitched = adapter.posted.some(p =>
+    typeof p.content.text === 'string' && p.content.text.includes('Switched to session')
+  );
+  assert(hasSwitched);
+});
+
