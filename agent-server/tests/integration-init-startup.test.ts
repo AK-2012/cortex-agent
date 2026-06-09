@@ -252,8 +252,11 @@ test('Test 2: Server starts and shuts down cleanly in initialized environment', 
     child.stdout.on('data', (d: Buffer) => { stdout += d.toString(); });
     child.stderr.on('data', (d: Buffer) => { stderr += d.toString(); });
 
-    // Wait for readiness signal (all modules now init before this log)
-    const readySignal = 'Cortex agent is running (mock)';
+    // Wait for readiness signal (all modules now init before this log).
+    // Adapter-name-agnostic: with CORTEX_PLATFORM=test the adapter may be a bare mock
+    // OR a CompositeAdapter (name "composite") when TUI auto-enables alongside it, so
+    // match the stable prefix rather than a specific "(mock)" suffix.
+    const readySignal = 'Cortex agent is running';
     const ready = await new Promise<boolean>((resolve) => {
       const timeout = setTimeout(() => resolve(false), 60_000);
       const check = () => {

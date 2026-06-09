@@ -84,7 +84,7 @@ test('addTask accepts known template names', () => {
   const proj = nextProject();
   const { cleanup } = makeRepo({ [proj]: 'tasks:\n  - id: "1111"\n    text: Existing\n    why: ""\n    done-when: ""\n    priority: medium\n    status: open\n    template: coder-review\n    plan: ""\n' });
   try {
-    const result = addTask(proj, 'Good template task', 'why', 'done', 'medium', 'default');
+    const result = addTask(proj, 'Good template task', 'why', 'done', 'medium', 'coder-review');
     assert.equal(result.success, true);
   } finally { cleanup(); }
 });

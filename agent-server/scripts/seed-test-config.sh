@@ -41,6 +41,7 @@ cat > "$CONFIG_DIR/profiles.json" <<'PROFILES'
     "execute": {
       "model": "claude-sonnet-4-6",
       "backend": "pi",
+      "provider": "anthropic",
       "mode": "plan",
       "fallback": [
         { "model": "claude-sonnet-4-6", "backend": "claude", "mode": "plan" }

@@ -11,6 +11,10 @@ import { resolve, dirname } from 'node:path';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { _test } from '../src/agent-adapter/pi/mcp-bridge.js';
+// Source-of-truth tool lists — assert the built servers match what the source declares,
+// so this test self-maintains instead of drifting against hardcoded counts.
+import { TOOL_NAMES as CORE_TOOLS } from '../src/domain/mcp/core-server.js';
+import { FEISHU_TOOL_NAMES as FEISHU_TOOLS } from '../src/domain/mcp/feishu/index.js';
 
 const { mapMcpContent, shouldLoadFeishu } = _test;
 
@@ -23,32 +27,6 @@ const DIST_DIR = resolve(TESTS_DIR, '../dist');
 const CORE_SERVER_PATH = resolve(DIST_DIR, 'domain/mcp/core-server.js');
 const EXT_SERVER_PATH = resolve(DIST_DIR, 'domain/mcp/server.js');
 const FEISHU_SERVER_PATH = resolve(DIST_DIR, 'domain/mcp/feishu-server.js');
-
-const FEISHU_TOOLS = [
-  // docx
-  'feishu_docx_create', 'feishu_docx_get_content', 'feishu_docx_list_blocks',
-  'feishu_docx_append', 'feishu_docx_insert', 'feishu_docx_update_block',
-  'feishu_docx_delete_blocks', 'feishu_docx_delete',
-  // wiki
-  'feishu_wiki_list_spaces', 'feishu_wiki_list_nodes', 'feishu_wiki_get_node',
-  'feishu_wiki_create_node', 'feishu_wiki_update_node_title',
-  // bitable
-  'feishu_bitable_create_app', 'feishu_bitable_list_tables', 'feishu_bitable_create_table',
-  'feishu_bitable_delete_table', 'feishu_bitable_list_fields', 'feishu_bitable_create_field',
-  'feishu_bitable_list_records', 'feishu_bitable_create_records', 'feishu_bitable_update_records',
-  'feishu_bitable_delete_records',
-  // sheets
-  'feishu_sheets_create', 'feishu_sheets_get', 'feishu_sheets_read_range',
-  'feishu_sheets_write_range', 'feishu_sheets_append_rows', 'feishu_sheets_add_sheet',
-  'feishu_sheets_delete_sheet',
-  // drive
-  'feishu_drive_set_link_share',
-];
-
-const CORE_TOOLS = [
-  'remote_bash', 'remote_read', 'remote_write',
-  'remote_edit', 'remote_glob', 'remote_grep',
-];
 
 const EXT_TOOLS = [
   'slack_send_file', 'cost_query', 'query_executions',
@@ -118,7 +96,7 @@ test('compiled feishu-server.js exists at expected dist location', () => {
 
 // --- Test A: listTools integration (real MCP subprocesses) ---
 
-test('core-server exposes 6 remote_* tools via StdioClientTransport', { timeout: 15000 }, async () => {
+test('core-server exposes its declared TOOL_NAMES via StdioClientTransport', { timeout: 15000 }, async () => {
   const transport = new StdioClientTransport({
     command: 'node',
     args: [CORE_SERVER_PATH],
@@ -158,7 +136,7 @@ test('ext-server exposes 10 non-remote tools via StdioClientTransport', { timeou
   }
 });
 
-test('feishu-server exposes all feishu_* tools via StdioClientTransport', { timeout: 15000 }, async () => {
+test('feishu-server exposes its declared FEISHU_TOOL_NAMES via StdioClientTransport', { timeout: 15000 }, async () => {
   const transport = new StdioClientTransport({
     command: 'node',
     args: [FEISHU_SERVER_PATH],

@@ -101,8 +101,10 @@ test('runCli daemon status shows child info when daemon is running', async () =>
   const result = await runCli(['daemon', 'status']);
   assert.equal(result.exitCode, 0);
   assert.equal(result.stderr, '');
-  if (/running/.test(result.stdout)) {
-    // When running, should include child/app.js info
+  if (/daemon is running/i.test(result.stdout)) {
+    // When running, should include child/app.js info.
+    // NOTE: match the positive phrase only — a bare /running/ also matches
+    // "Cortex daemon is not running", which would wrongly trigger this assertion.
     assert.match(result.stdout, /Child|app\.js/i);
   }
 });
