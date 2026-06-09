@@ -4,6 +4,7 @@
 //           Bug 2 — channel profile overrides global backend, edit-handler routes to wrong restore path
 // pos:    verifies createEditHandler dispatches the correct restore branch and tears down stale pooled processes
 // >>> If I am updated, update my header comment and the parent folder's CORTEX.md <<<
+import '../_test-home.js'; // MUST be first: isolate CORTEX_HOME before paths.ts loads
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createEditHandler } from '../../src/orchestration/routing/edit-handler.js';

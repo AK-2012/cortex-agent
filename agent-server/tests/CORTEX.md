@@ -17,6 +17,20 @@ Reference implementation: the `freshModuleWithCleanup(t)` helper in `tests/rate-
 
 ## Note: Tests must not modify files actually in production use, must not actually send content, to avoid issues
 
+### Isolation is enforced (tripwire), not just convention
+`atomicWrite` (the primitive every JSON store writes through) **throws** if a test process
+(`NODE_TEST_CONTEXT` set) attempts to write under the real `~/.cortex`. This turns silent
+production pollution into an immediate failure. Production is unaffected (guard is no-op when
+`NODE_TEST_CONTEXT` is unset). Regression: `tests/core/atomic-write-guard.test.ts`.
+
+How to run tests without tripping it:
+- Full suite: `npm test` (run-tests.sh seeds an isolated CORTEX_HOME + global `--import _test-home`).
+- One file: `npm run test:file tests/path/to/x.test.ts` (wraps `--import ./tests/_test-home.ts`, which
+  repoints CORTEX_HOME at a per-process temp before `paths.ts` binds).
+- Raw `npx tsx --test <file>` does NOT isolate. If the file touches a real store singleton, either
+  use `test:file`, or add `import '../_test-home.js'; // MUST be first` as the file's first import.
+  If you see `atomicWrite blocked: …`, that's why — the file wrote to production without isolating.
+
 | filename | role | function |
 |---|---|---|
 | `agent-adapter/` | Subdirectory | Three-backend fixture-replay tests |

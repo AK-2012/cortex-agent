@@ -4,6 +4,7 @@
 // pos:    validates that a terminal transition finalizes the persistent record AND publishes an event,
 //         which thread-step teardown previously skipped (used event-less remove()).
 
+import '../_test-home.js'; // MUST be first: isolate CORTEX_HOME before paths.ts loads
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as executionRegistry from '../../src/domain/executions/registry.js';

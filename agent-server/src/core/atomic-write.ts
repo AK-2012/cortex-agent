@@ -5,6 +5,18 @@
 
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import * as os from 'node:os';
+
+/** The operator's real data home. A test process must never write here — it would race the
+ *  running daemon and leak fixtures into the live store (this happened: tests polluted
+ *  ~/.cortex/data/threads.json). Tests isolate via tests/_test-home.ts, which repoints
+ *  CORTEX_HOME at a temp dir, so legitimate test writes land elsewhere and pass this guard. */
+const REAL_HOME_CORTEX = path.join(os.homedir(), '.cortex');
+
+/** True only inside `node --test` / `tsx --test` worker processes (env set by the runner). */
+function inTestProcess(): boolean {
+  return !!process.env.NODE_TEST_CONTEXT;
+}
 
 /**
  * Write `data` to `filePath` atomically via a sibling tmp file + fs.rename.
@@ -12,6 +24,19 @@ import path from 'node:path';
  * succeeds (new content visible) or it does not (original intact, tmp left on disk).
  */
 export async function atomicWrite(filePath: string, data: string): Promise<void> {
+  // Test-isolation tripwire: refuse (before writing anything) to mutate the real ~/.cortex from a
+  // test process. Converts silent production corruption into a loud failure. No-op in production
+  // (NODE_TEST_CONTEXT unset) and for temp-isolated test homes (path not under the real home).
+  if (inTestProcess()) {
+    const resolved = path.resolve(filePath);
+    if (resolved === REAL_HOME_CORTEX || resolved.startsWith(REAL_HOME_CORTEX + path.sep)) {
+      throw new Error(
+        `atomicWrite blocked: test process attempted to write under the real ~/.cortex (${resolved}). `
+        + `Isolate state first: import './_test-home.js' as the FIRST line of the test, or run via `
+        + `\`npm test\` / \`npm run test:file <file>\` (both set an isolated CORTEX_HOME).`,
+      );
+    }
+  }
   await fs.mkdir(path.dirname(filePath), { recursive: true });
   const rnd = Math.random().toString(36).slice(2, 8);
   const tmp = `${filePath}.tmp.${process.pid}.${Date.now()}.${rnd}`;
