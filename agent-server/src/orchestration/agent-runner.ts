@@ -205,7 +205,7 @@ async function handleDefaultAgentResult({ result, channel, adapter, statusMsg, s
   await handleAgentSuccess({ result, channel, adapter, statusMsg, startTime, userMessage, executionId, trigger: 'user', sessionName, threadAnchorId, userMessageTs: messageTs, onAssistantMessage: callbacks.onAssistantMsg });
 }
 
-async function resolveSessionName(sessionId: string | null, channel: string, userMessage: string, adapter: PlatformAdapter): Promise<string> {
+export async function resolveSessionName(sessionId: string | null, channel: string, userMessage: string, adapter: PlatformAdapter): Promise<string> {
   if (sessionId) {
     const existing = await sessionStore.lookupBySessionId(sessionId);
     if (existing) return existing;
