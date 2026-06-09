@@ -13,6 +13,7 @@ import { getSessionAsync } from '@domain/sessions/session.js';
 import { sessionStore } from '@store/session-registry-repo.js';
 import { conversationLedger } from '@store/conversation-ledger-repo.js';
 import { getActiveProfile, getDefaultAgent, resolveBackendForChannel } from '@domain/agents/index.js';
+import { registerNamedSession } from '@domain/sessions/session-lifecycle.js';
 import { handleAgentSuccess, handleAgentError, initTurnTracking } from './lifecycle.js';
 import { buildSessionTag, buildUserProcessingMessage, makeFallbackNotifier, makeStreamingMessageCallback, computeElapsed, writeStatus, sealStatus, buildStatusActionBlocks, buildSealedStatusActionBlocks, initStatusBlocks } from './status-helpers.js';
 import { readFileSync } from 'fs';
@@ -209,10 +210,15 @@ export async function resolveSessionName(sessionId: string | null, channel: stri
   if (sessionId) {
     const existing = await sessionStore.lookupBySessionId(sessionId);
     if (existing) return existing;
-    const name = await sessionStore.generateSessionName();
     const channelProject = await adapter.resolveInboundProject(channel);
-    await sessionStore.registerSession(name, { sessionId, channel, backend: resolveBackendForChannel(channel), kind: 'local', label: userMessage?.substring(0, 60), profileName: getActiveProfile(channel), projectId: channelProject ?? 'general' });
-    return name;
+    return registerNamedSession(sessionStore, {
+      sessionId,
+      channel,
+      backend: resolveBackendForChannel(channel),
+      label: userMessage?.substring(0, 60),
+      profileName: getActiveProfile(channel),
+      projectId: channelProject ?? 'general',
+    });
   }
   return sessionStore.generateSessionName();
 }
