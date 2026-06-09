@@ -50,6 +50,12 @@ async function main() {
     parts.push('After completing the task, run `git status` to check for your uncommitted changes. If there are changes, commit them with an appropriate commit message. Do not commit changes that are not made by you.');
   }
 
+  // Worktree integration reminder (concurrent-safe code isolation). Piggybacks on the
+  // turn we are already injecting, so it costs no extra agent step. Self-gates: a no-op
+  // for tasks that never created a worktree.
+  const threadId = context.threadId || '$CORTEX_THREAD_ID';
+  parts.push(`If you created a git worktree for this task (branch cortex/${threadId}), integrate it back now before finishing: pull the latest main branch, merge your branch into it, resolve conflicts, push, then \`git worktree remove\` and delete the branch. On remote machines run these commands via remote_bash on the device you worked on. If conflicts cannot be resolved automatically, stop and report it — never force-overwrite another thread's work. If you did NOT create a worktree, ignore this.`);
+
   console.log(JSON.stringify({
     insertAgent: false,
     targetAgent,

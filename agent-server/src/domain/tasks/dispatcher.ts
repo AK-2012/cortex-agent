@@ -277,6 +277,23 @@ function buildDispatchPrompt(task: any): string {
   if (task.plan) taskSpec.push(`**Plan (MUST read):** ${task.plan}`);
   sections.push(taskSpec.join('\n'));
 
+  const isolation = [
+    '## Workspace Isolation (concurrent-safe)',
+    '',
+    'Other threads may work on this same project in parallel. If this task will MODIFY CODE inside a project code directory (a git repository outside ~/.cortex), do NOT edit the shared checkout directly — isolate your work in a git worktree:',
+    '',
+    '1. First confirm the code directory is a git repository AND git is installed. If it is NOT a git repo, or git is unavailable, SKIP isolation entirely and work normally.',
+    '2. Otherwise create a worktree on a unique branch named with your thread id ($CORTEX_THREAD_ID), so parallel threads never collide:',
+    '     git -C <code-dir> worktree add <code-dir>-wt-$CORTEX_THREAD_ID -b cortex/$CORTEX_THREAD_ID',
+    '   Do ALL edits, tests, and commits INSIDE that worktree.',
+    '3. When the work is done, integrate back: pull the latest main branch, merge cortex/$CORTEX_THREAD_ID into it, resolve conflicts, push, then remove the worktree and delete the branch. If conflicts cannot be resolved automatically, STOP and report it in your completion note — never force-overwrite work from another thread.',
+    '',
+    'On REMOTE machines, run every git/worktree command through remote_bash on the same device you worked on (per-machine code paths are in project-dirs.json).',
+    '',
+    'This applies ONLY to project code directories, NOT to ~/.cortex bookkeeping (STATUS.md, experiments/, TASKS.yaml).',
+  ];
+  sections.push(isolation.join('\n'));
+
   const completion = [
     '## When Done',
     '',
