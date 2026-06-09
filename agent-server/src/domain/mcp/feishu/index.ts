@@ -30,6 +30,7 @@ export const FEISHU_TOOL_NAMES: readonly string[] = [
   'feishu_wiki_update_node_title',
   // bitable — 多维表格
   'feishu_bitable_create_app',
+  'feishu_bitable_delete_app',
   'feishu_bitable_list_tables',
   'feishu_bitable_create_table',
   'feishu_bitable_delete_table',
@@ -41,6 +42,7 @@ export const FEISHU_TOOL_NAMES: readonly string[] = [
   'feishu_bitable_delete_records',
   // sheets — 电子表格
   'feishu_sheets_create',
+  'feishu_sheets_delete',
   'feishu_sheets_get',
   'feishu_sheets_read_range',
   'feishu_sheets_write_range',
