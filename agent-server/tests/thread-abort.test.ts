@@ -238,6 +238,13 @@ test('THREAD_PROTOCOL_PREAMBLE mentions the [ABORT:] marker so agents can learn 
   assert.match(THREAD_PROTOCOL_PREAMBLE, /Cortex Thread Protocol/);
 });
 
+test('THREAD_PROTOCOL_PREAMBLE teaches the [WAIT_CHILDREN] suspend protocol and acceptance discipline (DR-0014)', () => {
+  assert.match(THREAD_PROTOCOL_PREAMBLE, /\[WAIT_CHILDREN\]/);
+  assert.match(THREAD_PROTOCOL_PREAMBLE, /thread_start/);
+  // Acceptance-before-trust: child results must be verified against the contract.
+  assert.match(THREAD_PROTOCOL_PREAMBLE, /verif/i);
+});
+
 test('buildStepPrompt injects THREAD_PROTOCOL_PREAMBLE for ad-hoc thread with workspace artifact', () => {
   const anyAgent = listAgents()[0];
   const agentConfig = resolveAgentSlotConfig(anyAgent.name)!;

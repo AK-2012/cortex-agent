@@ -28,15 +28,24 @@ export function registerThreadTools(server: McpServer): void {
 
   server.tool(
     'thread_start',
-    'Start a Thread (multi-agent pipeline) and return its threadId immediately (async — does NOT wait for completion). Poll thread_status / thread_result for progress and output. Provide exactly one of `template` (a multi-agent pipeline) or `agent` (a single ad-hoc agent). Use thread_list_templates to see what is available. Channel/project default to the current execution context.',
+    'Start a Thread (multi-agent pipeline) and return its threadId immediately (async — does NOT wait for completion). Provide exactly one of `template` (a multi-agent pipeline) or `agent` (a single ad-hoc agent); use thread_list_templates to discover both. '
+    + 'For substantive delegated work, pass a structured contract (goal / done_when / deliverable_path / context_files / budget_usd) — your child is graded against done_when and you must verify its deliverable before accepting. Reserve bare-message calls for small, quick side-quests; substantial multi-step work belongs in the task system ([SPLIT]) instead. '
+    + 'If you are an agent inside a thread: spawns default to wait=true — after spawning, end your current step with the marker [WAIT_CHILDREN] to suspend; you will be re-entered with each child\'s result once ALL awaited children finish. Pass wait=false for fire-and-forget. Interactive (non-thread) callers are woken automatically on completion. Spawns can be rejected by tree guards (max children / nodes / budget) — do not retry a rejected spawn; fold the work in or escalate.',
     {
       template: z.string().optional().describe('Template name for a multi-agent pipeline (mutually exclusive with `agent`)'),
       agent: z.string().optional().describe('Agent name for a single ad-hoc agent (mutually exclusive with `template`)'),
       message: z.string().min(1).describe('The initial user message / task prompt for the thread'),
       project: z.string().optional().describe('Project id for cost attribution & routing. Defaults to the current context project, else "general".'),
+      goal: z.string().optional().describe('One-line objective of this delegation (becomes the child\'s mission-chain entry). Defaults to the message when other contract fields are set.'),
+      done_when: z.string().optional().describe('Verifiable completion criteria. You (the parent) must check the deliverable against these before accepting the result.'),
+      context_files: z.array(z.string()).optional().describe('Absolute paths the child must read before working.'),
+      deliverable_path: z.string().optional().describe('Where the child must write its output.'),
+      budget_usd: z.number().optional().describe('Budget for the child\'s subtree in USD. Exhaustion trips the circuit breaker.'),
+      wait: z.boolean().optional().describe('Thread-parent only. true (default): child is awaited — emit [WAIT_CHILDREN] to suspend until all awaited children finish. false: fire-and-forget (result still lands in your pendingMessages).'),
     },
-    async ({ template, agent, message, project }: {
+    async ({ template, agent, message, project, goal, done_when, context_files, deliverable_path, budget_usd, wait }: {
       template?: string; agent?: string; message: string; project?: string;
+      goal?: string; done_when?: string; context_files?: string[]; deliverable_path?: string; budget_usd?: number; wait?: boolean;
     }) => {
       try {
         if ((template && agent) || (!template && !agent)) {
@@ -49,7 +58,10 @@ export function registerThreadTools(server: McpServer): void {
         const parentThreadId = process.env.CORTEX_THREAD_ID || null;
         const parentChannel = process.env.SLACK_CHANNEL || null;
         const parentProfile = process.env.CORTEX_PROFILE || null;
-        const result = await proxyThreadOp('start', { template, agent, message, projectId, channel, depth, parentSessionId, parentThreadId, parentChannel, parentProfile });
+        const result = await proxyThreadOp('start', {
+          template, agent, message, projectId, channel, depth, parentSessionId, parentThreadId, parentChannel, parentProfile,
+          goal, done_when, context_files, deliverable_path, budget_usd, wait,
+        });
         return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
       } catch (e) {
         return { content: [{ type: 'text', text: `thread_start error: ${(e as Error).message}` }], isError: true };

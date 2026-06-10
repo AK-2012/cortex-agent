@@ -16,6 +16,7 @@ import { getTemplate, getAgent } from './template-loader.js';
 import { resolveAgentSlotConfigByName, resolveTemplateAgents, resolveActiveAgentName } from './prompt-builder.js';
 import { resolveStageName, parseTarget } from './utils.js';
 import { readArtifact } from './artifact-io.js';
+import { checkContractBudget } from './contract.js';
 import type {
   ThreadRecord, ThreadTemplate, AgentDefinition,
   AgentSlotConfig, AgentSlotId, AgentSlot, AgentStep,
@@ -282,6 +283,11 @@ function checkTemplateLimits(thread: ThreadRecord, template: ThreadTemplate): Tr
     return { shouldTransition: false, reason: 'max_iterations' };
   }
   if (template.maxTotalCostUsd != null && thread.totalCostUsd >= template.maxTotalCostUsd) {
+    return { shouldTransition: false, reason: 'cost_limit' };
+  }
+  // DR-0014: per-thread delegation-contract budget (second gate after the spawn-time
+  // tree guards — catches a single thread burning through its allowance step by step).
+  if (checkContractBudget(thread)) {
     return { shouldTransition: false, reason: 'cost_limit' };
   }
   return null;

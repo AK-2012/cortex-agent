@@ -12,7 +12,7 @@ import { sendCommand, isDeviceOnline, getOnlineDevices } from '@domain/remote/cl
 import { registerAskQuestion, registerPlanApproval } from './hook-bridge.js';
 import { getCurrentPlanFilePath } from '@domain/agents/index.js';
 import { ctx as jobCtx } from '@domain/scheduling/job-registry.js';
-import { createThread, cancelThread, readArtifact, listTemplates, listAgents, checkSpawnGuards, getRootThreadId, registerChildSpawn, buildThreadTree, getTreeThreads } from '@domain/threads/index.js';
+import { createThread, cancelThread, readArtifact, listTemplates, listAgents, checkSpawnGuards, getRootThreadId, registerChildSpawn, buildThreadTree, getTreeThreads, buildContractPrompt, buildMissionChain } from '@domain/threads/index.js';
 import { runThreadDetached } from '../thread-executor.js';
 import { buildThreadSummary } from '@domain/threads/runner.js';
 import { Icons } from '@core/icons.js';
@@ -187,10 +187,22 @@ function createWebhookHandler({
             // channel-less context) we fall back to project-report routing (project conduit → admin DM).
             const haveChannel = typeof data.channel === 'string' && data.channel.length > 0;
             const channel = data.channel || projectId;
+            // Structured delegation contract (DR-0014): optional thread_start params compose
+            // into a contract prompt; the ancestor goal chain rides along to prevent drift.
+            const contract = (data.goal || data.done_when || data.context_files || data.deliverable_path || data.budget_usd != null)
+              ? {
+                  goal: String(data.goal || message).slice(0, 500),
+                  doneWhen: data.done_when ? String(data.done_when) : null,
+                  contextFiles: Array.isArray(data.context_files) ? data.context_files.map(String) : undefined,
+                  deliverablePath: data.deliverable_path ? String(data.deliverable_path) : null,
+                  budgetUsd: data.budget_usd != null ? Number(data.budget_usd) : null,
+                }
+              : null;
+            const missionChain = buildMissionChain(parentThread);
             const thread = createThread(channel, {
               templateName: template || null,
               agentName: agent || null,
-              userMessage: message,
+              userMessage: buildContractPrompt({ message, contract, missionChain }),
               userMessageTs: `mcp_${Date.now()}`,
               projectId,
               metadata: {
@@ -202,6 +214,8 @@ function createWebhookHandler({
                 parentProfile: data.parentProfile || null,
                 rootThreadId: parentThread ? getRootThreadId(parentThread) : null,
                 resumeDest: haveChannel ? 'interactive-reply' : 'project-report',
+                contract,
+                missionChain,
               },
             });
             // Register the child on its thread parent: childThreadIds always (width counter),

@@ -7,3 +7,4 @@ export * from './template-loader.js';
 export * from './prompt-builder.js';
 export * from './state-machine.js';
 export * from './tree.js';
+export * from './contract.js';

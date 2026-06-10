@@ -15,6 +15,7 @@ import {
   detectAbortMarker,
   detectWaitMarker,
   tryEnterWaiting,
+  checkContractBudget,
   isAdHocThread,
   getSessionKey,
   getTemplate,
@@ -501,7 +502,15 @@ async function runThread(threadId: string, opts: RunThreadOptions): Promise<Thre
           break;
         }
         const t = threadStore.get(threadId);
-        if (t?.metadata?.pendingMessages?.length) continue;
+        if (t?.metadata?.pendingMessages?.length) {
+          // Ad-hoc parents bypass transition evaluation, so the contract budget breaker
+          // must gate the re-entry loop here (template threads get it in checkTemplateLimits).
+          if (t && checkContractBudget(t)) {
+            if (ctx.stream) ctx.stream.emitText(`${Icons.warning} Contract budget exhausted — not re-entering wait loop`);
+          } else {
+            continue;
+          }
+        }
       }
 
       if (!await evaluateAndTransition(threadId, stepCtx, ctx, opts)) break;

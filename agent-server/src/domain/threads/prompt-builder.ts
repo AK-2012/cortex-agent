@@ -120,6 +120,11 @@ export const THREAD_PROTOCOL_PREAMBLE = [
   'contradictory requirements, or repeated unrecoverable failures), append `[ABORT: <reason>]` to the',
   'artifact to terminate the thread — terminal state `aborted`, distinct from `failed`. Use this only',
   'when truly blocked: normal retries, minor issues, or disagreements with the plan are not abort cases.',
+  'Delegation (DR-0014): you may spawn child threads via the thread_start tool (pass a contract:',
+  'goal / done_when / deliverable_path / budget_usd). After spawning awaited children, end your step',
+  'with the marker `[WAIT_CHILDREN]` to suspend; you are re-entered once ALL awaited children finish,',
+  'with their results injected. Acceptance before trust: verify each child deliverable against its',
+  'done_when yourself (read files, run tests) — never accept a child\'s self-report as evidence.',
 ].join('\n');
 
 // --- Prompt assembly ---
