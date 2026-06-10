@@ -95,7 +95,13 @@ export class ThreadExecutor {
 
     // Phase 6: buffer user messages when the thread is running a step,
     // so they're included in the next step's prompt instead of being lost.
-    if (ctx.isActiveThread && ctx.existingThread && ctx.existingThread.status === 'running'
+    // DR-0014: also buffer for a parent suspended on child threads — routing such a
+    // message through handleThreadContinue would prematurely wake the parent AND
+    // overwrite its userMessage (the delegation contract).
+    const suspendedOnChildren = ctx.existingThread?.status === 'waiting'
+      && !!ctx.existingThread?.metadata?.waitingOn?.length;
+    if (ctx.isActiveThread && ctx.existingThread
+        && (ctx.existingThread.status === 'running' || suspendedOnChildren)
         && !ctx.threadAddMatch && !ctx.threadStartMatch) {
       await bufferUserMessage(ctx);
       return;

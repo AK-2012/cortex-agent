@@ -149,9 +149,12 @@ class ThreadRepo {
       let count = 0;
       for (const record of this.map.values()) {
         // Suspended parents (waiting on child threads, DR-0014) survive restarts —
-        // recoverWaitingThreads() re-delivers child results after startup. Only
+        // recoverWaitingThreads() re-delivers child results after startup. childThreadIds
+        // also qualifies: a parent that delivered its last child result but crashed before
+        // re-entry has an empty waitingOn yet must still be recovered, not failed. Only
         // in-flight running threads and legacy waiting (no children) are interrupted.
-        const isSuspendedParent = record.status === 'waiting' && !!record.metadata?.waitingOn?.length;
+        const isSuspendedParent = record.status === 'waiting'
+          && !!(record.metadata?.waitingOn?.length || record.metadata?.childThreadIds?.length);
         if (isSuspendedParent) continue;
         if (record.status === 'running' || record.status === 'waiting') {
           record.status = 'failed';

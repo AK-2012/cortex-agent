@@ -12,7 +12,7 @@ import { sendCommand, isDeviceOnline, getOnlineDevices } from '@domain/remote/cl
 import { registerAskQuestion, registerPlanApproval } from './hook-bridge.js';
 import { getCurrentPlanFilePath } from '@domain/agents/index.js';
 import { ctx as jobCtx } from '@domain/scheduling/job-registry.js';
-import { createThread, cancelThread, readArtifact, listTemplates, listAgents } from '@domain/threads/index.js';
+import { createThread, cancelThread, readArtifact, listTemplates, listAgents, checkSpawnGuards, getRootThreadId, registerChildSpawn, buildThreadTree, getTreeThreads } from '@domain/threads/index.js';
 import { runThreadDetached } from '../thread-executor.js';
 import { buildThreadSummary } from '@domain/threads/runner.js';
 import { Icons } from '@core/icons.js';
@@ -173,6 +173,13 @@ function createWebhookHandler({
             if (!jobCtx.adapter) {
               return reply({ success: false, error: 'no platform adapter available (daemon not fully initialized)' });
             }
+            // Tree resource guards (DR-0014): width / node count / budget. A rejection is a
+            // signal to escalate or re-plan — the error text says so to the calling agent.
+            const parentThread = data.parentThreadId ? threadStore.get(String(data.parentThreadId)) : null;
+            const guard = checkSpawnGuards(parentThread);
+            if (guard.ok === false) {
+              return reply({ success: false, error: `${guard.reason}. Do NOT retry this spawn — fold the remaining work into your own step, or escalate via [ABORT: <diagnosis>].` });
+            }
             const projectId = data.projectId || 'general';
             // The originating conduit (the starter agent's SLACK_CHANNEL, forwarded by thread-ops.ts).
             // When present we route output back to that channel with a live status message, mirroring
@@ -193,8 +200,16 @@ function createWebhookHandler({
                 parentThreadId: data.parentThreadId || null,
                 parentChannel: data.parentChannel || null,
                 parentProfile: data.parentProfile || null,
+                rootThreadId: parentThread ? getRootThreadId(parentThread) : null,
+                resumeDest: haveChannel ? 'interactive-reply' : 'project-report',
               },
             });
+            // Register the child on its thread parent: childThreadIds always (width counter),
+            // waitingOn when the parent intends to suspend on it (wait defaults to true for
+            // thread parents — the [WAIT_CHILDREN] protocol).
+            if (parentThread) {
+              await registerChildSpawn(parentThread.id, thread.id, data.wait !== false);
+            }
 
             let dest: Destination;
             let statusMsg: MessageRef | null = null;
@@ -234,9 +249,16 @@ function createWebhookHandler({
             runThreadDetached(thread.id, runOpts, {
               onSettled: (id) => {
                 // Seal the live status message with a summary (interactive path only).
+                // A suspended parent ([WAIT_CHILDREN] → status 'waiting') is NOT sealed:
+                // it will resume; the message just reflects the suspension.
                 if (statusMsg) {
                   const t = threadStore.get(id);
-                  if (t) {
+                  if (t && t.status === 'waiting') {
+                    const n = t.metadata?.waitingOn?.length ?? 0;
+                    void jobCtx.adapter!.updateMessage(statusMsg, {
+                      text: `${Icons.processing} Thread suspended — waiting on ${n} child thread(s)`,
+                    }).catch(() => {});
+                  } else if (t) {
                     const totalNumTurns = t.steps.reduce((s, st) => s + (st.numTurns || 0), 0);
                     const summaryText = buildThreadSummary({ thread: t, totalCostUsd: t.totalCostUsd, totalNumTurns, finalOutput: null, lastAgentResult: null, executionId: null });
                     void jobCtx.adapter!.updateMessage(statusMsg, {

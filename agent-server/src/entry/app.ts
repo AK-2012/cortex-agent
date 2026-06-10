@@ -43,6 +43,7 @@ import { busyTracker } from '@orch/busy-tracker.js';
 import { buildExecutionStatusReport } from '@orch/status-helpers.js';
 import { reprocessMessage } from '@orch/lifecycle.js';
 import { initScheduledRunner, createScheduler, setSchedulerRef, setBus, setInteractiveCallbacksFactory, cancelDispatchedTask } from '@domain/scheduling/runner.js';
+import { recoverWaitingThreads } from '../orchestration/thread-callback.js';
 import { buildInteractiveCallbacks } from '@orch/agent-runner.js';
 import { registerInteractionHandlers, initInteractionHandlers } from '@orch/interactions/interaction-handlers.js';
 import { CommandActionRouter } from '@orch/interactions/command-action-router.js';
@@ -369,6 +370,12 @@ process.on('SIGTERM', async () => {
 
   startMemoryWatcher();
   startDispatchReconciler();
+
+  // DR-0014: re-deliver child results that turned terminal while the server was down and
+  // resume suspended parents. Runs last — needs jobCtx.adapter and the thread system ready.
+  // (markRunningAsFailedOnStartup above already failed all in-flight children, so every
+  // awaited child is terminal or missing by now.)
+  recoverWaitingThreads().catch((e) => log.error(`recoverWaitingThreads failed: ${(e as Error).message}`));
 
   log.info(`Cortex agent is running (${adapter.name}) — backend: ${getActiveBackend()}`);
 })();

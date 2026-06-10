@@ -125,6 +125,16 @@ export function checkSpawnGuards(parent: ThreadRecord | null): SpawnGuardResult 
   return { ok: true };
 }
 
+/** Record a freshly spawned child on its parent: always into childThreadIds (width/rework
+ *  counter); into waitingOn only when the parent intends to suspend on it (wait=true). */
+export async function registerChildSpawn(parentThreadId: string, childThreadId: string, wait: boolean): Promise<void> {
+  await threadStore.mutate(parentThreadId, (t) => {
+    const m = (t.metadata ??= {});
+    (m.childThreadIds ??= []).push(childThreadId);
+    if (wait) (m.waitingOn ??= []).push(childThreadId);
+  });
+}
+
 // --- Tree view (observability) ---
 
 export interface ThreadTreeNode {

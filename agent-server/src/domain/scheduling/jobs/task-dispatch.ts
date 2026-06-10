@@ -140,7 +140,13 @@ async function executeDispatchTask({ selected, selectedTask, channel, scheduleTa
     templateName: selected.template, userMessage: selected.prompt, userMessageTs: `dispatch_${Date.now()}`,
     platformThreadId: statusMsg?.messageId ?? null,
     projectId: selectedTask.project,
-    metadata: { scheduleTaskId, trigger: 'task-dispatch', profileOverride: effectiveProfile },
+    metadata: {
+      scheduleTaskId, trigger: 'task-dispatch', profileOverride: effectiveProfile,
+      // DR-0014: persisted so a suspended parent's re-entry can rebuild the
+      // task-status-check onEnd hook (extraHooks are not persisted on ThreadRecord).
+      taskId: selectedTask.id ?? null, taskProject: selectedTask.project ?? null,
+      resumeDest: 'project-report',
+    },
   });
 
   const icb = ctx.buildInteractiveCallbacks?.(channel, null);
@@ -157,6 +163,21 @@ async function executeDispatchTask({ selected, selectedTask, channel, scheduleTa
     },
   });
   const result = threadResult.lastAgentResult as any;
+
+  // DR-0014: the thread suspended on child threads ([WAIT_CHILDREN]). Not a completion —
+  // keep the task claimed (thread-callback resumes the thread when children finish, and the
+  // rebuilt onEnd hook closes the task loop at true termination). Don't finalize, don't
+  // publish task.completed.
+  if (threadResult.thread?.status === 'waiting') {
+    const n = threadResult.thread.metadata?.waitingOn?.length ?? 0;
+    if (statusMsg) {
+      const text = `${Icons.processing} [${selectedTask.project}] ${selectedTask.text.substring(0, 80)} | suspended — waiting on ${n} child thread(s)`;
+      const queue = getOutboundQueue();
+      if (queue) { await durableUpdate(queue, adapter, statusMsg, { text }); }
+      else { await adapter.updateMessage(statusMsg, { text }).catch(() => {}); }
+    }
+    return { success: true, skipped: false, note: `Suspended [${selectedTask.project}] waiting on ${n} child thread(s)` };
+  }
 
   if (result?.rateLimited) {
     const { elapsedStr } = computeElapsed(startTime);

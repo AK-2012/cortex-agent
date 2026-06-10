@@ -298,6 +298,9 @@ export interface ThreadMetadata {
   /** Children this thread is still waiting on. status==='waiting' && waitingOn.length>0
    *  identifies a suspended parent (vs. the legacy waiting-for-user semantics). */
   waitingOn?: string[];
+  /** Children whose results were already queued into pendingMessages — persistent
+   *  idempotency for completion callbacks (survives restarts, unlike the in-memory fired set). */
+  deliveredChildResults?: string[];
   /** Delegation contract this thread was spawned with (child side). */
   contract?: ThreadContract | null;
   /** Ancestor goal chain, root-first — injected into the child prompt to prevent drift. */

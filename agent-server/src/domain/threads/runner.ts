@@ -1,5 +1,5 @@
 // input:  domain/threads, mode-manager, hook-runner, handles
-// output: runThread / continueThread / buildThreadSummary
+// output: runThread / continueThread / resumeThread / buildThreadSummary
 // pos:    runtime execution engine for the Thread system
 // >>> If I am updated, update my header comment and the parent folder's CORTEX.md <<<
 
@@ -13,6 +13,8 @@ import {
   failThread,
   abortThread,
   detectAbortMarker,
+  detectWaitMarker,
+  tryEnterWaiting,
   isAdHocThread,
   getSessionKey,
   getTemplate,
@@ -454,6 +456,7 @@ async function finalizeThread(threadId: string, ctx: ThreadContext): Promise<Thr
 
 async function runThread(threadId: string, opts: RunThreadOptions): Promise<ThreadRunResult> {
   const ctx = initThreadContext(threadId, opts);
+  let enteredWaiting = false;
 
   try {
     // --- onStart hook (before first step) ---
@@ -483,15 +486,38 @@ async function runThread(threadId: string, opts: RunThreadOptions): Promise<Thre
         break;
       }
 
+      // Parent suspension (DR-0014): [WAIT_CHILDREN] marker in last step output / artifact.
+      // Checked after abort, before transitions. Three outcomes:
+      //  - live awaited children remain → thread enters 'waiting' (resumed by thread-callback
+      //    when the last child turns terminal); skip onEnd — it fires once, at true termination.
+      //  - all awaited children already terminal (callback won the race) and their results sit
+      //    in pendingMessages → re-enter the loop immediately so the same agent processes them.
+      //  - marker but nothing to wait on or process → fall through to normal transitions.
+      if (detectWaitMarker(threadId)) {
+        if (await tryEnterWaiting(threadId)) {
+          enteredWaiting = true;
+          const n = threadStore.get(threadId)?.metadata?.waitingOn?.length ?? 0;
+          if (ctx.stream) ctx.stream.emitText(`${Icons.processing} Thread suspended — waiting on ${n} child thread(s)`);
+          break;
+        }
+        const t = threadStore.get(threadId);
+        if (t?.metadata?.pendingMessages?.length) continue;
+      }
+
       if (!await evaluateAndTransition(threadId, stepCtx, ctx, opts)) break;
     }
 
     // --- onEnd hook (after main loop) ---
     // Template hook first, then per-call extraHooks (see note at onTransition).
-    const threadForEnd = threadStore.get(threadId)!;
-    const lastStep = threadForEnd.steps[threadForEnd.steps.length - 1];
-    await executeLifecycleHook(threadId, 'end', ctx.template?.hooks?.onEnd, opts, lastStep?.agentSlotId);
-    await executeLifecycleHook(threadId, 'end', opts.extraHooks?.onEnd, opts, lastStep?.agentSlotId);
+    // Skipped on suspension: onEnd semantics are "thread truly finished" (e.g. the dispatch
+    // task-status-check hook must not nag while children are still working). The re-entry
+    // path re-runs runThread, so onEnd still fires exactly once at final termination.
+    if (!enteredWaiting) {
+      const threadForEnd = threadStore.get(threadId)!;
+      const lastStep = threadForEnd.steps[threadForEnd.steps.length - 1];
+      await executeLifecycleHook(threadId, 'end', ctx.template?.hooks?.onEnd, opts, lastStep?.agentSlotId);
+      await executeLifecycleHook(threadId, 'end', opts.extraHooks?.onEnd, opts, lastStep?.agentSlotId);
+    }
 
     // Only complete if not already in a terminal state (e.g. cancelled during loop)
     const threadBeforeComplete = threadStore.get(threadId);
@@ -520,7 +546,9 @@ async function runThread(threadId: string, opts: RunThreadOptions): Promise<Thre
         runningExecutions.remove(e.registryKey);
       }
     }
-    // Cleanup thread-specific sessions
+    // Cleanup thread-specific sessions. Intentionally also runs on suspension (DR-0014):
+    // a waiting parent holds no live session — the artifact is its durable memory, and
+    // persistSession slots keep their sessionId so re-entry resumes via --resume.
     closeSessionsByPrefix(`thr:${threadId}:`);
   }
 
@@ -545,6 +573,23 @@ async function continueThread(threadId: string, userMessage: string, opts: RunTh
   return runThread(threadId, opts);
 }
 
+// --- Resume a suspended parent thread (DR-0014) ---
+
+/** Re-enter a parent thread that was suspended via [WAIT_CHILDREN]. Unlike continueThread,
+ *  the userMessage is NOT overwritten — the original contract stays in {{input}}; the child
+ *  results arrive through metadata.pendingMessages (injected by the prompt builder). */
+async function resumeThread(threadId: string, opts: RunThreadOptions): Promise<ThreadRunResult> {
+  const thread = threadStore.get(threadId);
+  if (!thread) throw new Error(`Thread not found: ${threadId}`);
+  if (thread.status !== 'waiting') {
+    throw new Error(`Thread ${threadId} is ${thread.status}, cannot resume`);
+  }
+  await threadStore.mutate(threadId, (t) => {
+    t.status = 'running';
+  });
+  return runThread(threadId, opts);
+}
+
 // --- Thread summary for Slack ---
 
 function buildThreadSummary(result: ThreadRunResult): string {
@@ -557,11 +602,13 @@ function buildThreadSummary(result: ThreadRunResult): string {
   const statusEmoji = thread.status === 'completed' ? Icons.ok
     : thread.status === 'cancelled' ? Icons.blocked
     : thread.status === 'aborted' ? Icons.stopped
+    : thread.status === 'waiting' ? Icons.processing
     : Icons.error;
 
-  const lines = [
-    `${statusEmoji} Thread complete | ${steps.length} steps | $${totalCostUsd.toFixed(4)} | ${formatDurationCompact(elapsed)}`,
-  ];
+  const headline = thread.status === 'waiting'
+    ? `${statusEmoji} Thread suspended — waiting on ${thread.metadata?.waitingOn?.length ?? 0} child thread(s) | ${steps.length} steps | $${totalCostUsd.toFixed(4)}`
+    : `${statusEmoji} Thread complete | ${steps.length} steps | $${totalCostUsd.toFixed(4)} | ${formatDurationCompact(elapsed)}`;
+  const lines = [headline];
 
   if (steps.length > 1) {
     for (const step of steps) {
@@ -597,6 +644,7 @@ function getActiveHandle(channel: string): RunningExecution | null {
 export {
   runThread,
   continueThread,
+  resumeThread,
   buildThreadSummary,
   cancelActiveThread,
   getActiveHandle,

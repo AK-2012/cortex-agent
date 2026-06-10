@@ -12,6 +12,7 @@ import {
   summarizeTree,
   checkSpawnGuards,
   buildThreadTree,
+  registerChildSpawn,
 } from '../src/domain/threads/tree.js';
 import type { ThreadRecord, ThreadMetadata, ThreadStatus } from '../src/core/types/thread-types.js';
 
@@ -189,6 +190,17 @@ test('buildThreadTree nests children under parents and computes root rollup', as
   assert.ok(Math.abs(rootNode.rollup!.totalCostUsd - 7) < 1e-9);
   assert.equal(rootNode.rollup!.maxDepth, 2);
   assert.equal(rootNode.rollup!.byStatus['completed'], 1);
+});
+
+// --- registerChildSpawn ---
+
+test('registerChildSpawn appends to childThreadIds and (when wait) to waitingOn', async () => {
+  const parent = makeThread();
+  await registerChildSpawn(parent.id, 'thr_kid1', true);
+  await registerChildSpawn(parent.id, 'thr_kid2', false);
+  const p = threadStore.get(parent.id)!;
+  assert.deepEqual(p.metadata!.childThreadIds, ['thr_kid1', 'thr_kid2']);
+  assert.deepEqual(p.metadata!.waitingOn, ['thr_kid1']);
 });
 
 test('buildThreadTree treats nodes whose parent is outside the set as roots', () => {
