@@ -328,6 +328,14 @@ function createWebhookHandler({
               const sid = data.parentSessionId || null;
               threads = sid ? threads.filter((t) => t.metadata?.parentSessionId === sid) : [];
             }
+            // Tree view (DR-0014): expand the matched threads to their full trees and
+            // return nested nodes with per-root rollups (nodeCount/cost/byStatus/maxDepth).
+            if (data.view === 'tree') {
+              const rootIds = new Set(threads.map((t) => getRootThreadId(t)));
+              const treeThreads = [...rootIds].flatMap((rid) => getTreeThreads(rid));
+              const trees = buildThreadTree(treeThreads);
+              return reply({ success: true, data: { scope, view: 'tree', count: trees.length, trees } });
+            }
             threads = threads.sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
             const limit = Number(data.limit) || 50;
             const out = threads.slice(0, limit).map((t) => ({

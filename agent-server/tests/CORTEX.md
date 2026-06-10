@@ -69,7 +69,12 @@ How to run tests without tripping it:
 | `thread-manager.test.ts` | Test | resolveSystemVars/evaluateTransitions |
 | `thread-runner.test.ts` | Test | buildThreadSummary/initThreadContext |
 | `conversation-runner.test.ts` | Test | buildConversationPrompt golden-prompt fidelity vs legacy default-thread prompt |
-| `thread-abort.test.ts` | Test | detectAbortMarker/abortThread |
+| `thread-abort.test.ts` | Test | detectAbortMarker/abortThread + THREAD_PROTOCOL_PREAMBLE assertions (incl. [WAIT_CHILDREN]) |
+| `thread-tree.test.ts` | Test | DR-0014 tree: getRootThreadId/getTreeThreads/summarizeTree/checkSpawnGuards/buildThreadTree/registerChildSpawn |
+| `thread-wait-children.test.ts` | Test | DR-0014 suspend: detectWaitMarker/tryEnterWaiting/detectSplitMarker + restart/cleanup semantics |
+| `thread-callback-tree.test.ts` | Test | DR-0014 re-entry: notifyThreadParent idempotency+resume / recoverWaitingThreads / buildChildResultNotice |
+| `thread-contract.test.ts` | Test | DR-0014 contracts: buildContractPrompt/buildMissionChain/checkContractBudget |
+| `task-parent-split.test.ts` | Test | DR-0014 task tree: Task.parent round-trip / decompose keepParent / lint parent rules / processSplitOutcome |
 | `thread-stages.test.ts` | Test | Thread step stage progression |
 | `thread-coder-review.e2e.test.ts` | Test | coder/reviewer two-stage e2e |
 | `thread-extra-hooks.test.ts` | Test | per-call extraHooks serial injection |

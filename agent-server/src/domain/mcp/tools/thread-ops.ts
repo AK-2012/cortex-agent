@@ -115,13 +115,14 @@ export function registerThreadTools(server: McpServer): void {
     {
       scope: z.enum(['mine', 'project']).optional().describe('"mine" (default): threads you started from this session. "project": all threads in the current project (any starter).'),
       limit: z.number().optional().describe('Max threads to return (default 50, newest first).'),
+      view: z.enum(['flat', 'tree']).optional().describe('"flat" (default): newest-first list. "tree": nested thread trees (children under parents) with per-root rollups (nodeCount / totalCostUsd / byStatus / maxDepth).'),
     },
     { readOnlyHint: true },
-    async ({ scope, limit }: { scope?: 'mine' | 'project'; limit?: number }) => {
+    async ({ scope, limit, view }: { scope?: 'mine' | 'project'; limit?: number; view?: 'flat' | 'tree' }) => {
       try {
         const parentSessionId = process.env.CORTEX_SESSION_ID || null;
         const projectId = process.env.CORTEX_PROJECT || undefined;
-        const result = await proxyThreadOp('list-threads', { scope: scope || 'mine', parentSessionId, projectId, limit });
+        const result = await proxyThreadOp('list-threads', { scope: scope || 'mine', parentSessionId, projectId, limit, view });
         return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
       } catch (e) {
         return { content: [{ type: 'text', text: `thread_list error: ${(e as Error).message}` }], isError: true };

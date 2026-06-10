@@ -9,8 +9,10 @@ External callers should import from index.ts, not reference sub-files directly.
 | `artifact-io.ts` | I/O | readArtifact / cleanupWorkspace / getModifiedFilesFromSession / getSessionFileChanges / renderModifiedFilesWithDiff / FileChange |
 | `template-loader.ts` | config | loadConfig / startConfigWatcher / stopConfigWatcher / getTemplate / getAgent / listTemplates / listTemplateNames / listAgents / resolveFileRef |
 | `prompt-builder.ts` | build | buildStepPrompt / buildConversationPrompt / resolveSystemVars / resolveAgentSlotConfig / resolveTemplateAgents / formatEndpoint / pickStepTemplate / THREAD_PROTOCOL_PREAMBLE |
-| `state-machine.ts` | state machine | createThread / addAgentToThread / resolveNextStep / evaluateTransitions / recordStepResult / completeThread / failThread / cancelThread / abortThread / detectAbortMarker |
-| `runner.ts` | runtime | runThread / continueThread / buildThreadSummary — thread execution engine, registers handle via runningExecutions. Also invoked fire-and-forget by the `/webhook/thread-op` MCP bridge (thread_start), so any agent can spawn a thread (depth-capped via metadata.depth + CORTEX_THREAD_DEPTH). |
+| `state-machine.ts` | state machine | createThread / addAgentToThread / resolveNextStep / evaluateTransitions / recordStepResult / completeThread / failThread / cancelThread / abortThread / detectAbortMarker / detectWaitMarker / tryEnterWaiting / detectSplitMarker (DR-0014) |
+| `runner.ts` | runtime | runThread / continueThread / resumeThread / buildThreadSummary — thread execution engine, registers handle via runningExecutions. Also invoked fire-and-forget by the `/webhook/thread-op` MCP bridge (thread_start), so any agent can spawn a thread (depth-capped via metadata.depth + CORTEX_THREAD_DEPTH). [WAIT_CHILDREN] in a step output/artifact suspends the thread (status=waiting) until all awaited children finish (DR-0014). |
+| `tree.ts` | tree (DR-0014) | getRootThreadId / getTreeThreads / summarizeTree / checkSpawnGuards (width+nodes+budget) / registerChildSpawn / buildThreadTree — recursive thread-tree identity, resource guards, tree view |
+| `contract.ts` | contract (DR-0014) | buildContractPrompt / buildMissionChain / checkContractBudget — structured delegation contracts, ancestor goal chain, per-thread budget breaker |
 | `hook-runner.ts` | hook | executeLifecycleHook — lifecycle hook script executor + hook agent runner |
 | `index.ts` | entry | barrel re-export, the only import point for all external callers |
 
@@ -21,6 +23,8 @@ utils.ts          → threadStore, thread-types
 artifact-io.ts    → threadStore, REPO_ROOT, fs, diff
 template-loader.ts → DATA_DIR, REPO_ROOT, template-resolver, thread-types
 prompt-builder.ts  → template-loader, artifact-io, threadStore, thread-types, memory/user-context
-state-machine.ts   → threadStore, template-loader, prompt-builder, utils, artifact-io
-index.ts           → all 5 above
+contract.ts        → thread-types (pure)
+tree.ts            → threadStore, thread-types
+state-machine.ts   → threadStore, template-loader, prompt-builder, utils, artifact-io, contract
+index.ts           → all of the above
 ```
