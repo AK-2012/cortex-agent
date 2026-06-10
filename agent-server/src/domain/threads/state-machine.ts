@@ -2,7 +2,8 @@
 // input:  thread-store, template-loader, prompt-builder, utils, artifact-io
 // output: createThread / addAgentToThread /
 //         resolveNextStep / evaluateTransitions / recordStepResult / completeThread /
-//         failThread / cancelThread / abortThread / detectAbortMarker
+//         failThread / cancelThread / abortThread / detectAbortMarker /
+//         detectWaitMarker / tryEnterWaiting / detectSplitMarker (DR-0014)
 
 import { mkdirSync, writeFileSync, readFileSync } from 'fs';
 import * as path from 'path';
@@ -413,6 +414,78 @@ export function detectAbortMarker(threadId: string): { aborted: boolean; reason:
   if (!m) return { aborted: false, reason: null };
   const raw = m[1] != null ? m[1].trim() : '';
   return { aborted: true, reason: raw.length > 0 ? raw : null };
+}
+
+// --- Wait-on-children + split markers (DR-0014) ---
+
+const WAIT_MARKER_RE = /\[WAIT_CHILDREN\]/;
+
+/** Detect `[WAIT_CHILDREN]` in the last step's output or in the artifact. The marker alone
+ *  does not suspend the thread — tryEnterWaiting() additionally requires live children. */
+export function detectWaitMarker(threadId: string): boolean {
+  const thread = threadStore.get(threadId);
+  if (!thread) return false;
+  const lastStep = thread.steps[thread.steps.length - 1];
+  if (lastStep?.output && WAIT_MARKER_RE.test(lastStep.output)) return true;
+  const content = readArtifact(threadId);
+  return !!content && WAIT_MARKER_RE.test(content);
+}
+
+function isTerminal(status: ThreadRecord['status']): boolean {
+  return status === 'completed' || status === 'failed' || status === 'cancelled' || status === 'aborted';
+}
+
+/** Try to suspend the thread until its waited-on children finish. Inside a single mutate
+ *  (serialized with the callback side via the store mutex), filter waitingOn down to
+ *  children that still exist and are non-terminal; if any remain, set status='waiting'.
+ *  Returns true iff the thread entered waiting. Either interleaving with the completion
+ *  callback converges: callback-first → nothing left to wait on (results already in
+ *  pendingMessages); runner-first → callback sees waiting and resumes when the list empties. */
+export async function tryEnterWaiting(threadId: string): Promise<boolean> {
+  const thread = threadStore.get(threadId);
+  if (!thread || !thread.metadata?.waitingOn?.length) return false;
+  let entered = false;
+  await threadStore.mutate(threadId, (t) => {
+    const live = (t.metadata?.waitingOn || []).filter((id) => {
+      const child = threadStore.get(id);
+      return !!child && !isTerminal(child.status);
+    });
+    t.metadata!.waitingOn = live;
+    if (live.length > 0) {
+      t.status = 'waiting';
+      entered = true;
+    }
+  });
+  if (entered) log.info(`Thread ${threadId} suspended, waiting on ${threadStore.get(threadId)!.metadata!.waitingOn!.length} children`);
+  return entered;
+}
+
+const SPLIT_MARKER_RE = /\[SPLIT\]/;
+const SPLIT_JSON_FENCE_RE = /\[SPLIT\][\s\S]*?```json\s*\n([\s\S]*?)\n\s*```/;
+
+export interface SplitDetection {
+  split: boolean;
+  subtasks: any[] | null;
+  error: string | null;
+}
+
+/** Detect a `[SPLIT]` decomposition proposal in the artifact: the marker followed by a
+ *  ```json fenced block containing `{ "subtasks": [...] }`. Parse failures are surfaced
+ *  (not swallowed) so the dispatch path can report them instead of silently dropping. */
+export function detectSplitMarker(threadId: string): SplitDetection {
+  const content = readArtifact(threadId) || '';
+  if (!SPLIT_MARKER_RE.test(content)) return { split: false, subtasks: null, error: null };
+  const fence = SPLIT_JSON_FENCE_RE.exec(content);
+  if (!fence) return { split: true, subtasks: null, error: '[SPLIT] marker present but no ```json fenced block follows' };
+  try {
+    const parsed = JSON.parse(fence[1]);
+    if (!parsed || !Array.isArray(parsed.subtasks) || parsed.subtasks.length === 0) {
+      return { split: true, subtasks: null, error: '[SPLIT] JSON must be an object with a non-empty "subtasks" array' };
+    }
+    return { split: true, subtasks: parsed.subtasks, error: null };
+  } catch (e: any) {
+    return { split: true, subtasks: null, error: `[SPLIT] JSON parse failed: ${e?.message || e}` };
+  }
 }
 
 /** Terminate the thread with status='aborted'. Idempotent — returns false if thread is already terminal. */

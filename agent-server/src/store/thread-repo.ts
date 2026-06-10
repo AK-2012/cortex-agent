@@ -148,6 +148,11 @@ class ThreadRepo {
     return this.mutex.run(async () => {
       let count = 0;
       for (const record of this.map.values()) {
+        // Suspended parents (waiting on child threads, DR-0014) survive restarts —
+        // recoverWaitingThreads() re-delivers child results after startup. Only
+        // in-flight running threads and legacy waiting (no children) are interrupted.
+        const isSuspendedParent = record.status === 'waiting' && !!record.metadata?.waitingOn?.length;
+        if (isSuspendedParent) continue;
         if (record.status === 'running' || record.status === 'waiting') {
           record.status = 'failed';
           record.error = 'Interrupted by server restart';
@@ -173,6 +178,20 @@ class ThreadRepo {
       const cutoff = new Date(Date.now() - maxAgeMs).toISOString();
       const autoRecordCutoff = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
       let count = 0;
+      let staleWaiting = 0;
+      for (const record of this.map.values()) {
+        // Leak safety net (DR-0014): a parent stuck in waiting beyond maxAge has lost its
+        // children (records purged / callbacks dropped). Fail it now; the next cleanup
+        // cycle garbage-collects it through the normal terminal path below.
+        if (record.status === 'waiting' && record.updatedAt < cutoff) {
+          record.status = 'failed';
+          record.error = 'stale waiting parent — children never completed';
+          record.endedAt = new Date().toISOString();
+          record.updatedAt = new Date().toISOString();
+          staleWaiting++;
+        }
+      }
+      if (staleWaiting > 0) log.info(`Failed ${staleWaiting} stale waiting threads (leak safety net)`);
       for (const [id, record] of this.map) {
         const isTerminal = record.status === 'completed' || record.status === 'failed'
           || record.status === 'cancelled' || record.status === 'aborted';
@@ -188,9 +207,9 @@ class ThreadRepo {
           count++;
         }
       }
-      if (count > 0) {
+      if (count > 0 || staleWaiting > 0) {
         await this.persist();
-        log.info(`Cleaned up ${count} old threads (including workspaces)`);
+        if (count > 0) log.info(`Cleaned up ${count} old threads (including workspaces)`);
       }
       return count;
     });

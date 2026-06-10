@@ -256,6 +256,17 @@ export interface ThreadRecord {
   metadata?: ThreadMetadata | null;
 }
 
+/** Structured delegation contract attached to a spawned (child) thread (DR-0014).
+ *  Composed into the child's prompt by buildContractPrompt and echoed back to the
+ *  parent in the completion notice so the parent can verify the deliverable. */
+export interface ThreadContract {
+  goal: string;                      // one-line objective (becomes the child's mission-chain entry)
+  doneWhen?: string | null;          // verifiable completion criteria
+  contextFiles?: string[];           // files the child must read before working
+  deliverablePath?: string | null;   // where the child must write its output
+  budgetUsd?: number | null;         // subtree budget — spawn guard + per-thread circuit breaker
+}
+
 /** Caller-provided metadata stored on ThreadRecord, used by thread-runner for execution registry etc. */
 export interface ThreadMetadata {
   scheduleTaskId?: string | null;    // schedule task association
@@ -276,6 +287,27 @@ export interface ThreadMetadata {
   parentProfile?: string | null;
   /** Messages buffered while a step was executing, to be included in the next step's prompt. */
   pendingMessages?: string[];        // Phase 6: dispatch message buffering
+
+  // --- Recursive thread tree (DR-0014) ---
+  /** Root of the thread tree this thread belongs to. Unset on root threads —
+   *  use tree.getRootThreadId() which falls back to the thread's own id. */
+  rootThreadId?: string | null;
+  /** All children ever spawned by this thread via thread_start (terminal ones included).
+   *  Doubles as the width / rework hard-cap counter for checkSpawnGuards. */
+  childThreadIds?: string[];
+  /** Children this thread is still waiting on. status==='waiting' && waitingOn.length>0
+   *  identifies a suspended parent (vs. the legacy waiting-for-user semantics). */
+  waitingOn?: string[];
+  /** Delegation contract this thread was spawned with (child side). */
+  contract?: ThreadContract | null;
+  /** Ancestor goal chain, root-first — injected into the child prompt to prevent drift. */
+  missionChain?: string[];
+  /** Task association for task-dispatch threads, so a suspended parent can rebuild its
+   *  onEnd task-status-check hook on re-entry (extraHooks are not persisted). */
+  taskId?: string | null;
+  taskProject?: string | null;
+  /** Destination kind decided at spawn time, so re-entry can rebuild RunThreadOptions. */
+  resumeDest?: 'interactive-reply' | 'project-report' | null;
 }
 
 // --- Thread Step Result (returned by thread-manager.stepThread) ---
