@@ -17,6 +17,9 @@ export interface Task {
   template: string;
   plan: string;
   project: string;
+  /** Parent task id (DR-0014 task tree). Children created by decompose --keep-parent point
+   *  at the retained parent, which becomes the join/acceptance node via depends_on. */
+  parent: string | null;
   depends_on: string[];
   gpu: string | null;
   gpu_count: number;
@@ -80,6 +83,7 @@ const VALID_STATUSES = new Set([
 ]);
 
 const TASK_DEFAULTS: Partial<Task> = {
+  parent: null,
   depends_on: [],
   gpu: null,
   gpu_count: 1,
@@ -112,6 +116,7 @@ function rawToTask(raw: any, project: string): Task {
     template: String(mapped.template ?? ''),
     plan: String(mapped.plan ?? ''),
     project,
+    parent: mapped.parent != null ? String(mapped.parent) : null,
     depends_on: Array.isArray(mapped.depends_on) ? mapped.depends_on.map(String) : [],
     gpu: mapped.gpu != null ? String(mapped.gpu) : null,
     gpu_count: typeof mapped.gpu_count === 'number' ? mapped.gpu_count : 1,
@@ -169,7 +174,7 @@ function parseTasksFileWithLock(content: string, project: string): { tasks: Task
 
 const REQUIRED_KEYS = ['id', 'text', 'why', 'done_when', 'priority', 'status', 'template', 'plan'];
 const OPTIONAL_KEY_ORDER = [
-  'depends_on', 'gpu', 'gpu_count', 'blocked_by', 'claimed_by', 'claimed_at',
+  'parent', 'depends_on', 'gpu', 'gpu_count', 'blocked_by', 'claimed_by', 'claimed_at',
   'paused', 'approval_needed', 'approved_at', 'not_before', 'pending_at', 'completed_at', 'completed_note',
 ];
 

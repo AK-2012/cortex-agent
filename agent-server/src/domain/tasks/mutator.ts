@@ -21,7 +21,7 @@ import {
   decomposeTask as lifecycleDecomposeTask,
 } from './system/task-mutations.js';
 import { editTask as lifecycleEditTask } from './system/task-lifecycle-edit.js';
-import { assertLockHeld, getOwnerIdentity } from './system/task-lock.js';
+import { assertLockHeld, getOwnerIdentity, isProjectLocked } from './system/task-lock.js';
 
 export class TaskMutator {
   constructor(
@@ -179,12 +179,25 @@ export class TaskMutator {
     });
   }
 
-  async decompose(project: string, taskText: string, subtasks: any[], taskId?: string): Promise<any> {
+  async decompose(
+    project: string,
+    taskText: string | null,
+    subtasks: any[],
+    taskId?: string | null,
+    options: { keepParent?: boolean; system?: boolean } = {},
+  ): Promise<any> {
     return this.store.runExclusive(() => {
-      const lockError = assertLockHeld(project, getOwnerIdentity());
-      if (lockError) return { success: false, message: lockError };
-      const result = lifecycleDecomposeTask(project, taskText, subtasks, taskId || null);
-      if (result.success) { this.store.refresh(); this.store.commitAndPush(`task-store: decompose task in ${project}`); }
+      if (options.system) {
+        // System-initiated decompose ([SPLIT] dispatch path, DR-0014): no agent holds the
+        // lock here — proceed unless a FOREIGN lock exists (defer to the lock holder).
+        const l = isProjectLocked(project);
+        if (l.locked) return { success: false, message: `Project lock held by ${l.owner} — split deferred` };
+      } else {
+        const lockError = assertLockHeld(project, getOwnerIdentity());
+        if (lockError) return { success: false, message: lockError };
+      }
+      const result = lifecycleDecomposeTask(project, taskText, subtasks, taskId || null, { keepParent: options.keepParent });
+      if (result.success) { this.store.refresh(); this.store.commitAndPush(`task-store: decompose task in ${project}${options.keepParent ? ' (keep-parent)' : ''}`); }
       return result;
     });
   }

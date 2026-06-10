@@ -164,6 +164,47 @@ function _testSetRegistry(registry: MachineRegistry): void {
   _loaded = true;
 }
 
+// --- [SPLIT] outcome handling (DR-0014 task tree) ---
+
+export interface SplitOutcome {
+  handled: boolean;
+  note?: string;
+  error?: string;
+}
+
+/** Process a worker thread's [SPLIT] decomposition proposal after dispatch:
+ *  decompose keep-parent (the task becomes a join/acceptance node over its new children)
+ *  and unclaim it so the children flow through the normal queue. Parse errors are surfaced
+ *  (and the task still unclaimed) instead of silently dropped. Deps are injected by the
+ *  caller (task-dispatch wires the real detect/decompose/unclaim) — keeps this testable
+ *  and this module free of thread-system imports. */
+async function processSplitOutcome(
+  args: { threadId: string; taskId: string | null; project: string },
+  deps: {
+    detect: (threadId: string) => { split: boolean; subtasks: any[] | null; error: string | null };
+    decompose: (project: string, text: string | null, subtasks: any[], taskId: string | null, options: { keepParent?: boolean }) => { success: boolean; message: string } | Promise<{ success: boolean; message: string }>;
+    unclaim: (taskId: string) => Promise<unknown>;
+  },
+): Promise<SplitOutcome> {
+  const detection = deps.detect(args.threadId);
+  if (!detection.split) return { handled: false };
+  if (!args.taskId) {
+    log.warn(`[SPLIT] marker in thread ${args.threadId} but no associated task — ignoring`);
+    return { handled: false };
+  }
+  if (detection.error || !detection.subtasks) {
+    await deps.unclaim(args.taskId);
+    return { handled: true, error: detection.error || '[SPLIT] proposal empty' };
+  }
+  const result = await deps.decompose(args.project, null, detection.subtasks, args.taskId, { keepParent: true });
+  if (!result.success) {
+    await deps.unclaim(args.taskId);
+    return { handled: true, error: result.message };
+  }
+  await deps.unclaim(args.taskId);
+  return { handled: true, note: `split into ${detection.subtasks.length} subtask(s) — parent kept as join node` };
+}
+
 export {
   getMachineRegistry,
   getLocalMachine,
@@ -172,5 +213,6 @@ export {
   stopMachineRegistryWatcher,
   generateTaskId,
   buildDispatchSessionName,
+  processSplitOutcome,
   _testSetRegistry,
 };

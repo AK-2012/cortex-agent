@@ -73,6 +73,32 @@ function lintDependencies(tasks: Task[], byId: Record<string, Task>, errors: any
   }
 }
 
+/** DR-0014 task tree: parent must reference an existing task; parent chains must be acyclic. */
+function lintParents(tasks: Task[], byId: Record<string, Task>, errors: any[]) {
+  for (const task of tasks) {
+    if (task.parent && !byId[task.parent]) {
+      errors.push({ code: 'missing-parent', task_id: task.id || null, missing: task.parent, project: task.project, text: task.text });
+    }
+  }
+  const inReportedCycle = new Set<string>();
+  for (const task of tasks) {
+    if (!task.id || !task.parent || inReportedCycle.has(task.id)) continue;
+    const chain: string[] = [task.id];
+    const seen = new Set<string>(chain);
+    let cursor = task.parent;
+    while (cursor && byId[cursor]) {
+      if (seen.has(cursor)) {
+        errors.push({ code: 'parent-cycle', cycle: [...chain, cursor] });
+        for (const id of chain) inReportedCycle.add(id);
+        break;
+      }
+      seen.add(cursor);
+      chain.push(cursor);
+      cursor = byId[cursor].parent ?? '';
+    }
+  }
+}
+
 function lintSupplyHealth(summary: any, info: any[]) {
   for (const [project, raw] of Object.entries(summary.projects as Record<string, any>)) {
     const s = raw as any;
@@ -98,6 +124,7 @@ export function lintTasks(tasks: Task[], options: LintOptions = {}) {
   for (const task of tasks) lintSingleTask(task, warnings, errors, duplicateCounts, byId, validTemplateNames);
   lintDuplicates(duplicateCounts, errors);
   lintDependencies(tasks, byId, errors);
+  lintParents(tasks, byId, errors);
 
   const summary = getTaskStatsFromTasks(tasks) as any;
   lintSupplyHealth(summary, info);

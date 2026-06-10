@@ -119,6 +119,10 @@ async function main() {
 
   if (!project || !taskId) { noop(); return; }
 
+  // [SPLIT] decomposition proposal (DR-0014): the task is INTENTIONALLY not done — the
+  // dispatcher decomposes it keep-parent and unclaims. Don't burn an agent turn nagging.
+  if ((ctx.artifactContent || '').includes('[SPLIT]')) { noop(); return; }
+
   const tasksPath = path.join(PROJECTS_DIR, project, 'TASKS.yaml');
   if (!existsSync(tasksPath)) { noop(); return; }
 

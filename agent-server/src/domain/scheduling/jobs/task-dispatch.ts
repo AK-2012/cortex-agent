@@ -16,8 +16,9 @@ import { allConfigsRateLimited } from '@domain/agents/facade.js';
 import { selectAndClaimTask, computeNextInterval, updateScheduleInterval } from '../../tasks/dispatcher.js';
 import { taskStore } from '../../tasks/store.js';
 import { taskMutator } from '../../tasks/mutator.js';
-import { createThread } from '../../threads/index.js';
+import { createThread, detectSplitMarker } from '../../threads/index.js';
 import { runThread as runThreadExec } from '../../threads/runner.js';
+import { processSplitOutcome } from '../../tasks/dispatch-utils.js';
 import { buildUserProcessingMessage, computeElapsed, buildSessionTag } from '@core/status-format.js';
 import { finalizeThreadSuccess } from './_shared.js';
 import type { PlatformAdapter, MessageRef } from '@platform/index.js';
@@ -177,6 +178,33 @@ async function executeDispatchTask({ selected, selectedTask, channel, scheduleTa
       else { await adapter.updateMessage(statusMsg, { text }).catch(() => {}); }
     }
     return { success: true, skipped: false, note: `Suspended [${selectedTask.project}] waiting on ${n} child thread(s)` };
+  }
+
+  // DR-0014: the worker proposed a [SPLIT] decomposition instead of doing the task.
+  // Decompose keep-parent (task becomes the join/acceptance node) and unclaim; the
+  // children flow through the normal dispatch queue.
+  const splitOutcome = await processSplitOutcome(
+    { threadId: thread.id, taskId: selectedTask.id ?? null, project: selectedTask.project },
+    {
+      detect: detectSplitMarker,
+      // system:true — no agent lock in the dispatch path; defer if a foreign lock exists.
+      decompose: (p, t, subs, tid, opts) => taskMutator.decompose(p, t, subs, tid, { ...opts, system: true }),
+      unclaim: (tid) => taskMutator.unclaim(tid),
+    },
+  );
+  if (splitOutcome.handled) {
+    const text = splitOutcome.error
+      ? `${Icons.error} [${selectedTask.project}] ${selectedTask.text.substring(0, 80)} | [SPLIT] proposal invalid: ${splitOutcome.error} — task unclaimed`
+      : `🌿 [${selectedTask.project}] ${selectedTask.text.substring(0, 80)} | ${splitOutcome.note}`;
+    if (statusMsg) {
+      const queue = getOutboundQueue();
+      if (queue) { await durableUpdate(queue, adapter, statusMsg, { text }); }
+      else { await adapter.updateMessage(statusMsg, { text }).catch(() => {}); }
+    }
+    if (splitOutcome.error) {
+      return { success: false, skipped: false, note: `[SPLIT] invalid: ${splitOutcome.error}` };
+    }
+    return { success: true, skipped: false, note: `[${selectedTask.project}] ${splitOutcome.note}` };
   }
 
   if (result?.rateLimited) {

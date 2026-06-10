@@ -294,6 +294,22 @@ function buildDispatchPrompt(task: any): string {
   ];
   sections.push(isolation.join('\n'));
 
+  const split = [
+    '## If This Task Is Too Big ([SPLIT])',
+    '',
+    'If during execution you discover this task is really MULTIPLE independent work units (separately completable and verifiable), do NOT grind through it in one pass. Instead, propose a decomposition: append to the artifact the marker `[SPLIT]` followed by a json code fence:',
+    '',
+    '```json',
+    '{"subtasks": [',
+    '  {"key": "a", "text": "first unit (verb-first)", "why": "...", "done-when": "verifiable criteria"},',
+    '  {"key": "b", "text": "second unit", "done-when": "...", "depends-on": ["a"]}',
+    ']}',
+    '```',
+    '',
+    'Then end normally WITHOUT completing the task. The dispatcher will keep this task as the join/acceptance node (it becomes actionable again only after all subtasks are done — at that point your job is to VERIFY the children\'s combined output against the original done_when, then complete). Use `key` + `depends-on` for ordering between siblings. Decomposing at execution time, when you can see the real structure of the work, beats grinding through a mis-scoped task.',
+  ];
+  sections.push(split.join('\n'));
+
   const completion = [
     '## When Done',
     '',

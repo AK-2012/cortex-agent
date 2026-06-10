@@ -69,6 +69,7 @@ interface ParsedValues {
   noDeps: boolean;
   json: boolean;
   dryRun: boolean;
+  keepParent: boolean;
   skipVerify: boolean;
   skipVerifyReason: string | null;
   force: boolean;
@@ -137,7 +138,7 @@ const COMMAND_FLAG_ALLOWLIST: Record<string, Set<string>> = {
     ...COMMON_FLAGS, '--task-ids', '--text', '--why', '--done-when', '--plan', '--priority',
     '--depends-on', '--add-depends-on', '--remove-depends-on', '--clear-depends-on', '--auto-lock',
   ]),
-  decompose: new Set([...COMMON_FLAGS, '--task', '--subtasks-file', '--dry-run', '--auto-lock']),
+  decompose: new Set([...COMMON_FLAGS, '--task', '--subtasks-file', '--dry-run', '--auto-lock', '--keep-parent']),
   'bulk-add': new Set([...COMMON_FLAGS, '--file', '--auto-lock']),
   'assign-ids': new Set([...COMMON_FLAGS, '--auto-lock']),
   validate: new Set([...COMMON_FLAGS]),
@@ -248,6 +249,7 @@ const HELP_CONFIG = {
     { flag: '--json', description: 'Output as JSON (read commands)' },
     { flag: '--base-dir <path>', description: 'Cortex root directory', default: '~/Cortex' },
     { flag: '--dry-run', description: 'Preview without executing (stop, decompose)' },
+    { flag: '--keep-parent', description: 'decompose: keep the original task as a join/acceptance node depending on all subtasks (DR-0014 task tree)' },
     { flag: '--auto-lock', description: 'Auto-acquire project lock before write (does NOT auto-release)' },
     { flag: '--skip-verify', description: 'Skip completion evidence check for `complete` (escape hatch)' },
     { flag: '--skip-verify-reason <text>', description: 'Reason for skipping verification (logged in result)' },
@@ -331,6 +333,7 @@ function createDefaults(): ParsedValues {
     noDeps: false,
     json: false,
     dryRun: false,
+    keepParent: false,
     skipVerify: false,
     skipVerifyReason: null,
     force: false,
@@ -396,6 +399,9 @@ function parseOptions(args: string[], values: ParsedValues, seen: Set<string>): 
     } else if (token === '--dry-run') {
       seen.add(token);
       values.dryRun = true;
+    } else if (token === '--keep-parent') {
+      seen.add(token);
+      values.keepParent = true;
     } else if (token === '--skip-verify') {
       seen.add(token);
       values.skipVerify = true;
@@ -707,7 +713,7 @@ function handleDecompose(v: ParsedValues) {
   if (v.dryRun) {
     return { success: true, dry_run: true, message: `Would decompose task into ${subtasks.length} subtasks`, subtasks_preview: subtasks };
   }
-  return decomposeTask(v.project!, v.task, subtasks, v.taskId);
+  return decomposeTask(v.project!, v.task, subtasks, v.taskId, { keepParent: v.keepParent });
 }
 
 function handleStop(v: ParsedValues) {

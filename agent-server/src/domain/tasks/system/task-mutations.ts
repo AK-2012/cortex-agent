@@ -61,6 +61,7 @@ function addTask(
     template,
     plan: plan?.trim() || '',
     project,
+    parent: null,
     depends_on: dependsOnList,
     gpu: null,
     gpu_count: 1,
@@ -96,12 +97,31 @@ function batchEdit(project: string, taskIds: string[], options: any = {}) {
   return { success: failed.length === 0, message, results };
 }
 
+/** Subtask input for decomposeTask. Accepts both kebab and snake key styles
+ *  ([SPLIT] proposals are agent-written JSON; be liberal in what we accept). */
+interface DecomposeSubtaskInput {
+  key?: string;                      // local key for sibling depends-on references
+  text: string;
+  template?: string;
+  why?: string;
+  done_when?: string;
+  'done-when'?: string;
+  priority?: string;
+  plan?: string;
+  depends_on?: string[];
+  'depends-on'?: string[];
+}
+
+const HEX_ID_RE = /^[0-9a-fA-F]{4}$/;
+
 function decomposeTask(
   project: string,
   originalText: string | null,
-  subtasks: Array<{ text: string; template?: string; why?: string; done_when?: string; priority?: string; plan?: string; depends_on?: string[] }>,
+  subtasks: DecomposeSubtaskInput[],
   taskId: string | null = null,
+  options: { keepParent?: boolean } = {},
 ) {
+  const keepParent = !!options.keepParent;
   const tasks = readTasks(project);
   if (tasks.length === 0 && !fs.existsSync(getTasksPath(project))) {
     return { success: false, message: `TASKS.yaml not found for project ${project}` };
@@ -112,23 +132,43 @@ function decomposeTask(
   const parentIndex = found.index;
   const parentTask = found.task;
 
+  // First pass: ids for every subtask, keyed for sibling dependency resolution.
   const existingHashes = collectAllExistingHashes();
-  const newTasks: Task[] = [];
-
+  const keyToId = new Map<string, string>();
+  const ids: string[] = [];
   for (const sub of subtasks) {
     const hash = generateHash(existingHashes);
     existingHashes.add(hash);
+    ids.push(hash);
+    if (sub.key) keyToId.set(sub.key.trim(), hash);
+  }
+
+  // Second pass: build tasks, resolving depends-on entries (sibling key | existing hex id).
+  const newTasks: Task[] = [];
+  for (let i = 0; i < subtasks.length; i++) {
+    const sub = subtasks[i];
+    const rawDeps = sub.depends_on ?? sub['depends-on'] ?? [];
+    const resolvedDeps: string[] = [];
+    for (const rawDep of rawDeps) {
+      const dep = String(rawDep).trim();
+      if (keyToId.has(dep)) resolvedDeps.push(keyToId.get(dep)!);
+      else if (HEX_ID_RE.test(dep)) resolvedDeps.push(dep);
+      else return { success: false, message: `subtask[${i}]: unknown dependency "${dep}" — not a sibling key and not a 4-char hex id` };
+    }
     newTasks.push({
-      id: hash,
+      id: ids[i],
       text: sub.text,
       why: sub.why || '',
-      done_when: sub.done_when || '',
+      done_when: sub.done_when ?? sub['done-when'] ?? '',
       priority: (sub.priority || 'medium') as Task['priority'],
       status: 'open',
       template: sub.template || parentTask.template,
       plan: (sub.plan?.trim()) || parentTask.plan,
       project,
-      depends_on: sub.depends_on || [],
+      // keepParent: children hang under the retained parent. Replace mode: children
+      // inherit the grandparent so the tree stays connected (DR-0014).
+      parent: keepParent ? parentTask.id : (parentTask.parent ?? null),
+      depends_on: resolvedDeps,
       gpu: null,
       gpu_count: 1,
       blocked_by: null,
@@ -144,9 +184,19 @@ function decomposeTask(
     });
   }
 
+  if (keepParent) {
+    // Parent becomes the join/acceptance node: it stays in place and depends on all
+    // children — getActionable keeps it dormant until every child is done, and
+    // clearDependsOnAll unlocks it child by child. Zero new dispatch machinery.
+    tasks.splice(parentIndex + 1, 0, ...newTasks);
+    parentTask.depends_on = [...new Set([...parentTask.depends_on, ...ids])];
+    writeTasks(project, tasks);
+    return { success: true, message: `Task decomposed into ${subtasks.length} subtasks (parent ${parentTask.id} kept as join node)`, child_ids: ids };
+  }
+
   tasks.splice(parentIndex, 1, ...newTasks);
   writeTasks(project, tasks);
-  return { success: true, message: `Task decomposed into ${subtasks.length} subtasks` };
+  return { success: true, message: `Task decomposed into ${subtasks.length} subtasks`, child_ids: ids };
 }
 
 function bulkAddTasks(project: string, inputs: BulkTaskInput[]) {
@@ -260,6 +310,7 @@ function bulkAddTasks(project: string, inputs: BulkTaskInput[]) {
       template: inp.template!,
       plan: (inp.plan || '').trim(),
       project,
+      parent: null,
       depends_on: resolvedDeps.get(inp.key.trim()) || [],
       gpu: inp.gpu || null,
       gpu_count: typeof inp['gpu-count'] === 'number' ? inp['gpu-count'] : 1,
