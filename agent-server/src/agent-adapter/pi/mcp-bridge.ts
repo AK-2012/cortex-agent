@@ -87,6 +87,7 @@ async function spawnMcpClient(serverPath: string, serverName: string): Promise<M
       ...process.env,
       SLACK_BOT_TOKEN: process.env.SLACK_BOT_TOKEN || '',
       SLACK_CHANNEL: process.env.SLACK_CHANNEL || '',
+      FEISHU_CHANNEL: process.env.SLACK_CHANNEL || '',
     },
   });
   const client = new Client({ name: `pi-mcp-bridge-${serverName}`, version: '1.0.0' });

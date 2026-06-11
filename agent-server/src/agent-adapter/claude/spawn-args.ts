@@ -151,6 +151,7 @@ export function buildClaudeEnv(
   env.CLAUDE_CODE_DISABLE_POLICY_SKILLS = '1';                    // skip system managed-skills dir (Cortex uses pluginDirs)
   env.CLAUDE_CODE_DISABLE_TERMINAL_TITLE = '1';                   // no title updates; also skips the title-gen Haiku call in -p
   env.SLACK_CHANNEL = channel;
+  env.FEISHU_CHANNEL = channel;
   env.SLACK_BOT_TOKEN = process.env.SLACK_BOT_TOKEN;
   env.CORTEX_SESSION_ID = sessionId;
   if (callbackSource) env.CORTEX_CALLBACK_SOURCE = callbackSource;

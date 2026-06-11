@@ -181,7 +181,7 @@ function buildMcpBlock(channel: string, sessionId: string | null, callbackSource
   if (context?.threadId) return coreSection;
 
   // Direct sessions: core + ext (everything else)
-  const extSection = `\n[mcp_servers.cortex-ext]\ncommand = "node"\nargs = ["${escapedPath(extServerPath)}", "--route-context-file", "${escapedPath(routeContextPath)}"]\n\n[mcp_servers.cortex-ext.env]\n${formatEnv({ SLACK_BOT_TOKEN: process.env.SLACK_BOT_TOKEN || '', SLACK_CHANNEL: channel || '' })}\n`;
+  const extSection = `\n[mcp_servers.cortex-ext]\ncommand = "node"\nargs = ["${escapedPath(extServerPath)}", "--route-context-file", "${escapedPath(routeContextPath)}"]\n\n[mcp_servers.cortex-ext.env]\n${formatEnv({ SLACK_BOT_TOKEN: process.env.SLACK_BOT_TOKEN || '', SLACK_CHANNEL: channel || '', FEISHU_CHANNEL: channel || '' })}\n`;
   return coreSection + extSection;
 }
 

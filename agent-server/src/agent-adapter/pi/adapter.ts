@@ -620,7 +620,10 @@ export class PIAdapter implements AgentAdapter {
     }
 
     const env: Record<string, string | undefined> = { ...process.env, ...(config.env ?? {}), PI_CODING_AGENT_DIR: PI_AGENT_DIR };
-    if (config.channel) env.SLACK_CHANNEL = config.channel;
+    if (config.channel) {
+      env.SLACK_CHANNEL = config.channel;
+      env.FEISHU_CHANNEL = config.channel;
+    }
     // Forward the agent's tool allowlist (Claude-native names) so tool-shims.ts can gate which
     // pseudo-tools it registers — mirroring the Claude backend's `--tools` allowlist. Without this,
     // thread-dispatched agents (whose config excludes AskUserQuestion/EnterPlanMode/ExitPlanMode)
