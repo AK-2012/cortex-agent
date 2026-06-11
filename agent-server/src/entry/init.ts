@@ -776,16 +776,14 @@ async function collectFeishuConfig(): Promise<FeishuInitConfig> {
       'To set up Feishu (飞书), create a Feishu app:',
       '',
       '1. Go to https://open.feishu.cn/app',
-      '2. Create a new app with bot capability enabled',
-      '3. Get App ID and App Secret from "Credentials & Basic Info"',
-      '4. Enable bot events and subscribe to: im.message.receive_v1',
-      '5. Publish the app and get it approved by your admin',
+      '2. Click "Create Agentic App" (创建agentic应用)',
+      '3. Enter agent name (e.g. CortexAgent), select an avatar, and click Create',
+      '4. After creation, the page will display App ID and App Secret — copy them directly',
+      '5. Enable bot events and subscribe to: im.message.receive_v1',
       '',
       'Identity for MCP document operations (docx/wiki/bitable/sheets/drive):',
-      '  - bot:  documents are created/owned by the app (default).',
-      '  - user: documents are created/owned by YOUR Feishu account. Messaging stays as the bot.',
-      '          Pick user and init starts the login right away — it prints a URL to authorize in',
-      '          any browser (OAuth device flow). No redirect URL to register, nothing to paste back.',
+      '  - bot:  documents are created/owned by the app (default)',
+      '  - user: documents are created/owned by YOUR Feishu account (Recommended)',
     ].join('\n'),
     'Feishu App Setup Guide',
   );
@@ -832,10 +830,10 @@ async function collectFeishuConfig(): Promise<FeishuInitConfig> {
   const authMode = await clack.select({
     message: 'Identity for MCP document operations:',
     options: [
-      { value: 'bot' as const, label: 'bot', hint: 'documents owned by the app (default)' },
-      { value: 'user' as const, label: 'user', hint: 'documents owned by your Feishu account' },
+      { value: 'bot' as const, label: 'bot', hint: 'documents owned by the app' },
+      { value: 'user' as const, label: 'user (Recommended)', hint: 'documents owned by your Feishu account' },
     ],
-    initialValue: 'bot' as const,
+    initialValue: 'user' as const,
   });
   handleCancel(authMode);
 
