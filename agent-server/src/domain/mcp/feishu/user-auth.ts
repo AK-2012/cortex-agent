@@ -79,7 +79,7 @@ const REQUIRED_SCOPE = 'offline_access';
  * review step and want the canonical tenant-subdomain URL. Unopened scopes are ignored at consent.
  */
 export const DEFAULT_DOC_SCOPE =
-  'docx:document sheets:spreadsheet bitable:app wiki:wiki space:document:delete';
+  'docx:document sheets:spreadsheet bitable:app wiki:wiki space:document:delete im:resource';
 
 /** Default location of the on-disk token store (alongside .env in CONFIG_DIR). */
 export function userTokenPath(): string {

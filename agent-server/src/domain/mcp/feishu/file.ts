@@ -43,26 +43,23 @@ function stripFeishuPrefix(channelId: string): string {
   return channelId.startsWith(PREFIX) ? channelId.slice(PREFIX.length) : channelId;
 }
 
-/** Infer Feishu file type from file extension (used by the OpenAPI file.create call). */
+/** Infer Feishu file type from file extension (used by the OpenAPI file.create call).
+ *  Feishu API only supports specific file_type values:
+ *  opus, mp4, pdf, doc, xls, ppt, stream
+ *  For unsupported types, use 'stream' as a catch-all. */
 function inferFeishuFileType(fileName: string): string {
   const ext = path.extname(fileName).toLowerCase();
   const typeMap: Record<string, string> = {
     '.pdf': 'pdf',
     '.doc': 'doc',
-    '.docx': 'docx',
     '.xls': 'xls',
-    '.xlsx': 'xlsx',
     '.ppt': 'ppt',
-    '.pptx': 'pptx',
-    '.txt': 'text',
-    '.jpg': 'image',
-    '.jpeg': 'image',
-    '.png': 'image',
-    '.gif': 'image',
-    '.zip': 'zip',
-    '.rar': 'rar',
+    '.mp4': 'mp4',
+    '.opus': 'opus',
   };
-  return typeMap[ext] || 'file';
+  // Feishu API doesn't support 'text', 'image', 'zip', 'rar', 'docx', 'xlsx', 'pptx'
+  // Use 'stream' as fallback for all unsupported types
+  return typeMap[ext] || 'stream';
 }
 
 export async function uploadFileToFeishu(
