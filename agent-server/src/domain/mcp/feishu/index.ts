@@ -9,10 +9,13 @@ import { registerWikiTools } from './wiki.js';
 import { registerBitableTools } from './bitable.js';
 import { registerSheetsTools } from './sheets.js';
 import { registerDriveTools } from './drive.js';
+import { registerFileTools } from './file.js';
 import type { FeishuToolDeps } from './types.js';
 
 /** Tool names exposed by the cortex-feishu MCP server (kept in sync for verification). */
 export const FEISHU_TOOL_NAMES: readonly string[] = [
+  // file — send files to chats
+  'feishu_send_file',
   // docx — cloud documents
   'feishu_docx_create',
   'feishu_docx_get_content',
@@ -54,6 +57,7 @@ export const FEISHU_TOOL_NAMES: readonly string[] = [
 ];
 
 export function registerFeishuTools(server: McpServer, deps: FeishuToolDeps): void {
+  registerFileTools(server, deps);
   registerDocxTools(server, deps);
   registerWikiTools(server, deps);
   registerBitableTools(server, deps);
