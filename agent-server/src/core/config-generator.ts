@@ -12,6 +12,7 @@ const log = createLogger('config-generator');
 const MCP_CONFIG_PATH = path.join(CONFIG_DIR, 'mcp-config.json');
 const CORE_MCP_CONFIG_PATH = path.join(CONFIG_DIR, 'mcp-config-core.json');
 const TUI_MCP_CONFIG_PATH = path.join(CONFIG_DIR, 'mcp-config-tui.json');
+const SLACK_MCP_CONFIG_PATH = path.join(CONFIG_DIR, 'mcp-config-slack.json');
 const FEISHU_MCP_CONFIG_PATH = path.join(CONFIG_DIR, 'mcp-config-feishu.json');
 
 /**
@@ -57,6 +58,18 @@ export function buildTuiConfig(serverRoot: string): object {
   };
 }
 
+/** Slack MCP config — layered ON TOP of the full config (via the variadic `--mcp-config`) only for
+ *  sessions that originate from Slack (channel carries the `slack:` prefix). Isolated to the single
+ *  cortex-slack server so it can be added/removed independently of the base config; the Claude adapter
+ *  and the PI mcp-bridge each decide whether to load it based on the session's source channel. */
+export function buildSlackConfig(serverRoot: string): object {
+  return {
+    mcpServers: {
+      'cortex-slack': serverEntry('dist/domain/mcp/slack-server.js', serverRoot),
+    },
+  };
+}
+
 /** Feishu MCP config — layered ON TOP of the full config (via the variadic `--mcp-config`) only for
  *  sessions that originate from Feishu (channel carries the `feishu:` prefix). Isolated to the single
  *  cortex-feishu server so it can be added/removed independently of the base config; the Claude adapter
@@ -78,6 +91,9 @@ export function generateMcpConfig(): void {
 
   writeFileSync(TUI_MCP_CONFIG_PATH, JSON.stringify(buildTuiConfig(SERVER_ROOT), null, 2));
   log.info(`Generated TUI MCP config at ${TUI_MCP_CONFIG_PATH}`);
+
+  writeFileSync(SLACK_MCP_CONFIG_PATH, JSON.stringify(buildSlackConfig(SERVER_ROOT), null, 2));
+  log.info(`Generated Slack MCP config at ${SLACK_MCP_CONFIG_PATH}`);
 
   writeFileSync(FEISHU_MCP_CONFIG_PATH, JSON.stringify(buildFeishuConfig(SERVER_ROOT), null, 2));
   log.info(`Generated Feishu MCP config at ${FEISHU_MCP_CONFIG_PATH}`);
