@@ -66,6 +66,16 @@ function resolveReadableFilePath(filePathInput: string): { resolved: string; siz
   return { resolved, size: stat.size };
 }
 
+/** Strip the 'slack:' prefix from a channel ID (tolerates already-bare values for back-compat).
+ *  Multi-platform conduits carry the 'slack:' prefix from SLACK_CHANNEL env var;
+ *  the Slack WebClient API expects bare channel IDs.
+ *  This mirrors SlackAdapter._unwrap() behavior. */
+function stripSlackPrefix(channelId: string): string {
+  const PREFIX = 'slack:';
+  if (!channelId) return channelId;
+  return channelId.startsWith(PREFIX) ? channelId.slice(PREFIX.length) : channelId;
+}
+
 /** Lazy-initialized per-process rate limiter for Slack API calls in the MCP server. */
 let _rateLimiter: TokenBucketRateLimiter | null = null;
 
@@ -77,12 +87,15 @@ export async function uploadFileToSlack(slack: WebClient, { channel, filePath, f
   const body = fs.readFileSync(resolved);
   const uploadName = fileName || path.basename(resolved);
 
+  // Strip 'slack:' prefix from channel ID for Slack API compatibility
+  const bareChannel = stripSlackPrefix(channel);
+
   if (initialComment) {
-    await rl.acquire('chat.postMessage', channel);
-    await slack.chat.postMessage({ channel, text: initialComment });
+    await rl.acquire('chat.postMessage', bareChannel);
+    await slack.chat.postMessage({ channel: bareChannel, text: initialComment });
   }
 
-  await rl.acquire('files.getUploadURLExternal', channel);
+  await rl.acquire('files.getUploadURLExternal', bareChannel);
   const uploadInit = await slack.files.getUploadURLExternal({
     filename: uploadName,
     length: size,
@@ -104,10 +117,10 @@ export async function uploadFileToSlack(slack: WebClient, { channel, filePath, f
     throw new Error(`Slack file upload failed (${uploadRes.status} ${uploadRes.statusText})${suffix}`);
   }
 
-  await rl.acquire('files.completeUploadExternal', channel);
+  await rl.acquire('files.completeUploadExternal', bareChannel);
   await slack.files.completeUploadExternal({
     files: [{ id: uploadInit.file_id, title: title || uploadName }],
-    channel_id: channel,
+    channel_id: bareChannel,
   });
 
   return { path: resolved, fileName: uploadName, size };
