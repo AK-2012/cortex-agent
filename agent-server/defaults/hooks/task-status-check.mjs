@@ -123,6 +123,10 @@ async function main() {
   // dispatcher decomposes it keep-parent and unclaims. Don't burn an agent turn nagging.
   if ((ctx.artifactContent || '').includes('[SPLIT]')) { noop(); return; }
 
+  // [ABORT] worker escalation (DR-0014 §8): the dispatcher blocks the task with the abort
+  // reason right after this hook returns — the task is intentionally not done.
+  if (/\[ABORT(?::|\])/.test(ctx.artifactContent || '')) { noop(); return; }
+
   const tasksPath = path.join(PROJECTS_DIR, project, 'TASKS.yaml');
   if (!existsSync(tasksPath)) { noop(); return; }
 

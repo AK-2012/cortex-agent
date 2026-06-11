@@ -13,6 +13,7 @@ import { resumeThread } from '@domain/threads/runner.js';
 import { isTerminalStatus } from '@domain/threads/tree.js';
 import { runThreadDetached } from './thread-executor.js';
 import { createLogger } from '@core/log.js';
+import { scanAllTasks, type Task } from '@core/task-parser.js';
 import type { ThreadRecord, RunThreadOptions } from '@core/types/thread-types.js';
 import type { IncomingMessage, Destination } from '@platform/index.js';
 
@@ -137,12 +138,14 @@ const defaultResume: ResumeFn = (parentId) => {
   });
 };
 
-/** Resume `parentId` if (and only if) it is suspended with nothing left to wait on. */
+/** Resume `parentId` if (and only if) it is suspended with nothing left to wait on —
+ *  both thread children (waitingOn) and task children (waitingOnTasks, DR-0014 §8). */
 function maybeResumeParent(parentId: string, resume?: ResumeFn): void {
   if (resuming.has(parentId)) return;
   const parent = threadStore.get(parentId);
   if (!parent || parent.status !== 'waiting') return;
   if (parent.metadata?.waitingOn?.length) return;
+  if (parent.metadata?.waitingOnTasks?.length) return;
   resuming.add(parentId);
   (resume ?? defaultResume)(parentId);
 }
@@ -191,17 +194,153 @@ export async function notifyThreadParent(childId: string, deps: { resume?: Resum
   if (delivered) maybeResumeParent(parentId, deps.resume);
 }
 
+// --- Task-children bridge (DR-0014 §8: resident manager waits on child TASKS) ---
+
+/** Child-task result notice delivered into a suspended manager's pendingMessages.
+ *  completed → acceptance instructions (verify the deliverable, never the report);
+ *  blocked → escalation instructions (the child cannot finish on its own). */
+export function buildTaskResultNotice(task: Task, kind: 'completed' | 'blocked'): string {
+  const lines: string[] = [];
+  if (kind === 'completed') {
+    lines.push(`[子任务完成] #${task.id} ${task.text}`);
+    if (task.done_when) lines.push(`Done when: ${task.done_when}`);
+    if (task.completed_note) lines.push(`完成备注: ${task.completed_note}`);
+    lines.push('');
+    lines.push('验收要求（必须执行，不得凭完成备注直接采信）:');
+    lines.push('1. 读取实际产出（代码/文档/实验记录），逐条核对 done_when；涉及代码的跑测试验证。');
+    lines.push('2. 达标 → 蒸馏关键结论进你的 artifact，继续你的计划。');
+    lines.push(`3. 未达标 → cortex-task uncomplete 后修订该任务，或用 decompose --keep-parent 增加修订子任务，再 [WAIT_CHILDREN]。`);
+    lines.push('4. 方向性问题 → 在 artifact 写 [ABORT: <诊断>] 升级。');
+  } else {
+    lines.push(`[子任务被阻塞 — 升级信号] #${task.id} ${task.text}`);
+    lines.push(`阻塞原因: ${task.blocked_by || '(未记录)'}`);
+    lines.push('');
+    lines.push('这是子任务的升级：它无法自行完成。你必须处理:');
+    lines.push('1. 诊断原因（读它的产出/日志；too-big 类原因 = 你当初的分解需要修订）。');
+    lines.push('2. 可修复 → cortex-task unblock 并修订任务描述/done_when，或重建修订后的子任务（decompose --keep-parent），再 [WAIT_CHILDREN]。');
+    lines.push('3. 超出你的职权或方向性问题 → 在 artifact 写 [ABORT: <诊断>] 向上升级。');
+  }
+  return lines.join('\n');
+}
+
+/** Disk-fresh read of one task (zero-dependency core parser — consistent with the
+ *  suspension snapshot, immune to taskStore cache staleness). */
+function readTaskFromDisk(project: string, taskId: string): Task | null {
+  try {
+    return scanAllTasks(project).find((t) => t.id === taskId) ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/** Deliver one child-task result to one waiting manager thread. Returns true if delivered.
+ *  Idempotency rides the same persistent deliveredChildResults array as thread children
+ *  (4-hex task ids cannot collide with thr_ thread ids). */
+async function deliverTaskResult(parentThreadId: string, task: Task, kind: 'completed' | 'blocked', deps: { resume?: ResumeFn }): Promise<boolean> {
+  let delivered = false;
+  await threadStore.mutate(parentThreadId, (t) => {
+    const m = (t.metadata ??= {});
+    const waiting = m.waitingOnTasks ?? [];
+    const idx = waiting.indexOf(task.id);
+    if (idx >= 0) {
+      waiting.splice(idx, 1);
+      m.waitingOnTasks = waiting;
+    }
+    if ((m.deliveredChildResults ?? []).includes(task.id)) return;
+    delivered = true;
+    (m.deliveredChildResults ??= []).push(task.id);
+    if (!Array.isArray(m.pendingMessages)) m.pendingMessages = [];
+    if (m.pendingMessages.length >= 10) m.pendingMessages.shift();
+    m.pendingMessages.push(buildTaskResultNotice(task, kind));
+  });
+  if (delivered) maybeResumeParent(parentThreadId, deps.resume);
+  return delivered;
+}
+
+/** Event-bridge entry: a task completed or got blocked — wake every manager thread waiting
+ *  on it. For 'completed', the task's real status is verified on disk first: the dispatch
+ *  cycle publishes task.completed loosely (thread ended ≠ task done), so the disk state is
+ *  the source of truth. A rejected bogus event keeps the manager waiting; the genuine
+ *  completion publishes again later. */
+export async function notifyTaskParentThreads(taskId: string, kind: 'completed' | 'blocked', deps: { resume?: ResumeFn } = {}): Promise<void> {
+  for (const parent of threadStore.getAll()) {
+    if (parent.status !== 'waiting') continue;
+    if (!parent.metadata?.waitingOnTasks?.includes(taskId)) continue;
+    const project = parent.metadata?.taskProject || parent.projectId;
+    const task = readTaskFromDisk(project, taskId);
+    if (!task) {
+      log.warn(`task ${taskId} not found on disk for waiting manager ${parent.id} — leaving to reconcile/recovery`);
+      continue;
+    }
+    if (kind === 'completed' && task.status !== 'done') {
+      log.info(`ignoring loose task.completed for ${taskId} (disk status=${task.status})`);
+      continue;
+    }
+    if (kind === 'blocked' && !task.blocked_by) {
+      log.info(`ignoring stale task.blocked for ${taskId} (no blocked_by on disk)`);
+      continue;
+    }
+    await deliverTaskResult(parent.id, task, kind, deps);
+  }
+}
+
+/** Sweep one waiting thread's waitingOnTasks against disk state: deliver already-done and
+ *  already-blocked children, drop missing ones, keep open ones. Closes the race window
+ *  where a child task turns terminal between the suspension snapshot and the waiting
+ *  persist (its event fired before anyone was listening). Also the recovery path for task
+ *  children — unlike thread children, open tasks survive restarts and stay awaited. */
+export async function reconcileWaitingTasks(threadId: string, deps: { resume?: ResumeFn } = {}): Promise<void> {
+  const thread = threadStore.get(threadId);
+  if (!thread || thread.status !== 'waiting') return;
+  const ids = [...(thread.metadata?.waitingOnTasks ?? [])];
+  if (!ids.length) {
+    maybeResumeParent(threadId, deps.resume);
+    return;
+  }
+  const project = thread.metadata?.taskProject || thread.projectId;
+  for (const taskId of ids) {
+    const task = readTaskFromDisk(project, taskId);
+    if (!task) {
+      await threadStore.mutate(threadId, (t) => {
+        const m = t.metadata!;
+        m.waitingOnTasks = (m.waitingOnTasks ?? []).filter((id) => id !== taskId);
+        if (!Array.isArray(m.pendingMessages)) m.pendingMessages = [];
+        m.pendingMessages.push(`[子任务丢失] #${taskId} 已不在 TASKS.yaml（可能被归档或删除），按失败处理。`);
+      });
+      log.warn(`reconcile: dropped missing task ${taskId} from waiting thread ${threadId}`);
+    } else if (task.status === 'done') {
+      await deliverTaskResult(threadId, task, 'completed', deps);
+    } else if (task.blocked_by) {
+      await deliverTaskResult(threadId, task, 'blocked', deps);
+    }
+    // open/pending and unblocked → keep waiting (tasks survive restarts).
+  }
+  maybeResumeParent(threadId, deps.resume);
+}
+
+/** Register the EventBus subscribers that wake suspended manager threads on child-task
+ *  terminal events (DR-0014 §8). Call once at startup, before recoverWaitingThreads. */
+export function registerTaskTreeSubscribers(bus: { subscribe: (type: any, fn: (e: any) => void) => unknown }): void {
+  bus.subscribe('task.completed', (e: { taskId: string }) => {
+    void notifyTaskParentThreads(e.taskId, 'completed').catch((err) => log.error(`task.completed bridge: ${(err as Error).message}`));
+  });
+  bus.subscribe('task.blocked', (e: { taskId: string }) => {
+    void notifyTaskParentThreads(e.taskId, 'blocked').catch((err) => log.error(`task.blocked bridge: ${(err as Error).message}`));
+  });
+}
+
 /** Startup recovery: re-deliver results that completed while the server was down.
- *  Idempotent — safe to call repeatedly. Children still marked waiting whose records are
- *  gone are treated as failed (the restart already failed all in-flight running threads,
- *  so every surviving child record is terminal by the time this runs). Returns the number
+ *  Idempotent — safe to call repeatedly. Thread children still marked waiting whose records
+ *  are gone are treated as failed (the restart already failed all in-flight running threads,
+ *  so every surviving child THREAD record is terminal by the time this runs). Task children
+ *  are reconciled against disk — open ones stay awaited. Returns the number
  *  of suspended parents processed. */
 export async function recoverWaitingThreads(deps: { resume?: ResumeFn } = {}): Promise<number> {
   let recovered = 0;
   for (const parent of threadStore.getAll()) {
     if (parent.status !== 'waiting') continue;
     const m = parent.metadata;
-    if (!m?.waitingOn?.length && !m?.childThreadIds?.length) continue; // legacy waiting — not ours
+    if (!m?.waitingOn?.length && !m?.childThreadIds?.length && !m?.waitingOnTasks?.length) continue; // legacy waiting — not ours
     recovered++;
 
     for (const childId of [...(m.waitingOn ?? [])]) {
@@ -218,9 +357,11 @@ export async function recoverWaitingThreads(deps: { resume?: ResumeFn } = {}): P
         await notifyThreadParent(childId, deps);
       }
     }
-    // Covers the crash-after-last-delivery-before-resume window (waitingOn already empty)
-    // and the missing-child branch above (which doesn't resume by itself).
-    maybeResumeParent(parent.id, deps.resume);
+    // Task children: reconcile against disk (already-done/blocked delivered, missing
+    // dropped, open kept — tasks survive restarts). Ends with its own resume check, which
+    // also covers the crash-after-last-delivery-before-resume window and the
+    // missing-child branch above (neither resumes by itself).
+    await reconcileWaitingTasks(parent.id, deps);
   }
   if (recovered > 0) log.info(`recovered ${recovered} suspended parent thread(s)`);
   return recovered;
@@ -239,7 +380,16 @@ export async function recoverWaitingThreads(deps: { resume?: ResumeFn } = {}): P
 export async function fireThreadCallback(threadId: string): Promise<void> {
   const t = threadStore.get(threadId);
   if (!t) return;
-  if (!isTerminalStatus(t.status)) return;
+  if (!isTerminalStatus(t.status)) {
+    // Suspension is not completion — but it IS the moment to close the task-side race
+    // window: a child task that turned terminal between the suspension snapshot and the
+    // waiting persist fired its event before anyone was listening. Sweep disk state now.
+    // (All detached run paths — webhook start, resume — settle through this callback.)
+    if (t.status === 'waiting' && t.metadata?.waitingOnTasks?.length) {
+      await reconcileWaitingTasks(threadId).catch((e) => log.error(`reconcile ${threadId}: ${(e as Error).message}`));
+    }
+    return;
+  }
   const m = t.metadata;
   if (!m?.parentSessionId) return; // not agent-spawned → nobody to notify
 

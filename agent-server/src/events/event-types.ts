@@ -33,6 +33,7 @@ export type CortexEvent =
   | { type: 'task.claimed';           ts: string; taskId: string; by: string }
   | { type: 'task.completed';         ts: string; taskId: string }
   | { type: 'task.dispatched';        ts: string; taskId: string; machine: string }
+  | { type: 'task.blocked';           ts: string; taskId: string; reason: string }
 
   // System
   | { type: 'llm.active-count-delta'; ts: string; delta: number }

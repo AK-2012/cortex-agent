@@ -33,6 +33,18 @@ export class TaskMutator {
     this.bus = bus;
   }
 
+  /** getById with a one-shot refresh on miss: tasks created out-of-process (CLI, manager
+   *  threads) reach the in-memory cache only on refresh — callers like the cortex-run
+   *  callback may fire before any dispatch cycle has reloaded TASKS.yaml. */
+  private getByIdFresh(taskId: string): any | null {
+    let task = this.store.getById(taskId);
+    if (!task) {
+      this.store.refresh();
+      task = this.store.getById(taskId);
+    }
+    return task;
+  }
+
   async claim(taskId: string, agent: string): Promise<any> {
     return this.store.runExclusive(() => {
       const task = this.store.getById(taskId);
@@ -56,11 +68,12 @@ export class TaskMutator {
     });
   }
 
-  async complete(taskId: string, note?: string): Promise<any> {
+  async complete(taskId: string, note?: string, options: { skipVerify?: boolean; skipVerifyReason?: string } = {}): Promise<any> {
     return this.store.runExclusive(() => {
-      const task = this.store.getById(taskId);
+      const task = this.getByIdFresh(taskId);
       if (!task) return { success: false, message: `Task not found: ${taskId}` };
-      const result = lifecycleCompleteTask(task.text, task.project, note || '', taskId);
+      const result = lifecycleCompleteTask(task.text, task.project, note || '', taskId,
+        options.skipVerify ?? false, options.skipVerifyReason ?? null);
       if (result.success) {
         this.store.refresh(); this.store.commitAndPush(`task-store: complete ${taskId}`);
         this.bus?.publish({ type: 'task.completed', taskId });
@@ -81,10 +94,14 @@ export class TaskMutator {
 
   async block(taskId: string, reason: string): Promise<any> {
     return this.store.runExclusive(() => {
-      const task = this.store.getById(taskId);
+      const task = this.getByIdFresh(taskId);
       if (!task) return { success: false, message: `Task not found: ${taskId}` };
       const result = lifecycleBlockTask(task.text, task.project, reason, taskId);
-      if (result.success) { this.store.refresh(); this.store.commitAndPush(`task-store: block ${taskId}`); }
+      if (result.success) {
+        this.store.refresh(); this.store.commitAndPush(`task-store: block ${taskId}`);
+        // DR-0014 §8: a blocked task is a child's escalation — wake its waiting manager.
+        this.bus?.publish({ type: 'task.blocked', taskId, reason });
+      }
       return result;
     });
   }

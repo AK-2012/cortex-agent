@@ -371,6 +371,24 @@ If decomposed tasks have execution order requirements, they **must use `depends-
 - Mixes blocked and unblocked work
 - Mixes mechanical work and judgment-based work
 
+#### Composite Tasks: Assign the `manager` Template (DR-0014 §8)
+
+Decomposition does NOT have to happen at creation time. When a task is clearly composite —
+it would trigger the conditions above, but the right split is only knowable after some
+investigation — do not force a premature decomposition. Instead create ONE task with
+`template: manager`:
+
+- A manager thread (strong model, persistent session) is dispatched for it: it orients,
+  decomposes into child tasks (`decompose --keep-parent`, children carry `parent`), suspends
+  on `[WAIT_CHILDREN]`, and is woken to verify each child's deliverable against its done_when
+  before completing the parent. Acceptance is part of the node, not an afterthought.
+- Rule of thumb: expected to span 2+ independently verifiable units, or the decomposition
+  itself needs judgment → `manager`. A single well-scoped unit → a worker template
+  (coder-review / execute-review / ...).
+- Worker escalation: a worker that discovers its task is mis-scoped writes
+  `[ABORT: too-big — <diagnosis>]`; the task gets blocked with the diagnosis and the owning
+  manager (or a human) re-plans. Workers never decompose tasks themselves.
+
 ### Stage Boundary Constraints
 
 **For projects using the stage-gate mechanism**: Each task creation operation only creates tasks **up to the next gate**; do not pre-create tasks across gates for future stages.

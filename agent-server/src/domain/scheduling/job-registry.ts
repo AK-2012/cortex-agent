@@ -21,11 +21,21 @@ export type InteractiveCallbacksFactory = (channel: string, sessionId: string | 
 };
 
 // Shared context set by runner.ts after init
-export const ctx: { adapter: PlatformAdapter | null; schedulerRef: Scheduler | null; bus: EventBus | null; buildInteractiveCallbacks: InteractiveCallbacksFactory | null } = {
+export const ctx: {
+  adapter: PlatformAdapter | null;
+  schedulerRef: Scheduler | null;
+  bus: EventBus | null;
+  buildInteractiveCallbacks: InteractiveCallbacksFactory | null;
+  /** DR-0014 §8: injected by app.ts (→ orchestration/thread-callback.reconcileWaitingTasks)
+   *  so the dispatch path can close the suspension race window for manager threads
+   *  without a domain → orchestration import. */
+  onThreadSuspended: ((threadId: string) => Promise<void>) | null;
+} = {
   adapter: null,
   schedulerRef: null,
   bus: null,
   buildInteractiveCallbacks: null,
+  onThreadSuspended: null,
 };
 
 export function register(key: string, runner: JobRunner): void {

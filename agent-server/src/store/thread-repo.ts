@@ -10,6 +10,7 @@ import { JsonRepository } from '@core/json-repository.js';
 import { createLogger } from '@core/log.js';
 import { AsyncMutex } from '@core/async-mutex.js';
 import { STORE_DIR } from '@core/paths.js';
+import { scanAllTasks } from '@core/task-parser.js';
 
 const log = createLogger('thread-store');
 import type { ThreadRecord, ThreadId, ThreadStatus } from '@core/types/thread-types.js';
@@ -143,6 +144,20 @@ class ThreadRepo {
 
   // --- Lifecycle helpers ---
 
+  /** Does this waiting record still await any live (open/pending, unblocked) child TASK?
+   *  Reads TASKS.yaml via the zero-dependency core parser (store → core is layer-legal). */
+  private hasLiveTaskChildren(record: ThreadRecord): boolean {
+    const ids = record.metadata?.waitingOnTasks;
+    const project = record.metadata?.taskProject;
+    if (!ids?.length || !project) return false;
+    try {
+      const waiting = new Set(ids);
+      return scanAllTasks(project).some((t) => waiting.has(t.id) && t.status !== 'done' && !t.blocked_by);
+    } catch {
+      return false;
+    }
+  }
+
   async markRunningAsFailedOnStartup(): Promise<number> {
     await this._pendingPersist;
     return this.mutex.run(async () => {
@@ -154,7 +169,8 @@ class ThreadRepo {
         // re-entry has an empty waitingOn yet must still be recovered, not failed. Only
         // in-flight running threads and legacy waiting (no children) are interrupted.
         const isSuspendedParent = record.status === 'waiting'
-          && !!(record.metadata?.waitingOn?.length || record.metadata?.childThreadIds?.length);
+          && !!(record.metadata?.waitingOn?.length || record.metadata?.childThreadIds?.length
+            || record.metadata?.waitingOnTasks?.length);
         if (isSuspendedParent) continue;
         if (record.status === 'running' || record.status === 'waiting') {
           record.status = 'failed';
@@ -184,9 +200,13 @@ class ThreadRepo {
       let staleWaiting = 0;
       for (const record of this.map.values()) {
         // Leak safety net (DR-0014): a parent stuck in waiting beyond maxAge has lost its
-        // children (records purged / callbacks dropped). Fail it now; the next cleanup
-        // cycle garbage-collects it through the normal terminal path below.
+        // children (records purged / callbacks dropped). This is ORPHAN detection, not an
+        // age limit: a manager waiting on a multi-day child TASK (e.g. a long training run,
+        // DR-0014 §8) is legitimately silent — spare it while any awaited task is still
+        // open/pending in TASKS.yaml. Fail true orphans; the next cleanup cycle
+        // garbage-collects them through the normal terminal path below.
         if (record.status === 'waiting' && record.updatedAt < cutoff) {
+          if (this.hasLiveTaskChildren(record)) continue;
           record.status = 'failed';
           record.error = 'stale waiting parent — children never completed';
           record.endedAt = new Date().toISOString();

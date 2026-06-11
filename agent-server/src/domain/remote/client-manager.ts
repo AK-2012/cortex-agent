@@ -13,8 +13,7 @@ import { getMachineRegistry, type MachineEntry, type MachineRegistry } from '../
 import { STORE_DIR, CONFIG_DIR } from '@core/utils.js';
 import { createLogger } from '@core/log.js';
 import { readTasks, findTask } from '../tasks/system/task-lifecycle-edit.js';
-import { completeTask } from '../tasks/system/task-completion.js';
-import { blockTask } from '../tasks/system/task-state.js';
+import { taskMutator } from '../tasks/mutator.js';
 
 const log = createLogger('client-manager');
 
@@ -125,7 +124,7 @@ function startClientManager(port: number): void {
       }
 
       if (msg.type === 'task-callback') {
-        handleTaskCallback(ws, msg);
+        void handleTaskCallback(ws, msg).catch((e) => log.error(`task-callback: ${(e as Error).message}`));
         return;
       }
     });
@@ -464,7 +463,7 @@ function sendAck(ws: WebSocket, callbackId: string, ok: boolean, message?: strin
   }
 }
 
-function handleTaskCallback(ws: WebSocket, msg: any): void {
+async function handleTaskCallback(ws: WebSocket, msg: any): Promise<void> {
   const { taskProject, taskId, termination, exitCode, durationHuman,
           remoteResultPath, remoteLogPath, device, callbackId, logTail } = msg;
 
@@ -496,11 +495,14 @@ function handleTaskCallback(ws: WebSocket, msg: any): void {
     ? `cortex-run on ${device} completed in ${durationHuman || '?'}, exit 0. Remote: ${remoteRef}`
     : `cortex-run on ${device} ${termination || '?'} after ${durationHuman || '?'}, exit ${exitCode ?? '?'}. Remote: ${remoteRef}\n--- log tail ---\n${logTail || '(no log tail)'}`;
 
+  // Route through taskMutator (not the bare lifecycle functions) so task.completed /
+  // task.blocked events fire — a manager thread suspended on this task (DR-0014 §8)
+  // is woken by exactly these events, possibly days after dispatch.
   let result: any;
   if (isSuccess) {
-    result = completeTask(null, taskProject, note, taskId, true, 'remote-run');
+    result = await taskMutator.complete(taskId, note, { skipVerify: true, skipVerifyReason: 'remote-run' });
   } else {
-    result = blockTask(null, taskProject, note, taskId);
+    result = await taskMutator.block(taskId, note);
   }
 
   const ackMessage = result.verify_warning

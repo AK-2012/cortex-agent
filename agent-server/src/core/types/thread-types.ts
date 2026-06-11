@@ -298,6 +298,11 @@ export interface ThreadMetadata {
   /** Children this thread is still waiting on. status==='waiting' && waitingOn.length>0
    *  identifies a suspended parent (vs. the legacy waiting-for-user semantics). */
   waitingOn?: string[];
+  /** Child TASK ids (4-hex) this manager thread is waiting on (DR-0014 §8). Snapshotted from
+   *  TASKS.yaml (tasks with parent === metadata.taskId, open and unblocked) at suspension.
+   *  task.completed / task.blocked events drain it; resume requires waitingOn AND
+   *  waitingOnTasks both empty. Unlike thread children, task children survive restarts. */
+  waitingOnTasks?: string[];
   /** Children whose results were already queued into pendingMessages — persistent
    *  idempotency for completion callbacks (survives restarts, unlike the in-memory fired set). */
   deliveredChildResults?: string[];

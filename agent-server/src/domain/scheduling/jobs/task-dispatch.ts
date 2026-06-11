@@ -18,7 +18,8 @@ import { taskStore } from '../../tasks/store.js';
 import { taskMutator } from '../../tasks/mutator.js';
 import { createThread, detectSplitMarker } from '../../threads/index.js';
 import { runThread as runThreadExec } from '../../threads/runner.js';
-import { processSplitOutcome } from '../../tasks/dispatch-utils.js';
+import { processSplitOutcome, processAbortOutcome } from '../../tasks/dispatch-utils.js';
+import { threadStore } from '@store/thread-repo.js';
 import { buildUserProcessingMessage, computeElapsed, buildSessionTag } from '@core/status-format.js';
 import { finalizeThreadSuccess } from './_shared.js';
 import type { PlatformAdapter, MessageRef } from '@platform/index.js';
@@ -170,14 +171,44 @@ async function executeDispatchTask({ selected, selectedTask, channel, scheduleTa
   // rebuilt onEnd hook closes the task loop at true termination). Don't finalize, don't
   // publish task.completed.
   if (threadResult.thread?.status === 'waiting') {
-    const n = threadResult.thread.metadata?.waitingOn?.length ?? 0;
+    const nThreads = threadResult.thread.metadata?.waitingOn?.length ?? 0;
+    const nTasks = threadResult.thread.metadata?.waitingOnTasks?.length ?? 0;
+    // DR-0014 §8: close the suspension race window (a child task that turned terminal
+    // between the snapshot and the waiting persist fired its event unheard).
+    if (nTasks > 0 && ctx.onThreadSuspended) {
+      await ctx.onThreadSuspended(thread.id).catch((e) => log.error(`onThreadSuspended: ${(e as Error).message}`));
+    }
     if (statusMsg) {
-      const text = `${Icons.processing} [${selectedTask.project}] ${selectedTask.text.substring(0, 80)} | suspended — waiting on ${n} child thread(s)`;
+      const parts = [nThreads > 0 ? `${nThreads} child thread(s)` : null, nTasks > 0 ? `${nTasks} child task(s)` : null].filter(Boolean);
+      const text = `${Icons.processing} [${selectedTask.project}] ${selectedTask.text.substring(0, 80)} | suspended — waiting on ${parts.join(' + ') || 'children'}`;
       const queue = getOutboundQueue();
       if (queue) { await durableUpdate(queue, adapter, statusMsg, { text }); }
       else { await adapter.updateMessage(statusMsg, { text }).catch(() => {}); }
     }
-    return { success: true, skipped: false, note: `Suspended [${selectedTask.project}] waiting on ${n} child thread(s)` };
+    return { success: true, skipped: false, note: `Suspended [${selectedTask.project}] waiting on ${nThreads} thread(s) + ${nTasks} task(s)` };
+  }
+
+  // DR-0014 §8: worker escalation — [ABORT: <reason>] blocks the task (task.blocked event
+  // wakes the waiting manager, if any). Must run BEFORE finalizeThreadSuccess: aborted
+  // threads were previously finalized as successes and published a bogus task.completed.
+  const abortOutcome = await processAbortOutcome(
+    { threadId: thread.id, taskId: selectedTask.id ?? null, project: selectedTask.project },
+    {
+      getThread: (id) => threadStore.get(id),
+      block: (tid, reason) => taskMutator.block(tid, reason),
+    },
+  );
+  if (abortOutcome.handled) {
+    const text = abortOutcome.error
+      ? `${Icons.error} [${selectedTask.project}] ${selectedTask.text.substring(0, 80)} | worker aborted but block failed: ${abortOutcome.error}`
+      : `${Icons.stopped} [${selectedTask.project}] ${selectedTask.text.substring(0, 80)} | ${abortOutcome.note}`;
+    if (statusMsg) {
+      const queue = getOutboundQueue();
+      if (queue) { await durableUpdate(queue, adapter, statusMsg, { text }); }
+      else { await adapter.updateMessage(statusMsg, { text }).catch(() => {}); }
+    }
+    if (selectedTask.id) dispatchFailureCounts.delete(selectedTask.id); // abort is judgment, not fault
+    return { success: !abortOutcome.error, skipped: false, note: abortOutcome.error ? `abort-block failed: ${abortOutcome.error}` : `[${selectedTask.project}] ${abortOutcome.note}` };
   }
 
   // DR-0014: the worker proposed a [SPLIT] decomposition instead of doing the task.

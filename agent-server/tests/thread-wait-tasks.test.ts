@@ -1,0 +1,151 @@
+// input:  Node test runner + tryEnterWaiting task-children extension + thread-repo semantics
+// output: waitingOnTasks snapshot / restart preservation / cleanup orphan-detection tests
+// pos:    Verify resident-manager suspension on child TASKS (DR-0014 §8 Phase A)
+// >>> If I am updated, update my header comment and the parent folder's CORTEX.md <<<
+
+import './_test-home.js'; // MUST be first: isolate CORTEX_HOME before paths.ts loads
+import test, { after } from 'node:test';
+import assert from 'node:assert/strict';
+import * as fs from 'node:fs';
+import * as path from 'node:path';
+import { PROJECTS_DIR } from '../src/core/paths.js';
+import { threadStore } from '../src/store/thread-repo.js';
+import { tryEnterWaiting } from '../src/domain/threads/index.js';
+import type { ThreadRecord, ThreadStatus } from '../src/core/types/thread-types.js';
+
+const createdThreadIds = new Set<string>();
+const projectDirs: string[] = [];
+let seq = 0;
+
+after(async () => {
+  for (const id of createdThreadIds) await threadStore.delete(id);
+  await threadStore.flush();
+  for (const d of projectDirs) { try { fs.rmSync(d, { recursive: true, force: true }); } catch {} }
+});
+
+function makeProject(name: string, tasksYaml: string): void {
+  const dir = path.join(PROJECTS_DIR, name);
+  projectDirs.push(dir);
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, 'TASKS.yaml'), tasksYaml);
+}
+
+function taskYaml(id: string, over: Record<string, string> = {}): string {
+  const lines = [
+    `  - id: "${id}"`,
+    `    text: task ${id}`,
+    '    why: w',
+    '    done-when: d',
+    '    priority: medium',
+    `    status: ${over.status ?? 'open'}`,
+    '    template: coder-review',
+    '    plan: p',
+  ];
+  if (over.parent) lines.push(`    parent: "${over.parent}"`);
+  if (over.blocked) lines.push(`    blocked-by: ${over.blocked}`);
+  return lines.join('\n') + '\n';
+}
+
+function makeThread(over: Partial<ThreadRecord> = {}): ThreadRecord {
+  const id = over.id ?? `thr_wt${(seq++).toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+  const now = new Date().toISOString();
+  const rec: ThreadRecord = {
+    id, templateName: null, status: 'running' as ThreadStatus,
+    channel: 'C-wt-test', projectId: 'general', platformThreadId: null,
+    userMessage: 'x', userMessageTs: 'ts', workspacePath: '', artifactPath: '',
+    agents: {}, activeAgent: 'main', activeStage: null, currentStepIndex: 0, steps: [],
+    iterationCounts: {}, totalCostUsd: 0, createdAt: now, updatedAt: now,
+    endedAt: null, error: null, abortReason: null, metadata: null,
+    ...over,
+  };
+  threadStore.set(rec);
+  createdThreadIds.add(id);
+  return rec;
+}
+
+// --- tryEnterWaiting: task-children extension ---
+
+test('tryEnterWaiting snapshots open child tasks into waitingOnTasks and suspends', async () => {
+  const proj = `_wt_p${seq++}`;
+  makeProject(proj, 'tasks:\n' + taskYaml('aa01') + taskYaml('bb01', { parent: 'aa01' }) + taskYaml('cc01', { parent: 'aa01' }));
+  const manager = makeThread({ metadata: { taskId: 'aa01', taskProject: proj } });
+
+  assert.equal(await tryEnterWaiting(manager.id), true);
+  const t = threadStore.get(manager.id)!;
+  assert.equal(t.status, 'waiting');
+  assert.deepEqual(new Set(t.metadata!.waitingOnTasks), new Set(['bb01', 'cc01']));
+});
+
+test('tryEnterWaiting excludes done and blocked children from the snapshot', async () => {
+  const proj = `_wt_p${seq++}`;
+  makeProject(proj, 'tasks:\n'
+    + taskYaml('aa02')
+    + taskYaml('bb02', { parent: 'aa02', status: 'done' })
+    + taskYaml('cc02', { parent: 'aa02', blocked: 'stuck' })
+    + taskYaml('dd02', { parent: 'aa02' }));
+  const manager = makeThread({ metadata: { taskId: 'aa02', taskProject: proj } });
+
+  assert.equal(await tryEnterWaiting(manager.id), true);
+  assert.deepEqual(threadStore.get(manager.id)!.metadata!.waitingOnTasks, ['dd02']);
+});
+
+test('tryEnterWaiting does not suspend when all child tasks are done', async () => {
+  const proj = `_wt_p${seq++}`;
+  makeProject(proj, 'tasks:\n' + taskYaml('aa03') + taskYaml('bb03', { parent: 'aa03', status: 'done' }));
+  const manager = makeThread({ metadata: { taskId: 'aa03', taskProject: proj } });
+
+  assert.equal(await tryEnterWaiting(manager.id), false);
+  assert.equal(threadStore.get(manager.id)!.status, 'running');
+});
+
+test('tryEnterWaiting without taskId metadata keeps thread-children-only behavior', async () => {
+  const liveChild = makeThread({ status: 'running' });
+  const parent = makeThread({ metadata: { waitingOn: [liveChild.id] } });
+  assert.equal(await tryEnterWaiting(parent.id), true);
+  const t = threadStore.get(parent.id)!;
+  assert.deepEqual(t.metadata!.waitingOn, [liveChild.id]);
+  assert.equal(t.metadata!.waitingOnTasks?.length ?? 0, 0);
+});
+
+test('tryEnterWaiting suspends on task children even with zero thread children', async () => {
+  const proj = `_wt_p${seq++}`;
+  makeProject(proj, 'tasks:\n' + taskYaml('aa04') + taskYaml('bb04', { parent: 'aa04' }));
+  const manager = makeThread({ metadata: { taskId: 'aa04', taskProject: proj, waitingOn: [] } });
+  assert.equal(await tryEnterWaiting(manager.id), true);
+});
+
+// --- restart semantics ---
+
+test('markRunningAsFailedOnStartup preserves parents suspended on task children only', async () => {
+  const proj = `_wt_p${seq++}`;
+  makeProject(proj, 'tasks:\n' + taskYaml('aa05') + taskYaml('bb05', { parent: 'aa05' }));
+  const manager = makeThread({ status: 'waiting', metadata: { taskId: 'aa05', taskProject: proj, waitingOnTasks: ['bb05'] } });
+  const plain = makeThread({ status: 'waiting', metadata: null });
+
+  await threadStore.markRunningAsFailedOnStartup();
+
+  assert.equal(threadStore.get(manager.id)!.status, 'waiting', 'task-waiting manager survives restart');
+  assert.equal(threadStore.get(plain.id)!.status, 'failed');
+});
+
+// --- cleanup: orphan detection, not age limit ---
+
+test('cleanup spares an over-age waiting manager whose child tasks are still open', async () => {
+  const proj = `_wt_p${seq++}`;
+  makeProject(proj, 'tasks:\n' + taskYaml('aa06') + taskYaml('bb06', { parent: 'aa06' }));
+  const manager = makeThread({ status: 'waiting', metadata: { taskId: 'aa06', taskProject: proj, waitingOnTasks: ['bb06'] } });
+  threadStore.get(manager.id)!.updatedAt = new Date(Date.now() - 10 * 24 * 60 * 60 * 1000).toISOString();
+
+  await threadStore.cleanup();
+
+  assert.equal(threadStore.get(manager.id)!.status, 'waiting', 'multi-day training waits must not be reaped');
+});
+
+test('cleanup still fails an over-age waiting parent with no live children anywhere', async () => {
+  const orphan = makeThread({ status: 'waiting', metadata: { waitingOn: ['thr_gone_x'], waitingOnTasks: [] } });
+  threadStore.get(orphan.id)!.updatedAt = new Date(Date.now() - 10 * 24 * 60 * 60 * 1000).toISOString();
+
+  await threadStore.cleanup();
+
+  assert.equal(threadStore.get(orphan.id)!.status, 'failed');
+});

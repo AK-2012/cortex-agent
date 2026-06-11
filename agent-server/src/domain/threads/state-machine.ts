@@ -17,6 +17,7 @@ import { resolveAgentSlotConfigByName, resolveTemplateAgents, resolveActiveAgent
 import { resolveStageName, parseTarget } from './utils.js';
 import { readArtifact } from './artifact-io.js';
 import { checkContractBudget } from './contract.js';
+import { scanAllTasks } from '@core/task-parser.js';
 import type {
   ThreadRecord, ThreadTemplate, AgentDefinition,
   AgentSlotConfig, AgentSlotId, AgentSlot, AgentStep,
@@ -441,28 +442,57 @@ function isTerminal(status: ThreadRecord['status']): boolean {
   return status === 'completed' || status === 'failed' || status === 'cancelled' || status === 'aborted';
 }
 
+/** Live (open, unblocked) child tasks of the given task, read straight from TASKS.yaml via
+ *  the zero-dependency core parser — no domain/tasks import (avoids a layer cycle). */
+function liveChildTaskIds(taskId: string, taskProject: string): string[] {
+  try {
+    return scanAllTasks(taskProject)
+      .filter((t) => t.parent === taskId && t.status !== 'done' && !t.blocked_by)
+      .map((t) => t.id)
+      .filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
 /** Try to suspend the thread until its waited-on children finish. Inside a single mutate
  *  (serialized with the callback side via the store mutex), filter waitingOn down to
- *  children that still exist and are non-terminal; if any remain, set status='waiting'.
- *  Returns true iff the thread entered waiting. Either interleaving with the completion
- *  callback converges: callback-first → nothing left to wait on (results already in
- *  pendingMessages); runner-first → callback sees waiting and resumes when the list empties. */
+ *  children that still exist and are non-terminal; additionally (DR-0014 §8) snapshot live
+ *  child TASKS (parent === metadata.taskId) into waitingOnTasks. If either list is
+ *  non-empty, set status='waiting'. Returns true iff the thread entered waiting.
+ *  Either interleaving with the completion callback converges: callback-first → nothing
+ *  left to wait on (results already in pendingMessages); runner-first → callback sees
+ *  waiting and resumes when both lists empty. The task-side race (a child completing
+ *  between the snapshot and the waiting persist, its event missed) is closed by
+ *  reconcileWaitingTasks right after suspension. */
 export async function tryEnterWaiting(threadId: string): Promise<boolean> {
   const thread = threadStore.get(threadId);
-  if (!thread || !thread.metadata?.waitingOn?.length) return false;
+  if (!thread) return false;
+  const hasThreadChildren = !!thread.metadata?.waitingOn?.length;
+  const taskId = thread.metadata?.taskId;
+  const taskProject = thread.metadata?.taskProject;
+  if (!hasThreadChildren && !(taskId && taskProject)) return false;
+
+  const taskChildren = taskId && taskProject ? liveChildTaskIds(taskId, taskProject) : [];
+
   let entered = false;
   await threadStore.mutate(threadId, (t) => {
-    const live = (t.metadata?.waitingOn || []).filter((id) => {
+    const m = (t.metadata ??= {});
+    const live = (m.waitingOn || []).filter((id) => {
       const child = threadStore.get(id);
       return !!child && !isTerminal(child.status);
     });
-    t.metadata!.waitingOn = live;
-    if (live.length > 0) {
+    m.waitingOn = live;
+    m.waitingOnTasks = taskChildren;
+    if (live.length > 0 || taskChildren.length > 0) {
       t.status = 'waiting';
       entered = true;
     }
   });
-  if (entered) log.info(`Thread ${threadId} suspended, waiting on ${threadStore.get(threadId)!.metadata!.waitingOn!.length} children`);
+  if (entered) {
+    const m = threadStore.get(threadId)!.metadata!;
+    log.info(`Thread ${threadId} suspended, waiting on ${m.waitingOn!.length} thread children + ${m.waitingOnTasks!.length} task children`);
+  }
   return entered;
 }
 

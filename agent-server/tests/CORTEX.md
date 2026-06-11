@@ -75,6 +75,9 @@ How to run tests without tripping it:
 | `thread-callback-tree.test.ts` | Test | DR-0014 re-entry: notifyThreadParent idempotency+resume / recoverWaitingThreads / buildChildResultNotice |
 | `thread-contract.test.ts` | Test | DR-0014 contracts: buildContractPrompt/buildMissionChain/checkContractBudget |
 | `task-parent-split.test.ts` | Test | DR-0014 task tree: Task.parent round-trip / decompose keepParent / lint parent rules / processSplitOutcome |
+| `thread-wait-tasks.test.ts` | Test | DR-0014 §8: tryEnterWaiting task-children snapshot / restart preservation / cleanup orphan detection |
+| `thread-task-bridge.test.ts` | Test | DR-0014 §8: notifyTaskParentThreads / reconcileWaitingTasks race closer / recovery keeps open task children |
+| `task-abort-outcome.test.ts` | Test | DR-0014 §8: processAbortOutcome worker escalation (aborted thread → block task; fixes aborted-as-success bug) |
 | `thread-stages.test.ts` | Test | Thread step stage progression |
 | `thread-coder-review.e2e.test.ts` | Test | coder/reviewer two-stage e2e |
 | `thread-extra-hooks.test.ts` | Test | per-call extraHooks serial injection |

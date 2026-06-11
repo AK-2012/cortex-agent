@@ -205,6 +205,42 @@ async function processSplitOutcome(
   return { handled: true, note: `split into ${detection.subtasks.length} subtask(s) — parent kept as join node` };
 }
 
+// --- [ABORT] outcome handling (DR-0014 §8: worker escalation) ---
+
+export interface AbortOutcome {
+  handled: boolean;
+  note?: string;
+  error?: string;
+}
+
+/** Process an aborted dispatch thread: the worker said "I can't" ([ABORT: <reason>]) —
+ *  block the task with the abort reason. taskMutator.block publishes task.blocked, which
+ *  wakes a manager thread waiting on this task (its parent re-plans); with no manager the
+ *  block surfaces to humans/stage-gate as usual. Also fixes the pre-existing bug where
+ *  aborted dispatch threads were finalized as successes (publishing a bogus task.completed).
+ *  Not counted as a dispatch failure — abort is a judgment, not a fault. */
+async function processAbortOutcome(
+  args: { threadId: string; taskId: string | null; project: string },
+  deps: {
+    getThread: (threadId: string) => { status: string; abortReason: string | null } | null;
+    block: (taskId: string, reason: string) => Promise<{ success: boolean; message: string }>;
+  },
+): Promise<AbortOutcome> {
+  const thread = deps.getThread(args.threadId);
+  if (!thread || thread.status !== 'aborted') return { handled: false };
+  if (!args.taskId) {
+    log.warn(`aborted thread ${args.threadId} has no associated task — ignoring`);
+    return { handled: false };
+  }
+  const rawReason = (thread.abortReason || 'no reason given').replace(/\s+/g, ' ').trim();
+  const reason = `worker-abort: ${rawReason}`.slice(0, 280);
+  const result = await deps.block(args.taskId, reason);
+  if (!result.success) {
+    return { handled: true, error: result.message };
+  }
+  return { handled: true, note: `worker aborted — task blocked (${rawReason.slice(0, 120)})` };
+}
+
 export {
   getMachineRegistry,
   getLocalMachine,
@@ -214,5 +250,6 @@ export {
   generateTaskId,
   buildDispatchSessionName,
   processSplitOutcome,
+  processAbortOutcome,
   _testSetRegistry,
 };
