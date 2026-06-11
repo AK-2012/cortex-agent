@@ -27,13 +27,13 @@ as a controlled bridge — the agent calls an MCP tool, the MCP server talks to
 agent-server internals (via HTTP to the local webhook server on port 3001, or
 by reading shared files), and the result flows back to the agent.
 
-## The three bundled MCP servers
+## The bundled MCP servers
 
 ### cortex-core
 
 Exposes tools for interacting with remote machines. This is the only server
 loaded by thread/template sessions — thread agents get remote machine access
-but not Slack, cost, or schedule tools.
+but not platform-specific, cost, or schedule tools.
 
 | Tool | Parameters | Description |
 |---|---|---|
@@ -43,17 +43,20 @@ but not Slack, cost, or schedule tools.
 | `remote_edit` | `device`, `file_path`, `old_string`, `new_string`, `replace_all?` | Edit a file on a remote device by string replacement |
 | `remote_glob` | `device`, `pattern`, `path?` | Find files matching a glob pattern on a remote device |
 | `remote_grep` | `device`, `pattern`, `path?`, `glob?`, `type?`, `output_mode?`, `-A?`, `-B?`, `-C?`, `-i?`, `-n?`, `head_limit?`, `offset?`, `multiline?` | Search file contents on a remote device using ripgrep |
+| `thread_start` | `message`, `template?`, `agent?`, `goal?`, `done_when?`, `deliverable_path?`, `context_files?`, `budget_usd?`, `project?`, `wait?` | Start a child thread (sub-pipeline) from within an agent |
+| `thread_status` | `threadId` | Query a thread's execution status (running/waiting/completed/failed/cancelled/aborted) |
+| `thread_cancel` | `threadId` | Cancel a running thread by ID |
 | `current_time` | `timezone?` | Get the current date/time; optional IANA timezone (defaults to server local). Returns Unix epoch, UTC ISO, and localized wall-clock with offset |
 
 The server implementation is at
 `agent-server/src/domain/mcp/core-server.ts`. Tools are implemented in
-`agent-server/src/domain/mcp/tools/task-ops.ts`.
+`agent-server/src/domain/mcp/tools/`.
 
 ### cortex-ext
 
-Exposes Cortex management tools: scheduling, cost queries, execution tracking,
-Slack file upload, and context resolution. This server is only loaded by
-direct/user-initiated sessions — thread agents do not get these tools.
+Exposes Cortex management tools: scheduling, cost queries, and context
+resolution. This server is only loaded by direct/user-initiated sessions —
+thread agents do not get these tools.
 
 | Tool | Parameters | Description |
 |---|---|---|
@@ -66,11 +69,39 @@ direct/user-initiated sessions — thread agents do not get these tools.
 | `cost_query` | _(none)_ | Query current cost: today/month spending, budget limits, remaining budget, API/plan split, source breakdown, token usage |
 | `query_executions` | `execution_id?`, `task_id?`, `status?`, `project?`, `limit?` | Query execution records — filter by status, project, or look up by ID |
 | `cortex_context` | _(none)_ | Return the current execution context: channel, sessionId, sessionName, threadId, profile, project, backend |
-| `slack_send_file` | `file_path`, `file_name?`, `title?`, `comment?` | Upload a local file to Slack |
 
 The server implementation is at `agent-server/src/domain/mcp/server.ts`.
-Individual tools are in `agent-server/src/domain/mcp/tools/`:
-`slack.js`, `cost.js`, `executions.js`, `context.js`, `schedule.js`.
+Individual tools are in `agent-server/src/domain/mcp/tools/`.
+
+### cortex-slack
+
+Platform-specific MCP server for Slack. Loaded only when the session originates
+from Slack, providing platform-specific file upload and messaging capabilities.
+
+| Tool | Parameters | Description |
+|---|---|---|
+| `slack_send_file` | `file_path`, `file_name?`, `title?`, `comment?` | Upload a local file to Slack |
+
+The server implementation is at `agent-server/src/domain/mcp/slack-server.ts`.
+
+### cortex-feishu
+
+Platform-specific MCP server for Feishu/Lark. Loaded only when the session
+originates from Feishu, providing comprehensive document and file operations.
+
+| Tool | Parameters | Description |
+|---|---|---|
+| `feishu_send_file` | `file_path`, `file_name?`, `title?`, `comment?`, `channel?` | Upload a local file to Feishu |
+| `feishu_create_doc` | `title`, `content?`, `folder_token?` | Create a new Feishu document |
+| `feishu_read_doc` | `doc_token` | Read content from a Feishu document |
+| `feishu_update_doc` | `doc_token`, `content` | Update a Feishu document's content |
+| `feishu_delete_doc` | `doc_token` | Delete a Feishu document |
+| `feishu_wiki_create` | `space_id`, `title`, `content?` | Create a new wiki page in Feishu |
+| `feishu_wiki_read` | `node_token` | Read content from a Feishu wiki page |
+| *(and more bitable/sheets/drive tools)* | — | Full list in `agent-server/src/domain/mcp/feishu/index.ts` |
+
+The server implementation is at `agent-server/src/domain/mcp/feishu-server.ts`.
+Individual tools are in `agent-server/src/domain/mcp/feishu/`.
 
 ### cortex-tui-bridge
 
@@ -89,15 +120,18 @@ Tools are in `agent-server/src/domain/mcp/tools/tui-plan.js` and `tui-ask.js`.
 
 ## MCP configuration files
 
-Cortex auto-generates three MCP config files at startup (via
+Cortex auto-generates MCP config files at startup (via
 `agent-server/src/core/config-generator.ts` and the `ensureMcpConfig()` call
-in `agent-server/src/entry/startup-helpers.ts`):
+in `agent-server/src/entry/startup-helpers.ts`). Platform-specific servers
+(cortex-slack, cortex-feishu) are dynamically loaded based on the session's
+origin platform.
 
 | File | Loaded by | Servers |
 |---|---|---|
-| `~/.cortex/config/mcp-config.json` | Direct/user-initiated sessions | cortex-core + cortex-ext |
+| `~/.cortex/config/mcp-config.json` | Direct/user-initiated sessions | cortex-core + cortex-ext + platform-specific (cortex-slack or cortex-feishu) |
 | `~/.cortex/config/mcp-config-core.json` | Thread/template sessions | cortex-core only |
 | `~/.cortex/config/mcp-config-tui.json` | TUI mode sessions | cortex-tui-bridge only |
+| `~/.cortex/config/mcp-config-slack.json` | Slack-specific layering (on-demand) | cortex-slack |
 
 Each file follows Claude Code's standard MCP config format:
 
@@ -128,14 +162,15 @@ that the tools read.
 In `agent-adapter/claude/spawn-args.ts`, the MCP config path is selected based
 on session context:
 
-- **TUI mode**: loads `mcp-config-tui.json`
-- **Print mode, user-initiated sessions**: loads `mcp-config.json`
-- **Thread/template sessions**: loads `mcp-config-core.json`
+- **TUI mode**: loads `mcp-config-tui.json` (cortex-tui-bridge only)
+- **Print mode, user-initiated sessions**: loads `mcp-config.json` (cortex-core + cortex-ext + platform-specific)
+- **Thread/template sessions**: loads `mcp-config-core.json` (cortex-core only)
 
-The thread session override happens in the Claude adapter
-(`adapter.ts`), which checks `session.cortexContext.useCoreMcp`. This field is
-set by the thread executor to ensure thread agents only get remote machine
-tools, not Slack, cost, or scheduling tools.
+Platform-specific servers (cortex-slack, cortex-feishu) are loaded dynamically
+in the Claude and PI adapters based on the session's originating platform. The
+thread session override happens via `session.cortexContext.useCoreMcp`, which
+ensures thread agents only get remote machine tools, not platform-specific,
+cost, or scheduling tools.
 
 ## How MCP tools communicate with agent-server
 

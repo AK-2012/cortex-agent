@@ -82,6 +82,7 @@ $CORTEX_HOME/
 | `FEISHU_ENCRYPT_KEY` | 否 | 飞书事件加密密钥（长连接模式下可选） |
 | `FEISHU_VERIFICATION_TOKEN` | 否 | 飞书事件验证令牌（可选） |
 | `FEISHU_DOMAIN` | 否 | `feishu`（默认）或国际版 `lark` |
+| `FEISHU_CHANNEL` | 否 | 飞书频道 ID（会话自动设置）— 用于标识当前飞书 conduit，供 MCP 工具使用 |
 | `CORTEX_ADMIN_CHANNEL` | 否 | 系统通知的默认 admin channel（Slack 私信运行时自动检测） |
 | `SLACK_ADMIN_CHANNEL` | 否 | Slack 平台 admin channel 覆盖（回退到 `CORTEX_ADMIN_CHANNEL`） |
 | `FEISHU_ADMIN_CHANNEL` | 否 | 飞书 admin chat_id（`oc_...`），回退到 `CORTEX_ADMIN_CHANNEL` |

@@ -98,6 +98,7 @@ channel.
 | `FEISHU_ENCRYPT_KEY` | no | Feishu event encrypt key (optional with long-connection) |
 | `FEISHU_VERIFICATION_TOKEN` | no | Feishu event verification token (optional) |
 | `FEISHU_DOMAIN` | no | `feishu` (default) or `lark` for the international edition |
+| `FEISHU_CHANNEL` | no | Feishu channel ID (auto-set by session) — identifies the current Feishu conduit for MCP tools |
 | `CORTEX_ADMIN_CHANNEL` | no | Default admin channel for system notices (Slack DM auto-detected at runtime) |
 | `SLACK_ADMIN_CHANNEL` | no | Per-platform admin channel override (falls back to `CORTEX_ADMIN_CHANNEL`) |
 | `FEISHU_ADMIN_CHANNEL` | no | Per-platform admin chat_id (`oc_...`); falls back to `CORTEX_ADMIN_CHANNEL` |
