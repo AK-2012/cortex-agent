@@ -43,6 +43,7 @@ function taskYaml(id: string, over: Record<string, string> = {}): string {
   ];
   if (over.parent) lines.push(`    parent: "${over.parent}"`);
   if (over.blocked) lines.push(`    blocked-by: ${over.blocked}`);
+  if (over.dependsOn) lines.push(`    depends-on:\n${over.dependsOn.split(',').map((d) => `      - "${d}"`).join('\n')}`);
   return lines.join('\n') + '\n';
 }
 
@@ -105,6 +106,39 @@ test('tryEnterWaiting without taskId metadata keeps thread-children-only behavio
   const t = threadStore.get(parent.id)!;
   assert.deepEqual(t.metadata!.waitingOn, [liveChild.id]);
   assert.equal(t.metadata!.waitingOnTasks?.length ?? 0, 0);
+});
+
+test('tryEnterWaiting also waits on own-task depends_on entries lacking a parent field (regression: thr_6faa13a1)', async () => {
+  // 2026-06-11 production incident: the manager fumbled `decompose --keep-parent` and fell
+  // back to bulk-add (children got no `parent`) + edit --add-depends-on on its own task.
+  // [WAIT_CHILDREN] was emitted but suspension found no children → thread completed and
+  // the children's results had no one to return to. The wait set must be the UNION of
+  // parent-linked children and the manager task's own unmet depends_on (any not-done dep
+  // at manager runtime was added by the manager itself — pre-existing deps were cleared
+  // before dispatch by the actionability filter).
+  const proj = `_wt_p${seq++}`;
+  makeProject(proj, 'tasks:\n'
+    + taskYaml('aa07', { dependsOn: 'bb07,cc07' })
+    + taskYaml('bb07')              // no parent field — bulk-add fallback path
+    + taskYaml('cc07', { status: 'done' }));
+  const manager = makeThread({ metadata: { taskId: 'aa07', taskProject: proj } });
+
+  assert.equal(await tryEnterWaiting(manager.id), true);
+  const t = threadStore.get(manager.id)!;
+  assert.equal(t.status, 'waiting');
+  assert.deepEqual(t.metadata!.waitingOnTasks, ['bb07'], 'open dep awaited; done dep excluded');
+});
+
+test('tryEnterWaiting unions parent-linked children with depends_on entries (no duplicates)', async () => {
+  const proj = `_wt_p${seq++}`;
+  makeProject(proj, 'tasks:\n'
+    + taskYaml('aa08', { dependsOn: 'bb08' })
+    + taskYaml('bb08', { parent: 'aa08' })   // linked both ways
+    + taskYaml('cc08', { parent: 'aa08' })); // parent-only
+  const manager = makeThread({ metadata: { taskId: 'aa08', taskProject: proj } });
+
+  assert.equal(await tryEnterWaiting(manager.id), true);
+  assert.deepEqual(new Set(threadStore.get(manager.id)!.metadata!.waitingOnTasks), new Set(['bb08', 'cc08']));
 });
 
 test('tryEnterWaiting suspends on task children even with zero thread children', async () => {

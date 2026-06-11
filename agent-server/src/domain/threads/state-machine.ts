@@ -443,13 +443,23 @@ function isTerminal(status: ThreadRecord['status']): boolean {
 }
 
 /** Live (open, unblocked) child tasks of the given task, read straight from TASKS.yaml via
- *  the zero-dependency core parser — no domain/tasks import (avoids a layer cycle). */
+ *  the zero-dependency core parser — no domain/tasks import (avoids a layer cycle).
+ *  Wait set = UNION of parent-linked children and the task's own unmet depends_on: any
+ *  not-done dependency at manager runtime was added by the manager itself (pre-existing
+ *  deps were cleared before dispatch by the actionability filter), so suspension stays
+ *  correct even when the manager created children without the parent field (bulk-add +
+ *  edit --add-depends-on instead of decompose --keep-parent — 2026-06-11 incident
+ *  thr_6faa13a1: [WAIT_CHILDREN] emitted, suspension found no children, thread completed). */
 function liveChildTaskIds(taskId: string, taskProject: string): string[] {
   try {
-    return scanAllTasks(taskProject)
-      .filter((t) => t.parent === taskId && t.status !== 'done' && !t.blocked_by)
-      .map((t) => t.id)
-      .filter(Boolean);
+    const tasks = scanAllTasks(taskProject);
+    const own = tasks.find((t) => t.id === taskId);
+    const depIds = new Set(own?.depends_on ?? []);
+    return tasks
+      .filter((t) => t.id && t.id !== taskId
+        && (t.parent === taskId || depIds.has(t.id))
+        && t.status !== 'done' && !t.blocked_by)
+      .map((t) => t.id);
   } catch {
     return [];
   }

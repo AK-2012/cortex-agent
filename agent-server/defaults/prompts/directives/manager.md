@@ -21,12 +21,27 @@ run `cortex-task tree --task-id <your Task ID>` (and `cortex-task show`) to see 
 3. **Decompose by the Iron Rules** (One-Criterion-One-Task; explicit dependencies — see /task skill):
    - Each child = one independently completable AND verifiable unit, verb-first text, concrete done_when.
    - Order siblings with `key` + `depends-on`. Pick each child's `template` deliberately (worker templates for execution; another `manager` for a composite child — that nests the tree).
-   - Create them in ONE call:
-     `cortex-task decompose --project <project> --task-id <your Task ID> --keep-parent --auto-lock --subtasks-file -`
-     (stdin JSON: `{"subtasks":[{"key":"a","text":"...","done-when":"...","template":"...","depends-on":["..."]}]}`)
-     `--keep-parent` makes children hang under you (`parent`) and adds them to your task's `depends_on` — that is your disaster-recovery join: if this thread is ever lost, your task re-unlocks after all children finish and a fresh manager takes over from the artifact.
-4. **Write your reasoning to the artifact** (MANDATORY — this is the fallback memory): why this decomposition, what each child must deliver, and your per-child acceptance checklist.
-5. End your step with the marker `[WAIT_CHILDREN]` on its own line. You will suspend; the queue dispatches your children; you are woken when they finish or get blocked.
+   - Create them in ONE call (exact recipe — write the JSON to a temp file first):
+
+     ```bash
+     cat > /tmp/subtasks-<your Task ID>.json <<'JSON'
+     {"subtasks": [
+       {"key": "a", "text": "Create X", "done-when": "X exists and ...", "template": "execute-review"},
+       {"key": "b", "text": "Create Y", "done-when": "...", "template": "execute-review", "depends-on": ["a"]}
+     ]}
+     JSON
+     cortex-task decompose --project <project> --task-id <your Task ID> --keep-parent --auto-lock --subtasks-file /tmp/subtasks-<your Task ID>.json
+     ```
+
+     `--keep-parent` makes children hang under you (`parent`) and adds them to your task's `depends_on` — that is your disaster-recovery join: if this thread is ever lost, your task re-unlocks after all children finish and a fresh manager takes over.
+     Verify with `cortex-task tree --task-id <your Task ID>` before suspending. If decompose errors, fix the JSON and retry — do NOT fall back to ad-hoc task creation that leaves children unlinked to you.
+4. **Write your reasoning down** (MANDATORY — fallback memory for a fresh manager if this session is ever lost): why this decomposition, what each child must deliver, your per-child acceptance checklist. Write it BOTH to your artifact AND to `context/projects/<project>/manager-notes-<your Task ID>.md` — the project file survives thread-workspace cleanup; the artifact does not.
+5. End your step with the marker `[WAIT_CHILDREN]` on its own line.
+
+**Queue semantics — read carefully (this is where managers go wrong):**
+- Your children are dispatched by the task queue ONLY AFTER your step ends and you suspend. You will NEVER see them start, run, or finish during your own step. Children sitting `open`/unclaimed while you are still running is the EXPECTED state, not a failure.
+- NEVER block, complete, or unclaim your own task in Phase A, and never conclude "the dispatcher isn't working" from inside your own step. Emit `[WAIT_CHILDREN]` and end — the system does the rest.
+- Do not poll or wait in-step. Suspension is free; polling burns budget.
 
 ## Phase B — Verify & Correct (woken with child results)
 
