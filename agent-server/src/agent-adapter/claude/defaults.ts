@@ -40,6 +40,9 @@ export const MCP_CONFIG = path.join(CONFIG_DIR, 'mcp-config.json');
 export const CORE_MCP_CONFIG = path.join(CONFIG_DIR, 'mcp-config-core.json');
 /** DR-0012: TUI-mode-exclusive MCP set (only cortex-tui-bridge server, no core/ext leakage). */
 export const TUI_MCP_CONFIG = path.join(CONFIG_DIR, 'mcp-config-tui.json');
+/** Slack platform-specific tools (cortex-slack server). Layered on top of the full config via the variadic
+ *  `--mcp-config` only for sessions that originate from Slack (channel carries the `slack:` prefix). */
+export const SLACK_MCP_CONFIG = path.join(CONFIG_DIR, 'mcp-config-slack.json');
 /** Feishu document tools (cortex-feishu server). Layered on top of the full config via the variadic
  *  `--mcp-config` only for sessions that originate from Feishu (channel carries the `feishu:` prefix). */
 export const FEISHU_MCP_CONFIG = path.join(CONFIG_DIR, 'mcp-config-feishu.json');

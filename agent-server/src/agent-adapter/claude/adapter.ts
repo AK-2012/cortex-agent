@@ -217,6 +217,10 @@ class ClaudeSession {
     if (this.context?.useCoreMcp) {
       spawnOptions.mcpConfigPath = CORE_MCP_CONFIG;
     }
+    // Sessions that originate from Slack (channel carries the SlackAdapter `slack:` prefix) load the
+    // cortex-slack MCP server so the agent can send files to Slack. buildSpawnArgs suppresses
+    // it for thread/core sessions (CORE_MCP_CONFIG) regardless of this flag.
+    spawnOptions.loadSlackMcp = this.channel.startsWith('slack:');
     // Sessions that originate from Feishu (channel carries the FeishuAdapter `feishu:` prefix) load the
     // cortex-feishu MCP server so the agent can read/write Feishu documents. buildSpawnArgs suppresses
     // it for thread/core sessions (CORE_MCP_CONFIG) regardless of this flag.

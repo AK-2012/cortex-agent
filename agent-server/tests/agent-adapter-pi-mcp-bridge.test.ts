@@ -17,7 +17,7 @@ import { TOOL_NAMES as CORE_TOOLS } from '../src/domain/mcp/core-server.js';
 import { TOOL_NAMES as SLACK_TOOLS } from '../src/domain/mcp/slack-server.js';
 import { FEISHU_TOOL_NAMES as FEISHU_TOOLS } from '../src/domain/mcp/feishu/index.js';
 
-const { mapMcpContent, shouldLoadFeishu } = _test;
+const { mapMcpContent, shouldLoadSlack, shouldLoadFeishu } = _test;
 
 // The CORE_SERVER_PATH / EXT_SERVER_PATH exported from mcp-bridge resolves relative to its own
 // location: when loaded via tsx from src/ those siblings don't exist; when running compiled from
@@ -80,6 +80,19 @@ test('shouldLoadFeishu: false for slack / bare / empty channels', () => {
   assert.equal(shouldLoadFeishu('C0123'), false);
   assert.equal(shouldLoadFeishu(''), false);
   assert.equal(shouldLoadFeishu(undefined), false);
+});
+
+// --- shouldLoadSlack: gate the cortex-slack server on Slack-originated sessions ---
+
+test('shouldLoadSlack: true when channel carries the slack: prefix', () => {
+  assert.equal(shouldLoadSlack('slack:C0123ABC'), true);
+});
+
+test('shouldLoadSlack: false for feishu / bare / empty channels', () => {
+  assert.equal(shouldLoadSlack('feishu:oc_abc123'), false);
+  assert.equal(shouldLoadSlack('C0123'), false);
+  assert.equal(shouldLoadSlack(''), false);
+  assert.equal(shouldLoadSlack(undefined), false);
 });
 
 // --- Path constants sanity ---

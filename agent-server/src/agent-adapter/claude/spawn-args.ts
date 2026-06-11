@@ -3,7 +3,7 @@
 // pos:    Construct Claude CLI argv and process environment variables
 // >>> If I am updated, update my header comment and the parent folder's CORTEX.md <<<
 
-import { DEFAULT_TOOLS, MCP_CONFIG, CORE_MCP_CONFIG, TUI_MCP_CONFIG, FEISHU_MCP_CONFIG, TUI_TOOLS, TUI_STRIP_TOOLS } from './defaults.js';
+import { DEFAULT_TOOLS, MCP_CONFIG, CORE_MCP_CONFIG, TUI_MCP_CONFIG, SLACK_MCP_CONFIG, FEISHU_MCP_CONFIG, TUI_TOOLS, TUI_STRIP_TOOLS } from './defaults.js';
 // CORE_MCP_CONFIG is the thread/core marker: callers set mcpConfigPath to it for template thread
 // sessions (remote_* only). buildSpawnArgs uses identity against it to decide whether to layer the
 // TUI bridge server on top.
@@ -27,6 +27,10 @@ export interface ClaudeSpawnOptions {
   sessionId: string;
   /** Override MCP config path. Thread sessions pass CORE_MCP_CONFIG (remote_* only). */
   mcpConfigPath?: string;
+  /** Layer the cortex-slack MCP server on top of the base config. Set by the adapter for sessions
+   *  that originate from Slack (channel carries the `slack:` prefix). Ignored for thread/core
+   *  sessions (CORE_MCP_CONFIG), which must stay on the core server set only. */
+  loadSlackMcp?: boolean;
   /** Layer the cortex-feishu MCP server on top of the base config. Set by the adapter for sessions
    *  that originate from Feishu (channel carries the `feishu:` prefix). Ignored for thread/core
    *  sessions (CORE_MCP_CONFIG), which must stay on the core server set only. */
@@ -49,6 +53,9 @@ export function buildSpawnArgs(options: ClaudeSpawnOptions): string[] {
   const baseMcpConfig = options.mcpConfigPath || MCP_CONFIG;
   const mcpConfigs: string[] = [baseMcpConfig];
   if (mode === 'tui' && !isCoreOnly) mcpConfigs.push(TUI_MCP_CONFIG);
+  // Slack-originated sessions additionally layer the cortex-slack server (slack_send_file tool).
+  // Suppressed for thread/core sessions, which run no file-sending work and stay on the core set only.
+  if (options.loadSlackMcp && !isCoreOnly) mcpConfigs.push(SLACK_MCP_CONFIG);
   // Feishu-originated sessions additionally layer the cortex-feishu server (Feishu document tools).
   // Suppressed for thread/core sessions, which run no document work and stay on the core set only.
   if (options.loadFeishuMcp && !isCoreOnly) mcpConfigs.push(FEISHU_MCP_CONFIG);
