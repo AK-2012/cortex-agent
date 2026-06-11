@@ -1,12 +1,10 @@
-// input:  MCP SDK, Slack WebClient, 4 tool-family modules (no remote_* — those live in core-server.ts)
-// output: MCP stdio service, exposing slack/cost/query/context/schedule tools
-// pos:    Ext MCP server — direct-agent-only tools (Slack, cost, executions, context, schedule)
+// input:  MCP SDK, 3 tool-family modules (no remote_* — those live in core-server.ts, no slack_send_file — that lives in slack-server.ts)
+// output: MCP stdio service, exposing cost/query/context/schedule tools
+// pos:    Ext MCP server — platform-agnostic tools (cost, executions, context, schedule)
 // >>> If I am updated, update my header comment and the parent folder's CORTEX.md <<<
 
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
-import { WebClient } from '@slack/web-api';
-import { registerSlackTools, type SlackToolDeps } from './tools/slack.js';
 import { registerCostTools } from './tools/cost.js';
 import { registerExecutionTools } from './tools/executions.js';
 import { registerContextTools, type ContextToolDeps } from './tools/context.js';
@@ -19,11 +17,6 @@ import { CORTEX_VERSION } from '@core/version.js';
 const log = createLogger('mcp-server');
 
 // --- Config from env / CLI args ---
-
-const token = process.env.SLACK_BOT_TOKEN;
-const fallbackChannel = process.env.SLACK_CHANNEL;
-const branchMachine: string | undefined = process.env.CORTEX_BRANCH_MACHINE;
-const fallbackCallbackSource: string | undefined = process.env.CORTEX_CALLBACK_SOURCE;
 
 function getCliArg(name: string): string | null {
   const idx = process.argv.indexOf(name);
@@ -38,25 +31,12 @@ const routeContextFile: string | null =
   process.env.CORTEX_ROUTE_CONTEXT_FILE ||
   null;
 
-// --- Slack client ---
-
-const slack: WebClient | null = token ? new WebClient(token) : null;
-
 // --- McpServer + tool registration ---
 
-const server = new McpServer({ name: 'cortex', version: CORTEX_VERSION });
-
-const slackDeps: SlackToolDeps = {
-  slack,
-  fallbackChannel,
-  routeContextFile,
-  branchMachine,
-  callbackSource: fallbackCallbackSource,
-};
+const server = new McpServer({ name: 'cortex-ext', version: CORTEX_VERSION });
 
 const contextDeps: ContextToolDeps = { routeContextFile };
 
-registerSlackTools(server, slackDeps);
 registerCostTools(server);
 registerExecutionTools(server);
 registerContextTools(server, contextDeps);
@@ -65,7 +45,6 @@ registerScheduleTools(server, contextDeps);
 // --- Exported tool name list (for verification) ---
 
 export const TOOL_NAMES: readonly string[] = [
-  'slack_send_file',
   'cost_query',
   'query_executions',
   'cortex_context',
@@ -81,14 +60,9 @@ export const TOOL_NAMES: readonly string[] = [
 
 export async function startServer(): Promise<void> {
   executionRepo.load();
-  if (!token || !fallbackChannel) {
-    log.warn('SLACK_BOT_TOKEN or SLACK_CHANNEL not set — slack_send_file will be unavailable');
-  }
   const transport = new StdioServerTransport();
   await server.connect(transport);
 }
-
-export { uploadFileToSlack } from './tools/slack.js';
 
 if (isMainModule(import.meta.url)) {
   startServer().catch((e) => {

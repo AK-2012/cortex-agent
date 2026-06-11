@@ -14,6 +14,7 @@ import { _test } from '../src/agent-adapter/pi/mcp-bridge.js';
 // Source-of-truth tool lists — assert the built servers match what the source declares,
 // so this test self-maintains instead of drifting against hardcoded counts.
 import { TOOL_NAMES as CORE_TOOLS } from '../src/domain/mcp/core-server.js';
+import { TOOL_NAMES as SLACK_TOOLS } from '../src/domain/mcp/slack-server.js';
 import { FEISHU_TOOL_NAMES as FEISHU_TOOLS } from '../src/domain/mcp/feishu/index.js';
 
 const { mapMcpContent, shouldLoadFeishu } = _test;
@@ -26,10 +27,11 @@ const TESTS_DIR = dirname(fileURLToPath(import.meta.url));
 const DIST_DIR = resolve(TESTS_DIR, '../dist');
 const CORE_SERVER_PATH = resolve(DIST_DIR, 'domain/mcp/core-server.js');
 const EXT_SERVER_PATH = resolve(DIST_DIR, 'domain/mcp/server.js');
+const SLACK_SERVER_PATH = resolve(DIST_DIR, 'domain/mcp/slack-server.js');
 const FEISHU_SERVER_PATH = resolve(DIST_DIR, 'domain/mcp/feishu-server.js');
 
 const EXT_TOOLS = [
-  'slack_send_file', 'cost_query', 'query_executions',
+  'cost_query', 'query_executions',
   'cortex_context',
   'cortex_schedule_add', 'cortex_schedule_list', 'cortex_schedule_get',
   'cortex_schedule_remove', 'cortex_schedule_pause', 'cortex_schedule_resume',
@@ -90,6 +92,10 @@ test('compiled server.js exists at expected dist location', () => {
   assert.ok(existsSync(EXT_SERVER_PATH), `expected ${EXT_SERVER_PATH} on disk — run \`npm run build\` first`);
 });
 
+test('compiled slack-server.js exists at expected dist location', () => {
+  assert.ok(existsSync(SLACK_SERVER_PATH), `expected ${SLACK_SERVER_PATH} on disk — run \`npm run build\` first`);
+});
+
 test('compiled feishu-server.js exists at expected dist location', () => {
   assert.ok(existsSync(FEISHU_SERVER_PATH), `expected ${FEISHU_SERVER_PATH} on disk — run \`npm run build\` first`);
 });
@@ -116,7 +122,7 @@ test('core-server exposes its declared TOOL_NAMES via StdioClientTransport', { t
   }
 });
 
-test('ext-server exposes 10 non-remote tools via StdioClientTransport', { timeout: 15000 }, async () => {
+test('ext-server exposes 9 non-remote tools via StdioClientTransport', { timeout: 15000 }, async () => {
   const transport = new StdioClientTransport({
     command: 'node',
     args: [EXT_SERVER_PATH],
@@ -131,6 +137,26 @@ test('ext-server exposes 10 non-remote tools via StdioClientTransport', { timeou
       assert.ok(names.includes(expected), `expected tool '${expected}' in ext-server listTools`);
     }
     assert.equal(names.length, EXT_TOOLS.length, `expected exactly ${EXT_TOOLS.length} tools in ext-server`);
+  } finally {
+    await transport.close();
+  }
+});
+
+test('slack-server exposes its declared SLACK_TOOL_NAMES via StdioClientTransport', { timeout: 15000 }, async () => {
+  const transport = new StdioClientTransport({
+    command: 'node',
+    args: [SLACK_SERVER_PATH],
+    stderr: 'pipe',
+  });
+  const client = new Client({ name: 'test-slack-server', version: '1.0.0' });
+  await client.connect(transport);
+  try {
+    const { tools } = await client.listTools();
+    const names = tools.map((t) => t.name);
+    for (const expected of SLACK_TOOLS) {
+      assert.ok(names.includes(expected), `expected tool '${expected}' in slack-server listTools`);
+    }
+    assert.equal(names.length, SLACK_TOOLS.length, `expected exactly ${SLACK_TOOLS.length} tools in slack-server`);
   } finally {
     await transport.close();
   }
