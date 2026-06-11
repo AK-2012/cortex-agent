@@ -615,7 +615,7 @@ function buildThreadSummary(result: ThreadRunResult): string {
     : Icons.error;
 
   const headline = thread.status === 'waiting'
-    ? `${statusEmoji} Thread suspended — waiting on ${thread.metadata?.waitingOn?.length ?? 0} child thread(s) | ${steps.length} steps | $${totalCostUsd.toFixed(4)}`
+    ? `${statusEmoji} Thread suspended — waiting on ${(thread.metadata?.waitingOn?.length ?? 0) + (thread.metadata?.waitingOnTasks?.length ?? 0)} child(ren) | ${steps.length} steps | $${totalCostUsd.toFixed(4)}`
     : `${statusEmoji} Thread complete | ${steps.length} steps | $${totalCostUsd.toFixed(4)} | ${formatDurationCompact(elapsed)}`;
   const lines = [headline];
 

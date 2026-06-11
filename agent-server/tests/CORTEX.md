@@ -78,6 +78,7 @@ How to run tests without tripping it:
 | `thread-wait-tasks.test.ts` | Test | DR-0014 §8: tryEnterWaiting task-children snapshot / restart preservation / cleanup orphan detection |
 | `thread-task-bridge.test.ts` | Test | DR-0014 §8: notifyTaskParentThreads / reconcileWaitingTasks race closer / recovery keeps open task children |
 | `task-abort-outcome.test.ts` | Test | DR-0014 §8: processAbortOutcome worker escalation (aborted thread → block task; fixes aborted-as-success bug) |
+| `thread-statusmsg-seal.test.ts` | Test | DR-0014 §8: sealSuspendedStatusMsg refreshes the stale "suspended" status message after resume |
 | `thread-stages.test.ts` | Test | Thread step stage progression |
 | `thread-coder-review.e2e.test.ts` | Test | coder/reviewer two-stage e2e |
 | `thread-extra-hooks.test.ts` | Test | per-call extraHooks serial injection |

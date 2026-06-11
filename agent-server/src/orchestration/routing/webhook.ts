@@ -268,9 +268,11 @@ function createWebhookHandler({
                 if (statusMsg) {
                   const t = threadStore.get(id);
                   if (t && t.status === 'waiting') {
-                    const n = t.metadata?.waitingOn?.length ?? 0;
+                    const n = (t.metadata?.waitingOn?.length ?? 0) + (t.metadata?.waitingOnTasks?.length ?? 0);
+                    // Persist the ref so the post-resume settle can refresh this message.
+                    void threadStore.mutate(t.id, (r) => { (r.metadata ??= {}).statusMsgRef = statusMsg; }).catch(() => {});
                     void jobCtx.adapter!.updateMessage(statusMsg, {
-                      text: `${Icons.processing} Thread suspended — waiting on ${n} child thread(s)`,
+                      text: `${Icons.processing} Thread suspended — waiting on ${n} child(ren)`,
                     }).catch(() => {});
                   } else if (t) {
                     const totalNumTurns = t.steps.reduce((s, st) => s + (st.numTurns || 0), 0);

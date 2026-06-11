@@ -316,6 +316,9 @@ export interface ThreadMetadata {
   taskProject?: string | null;
   /** Destination kind decided at spawn time, so re-entry can rebuild RunThreadOptions. */
   resumeDest?: 'interactive-reply' | 'project-report' | null;
+  /** Live status message persisted at suspension so the post-resume settle can refresh it
+   *  (otherwise it reads "suspended — waiting on children" forever — 2026-06-11 finding). */
+  statusMsgRef?: MessageRef | null;
 }
 
 // --- Thread Step Result (returned by thread-manager.stepThread) ---

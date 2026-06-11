@@ -9,12 +9,13 @@ import { threadStore } from '@store/thread-repo.js';
 import { agentRunner } from './agent-runner.js';
 import { getOutboundQueue, durablePost } from '@store/outbound-queue.js';
 import { ctx as jobCtx } from '@domain/scheduling/job-registry.js';
-import { resumeThread } from '@domain/threads/runner.js';
+import { resumeThread, buildThreadSummary } from '@domain/threads/runner.js';
 import { isTerminalStatus } from '@domain/threads/tree.js';
 import { runThreadDetached } from './thread-executor.js';
 import { createLogger } from '@core/log.js';
 import { scanAllTasks, type Task } from '@core/task-parser.js';
 import type { ThreadRecord, RunThreadOptions } from '@core/types/thread-types.js';
+import type { PlatformAdapter } from '@platform/index.js';
 import type { IncomingMessage, Destination } from '@platform/index.js';
 
 const log = createLogger('thread-callback');
@@ -115,6 +116,21 @@ function buildResumeOptions(parent: ThreadRecord): RunThreadOptions | null {
   };
 }
 
+/** Refresh the status message persisted at suspension (metadata.statusMsgRef): a resumed
+ *  thread's terminal summary, or the new suspension count if it suspended again. Without
+ *  this, the dispatch/webhook status message reads "suspended — waiting on children"
+ *  forever after the thread has finished (2026-06-11 verification finding). */
+export async function sealSuspendedStatusMsg(threadId: string, adapter?: PlatformAdapter | null): Promise<void> {
+  const t = threadStore.get(threadId);
+  const ref = t?.metadata?.statusMsgRef;
+  if (!t || !ref) return;
+  const a = adapter ?? jobCtx.adapter;
+  if (!a) return;
+  const totalNumTurns = t.steps.reduce((acc, st) => acc + (st.numTurns || 0), 0);
+  const text = buildThreadSummary({ thread: t, totalCostUsd: t.totalCostUsd, totalNumTurns, finalOutput: null, lastAgentResult: null, executionId: null });
+  await a.updateMessage(ref, { text }).catch((e) => log.warn(`seal status msg ${threadId}: ${(e as Error).message}`));
+}
+
 export type ResumeFn = (parentThreadId: string) => void;
 
 const defaultResume: ResumeFn = (parentId) => {
@@ -131,6 +147,8 @@ const defaultResume: ResumeFn = (parentId) => {
     run: (tid, o) => resumeThread(tid, o),
     onSettled: async (tid) => {
       resuming.delete(tid);
+      // Refresh the suspension-era status message (terminal summary or new wait count).
+      await sealSuspendedStatusMsg(tid).catch(() => {});
       // Cascade: when the resumed parent itself terminates (or suspends again and later
       // terminates), its own parent gets notified through the same callback chain.
       await fireThreadCallback(tid).catch((e) => log.error(`cascade callback ${tid}: ${(e as Error).message}`));

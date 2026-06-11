@@ -179,6 +179,8 @@ async function executeDispatchTask({ selected, selectedTask, channel, scheduleTa
       await ctx.onThreadSuspended(thread.id).catch((e) => log.error(`onThreadSuspended: ${(e as Error).message}`));
     }
     if (statusMsg) {
+      // Persist the live status message so the post-resume settle can refresh it.
+      await threadStore.mutate(thread.id, (t) => { (t.metadata ??= {}).statusMsgRef = statusMsg; });
       const parts = [nThreads > 0 ? `${nThreads} child thread(s)` : null, nTasks > 0 ? `${nTasks} child task(s)` : null].filter(Boolean);
       const text = `${Icons.processing} [${selectedTask.project}] ${selectedTask.text.substring(0, 80)} | suspended — waiting on ${parts.join(' + ') || 'children'}`;
       const queue = getOutboundQueue();
