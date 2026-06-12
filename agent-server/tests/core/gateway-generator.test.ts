@@ -182,6 +182,25 @@ test('discoverEndpoints: openai-codex is gatewayManaged=true (upstream known)', 
   assert.match(yamlContent, /base_url: https:\/\/chatgpt\.com\/backend-api/);
 });
 
+test('discoverEndpoints: gateway-managed placeholder key does not enable api endpoint', async () => {
+  const { GATEWAY_MANAGED_KEY_PLACEHOLDER } = await import('../../src/core/utils.js');
+  const original = process.env.ANTHROPIC_API_KEY;
+  try {
+    process.env.ANTHROPIC_API_KEY = GATEWAY_MANAGED_KEY_PLACEHOLDER;
+    const withPlaceholder = discoverEndpoints(['claude']);
+    assert.ok(!withPlaceholder.some((e) => e.mode === 'api'),
+      'placeholder key is not a real credential — api endpoint must not be generated');
+    assert.ok(withPlaceholder.some((e) => e.mode === 'plan'), 'plan endpoint is always generated');
+
+    process.env.ANTHROPIC_API_KEY = 'sk-real-key';
+    const withRealKey = discoverEndpoints(['claude']);
+    assert.ok(withRealKey.some((e) => e.mode === 'api'), 'real key enables api endpoint');
+  } finally {
+    if (original !== undefined) process.env.ANTHROPIC_API_KEY = original;
+    else delete process.env.ANTHROPIC_API_KEY;
+  }
+});
+
 test('generateGatewayYaml: renders multi PI providers in separate sections', () => {
   const yamlContent = generateGatewayYaml([
     ep({ mode: 'plan', endpoint: 'anthropic', base_url: 'https://api.anthropic.com', auth_style: 'bearer' }),

@@ -108,4 +108,13 @@ function listProjectDirs(projectsDir: string = PROJECTS_DIR): string[] {
   }
 }
 
-export { INSTALL_ROOT, DEFAULTS_DIR, PACKAGE_ROOT, SERVER_ROOT, REPO_ROOT, DATA_DIR, CONFIG_DIR, STORE_DIR, CONTEXT_DIR, PROJECTS_DIR, WORKSPACE_DIR, PLUGINS_DIR, PROMPTS_DIR, HOOKS_DIR, SKIP_DIRS, moduleDir, isMainModule, readableTimestamp, chunkText, formatDurationCompact, todayISO, listProjectDirs };
+/**
+ * Sentinel ANTHROPIC_API_KEY value set when the gateway is healthy but no real key exists.
+ * Its only purpose is to satisfy Claude Code's startup credential check on machines without
+ * OAuth login — upstream auth is handled by the gateway's own configured keys. Anything that
+ * treats ANTHROPIC_API_KEY as a real credential (gateway-generator discovery, saved-env
+ * snapshots) must ignore this value.
+ */
+const GATEWAY_MANAGED_KEY_PLACEHOLDER = 'cortex-gateway-managed';
+
+export { INSTALL_ROOT, DEFAULTS_DIR, PACKAGE_ROOT, SERVER_ROOT, REPO_ROOT, DATA_DIR, CONFIG_DIR, STORE_DIR, CONTEXT_DIR, PROJECTS_DIR, WORKSPACE_DIR, PLUGINS_DIR, PROMPTS_DIR, HOOKS_DIR, SKIP_DIRS, GATEWAY_MANAGED_KEY_PLACEHOLDER, moduleDir, isMainModule, readableTimestamp, chunkText, formatDurationCompact, todayISO, listProjectDirs };

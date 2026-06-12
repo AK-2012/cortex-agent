@@ -14,6 +14,7 @@ import * as path from 'path';
 import * as os from 'os';
 import { parse as yamlParse, stringify as yamlStringify } from 'yaml';
 import { createLogger } from './log.js';
+import { GATEWAY_MANAGED_KEY_PLACEHOLDER } from './utils.js';
 
 const log = createLogger('gateway-generator');
 
@@ -217,8 +218,9 @@ export function discoverEndpoints(backends?: string[]): DiscoveredEndpoint[] {
       gatewayManaged: true,
     });
 
-    // api mode — only if ANTHROPIC_API_KEY is set
-    if (process.env.ANTHROPIC_API_KEY) {
+    // api mode — only if a REAL ANTHROPIC_API_KEY is set (the gateway-managed placeholder
+    // exists solely to satisfy Claude Code's startup credential check; it is not a key)
+    if (process.env.ANTHROPIC_API_KEY && process.env.ANTHROPIC_API_KEY !== GATEWAY_MANAGED_KEY_PLACEHOLDER) {
       endpoints.push({
         mode: 'api',
         endpoint: 'anthropic',

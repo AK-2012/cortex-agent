@@ -6,7 +6,7 @@ import { readFileSync, writeFileSync } from 'fs';
 import { parse as parseDotenv } from 'dotenv';
 import * as path from 'path';
 import * as http from 'http';
-import { STORE_DIR, CONFIG_DIR } from '@core/utils.js';
+import { STORE_DIR, CONFIG_DIR, GATEWAY_MANAGED_KEY_PLACEHOLDER } from '@core/utils.js';
 import { getProfileModel, resolveProfileConfig } from './profile-manager.js';
 import { GATEWAY_URL, isGatewayHealthy } from '../costs/gateway-manager.js';
 import { createLogger } from '@core/log.js';
@@ -72,8 +72,12 @@ function readApiEnvFromDotenvFile(): ApiEnv {
 
 function captureApiEnvSnapshot(): ApiEnv {
   const fileEnv = readApiEnvFromDotenvFile();
+  // The gateway-managed placeholder is not a real credential — never let it
+  // pollute the saved env used for direct (gateway-down) connections.
+  const liveKey = normalizeEnvValue(process.env.ANTHROPIC_API_KEY);
+  const realLiveKey = liveKey === GATEWAY_MANAGED_KEY_PLACEHOLDER ? undefined : liveKey;
   return {
-    ANTHROPIC_API_KEY: normalizeEnvValue(process.env.ANTHROPIC_API_KEY) || fileEnv.ANTHROPIC_API_KEY,
+    ANTHROPIC_API_KEY: realLiveKey || fileEnv.ANTHROPIC_API_KEY,
     ANTHROPIC_BASE_URL: normalizeEnvValue(process.env.ANTHROPIC_BASE_URL) || fileEnv.ANTHROPIC_BASE_URL,
   };
 }
@@ -264,7 +268,17 @@ export function configureEnvForMode(mode: string, metadata?: Record<string, stri
   if (isGatewayHealthy()) {
     const url = gatewayModeUrl(mode, metadata);
     process.env.ANTHROPIC_BASE_URL = url;
-    delete process.env.ANTHROPIC_API_KEY;
+    if (mode === 'plan') {
+      // Plan mode rides the gateway's passthrough: Claude Code must send its own OAuth
+      // bearer token, and an env API key would take precedence over OAuth — delete it.
+      delete process.env.ANTHROPIC_API_KEY;
+    } else {
+      // Non-plan modes: upstream auth is the gateway's job (it injects its own configured
+      // keys). Keep a key in env purely so Claude Code passes its startup credential check
+      // on machines without OAuth login (otherwise it exits with "Please run /login").
+      const saved = getSavedApiEnv();
+      process.env.ANTHROPIC_API_KEY = saved.ANTHROPIC_API_KEY || GATEWAY_MANAGED_KEY_PLACEHOLDER;
+    }
     return url;
   }
 
@@ -342,6 +356,7 @@ configureEnvForMode(claudeMode);
 
 export {
   GATEWAY_ANTHROPIC_URL,
+  GATEWAY_MANAGED_KEY_PLACEHOLDER,
   saveModeFile,
   loadModeFile,
 };
