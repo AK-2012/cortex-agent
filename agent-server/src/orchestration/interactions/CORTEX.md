@@ -7,4 +7,4 @@ Referenced by orch/ upper-layer modules via singleton references, must not inver
 | filename | role | function |
 |---|---|---|
 | `plan-approvals.ts` | singleton | Unified requestId-keyed plan approval state (merges pendingPlans + pendingHookPlans, provides register/lookup/resolve/reject/clearByChannel API, publishes plan.approved on resolve [S6-A]) |
-| `update-prompt.ts` | factory | createUpdatePrompt — UpdatePrompt impl with 3 pre-registered actionIds |
+| `update-prompt.ts` | factory | createUpdatePrompt — UpdatePrompt impl with 4 pre-registered actionIds (apply/skip/cancel/release-note); handlers dispatch to fetchReleaseNote() or updateMessage() |
