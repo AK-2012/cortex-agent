@@ -7,6 +7,7 @@
 
 import * as path from 'node:path';
 import * as fs from 'node:fs/promises';
+import * as os from 'node:os';
 import { CORTEX_VERSION } from '@core/version.js';
 import { DATA_DIR, DEFAULTS_DIR } from '@core/paths.js';
 import { atomicWrite } from '@core/atomic-write.js';
@@ -328,4 +329,93 @@ export async function runMigrations(opts: MigrationOptions = {}): Promise<void> 
   }
 
   await saveVersionsTo(versionsFile, versions);
+}
+
+// ── File location migrations ───────────────────────────────────
+
+/**
+ * Migrate config.yaml from CORTEX_HOME/config/ (wrong location before 2026.6.11)
+ * to ~/.aistatus/config.yaml (correct location read by aistatus).
+ * Idempotent: if target already exists and is valid YAML, source is deleted without copying.
+ * If source is malformed YAML, it's deleted to avoid interfering with aistatus.
+ */
+export async function migrateAistatusConfigLocation(dataDir: string): Promise<void> {
+  const srcPath = path.join(dataDir, 'config', 'config.yaml');
+  const dstPath = path.join(os.homedir(), '.aistatus', 'config.yaml');
+
+  // Check if source exists
+  let srcExists = false;
+  try {
+    await fs.access(srcPath);
+    srcExists = true;
+  } catch {
+    // Source does not exist — nothing to migrate
+    return;
+  }
+
+  // Check if target already exists
+  let dstExists = false;
+  let dstValid = false;
+  try {
+    await fs.access(dstPath);
+    dstExists = true;
+    // Validate target is readable YAML (not corrupted)
+    const raw = await fs.readFile(dstPath, 'utf8');
+    // Simple YAML validation: must be parseable as key: value pairs
+    if (raw.trim().length === 0 || /^[a-zA-Z_][\w]*:/.test(raw)) {
+      dstValid = true;
+    }
+  } catch {
+    // Target does not exist or is not readable
+  }
+
+  // If target exists and is valid, source is redundant — just remove it
+  if (dstExists && dstValid) {
+    try {
+      await fs.unlink(srcPath);
+      log.info(`Migrated aistatus config: removed redundant ${srcPath} (target ${dstPath} already exists)`);
+    } catch {
+      // Best effort — if we can't delete, log warning but don't fail
+      log.warn(`Could not remove old config file: ${srcPath}`);
+    }
+    return;
+  }
+
+  // Read source, validate, and copy to target
+  let srcData: string;
+  try {
+    srcData = await fs.readFile(srcPath, 'utf8');
+  } catch (err: unknown) {
+    log.warn(`Could not read old config file: ${srcPath}; skipping migration`);
+    return;
+  }
+
+  // Validate source is valid YAML before copying
+  if (srcData.trim().length === 0 || !/^[a-zA-Z_][\w]*:/.test(srcData)) {
+    // Source is empty or doesn't look like YAML — delete it to avoid pollution
+    try {
+      await fs.unlink(srcPath);
+      log.info(`Removed malformed old config file: ${srcPath}`);
+    } catch {
+      log.warn(`Could not remove malformed old config file: ${srcPath}`);
+    }
+    return;
+  }
+
+  // Copy source to target
+  try {
+    const dstDir = path.dirname(dstPath);
+    await fs.mkdir(dstDir, { recursive: true });
+    await atomicWrite(dstPath, srcData);
+    log.info(`Migrated aistatus config from ${srcPath} to ${dstPath}`);
+
+    // Clean up source after successful copy
+    try {
+      await fs.unlink(srcPath);
+    } catch {
+      log.warn(`Could not remove old config file after migration: ${srcPath}`);
+    }
+  } catch (err: unknown) {
+    log.error(`Failed to migrate aistatus config to ${dstPath}: ${(err as Error).message}`);
+  }
 }

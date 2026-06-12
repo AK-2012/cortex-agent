@@ -7,7 +7,7 @@ import { mkdirSync } from 'fs';
 import * as path from 'path';
 import { createAdapterFromEnv, extractTuiAdapter } from '@platform/index.js';
 import type { PlatformAdapter } from '@platform/index.js';
-import { WORKSPACE_DIR, CONFIG_DIR } from '@core/utils.js';
+import { WORKSPACE_DIR, CONFIG_DIR, DATA_DIR } from '@core/utils.js';
 import { closeAllSessions, closeSession as closeClaudePooledSession, shutdownCodex } from '@domain/agents/index.js';
 import { closeAllAdapters } from '../agent-adapter/index.js';
 import { recoverTuiOrphans } from '../agent-adapter/claude/adapter.js';
@@ -52,7 +52,7 @@ import { createUpdatePrompt } from '@orch/interactions/update-prompt.js';
 import { registerMessageHandler } from '@orch/routing/message-router.js';
 import { initRateLimitThrottle } from '@domain/costs/rate-limit-throttle.js';
 import { scheduleRepo } from '@store/schedule-repo.js';
-import { runMigrations } from '@store/version-migrations.js';
+import { runMigrations, migrateAistatusConfigLocation } from '@store/version-migrations.js';
 import { syncManagedHooks } from '@store/hook-sync.js';
 import { costRepo } from '@store/cost-repo.js';
 import { profileRepo, startProfileWatcher, setAdminNotifier as setProfileNotifier } from '@store/profile-repo.js';
@@ -223,6 +223,8 @@ process.on('SIGTERM', async () => {
   cleanupLogs();
   ensureMcpConfig();
   await runMigrations();
+  // Migrate old aistatus config from wrong location (CORTEX_HOME/config) to correct location (~/.aistatus)
+  await migrateAistatusConfigLocation(DATA_DIR);
   // Refresh version-stamped hooks in DATA_DIR/hooks from the shipped defaults. init's deployHooks
   // only copies-if-missing, so without this an existing install never picks up hook code fixes.
   await syncManagedHooks();
