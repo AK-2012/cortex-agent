@@ -105,7 +105,7 @@ How to run tests without tripping it:
 | `scheduled-target-dispatch.test.ts` | Test | planScheduledDispatch: fresh/channel/session/thread + fallback decision tree |
 | `claude-md-scanner.test.ts` | Test | scanClaudeMDChain ancestor scanning |
 | `claude-md-injector.test.ts` | Test | ClaudeMDInjector dedup and caching |
-| `mode-manager.test.ts` | Test | Per-request mode URL routing |
+| `mode-manager.test.ts` | Test | Per-request mode URL routing + per-mode ANTHROPIC_API_KEY retention (plan deletes for OAuth; non-plan keeps key/placeholder so CC starts without login) |
 | `gateway-per-request-mode.test.ts` | Test | Gateway /m/{mode}/ prefix and token |
 | `memory-index-regen.test.ts` | Test | Index rebuild lifecycle partitioning |
 | `session-activity-tracker.test.ts` | Test | sideband diff + inline marker fallback |
