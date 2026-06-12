@@ -93,7 +93,7 @@ export interface DiscoveredEndpoint {
 
 // ─── Anthropic models (default tier) ─────────────────────────────
 
-const ANTHROPIC_MODELS = ['claude-opus-4-7', 'claude-sonnet-4-6', 'claude-haiku-4-5'];
+const ANTHROPIC_MODELS = ['claude-fable-5', 'claude-4-8', 'claude-sonnet-4-6', 'claude-haiku-4-5'];
 
 // ─── PI provider → upstream URL lookup (manually maintained) ────────────────
 
