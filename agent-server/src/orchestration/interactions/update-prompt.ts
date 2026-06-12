@@ -4,9 +4,13 @@
 //         posts interactive message to system-notice, resolves ask() promise on button click.
 // >>> If I am updated, update my header comment and the parent folder's CORTEX.md <<<
 
-import type { PlatformAdapter, ActionElement, MessageRef } from '@platform/index.js';
+import type { PlatformAdapter, ActionElement, MessageRef, MessageContent } from '@platform/index.js';
 import type { CommandActionRouter } from '@orch/interactions/command-action-router.js';
 import type { UpdateChoice, UpdatePrompt } from '@domain/system/update-prompt.js';
+import { fetchReleaseNote, buildGitHubReleaseUrl } from '@domain/system/github-release.js';
+import { createLogger } from '@core/log.js';
+
+const log = createLogger('update-prompt');
 
 // --- Internal state ---
 
@@ -50,6 +54,29 @@ export function createUpdatePrompt(
     }
   };
 
+  /**
+   * Format release note info into a message.
+   * Truncates if too long (safe for Slack/Feishu 4000 char limit).
+   */
+  const formatReleaseNoteMessage = (releaseInfo: import('@domain/system/github-release.js').ReleaseInfo): MessageContent => {
+    let body = releaseInfo.body || '(No release notes available)';
+
+    // Truncate to safe length (~3500 chars to leave room for header/footer)
+    if (body.length > 3500) {
+      body = body.substring(0, 3500).trimEnd() + '\n\n_[Truncated — view full notes on GitHub]_';
+    }
+
+    return {
+      text: `Cortex Server v${releaseInfo.version} Release Notes`,
+      richBlocks: [
+        {
+          type: 'section',
+          text: `**${releaseInfo.name}**\n\n${body}\n\n[View full release notes](${releaseInfo.htmlUrl})`,
+        },
+      ],
+    };
+  };
+
   // --- Build click handlers ---
 
   const buildHandler = (choice: UpdateChoice) => {
@@ -67,13 +94,44 @@ export function createUpdatePrompt(
     };
   };
 
-  // --- Pre-register three actionIds on router ---
+  const handleReleaseNote = async (ctx: import('@platform/index.js').ActionContext): Promise<void> => {
+    if (!pending) return;
+
+    const version = pending.latestVersion;
+    log.debug(`Fetching release notes for version ${version}`);
+
+    try {
+      const releaseInfo = await fetchReleaseNote(version);
+
+      if (releaseInfo) {
+        const message = formatReleaseNoteMessage(releaseInfo);
+        await adapter.postMessage({ type: 'system-notice' }, message).catch((e) => {
+          log.error(`Failed to post release note message: ${(e as Error).message}`);
+        });
+      } else {
+        // Fallback: send GitHub link
+        const url = buildGitHubReleaseUrl(version);
+        await adapter
+          .postMessage({ type: 'system-notice' }, {
+            text: `Failed to fetch release notes for v${version}. View on GitHub: ${url}`,
+          })
+          .catch((e) => {
+            log.error(`Failed to post fallback release note: ${(e as Error).message}`);
+          });
+      }
+    } catch (error) {
+      log.error(`Error in release note handler: ${(error as Error).message}`);
+    }
+  };
+
+  // --- Pre-register four actionIds on router ---
 
   router.registerCommand('update', {
     actions: [
       { actionId: 'apply', handler: buildHandler('apply') },
       { actionId: 'skip', handler: buildHandler('skip') },
       { actionId: 'cancel', handler: buildHandler('cancel') },
+      { actionId: 'release-note', handler: handleReleaseNote },
     ],
   });
 
@@ -81,6 +139,7 @@ export function createUpdatePrompt(
 
   const buttonTemplates: ActionElement[] = [
     { type: 'button', text: 'Update', actionId: 'cmd:update:apply', value: '', style: 'primary' },
+    { type: 'button', text: 'Release Note', actionId: 'cmd:update:release-note', value: '' },
     { type: 'button', text: 'Skip this version', actionId: 'cmd:update:skip', value: '' },
     { type: 'button', text: 'Cancel', actionId: 'cmd:update:cancel', value: '', style: 'danger' },
   ];
