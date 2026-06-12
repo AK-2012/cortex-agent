@@ -500,7 +500,7 @@ export function generateGatewayUsageYaml(config: GatewayUsageConfig): string {
   return yaml.stringify(doc);
 }
 
-/** Write gateway usage config to ~/.aistatus/config.yaml, or <configDir>/config.yaml if configDir is given. */
+/** Write gateway usage config to ~/.aistatus/config.yaml, or <configDir>/config.yaml if configDir is given (for testing). */
 function writeGatewayUsageConfig(config: GatewayUsageConfig, configDir?: string): void {
   const configPath = configDir
     ? path.join(configDir, 'config.yaml')
@@ -1642,7 +1642,7 @@ export async function runInit(options: InitOptions = {}): Promise<void> {
   seedSchedules(paths, answers, force);
 
   // 5. Gateway usage
-  writeGatewayUsageConfig(answers.gatewayUsage, paths.CONFIG_DIR);
+  writeGatewayUsageConfig(answers.gatewayUsage, options.gatewayConfigDir);
 
   // 6. Service registration
   if (answers.installService) {
