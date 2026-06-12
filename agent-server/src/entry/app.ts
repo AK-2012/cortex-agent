@@ -31,7 +31,7 @@ import { conversationLedger } from '@store/conversation-ledger-repo.js';
 import { executionRepo } from '@store/execution-repo.js';
 import { loadConfig as loadThreadConfig, startConfigWatcher as startThreadConfigWatcher, setAdminNotifier as setConfigNotifier } from '@domain/threads/index.js';
 import { startMemoryWatcher } from '@domain/memory/watcher.js';
-import { getActiveBackend } from '@domain/agents/index.js';
+import { getActiveBackend, configureEnvForMode, loadMode } from '@domain/agents/index.js';
 import { createEditHandler } from '@orch/routing/edit-handler.js';
 
 // Extracted modules
@@ -71,6 +71,11 @@ import { enqueue, conduitQueues } from '@orch/conduit-queue.js';
 import { getCostSummary } from '@domain/costs/cost-tracker.js';
 
 dotenv.config({ path: path.join(CONFIG_DIR, '.env') });
+
+// Apply the persisted mode to env now that .env is loaded. This used to be an import-time
+// side effect inside domain/agents/config.ts; it is explicit here so that CLI processes
+// (cortex init / setup-gateway) importing that module don't get their env mutated.
+configureEnvForMode(loadMode());
 
 const log = createLogger('app');
 

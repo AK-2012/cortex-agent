@@ -351,8 +351,12 @@ export function detectBillingMode(): string {
   return 'api';
 }
 
-// Apply persisted mode on startup — route through gateway if healthy, else direct
-configureEnvForMode(claudeMode);
+// NOTE: deliberately NO configureEnvForMode() call at module scope. This module is imported
+// transitively by CLI processes (cortex init / setup-gateway via domain/threads), where the
+// gateway is always unhealthy — an import-time call would delete ANTHROPIC_API_KEY (plan mode)
+// before gateway-generator discovery runs, breaking api endpoint generation. The server entry
+// (app.ts) applies the persisted mode explicitly after dotenv loads; every agent spawn also
+// calls configureEnvForMode() per-request (facade.runAgentOnce).
 
 export {
   GATEWAY_ANTHROPIC_URL,

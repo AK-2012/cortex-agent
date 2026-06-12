@@ -208,6 +208,34 @@ test('configureEnvForMode(plan) falls back to direct when gateway unhealthy', as
     'plan mode should remove base URL for direct OAuth when gateway unhealthy');
 });
 
+test('importing config.js does NOT mutate ANTHROPIC_API_KEY (no module side effect)', async (t) => {
+  const originalApiKey = process.env.ANTHROPIC_API_KEY;
+  const originalBaseUrl = process.env.ANTHROPIC_BASE_URL;
+
+  t.after(() => {
+    _testSetHealthy(null);
+    if (originalApiKey !== undefined) process.env.ANTHROPIC_API_KEY = originalApiKey;
+    else delete process.env.ANTHROPIC_API_KEY;
+    if (originalBaseUrl !== undefined) process.env.ANTHROPIC_BASE_URL = originalBaseUrl;
+    else delete process.env.ANTHROPIC_BASE_URL;
+  });
+
+  // CLI processes (cortex init / setup-gateway) import this module transitively and the
+  // gateway is always unhealthy there. With mode=plan (isolated home → default), an
+  // import-time configureEnvForMode would delete the key BEFORE discoverEndpoints runs,
+  // making init unable to generate the api endpoint. Imports must be side-effect free.
+  _testSetHealthy(null);
+  process.env.ANTHROPIC_API_KEY = 'sk-import-probe';
+  process.env.ANTHROPIC_BASE_URL = 'https://import-probe.example.test';
+
+  await importFresh('./../src/domain/agents/config.js');
+
+  assert.equal(process.env.ANTHROPIC_API_KEY, 'sk-import-probe',
+    'importing config.js must not delete/rewrite ANTHROPIC_API_KEY');
+  assert.equal(process.env.ANTHROPIC_BASE_URL, 'https://import-probe.example.test',
+    'importing config.js must not delete/rewrite ANTHROPIC_BASE_URL');
+});
+
 test('GATEWAY_ANTHROPIC_URL has /anthropic suffix (backward compat)', async (t) => {
   const modeManager = await importFresh('./../src/domain/agents/index.js');
   assert.ok(modeManager.GATEWAY_ANTHROPIC_URL.endsWith('/anthropic'),

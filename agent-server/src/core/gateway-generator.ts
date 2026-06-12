@@ -13,10 +13,27 @@ import { execSync } from 'child_process';
 import * as path from 'path';
 import * as os from 'os';
 import { parse as yamlParse, stringify as yamlStringify } from 'yaml';
+import { parse as parseDotenv } from 'dotenv';
 import { createLogger } from './log.js';
-import { GATEWAY_MANAGED_KEY_PLACEHOLDER } from './utils.js';
+import { CONFIG_DIR, GATEWAY_MANAGED_KEY_PLACEHOLDER } from './utils.js';
 
 const log = createLogger('gateway-generator');
+
+/**
+ * Resolve the real Anthropic API key for endpoint discovery: process.env first (ignoring the
+ * gateway-managed placeholder), then CONFIG_DIR/.env — the canonical key location
+ * (docs/configuration.md). CLI processes (cortex init / setup-gateway) never run
+ * dotenv.config, so discovery must read the file itself.
+ */
+function resolveAnthropicApiKey(): string | undefined {
+  const envKey = process.env.ANTHROPIC_API_KEY?.trim();
+  if (envKey && envKey !== GATEWAY_MANAGED_KEY_PLACEHOLDER) return envKey;
+  try {
+    const fileKey = parseDotenv(readFileSync(path.join(CONFIG_DIR, '.env'), 'utf8')).ANTHROPIC_API_KEY?.trim();
+    if (fileKey && fileKey !== GATEWAY_MANAGED_KEY_PLACEHOLDER) return fileKey;
+  } catch { /* no .env file — fall through */ }
+  return undefined;
+}
 
 // ─── Merge support types (DR: stop init clobbering hand-maintained gateway.yaml) ──
 
@@ -218,9 +235,9 @@ export function discoverEndpoints(backends?: string[]): DiscoveredEndpoint[] {
       gatewayManaged: true,
     });
 
-    // api mode — only if a REAL ANTHROPIC_API_KEY is set (the gateway-managed placeholder
+    // api mode — only if a REAL ANTHROPIC_API_KEY is available (the gateway-managed placeholder
     // exists solely to satisfy Claude Code's startup credential check; it is not a key)
-    if (process.env.ANTHROPIC_API_KEY && process.env.ANTHROPIC_API_KEY !== GATEWAY_MANAGED_KEY_PLACEHOLDER) {
+    if (resolveAnthropicApiKey()) {
       endpoints.push({
         mode: 'api',
         endpoint: 'anthropic',

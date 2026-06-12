@@ -201,6 +201,33 @@ test('discoverEndpoints: gateway-managed placeholder key does not enable api end
   }
 });
 
+test('discoverEndpoints: falls back to CONFIG_DIR/.env for ANTHROPIC_API_KEY', async (t) => {
+  const { CONFIG_DIR } = await import('../../src/core/utils.js');
+  const envFile = nodePath.join(CONFIG_DIR, '.env');
+  const original = process.env.ANTHROPIC_API_KEY;
+  const originalEnvFile = fs.existsSync(envFile) ? fs.readFileSync(envFile, 'utf8') : null;
+
+  t.after(() => {
+    if (original !== undefined) process.env.ANTHROPIC_API_KEY = original;
+    else delete process.env.ANTHROPIC_API_KEY;
+    if (originalEnvFile !== null) fs.writeFileSync(envFile, originalEnvFile);
+    else { try { fs.rmSync(envFile); } catch { /* already gone */ } }
+  });
+
+  // Refuse to touch a real ~/.cortex/.env — this test writes the file, so it must only
+  // run under an isolated CORTEX_HOME (npm test / npm run test:file set this up).
+  assert.ok(process.env.CORTEX_HOME, 'requires isolated CORTEX_HOME (use npm test or npm run test:file)');
+  fs.mkdirSync(CONFIG_DIR, { recursive: true });
+  fs.writeFileSync(envFile, 'ANTHROPIC_API_KEY=sk-from-dotenv-file\n');
+
+  // The canonical key location is ~/.cortex/.env (docs/configuration.md) — init/cli
+  // processes do not run dotenv.config, so discovery must read the file itself.
+  delete process.env.ANTHROPIC_API_KEY;
+  const eps = discoverEndpoints(['claude']);
+  assert.ok(eps.some((e) => e.mode === 'api'),
+    'key present only in CONFIG_DIR/.env must still enable the api endpoint');
+});
+
 test('generateGatewayYaml: renders multi PI providers in separate sections', () => {
   const yamlContent = generateGatewayYaml([
     ep({ mode: 'plan', endpoint: 'anthropic', base_url: 'https://api.anthropic.com', auth_style: 'bearer' }),
