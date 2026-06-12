@@ -1,9 +1,9 @@
 // Prompt assembly and agent slot config resolution.
 // input:  template-loader, artifact-io, thread-store, thread-types
-// output: buildStepPrompt / resolveSystemVars / resolveAgentSlotConfig / resolveTemplateAgents / formatEndpoint / pickStepTemplate
+// output: buildStepPrompt / resolveSystemVars / resolveAgentSlotConfig / resolveTemplateAgents / resolveTemplateProfiles / formatEndpoint / pickStepTemplate
 
 import { threadStore } from '@store/thread-repo.js';
-import { getAgent, resolveFileRef } from './template-loader.js';
+import { getAgent, getTemplate, resolveFileRef } from './template-loader.js';
 import { getModifiedFilesFromSession, getSessionFileChanges, renderModifiedFilesWithDiff } from './artifact-io.js';
 import { getDefaultAgent } from '../agents/index.js';
 import { loadUserContext } from '../memory/user-context.js';
@@ -95,6 +95,22 @@ export function resolveTemplateAgents(template: ThreadTemplate): AgentSlotConfig
     if (config) configs.push(config);
   }
   return configs;
+}
+
+/** Resolve the unique profile names a template's agents will actually run with.
+ *  Mirrors thread-runner profile resolution (runner.ts): hardcoded agent profiles win;
+ *  `__active__` slots resolve to `activeProfile` (the dispatch/scheduler profile that
+ *  would be injected via metadata.profileOverride). Null/empty entries are dropped.
+ *  Unknown template or no resolvable agents → [] (fail-open; callers decide fallback). */
+export function resolveTemplateProfiles(templateName: string, activeProfile: string | null): string[] {
+  const template = getTemplate(templateName);
+  if (!template) return [];
+  const profiles = new Set<string>();
+  for (const config of resolveTemplateAgents(template)) {
+    const profile = config.profile === '__active__' ? activeProfile : config.profile;
+    if (profile) profiles.add(profile);
+  }
+  return [...profiles];
 }
 
 /** Render an `(agent, stage)` pair as the canonical endpoint string used for iterationCounts keys

@@ -55,7 +55,7 @@ How to run tests without tripping it:
 | `project-store.test.ts` | Test | ProjectStore list/get/exists/getDefault/resolveFromMessage + scaffolding + cache refresh |
 | `dispatch-utils.test.ts` | Test | Task dispatch commands and env injection |
 | `execution-lock-release.test.ts` | Test | Auto lock-release on terminal execution transitions (complete/fail/cancel/stale) |
-| `task-dispatcher.test.ts` | Test | Pre-filter + schedule guard + dispatch gate |
+| `task-dispatcher.test.ts` | Test | Pre-filter + schedule guard + dispatch gate (incl. per-task template-profile rate-limit filtering) |
 | `task-store.test.ts` | Test | runExclusive serialization and error propagation (verified through re-export path) |
 | `store/task-repo.test.ts` | Test | TaskRepo concurrent add, state serialization, flush draining |
 | `gpu-slot-scheduling.test.ts` | Test | Per-GPU slot scheduling |
@@ -131,4 +131,5 @@ How to run tests without tripping it:
 | `cli-utils.test.ts` | Test | formatHelp/formatError |
 | `template-resolver.test.ts` | Test | Template variables/block/conditional |
 | `threads/domain-threads-smoke.test.ts` | Test | domain/threads/ import smoke: parseTarget / resolveStageName / resolveSystemVars / THREAD_PROTOCOL_PREAMBLE |
+| `threads/resolve-template-profiles.test.ts` | Test | resolveTemplateProfiles: hardcoded profiles, `__active__` mapping, dedup, unknown template fail-open |
 | `module-loader.ts` | Utility | ESM fresh import + root path helper |

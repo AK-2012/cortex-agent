@@ -12,7 +12,6 @@ const log = createLogger('task-dispatch');
 import * as pendingTaskTracker from '../../tasks/pending-tracker.js';
 import { sessionStore } from '@store/session-registry-repo.js';
 import { getActiveProfile, getActiveBackend } from '../../agents/index.js';
-import { allConfigsRateLimited } from '@domain/agents/facade.js';
 import { selectAndClaimTask, computeNextInterval, updateScheduleInterval } from '../../tasks/dispatcher.js';
 import { taskStore } from '../../tasks/store.js';
 import { taskMutator } from '../../tasks/mutator.js';
@@ -86,21 +85,17 @@ async function runDispatchAsync({ channel, scheduleTaskId, profileName }: { chan
   let outcome: { success: boolean; skipped: boolean; note: string } = { success: false, skipped: false, note: '' };
 
   try {
-    // Step 1: Dry run — check there is a dispatchable task without claiming
-    const preview = await selectAndClaimTask({ scheduleTaskId, dryRun: true });
+    // Step 1: Dry run — check there is a dispatchable task without claiming.
+    // Rate-limit eligibility is decided per-task inside selection, against each task's
+    // TEMPLATE profiles (profileName only resolves __active__ slots) — see dispatcher.ts.
+    const preview = await selectAndClaimTask({ scheduleTaskId, dryRun: true, profileName });
     if (!preview) {
       outcome = { success: false, skipped: true, note: 'No dispatchable tasks available' };
       return;
     }
 
-    // Step 2: Check rate limits using the scheduler-resolved profile
-    if (allConfigsRateLimited(profileName)) {
-      outcome = { success: false, skipped: true, note: `All configs rate-limited for ${profileName}` };
-      return;
-    }
-
-    // Step 3: Real claim + execute
-    const selected = await selectAndClaimTask({ scheduleTaskId });
+    // Step 2: Real claim + execute
+    const selected = await selectAndClaimTask({ scheduleTaskId, profileName });
     if (!selected) {
       outcome = { success: false, skipped: true, note: 'No dispatchable tasks available' };
       return;

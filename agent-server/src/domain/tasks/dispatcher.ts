@@ -1,6 +1,6 @@
-// input:  task-store, client-manager, execution-registry
-// output: selectAndClaimTask + schedule/interval helpers
-// pos:    programmatic dispatch for task selection and claiming
+// input:  task-store, client-manager, execution-registry, threads (template profiles), agents facade (rate limits)
+// output: selectAndClaimTask + isTemplateRateLimited + schedule/interval helpers
+// pos:    programmatic dispatch for task selection and claiming; rate-limit eligibility is per-task, resolved from each task's template profiles
 // >>> If I am updated, update my header comment and the parent folder's CORTEX.md <<<
 import { createLogger } from '@core/log.js';
 import { isProjectLocked } from './system/task-lock.js';
@@ -15,6 +15,8 @@ import type { ExecutionRecord } from '../executions/registry.js';
 import { taskStore } from './store.js';
 import { taskMutator } from './mutator.js';
 import { listTemplateNames } from '../threads/template-loader.js';
+import { resolveTemplateProfiles } from '../threads/index.js';
+import { allConfigsRateLimited } from '../agents/facade.js';
 
 // --- Interfaces ---
 
@@ -53,6 +55,9 @@ interface DispatchOutcome {
 interface FilterDeps {
   findActiveDispatchMatch?: (task: any, scheduleTaskId: string) => DispatchMatch | null;
   checkRealGpuOccupancy?: (machine: string) => Promise<GpuOccupancyResult>;
+  isTemplateRateLimited?: (templateName: string, dispatchProfile: string | null) => boolean;
+  /** Scheduler-resolved dispatch profile — used only to resolve `__active__` template slots. */
+  profileName?: string | null;
 }
 
 
@@ -167,6 +172,27 @@ function findActiveDispatchMatch(task: any, scheduleTaskId: string): DispatchMat
   return null;
 }
 
+// --- Template-profile rate-limit eligibility ---
+// A task's thread runs with its TEMPLATE's agent profiles (hardcoded profiles win;
+// metadata.profileOverride only applies to __active__ slots — see threads/runner.ts).
+// Gating on the scheduler-resolved dispatch profile was wrong in both directions:
+// it over-blocked templates whose profiles were fine and under-blocked templates
+// whose profiles were limited.
+
+/** True when the task's template cannot run: ANY of its agents' profiles is fully
+ *  rate-limited (a known-blocked later agent would fail the thread mid-pipeline and
+ *  unclaim the task, discarding earlier agents' work). Empty resolution (unknown
+ *  template / no concrete profiles) falls back to checking the dispatch profile. */
+function isTemplateRateLimited(
+  templateName: string,
+  dispatchProfile: string | null,
+  check: (profile: string | null) => boolean = allConfigsRateLimited,
+): boolean {
+  const profiles = resolveTemplateProfiles(templateName, dispatchProfile);
+  if (profiles.length === 0) return check(dispatchProfile);
+  return profiles.some((p) => check(p));
+}
+
 // --- Unknown-template warning dedup (per-process, per-(task_hash, template) pair) ---
 
 const _unknownTemplateWarnedKeys = new Set<string>();
@@ -185,11 +211,14 @@ async function filterDispatchableTasks(tasks: any[] | null, scheduleTaskId: stri
 
   const findDuplicate = deps.findActiveDispatchMatch || findActiveDispatchMatch;
   const checkGpu = deps.checkRealGpuOccupancy || checkRealGpuOccupancy;
+  const checkTemplateRateLimited = deps.isTemplateRateLimited || isTemplateRateLimited;
+  const dispatchProfile = deps.profileName ?? null;
   const gpuStatusCache = new Map<string, GpuOccupancyResult>();
   // Fail-open if templates haven't been loaded yet (size === 0): let downstream
   // createThread surface the error rather than silently dropping every task.
   const validTemplates = new Set(listTemplateNames());
   const eligible: any[] = [];
+  let rateLimitedCount = 0;
 
   for (const task of tasks) {
     if (!task.template) {
@@ -197,6 +226,12 @@ async function filterDispatchableTasks(tasks: any[] | null, scheduleTaskId: stri
     }
     if (validTemplates.size > 0 && !validTemplates.has(task.template)) {
       warnOnceUnknownTemplate(task);
+      continue;
+    }
+    // Skip tasks whose template profiles are rate-limited; later tasks with
+    // usable templates still flow through (per-task gating, not whole-cycle).
+    if (checkTemplateRateLimited(task.template, dispatchProfile)) {
+      rateLimitedCount += 1;
       continue;
     }
     // Check remote GPU device is online (local machine is always reachable)
@@ -232,6 +267,10 @@ async function filterDispatchableTasks(tasks: any[] | null, scheduleTaskId: stri
     }
 
     eligible.push(task);
+  }
+
+  if (rateLimitedCount > 0) {
+    log.info(`Skipped ${rateLimitedCount} task(s) — template profiles rate-limited`);
   }
 
   return eligible;
@@ -328,7 +367,7 @@ function buildDispatchPrompt(task: any): string {
 
 // --- Main entry point: select and claim a task for local execution ---
 
-async function selectAndClaimTask({ scheduleTaskId, dryRun = false }: { scheduleTaskId: string; dryRun?: boolean }): Promise<SelectAndClaimResult | null> {
+async function selectAndClaimTask({ scheduleTaskId, dryRun = false, profileName = null }: { scheduleTaskId: string; dryRun?: boolean; profileName?: string | null }): Promise<SelectAndClaimResult | null> {
   log.info('Starting task selection cycle');
 
   // Get actionable tasks + GPU busy machines
@@ -337,8 +376,8 @@ async function selectAndClaimTask({ scheduleTaskId, dryRun = false }: { schedule
   const gpuBusyMachines = taskStore.getGpuBusyMachines();
   log.info(`Found ${tasks.length} actionable task(s)`);
 
-  // Filter to dispatchable tasks
-  const dispatchableTasks = await filterDispatchableTasks(tasks, scheduleTaskId, gpuBusyMachines);
+  // Filter to dispatchable tasks (incl. per-template rate-limit eligibility)
+  const dispatchableTasks = await filterDispatchableTasks(tasks, scheduleTaskId, gpuBusyMachines, { profileName });
   log.info(`${dispatchableTasks.length} task(s) dispatchable after preflight`);
 
   // Select task
@@ -390,6 +429,7 @@ export {
   computeNextInterval,
   updateScheduleInterval,
   isValidDispatchPrompt,
+  isTemplateRateLimited,
   // For testing
   selectTask,
   filterLockedProjects,

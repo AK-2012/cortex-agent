@@ -9,13 +9,21 @@ import assert from 'node:assert/strict';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { _testSetRegistry } from '../src/domain/tasks/dispatch-utils.js';
-import { updateScheduleInterval, hasRunningExecutionForSchedule, findActiveDispatchMatch, filterDispatchableTasks, filterLockedProjects, isValidDispatchPrompt } from '../src/domain/tasks/dispatcher.js';
+import { updateScheduleInterval, hasRunningExecutionForSchedule, findActiveDispatchMatch, filterDispatchableTasks, filterLockedProjects, isValidDispatchPrompt, isTemplateRateLimited } from '../src/domain/tasks/dispatcher.js';
+
+import { loadConfig, mergeThreadTemplates } from '../src/domain/threads/template-loader.js';
+import { PROJECTS_DIR, CONFIG_DIR } from '../src/core/paths.js';
 
 before(() => {
   _testSetRegistry({ testbox: { cortexPath: '/tmp/test', gpuCount: 2 } });
+  // Self-sufficient template fixture: seed defaults templates into the isolated
+  // CORTEX_HOME so template-dependent tests pass when run standalone (test:file
+  // with an empty-skeleton home), not only under the seeded full-suite home.
+  mergeThreadTemplates(
+    path.resolve(process.cwd(), 'defaults/config/thread-templates.json'),
+    path.join(CONFIG_DIR, 'thread-templates.json'),
+  );
 });
-import { loadConfig } from '../src/domain/threads/template-loader.js';
-import { PROJECTS_DIR } from '../src/core/paths.js';
 
 test('updateScheduleInterval routes interval changes through scheduler API', async () => {
   const calls = [];
@@ -141,6 +149,85 @@ test('filterDispatchableTasks drops tasks with unknown or missing [template:X] t
   assert.deepEqual(filtered.map((task) => task.id), ['c3']);
 });
 
+// --- Template-profile rate-limit filtering ---
+// The dispatch gate must check the profiles the task's TEMPLATE actually runs with
+// (template agents hardcode profiles; metadata.profileOverride only applies to __active__
+// slots — see runner.ts), NOT the scheduler-resolved dispatch profile.
+
+test('filterDispatchableTasks skips rate-limited-template task and keeps later usable task', async () => {
+  loadConfig();
+  const tasks = [
+    { id: 'a1', project: 'cortex-self', text: 'limited template task', gpu: null, template: 'plan-review' },
+    { id: 'b2', project: 'cortex-self', text: 'usable template task', gpu: null, template: 'coder-review' },
+  ];
+  const seen: [string, string | null][] = [];
+
+  const filtered = await filterDispatchableTasks(tasks, 'sched-1', new Map(), {
+    findActiveDispatchMatch: () => null,
+    checkRealGpuOccupancy: async () => ({ gpus: [], freeIndices: [], allOccupied: false }),
+    isTemplateRateLimited: (template: string, profile: string | null) => {
+      seen.push([template, profile]);
+      return template === 'plan-review';
+    },
+    profileName: 'plan',
+  });
+
+  // a1 blocked by its template's profiles; b2 falls through (the over-blocking regression)
+  assert.deepEqual(filtered.map((task) => task.id), ['b2']);
+  // dispatch profileName is forwarded to the check (resolves __active__ slots)
+  assert.deepEqual(seen, [['plan-review', 'plan'], ['coder-review', 'plan']]);
+});
+
+test('filterDispatchableTasks returns empty when every candidate template is rate-limited', async () => {
+  loadConfig();
+  const tasks = [
+    { id: 'a1', project: 'cortex-self', text: 'task one', gpu: null, template: 'plan-review' },
+    { id: 'b2', project: 'cortex-self', text: 'task two', gpu: null, template: 'default' },
+  ];
+
+  const filtered = await filterDispatchableTasks(tasks, 'sched-1', new Map(), {
+    findActiveDispatchMatch: () => null,
+    checkRealGpuOccupancy: async () => ({ gpus: [], freeIndices: [], allOccupied: false }),
+    isTemplateRateLimited: () => true,
+    profileName: 'plan',
+  });
+
+  assert.deepEqual(filtered, []);
+});
+
+test('filterDispatchableTasks default rate-limit check passes everything when not throttled', async () => {
+  loadConfig();
+  const tasks = [
+    { id: 'a1', project: 'cortex-self', text: 'task one', gpu: null, template: 'plan-review' },
+  ];
+
+  // No injected check → default isTemplateRateLimited → allConfigsRateLimited, which is
+  // false when the throttle is inactive (isThrottled() short-circuit).
+  const filtered = await filterDispatchableTasks(tasks, 'sched-1', new Map(), {
+    findActiveDispatchMatch: () => null,
+    checkRealGpuOccupancy: async () => ({ gpus: [], freeIndices: [], allOccupied: false }),
+    profileName: 'plan',
+  });
+
+  assert.deepEqual(filtered.map((task) => task.id), ['a1']);
+});
+
+test('isTemplateRateLimited: any limited template profile blocks the task', () => {
+  loadConfig();
+  // defaults: plan-review resolves to ['plan', 'execute']
+  assert.equal(isTemplateRateLimited('plan-review', 'disp', (p) => p === 'execute'), true);
+  assert.equal(isTemplateRateLimited('plan-review', 'disp', (p) => p === 'plan'), true);
+  assert.equal(isTemplateRateLimited('plan-review', 'disp', () => false), false);
+  // dispatch profile itself is NOT consulted when the template resolves concrete profiles
+  assert.equal(isTemplateRateLimited('plan-review', 'disp', (p) => p === 'disp'), false);
+});
+
+test('isTemplateRateLimited: empty profile resolution falls back to the dispatch profile', () => {
+  loadConfig();
+  assert.equal(isTemplateRateLimited('nonexistent-template-xyz', 'disp', (p) => p === 'disp'), true);
+  assert.equal(isTemplateRateLimited('nonexistent-template-xyz', 'disp', () => false), false);
+});
+
 // --- Null/empty prompt guard (ISS-CS-005 durable fix) ---
 
 test('isValidDispatchPrompt rejects null/empty/whitespace values', () => {
@@ -192,11 +279,13 @@ test('null-prompt guard is called in scheduled-task job runScheduledTask before 
   assert.ok(guardPos > 0 && spawnPos > guardPos, 'guard must precede runScheduledTaskAsync');
 });
 
-// --- Dry-run rate-limit pre-check regression guard ---
-// Verifies that runDispatchAsync calls selectAndClaimTask with dryRun:true
-// and checks allConfigsRateLimited before proceeding to real claim+execute.
+// --- Per-task template-profile rate-limit gating regression guard ---
+// The OLD design gated the whole dispatch cycle on the scheduler-resolved profile
+// (always "plan" by default), which both over-blocked (deepseek-only templates skipped
+// when plan was limited) and under-blocked (template profile limited but plan fine).
+// The gate now lives per-task inside selection, resolved from each task's template.
 
-test('dry-run rate-limit pre-check guard is called in runDispatchAsync before real claim', async () => {
+test('runDispatchAsync forwards profileName to selection and no longer gates on the scheduler profile', async () => {
   const fs = await import('node:fs/promises');
   const path = await import('node:path');
   const src = await fs.readFile(path.resolve(process.cwd(), 'src/domain/scheduling/jobs/task-dispatch.ts'), 'utf8');
@@ -207,17 +296,32 @@ test('dry-run rate-limit pre-check guard is called in runDispatchAsync before re
   const endIdx = after.search(/\n(function|async function|export )/);
   const body = after.slice(0, endIdx);
 
-  // Must call selectAndClaimTask with dryRun:true before real claim
-  assert.match(body, /dryRun:\s*true/, 'runDispatchAsync must call selectAndClaimTask with dryRun:true');
+  // The wrong gate must be gone (rate-limit eligibility is decided per-task in selection)
+  assert.doesNotMatch(body, /allConfigsRateLimited\s*\(/, 'runDispatchAsync must NOT gate on the scheduler profile');
 
-  // Must import and call allConfigsRateLimited
-  assert.match(body, /allConfigsRateLimited\s*\(/, 'runDispatchAsync must call allConfigsRateLimited');
+  // Both selection calls must forward profileName so __active__ slots resolve correctly
+  assert.match(body, /selectAndClaimTask\(\{\s*scheduleTaskId,\s*dryRun:\s*true,\s*profileName\s*\}\)/, 'dry-run selection must forward profileName');
+  assert.match(body, /selectAndClaimTask\(\{\s*scheduleTaskId,\s*profileName\s*\}\)/, 'real claim selection must forward profileName');
 
-  // dryRun call must precede the real selectAndClaimTask call (without dryRun)
+  // dryRun call must precede the real selectAndClaimTask call
   const dryRunPos = body.indexOf('dryRun: true');
-  const realCallPos = body.indexOf('selectAndClaimTask({ scheduleTaskId })');
+  const realCallPos = body.indexOf('selectAndClaimTask({ scheduleTaskId, profileName })');
   assert.ok(dryRunPos >= 0, 'dryRun:true must be present');
   assert.ok(realCallPos > dryRunPos, 'dry run must precede real claim');
+});
+
+test('filterDispatchableTasks wires the template rate-limit check in its body', async () => {
+  const fs = await import('node:fs/promises');
+  const path = await import('node:path');
+  const src = await fs.readFile(path.resolve(process.cwd(), 'src/domain/tasks/dispatcher.ts'), 'utf8');
+
+  const startIdx = src.indexOf('async function filterDispatchableTasks');
+  assert.ok(startIdx >= 0, 'filterDispatchableTasks declaration must exist');
+  const after = src.slice(startIdx + 1);
+  const endIdx = after.search(/\n(function|async function|export )/);
+  const body = after.slice(0, endIdx);
+
+  assert.match(body, /isTemplateRateLimited/, 'filterDispatchableTasks must apply the template rate-limit check');
 });
 
 test('null-prompt guard is called in task-dispatcher selectAndClaimTask before taskMutator.claim', async () => {
