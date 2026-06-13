@@ -77,14 +77,11 @@ export interface SlackInitConfig {
   botToken: string;
   signingSecret: string;
   appToken: string;
-  adminChannel?: string;
 }
 
 export interface FeishuInitConfig {
   appId: string;
   appSecret: string;
-  encryptKey?: string;
-  verificationToken?: string;
   domain?: 'feishu' | 'lark';
   /** Identity for MCP document operations: 'bot' (default) or the operator's 'user' account. */
   authMode?: 'bot' | 'user';
@@ -165,9 +162,6 @@ export function generateDotEnvContent(answers: InitAnswers): string {
       lines.push(`SLACK_BOT_TOKEN=${answers.slackConfig.botToken}`);
       lines.push(`SLACK_SIGNING_SECRET=${answers.slackConfig.signingSecret}`);
       lines.push(`SLACK_APP_TOKEN=${answers.slackConfig.appToken}`);
-      if (answers.slackConfig.adminChannel) {
-        lines.push(`CORTEX_ADMIN_CHANNEL=${answers.slackConfig.adminChannel}`);
-      }
       lines.push('');
     }
 
@@ -175,12 +169,6 @@ export function generateDotEnvContent(answers: InitAnswers): string {
       lines.push('# Feishu configuration');
       lines.push(`FEISHU_APP_ID=${answers.feishuConfig.appId}`);
       lines.push(`FEISHU_APP_SECRET=${answers.feishuConfig.appSecret}`);
-      if (answers.feishuConfig.encryptKey) {
-        lines.push(`FEISHU_ENCRYPT_KEY=${answers.feishuConfig.encryptKey}`);
-      }
-      if (answers.feishuConfig.verificationToken) {
-        lines.push(`FEISHU_VERIFICATION_TOKEN=${answers.feishuConfig.verificationToken}`);
-      }
       if (answers.feishuConfig.domain) {
         lines.push(`FEISHU_DOMAIN=${answers.feishuConfig.domain}`);
       }
@@ -402,11 +390,11 @@ async function promptCopyManifestToClipboard(manifest: string): Promise<void> {
 }
 
 /** Parse existing Slack configuration from a .env file. Returns null if no Slack config found. */
-function parseExistingEnvSlackConfig(envPath: string): { signingSecret?: string; appToken?: string; botToken?: string; adminChannel?: string } | null {
+function parseExistingEnvSlackConfig(envPath: string): { signingSecret?: string; appToken?: string; botToken?: string } | null {
   if (!existsSync(envPath)) return null;
   try {
     const content = readFileSync(envPath, 'utf-8');
-    const result: { signingSecret?: string; appToken?: string; botToken?: string; adminChannel?: string } = {};
+    const result: { signingSecret?: string; appToken?: string; botToken?: string } = {};
     for (const line of content.split('\n')) {
       const trimmed = line.trim();
       if (!trimmed || trimmed.startsWith('#')) continue;
@@ -417,7 +405,6 @@ function parseExistingEnvSlackConfig(envPath: string): { signingSecret?: string;
       if (key === 'SLACK_SIGNING_SECRET') result.signingSecret = value;
       else if (key === 'SLACK_APP_TOKEN') result.appToken = value;
       else if (key === 'SLACK_BOT_TOKEN') result.botToken = value;
-      else if (key === 'CORTEX_ADMIN_CHANNEL') result.adminChannel = value;
     }
     if (!result.signingSecret && !result.appToken && !result.botToken) return null;
     return result;
@@ -669,7 +656,7 @@ function handleCancel(value: unknown): asserts value {
   }
 }
 
-async function collectSlackConfig(prefill?: { signingSecret?: string; appToken?: string; botToken?: string; adminChannel?: string }): Promise<SlackInitConfig> {
+async function collectSlackConfig(prefill?: { signingSecret?: string; appToken?: string; botToken?: string }): Promise<SlackInitConfig> {
   clack.note(SLACK_APP_MANIFEST, 'Slack App Manifest — copy and paste when creating the app');
 
   clack.note(
@@ -707,7 +694,6 @@ async function collectSlackConfig(prefill?: { signingSecret?: string; appToken?:
   let signingSecret: string | symbol;
   let appToken: string | symbol;
   let botToken: string | symbol;
-  let adminChannelRaw: string | symbol;
 
   if (hasPrefill) {
     clack.log.info('Found existing Slack configuration. Press Enter to skip, or type anything to re-enter.');
@@ -723,13 +709,12 @@ async function collectSlackConfig(prefill?: { signingSecret?: string; appToken?:
       signingSecret = prefill!.signingSecret!;
       appToken = prefill!.appToken!;
       botToken = prefill!.botToken!;
-      adminChannelRaw = prefill!.adminChannel ?? '';
     }
   }
 
   if (!signingSecret) {
     signingSecret = await (clack.password as any)({
-      message: 'Step 1/4: SLACK_SIGNING_SECRET (from Basic Information):',
+      message: 'Step 1/3: SLACK_SIGNING_SECRET (from Basic Information):',
       validate(value) {
         if (!value) return 'Signing secret is required.';
       },
@@ -737,7 +722,7 @@ async function collectSlackConfig(prefill?: { signingSecret?: string; appToken?:
     handleCancel(signingSecret);
 
     appToken = await (clack.password as any)({
-      message: 'Step 2/4: SLACK_APP_TOKEN (App-Level Token, starts with xapp-):',
+      message: 'Step 2/3: SLACK_APP_TOKEN (App-Level Token, starts with xapp-):',
       validate(value) {
         if (!value) return 'App token is required.';
         if (!value.startsWith('xapp-')) return 'Token should start with xapp-';
@@ -746,27 +731,19 @@ async function collectSlackConfig(prefill?: { signingSecret?: string; appToken?:
     handleCancel(appToken);
 
     botToken = await (clack.password as any)({
-      message: 'Step 3/4: SLACK_BOT_TOKEN (Bot User OAuth Token, starts with xoxb-):',
+      message: 'Step 3/3: SLACK_BOT_TOKEN (Bot User OAuth Token, starts with xoxb-):',
       validate(value) {
         if (!value) return 'Bot token is required.';
         if (!value.startsWith('xoxb-')) return 'Token should start with xoxb-';
       },
     });
     handleCancel(botToken);
-
-    adminChannelRaw = await clack.text({
-      message: 'Step 4/4: CORTEX_ADMIN_CHANNEL (optional — Slack channel ID for admin notifications):',
-      placeholder: 'e.g. C0123456789 or D0123456789 (leave blank to configure later)',
-      initialValue: prefill?.adminChannel,
-    });
-    handleCancel(adminChannelRaw);
   }
 
   return {
     signingSecret: signingSecret as string,
     appToken: appToken as string,
     botToken: botToken as string,
-    adminChannel: (adminChannelRaw as string).trim() || undefined,
   };
 }
 
@@ -804,18 +781,6 @@ async function collectFeishuConfig(): Promise<FeishuInitConfig> {
   });
   handleCancel(appSecret);
 
-  const encryptKeyRaw = await clack.text({
-    message: 'FEISHU_ENCRYPT_KEY (optional):',
-    placeholder: 'leave blank to skip',
-  });
-  handleCancel(encryptKeyRaw);
-
-  const verificationTokenRaw = await clack.text({
-    message: 'FEISHU_VERIFICATION_TOKEN (optional):',
-    placeholder: 'leave blank to skip',
-  });
-  handleCancel(verificationTokenRaw);
-
   const domainRaw = await clack.text({
     message: 'FEISHU_DOMAIN (optional, "feishu" or "lark"):',
     placeholder: 'feishu (leave blank to use default)',
@@ -840,8 +805,6 @@ async function collectFeishuConfig(): Promise<FeishuInitConfig> {
   return {
     appId: appId as string,
     appSecret: appSecret as string,
-    encryptKey: (encryptKeyRaw as string).trim() || undefined,
-    verificationToken: (verificationTokenRaw as string).trim() || undefined,
     domain,
     authMode: authMode as 'bot' | 'user',
   };
@@ -1052,35 +1015,32 @@ async function collectAnswersNonInteractive(): Promise<InitAnswers> {
   log.info('Cortex Initialization (non-interactive)');
 
   // Parse platform token blocks from remaining lines (starting at index 7). Blocks are
-  // concatenated in fixed order — slack (4 lines), then feishu (5 lines) — regardless of the
+  // concatenated in fixed order — slack (3 lines), then feishu (3 lines) — regardless of the
   // order given in the platform list. The profile-choice lines (optional "mode:model"; empty
   // → auto-infer) follow whatever token lines were consumed. Single-platform layouts are
-  // back-compatible: slack-only → choices at 11; feishu-only → choices at 12.
+  // back-compatible: slack-only → choices at 10; feishu-only → choices at 10.
   let slackConfig: SlackInitConfig | undefined;
   let feishuConfig: FeishuInitConfig | undefined;
   let cursor = 7;
 
-  if (platforms.includes('slack') && lines.length >= cursor + 4) {
+  if (platforms.includes('slack') && lines.length >= cursor + 3) {
     slackConfig = {
       signingSecret: lines[cursor] || '',
       appToken: lines[cursor + 1] || '',
       botToken: lines[cursor + 2] || '',
-      adminChannel: lines[cursor + 3]?.trim() || undefined,
     };
-    cursor += 4;
+    cursor += 3;
   }
-  if (platforms.includes('feishu') && lines.length >= cursor + 5) {
-    const domainVal = (lines[cursor + 4] || '').trim().toLowerCase();
+  if (platforms.includes('feishu') && lines.length >= cursor + 3) {
+    const domainVal = (lines[cursor + 2] || '').trim().toLowerCase();
     feishuConfig = {
       appId: lines[cursor] || '',
       appSecret: lines[cursor + 1] || '',
-      encryptKey: lines[cursor + 2]?.trim() || undefined,
-      verificationToken: lines[cursor + 3]?.trim() || undefined,
       domain: (domainVal === 'feishu' || domainVal === 'lark')
         ? (domainVal as 'feishu' | 'lark')
         : undefined,
     };
-    cursor += 5;
+    cursor += 3;
   }
   const profileChoiceStart = cursor;
 
@@ -1357,8 +1317,9 @@ function generateConfigs(paths: InitPaths, answers: InitAnswers, force: boolean)
 
 /**
  * Seed schedules.json from defaults/data/schedules.json into STORE_DIR.
- * Replaces __ADMIN_CHANNEL__ placeholder with the configured admin channel,
- * and stamps createdAt with the current timestamp. Never overwrites existing file.
+ * The __ADMIN_CHANNEL__ placeholder resolves to an empty channel: the admin channel is
+ * auto-detected at runtime (first DM to the bot) rather than collected during init.
+ * Stamps createdAt with the current timestamp. Never overwrites existing file.
  */
 function seedSchedules(paths: InitPaths, answers: InitAnswers, force: boolean): void {
   const dstPath = path.join(paths.STORE_DIR, 'schedules.json');
@@ -1367,7 +1328,7 @@ function seedSchedules(paths: InitPaths, answers: InitAnswers, force: boolean): 
   const srcPath = path.join(DEFAULTS_DIR, 'data', 'schedules.json');
   if (!existsSync(srcPath)) return;
 
-  const adminChannel = answers.slackConfig?.adminChannel || '';
+  const adminChannel = '';
   const now = Date.now();
 
   let content = readFileSync(srcPath, 'utf-8');

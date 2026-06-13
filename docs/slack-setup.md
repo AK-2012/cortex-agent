@@ -152,18 +152,18 @@ From a manifest.
 `cortex init` validates that the App-Level Token starts with `xapp-`
 and the Bot Token starts with `xoxb-` before writing them to `.env`.
 
-## Admin channel: leave blank, let Cortex find it
+## Admin channel: auto-detected, no setup needed
 
 `CORTEX_ADMIN_CHANNEL` is the channel Cortex DMs for startup
 notifications, approval requests, and other operator-facing chatter.
-You can leave it blank in `cortex init`. The first time you DM the
-bot, the Slack adapter records the channel ID and persists it. See
+`cortex init` does not ask for it. The first time you DM the bot, the
+Slack adapter records the channel ID and persists it. See
 `src/platform/adapters/slack.ts` for the auto-detection path.
 
 If you want to pin it explicitly (e.g. you want admin chatter to land
 in a different channel than your DM), grab the channel ID from Slack
-(channel name → View channel details → bottom of the page) and either
-type it during `cortex init` or set it later in `$CORTEX_HOME/config/.env`:
+(channel name → View channel details → bottom of the page) and set it
+in `$CORTEX_HOME/config/.env`:
 
 ```
 CORTEX_ADMIN_CHANNEL=C0123456789

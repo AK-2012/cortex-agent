@@ -211,15 +211,18 @@ cannot send it DMs.
 
 ![Enable Messages Tab in App Home](./images/slack-messages-tab.png)
 
-#### h) Admin channel (optional)
+#### h) Admin channel
 
-Cortex asks for `CORTEX_ADMIN_CHANNEL`. You can leave it **blank** —
-Cortex auto-detects your admin channel the first time you DM it.
+Cortex sends startup notices, approval requests, and other operational
+messages to an admin channel. There is nothing to enter during setup —
+Cortex auto-detects the admin channel the first time you DM the bot and
+persists it.
 
-If you want to set it explicitly (e.g., admin notifications should go
-to a shared channel), grab the channel ID from Slack: right-click the
+If you'd rather route admin messages to a specific channel (e.g., a
+shared ops channel), grab the channel ID from Slack — right-click the
 channel name → View channel details → copy the Channel ID from the
-bottom of the dialog.
+bottom of the dialog — and set `CORTEX_ADMIN_CHANNEL` in
+`$CORTEX_HOME/config/.env`.
 
 ### 2.4 Machine name
 
@@ -342,9 +345,9 @@ Send a DM to the bot:
 hello
 ```
 
-The first DM is what Cortex uses to auto-detect your admin channel if
-you left `CORTEX_ADMIN_CHANNEL` blank. You should get a reply within a
-few seconds.
+The first DM is what Cortex uses to auto-detect your admin channel
+(unless you set `CORTEX_ADMIN_CHANNEL` explicitly in `.env`). You should
+get a reply within a few seconds.
 
 
 ### 4.2 Create your first project

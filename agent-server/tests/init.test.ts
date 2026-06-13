@@ -125,7 +125,6 @@ const SLACK_ANSWERS: InitAnswers = {
     botToken: 'xoxb-test-bot-token',
     signingSecret: 'test-signing-secret',
     appToken: 'xapp-test-app-token',
-    adminChannel: 'D0TEST',
   },
   gatewayUsage: { enabled: false },
   installService: false,
@@ -139,8 +138,6 @@ const FEISHU_ANSWERS: InitAnswers = {
   feishuConfig: {
     appId: 'test-app-id',
     appSecret: 'test-app-secret',
-    encryptKey: 'test-encrypt',
-    verificationToken: 'test-verify',
     domain: 'feishu',
   },
   gatewayUsage: { enabled: false },
@@ -156,7 +153,6 @@ const MULTI_ANSWERS: InitAnswers = {
     botToken: 'xoxb-test-bot-token',
     signingSecret: 'test-signing-secret',
     appToken: 'xapp-test-app-token',
-    adminChannel: 'D0TEST',
   },
   feishuConfig: {
     appId: 'test-app-id',
@@ -199,13 +195,10 @@ test('generateDotEnvContent includes CORTEX_PLATFORM=slack and tokens', () => {
   assert.match(content, /^SLACK_BOT_TOKEN=xoxb-test-bot-token/m);
   assert.match(content, /^SLACK_SIGNING_SECRET=test-signing-secret/m);
   assert.match(content, /^SLACK_APP_TOKEN=xapp-test-app-token/m);
-  assert.match(content, /^CORTEX_ADMIN_CHANNEL=D0TEST/m);
 });
 
-test('generateDotEnvContent excludes adminChannel when undefined', () => {
-  const noAdmin = { ...SLACK_ANSWERS, slackConfig: { ...SLACK_ANSWERS.slackConfig!, adminChannel: undefined } };
-  const content = generateDotEnvContent(noAdmin);
-  assert.match(content, /^CORTEX_PLATFORM=slack/m);
+test('generateDotEnvContent never emits CORTEX_ADMIN_CHANNEL (auto-detected at runtime)', () => {
+  const content = generateDotEnvContent(SLACK_ANSWERS);
   assert.doesNotMatch(content, /CORTEX_ADMIN_CHANNEL/);
 });
 
@@ -214,9 +207,13 @@ test('generateDotEnvContent includes CORTEX_PLATFORM=feishu and tokens', () => {
   assert.match(content, /^CORTEX_PLATFORM=feishu/m);
   assert.match(content, /^FEISHU_APP_ID=test-app-id/m);
   assert.match(content, /^FEISHU_APP_SECRET=test-app-secret/m);
-  assert.match(content, /^FEISHU_ENCRYPT_KEY=test-encrypt/m);
-  assert.match(content, /^FEISHU_VERIFICATION_TOKEN=test-verify/m);
   assert.match(content, /^FEISHU_DOMAIN=feishu/m);
+});
+
+test('generateDotEnvContent never emits FEISHU_ENCRYPT_KEY / FEISHU_VERIFICATION_TOKEN', () => {
+  const content = generateDotEnvContent(FEISHU_ANSWERS);
+  assert.doesNotMatch(content, /FEISHU_ENCRYPT_KEY/);
+  assert.doesNotMatch(content, /FEISHU_VERIFICATION_TOKEN/);
 });
 
 test('generateDotEnvContent omits optional feishu fields when undefined', () => {
@@ -229,8 +226,6 @@ test('generateDotEnvContent omits optional feishu fields when undefined', () => 
   assert.match(content, /^CORTEX_PLATFORM=feishu/m);
   assert.match(content, /^FEISHU_APP_ID=id/m);
   assert.match(content, /^FEISHU_APP_SECRET=sec/m);
-  assert.doesNotMatch(content, /FEISHU_ENCRYPT_KEY/);
-  assert.doesNotMatch(content, /FEISHU_VERIFICATION_TOKEN/);
   assert.doesNotMatch(content, /FEISHU_DOMAIN/);
 });
 
@@ -257,7 +252,6 @@ test('generateDotEnvContent writes comma-joined CORTEX_PLATFORM and both platfor
   assert.match(content, /^SLACK_BOT_TOKEN=xoxb-test-bot-token/m);
   assert.match(content, /^SLACK_SIGNING_SECRET=test-signing-secret/m);
   assert.match(content, /^SLACK_APP_TOKEN=xapp-test-app-token/m);
-  assert.match(content, /^CORTEX_ADMIN_CHANNEL=D0TEST/m);
   // Feishu block
   assert.match(content, /^FEISHU_APP_ID=test-app-id/m);
   assert.match(content, /^FEISHU_APP_SECRET=test-app-secret/m);

@@ -346,8 +346,8 @@ test('Test 3: Initialized environment has correct config content', async () => {
 test('Test 4: cortex init with Slack platform writes Slack tokens to .env', async () => {
   const tempDir = mkdtempSync(path.join(os.tmpdir(), 'cortex-int-'));
   try {
-    // stdin: backends, platform, gateway, name, org, email, installService, signing_secret, app_token, bot_token, admin_channel
-    await cortexInit(tempDir, 'claude\nslack\nn\nn\nn\nn\nn\nsec123\nxapp-test-app\nxoxb-test-bot\nD0CHANNEL\n');
+    // stdin: backends, platform, gateway, name, org, email, installService, signing_secret, app_token, bot_token
+    await cortexInit(tempDir, 'claude\nslack\nn\nn\nn\nn\nn\nsec123\nxapp-test-app\nxoxb-test-bot\n');
 
     const envContent = readFileSync(path.join(tempDir, 'config', '.env'), 'utf-8');
     assert.match(envContent, /^CORTEX_MACHINE=/m);
@@ -355,7 +355,7 @@ test('Test 4: cortex init with Slack platform writes Slack tokens to .env', asyn
     assert.match(envContent, /^SLACK_BOT_TOKEN=xoxb-test-bot/m);
     assert.match(envContent, /^SLACK_SIGNING_SECRET=sec123/m);
     assert.match(envContent, /^SLACK_APP_TOKEN=xapp-test-app/m);
-    assert.match(envContent, /^CORTEX_ADMIN_CHANNEL=D0CHANNEL/m);
+    assert.doesNotMatch(envContent, /CORTEX_ADMIN_CHANNEL/);
   } finally {
     rmSync(tempDir, { recursive: true, force: true });
   }

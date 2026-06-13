@@ -123,11 +123,11 @@ Cortex 附带的应用清单设置了 `socket_mode_enabled: true` 和 `interacti
 
 `cortex init` 在写入 `.env` 之前会验证 App-Level Token 是否以 `xapp-` 开头，Bot Token 是否以 `xoxb-` 开头。
 
-## 管理频道：留空，让 Cortex 自己找到
+## 管理频道：自动检测，无需设置
 
-`CORTEX_ADMIN_CHANNEL` 是 Cortex 发送启动通知、审批请求和其他运维消息的频道。你可以在 `cortex init` 中留空。第一次给机器人发私信时，Slack 适配器会记录频道 ID 并持久化。自动检测路径见 `src/platform/adapters/slack.ts`。
+`CORTEX_ADMIN_CHANNEL` 是 Cortex 发送启动通知、审批请求和其他运维消息的频道。`cortex init` 不会询问它。第一次给机器人发私信时，Slack 适配器会记录频道 ID 并持久化。自动检测路径见 `src/platform/adapters/slack.ts`。
 
-如果你想显式指定（例如你想让管理消息发送到与私信不同的频道），从 Slack 获取频道 ID（频道名称 → View channel details → 页面底部），然后在 `cortex init` 中输入，或稍后在 `$CORTEX_HOME/config/.env` 中设置：
+如果你想显式指定（例如你想让管理消息发送到与私信不同的频道），从 Slack 获取频道 ID（频道名称 → View channel details → 页面底部），然后在 `$CORTEX_HOME/config/.env` 中设置：
 
 ```
 CORTEX_ADMIN_CHANNEL=C0123456789
