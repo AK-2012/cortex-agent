@@ -19,6 +19,7 @@ import { createDevicesHandler } from './device.js';
 import { handleTailCmd } from './tail.js';
 import { handleSendFileCmd } from './sendfile.js';
 import { handleDispatchCmd } from './dispatch.js';
+import { handleLangCmd } from './lang.js';
 
 const log = createLogger('command-handler');
 
@@ -108,6 +109,7 @@ export function registerCommands(deps: CommandDeps) {
     '!thread':   (ch, ad, msg) => handleThreadCmd(ch, ad, msg),
     '!agent':    (ch, ad, msg) => handleAgentCmdInteractive(ch, ad, msg),
     '!orient':   (ch, ad, _msg) => handleOrientCmd(ch, ad),
+    '!lang':     (ch, ad, msg) => handleLangCmd(ch, ad, msg),
   };
 
   const PREFIX_COMMANDS: { prefix: string; handler: Handler }[] = [
@@ -130,6 +132,7 @@ export function registerCommands(deps: CommandDeps) {
     { prefix: '!agent',      handler: handleAgentCmdInteractive },
     { prefix: '!sendFile',   handler: handleSendFileCmd },
     { prefix: '!dispatch',  handler: handleDispatchCmd as Handler },
+    { prefix: '!lang',       handler: handleLangCmd },
   ];
 
   const dispatchFn = function dispatchCommand(trimmedMessage: string | undefined, channel: string, adapter: PlatformAdapter, threadAnchorId?: string | null): boolean {
