@@ -38,10 +38,11 @@
 
 import * as dotenv from 'dotenv';
 import { fork, spawn } from 'child_process';
-import { watch, existsSync, unlinkSync, statSync, readFileSync, writeFileSync, readdirSync } from 'fs';
+import { watch, existsSync, unlinkSync, statSync, writeFileSync, readdirSync } from 'fs';
 import * as path from 'path';
 import { createLogger } from '@core/log.js';
 import { isMainModule, moduleDir, DATA_DIR, CONFIG_DIR, STORE_DIR } from '@core/utils.js';
+import { tryAcquireSingletonLock, releaseSingletonLock as releaseLock } from '@core/singleton-lock.js';
 
 // Load .env BEFORE reading any CORTEX_* env vars below. Mirrors app.ts §61 — the
 // daemon needs CORTEX_REPO (and potentially other vars) from .env, not just from
@@ -487,33 +488,22 @@ function setupShutdown() {
 }
 
 function acquireSingletonLock() {
-  if (existsSync(PID_FILE)) {
-    const raw = readFileSync(PID_FILE, 'utf8').trim();
-    const otherPid = Number(raw);
-    if (Number.isFinite(otherPid) && otherPid > 0) {
-      let alive = false;
-      try { process.kill(otherPid, 0); alive = true; } catch { alive = false; }
-      if (alive) {
-        log.error(
-          `Another Cortex daemon is already running (PID ${otherPid}, lockfile ${PID_FILE}).\n` +
-          `         Refusing to start a second instance — its app.ts already holds ports 3001/3002 and your child would crash-loop on EADDRINUSE.\n` +
-          `         To restart the running daemon: \`touch agent-server/.restart\` (hot reload), or send SIGTERM to PID ${otherPid} and rerun.`
-        );
-        process.exit(1);
-      }
-    }
+  const result = tryAcquireSingletonLock(PID_FILE);
+  if (result.acquired) {
     // Stale lock — previous daemon died without cleanup
-    log.info(`Removing stale PID file (PID ${raw} not running)`);
+    if (result.stale) log.info(`Removed stale PID file and reclaimed lock for PID ${process.pid}`);
+    return;
   }
-  writeFileSync(PID_FILE, String(process.pid), 'utf8');
+  log.error(
+    `Another Cortex daemon is already running (PID ${result.holderPid}, lockfile ${PID_FILE}).\n` +
+    `         Refusing to start a second instance — its app.ts already holds ports 3001/3002 and your child would crash-loop on EADDRINUSE.\n` +
+    `         To restart the running daemon: \`touch agent-server/.restart\` (hot reload), or send SIGTERM to PID ${result.holderPid} and rerun.`
+  );
+  process.exit(1);
 }
 
 function releaseSingletonLock() {
-  try {
-    if (!existsSync(PID_FILE)) return;
-    const raw = readFileSync(PID_FILE, 'utf8').trim();
-    if (Number(raw) === process.pid) unlinkSync(PID_FILE);
-  } catch {}
+  releaseLock(PID_FILE);
   try {
     if (existsSync(CHILD_PID_FILE)) unlinkSync(CHILD_PID_FILE);
   } catch {}

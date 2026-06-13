@@ -7,7 +7,8 @@ import { mkdirSync } from 'fs';
 import * as path from 'path';
 import { createAdapterFromEnv, extractTuiAdapter } from '@platform/index.js';
 import type { PlatformAdapter } from '@platform/index.js';
-import { WORKSPACE_DIR, CONFIG_DIR, DATA_DIR } from '@core/utils.js';
+import { WORKSPACE_DIR, CONFIG_DIR, DATA_DIR, STORE_DIR } from '@core/utils.js';
+import { tryAcquireSingletonLock, releaseSingletonLock } from '@core/singleton-lock.js';
 import { closeAllSessions, closeSession as closeClaudePooledSession, shutdownCodex } from '@domain/agents/index.js';
 import { closeAllAdapters } from '../agent-adapter/index.js';
 import { recoverTuiOrphans } from '../agent-adapter/claude/adapter.js';
@@ -78,6 +79,27 @@ dotenv.config({ path: path.join(CONFIG_DIR, '.env') });
 configureEnvForMode(loadMode());
 
 const log = createLogger('app');
+
+// --- Singleton lock ---
+// app.js owns ports 3001 (webhook) / 3002 (client-manager); a second instance would
+// crash-loop on EADDRINUSE. The daemon's own daemon.pid lock only guards the supervisor
+// layer and does nothing for `cortex start` (which forks app.js directly, bypassing the
+// daemon). Acquire our own app.pid lock here, as early as possible, to fail fast before
+// any heavy initialization or port binding. Stale locks (previous owner SIGKILL'd / crashed)
+// are reclaimed automatically. Released on process exit (covers SIGTERM→exit(0) and Ctrl+C).
+const APP_PID_FILE = path.join(STORE_DIR, 'app.pid');
+const appLock = tryAcquireSingletonLock(APP_PID_FILE);
+if (appLock.acquired) {
+  if (appLock.stale) log.info(`Reclaimed stale app.pid lock for PID ${process.pid}`);
+} else {
+  log.error(
+    `Another Cortex app.js is already running (PID ${appLock.holderPid}, lockfile ${APP_PID_FILE}).\n` +
+    `         Refusing to start a second instance — it already holds ports 3001/3002; this process would crash on EADDRINUSE.\n` +
+    `         Inspect with \`cortex daemon status\`, or stop the running instance before retrying.`,
+  );
+  process.exit(1);
+}
+process.on('exit', () => releaseSingletonLock(APP_PID_FILE));
 
 // --- Crash safety net ---
 // A single failed outbound post while handling an inbound message must never take
