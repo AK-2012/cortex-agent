@@ -25,6 +25,7 @@ import { mergeThreadTemplates } from '@domain/threads/index.js';
 import type { ModelChoice } from '@core/profile-generator.js';
 import { createLogger } from '@core/log.js';
 import { INSTALL_ROOT, DEFAULTS_DIR } from '@core/utils.js';
+import { t } from '../core/i18n.js';
 import { cmdFeishu, type CliResult } from './feishu-login.js';
 
 // ─── Path computation (DATA_DIR resolved locally to support --home override) ──
@@ -207,8 +208,10 @@ export interface ConfigStatus {
 
 /** Format resolved paths and initialization status for `cortex config` output. */
 export function formatConfigOutput(paths: InitPaths & { INSTALL_ROOT: string }, status: ConfigStatus): string {
+  const found = t('init.config.found');
+  const missing = t('init.config.missing');
   const lines: string[] = [
-    'Cortex configuration:',
+    t('init.config.title'),
     `  INSTALL_ROOT:  ${paths.INSTALL_ROOT}`,
     `  DATA_DIR:      ${paths.DATA_DIR}`,
     `  CONFIG_DIR:    ${paths.CONFIG_DIR}`,
@@ -217,29 +220,29 @@ export function formatConfigOutput(paths: InitPaths & { INSTALL_ROOT: string }, 
     `  PROJECTS_DIR:  ${paths.PROJECTS_DIR}`,
     `  WORKSPACE_DIR: ${paths.WORKSPACE_DIR}`,
     '',
-    'Status:',
-    `  DATA_DIR:      ${status.dataDirExists ? 'initialized' : 'not initialized'}`,
-    `  .env:          ${status.dotEnvExists ? 'found' : 'missing'}`,
-    `  mcp-config.json: ${status.mcpConfigExists ? 'found' : 'missing'}`,
-    `  mode.json:     ${status.modeJsonExists ? 'found' : 'missing'}`,
+    t('init.config.statusTitle'),
+    `  DATA_DIR:      ${status.dataDirExists ? t('init.config.initialized') : t('init.config.notInitialized')}`,
+    `  .env:          ${status.dotEnvExists ? found : missing}`,
+    `  mcp-config.json: ${status.mcpConfigExists ? found : missing}`,
+    `  mode.json:     ${status.modeJsonExists ? found : missing}`,
   ];
   return lines.join('\n');
 }
 
 // ─── Backend detection & installation ────────────────────────────
 
-const BACKEND_INFO: Record<InitBackend, { bin: string; npmPackage: string; label: string; loginHint: string }> = {
+const BACKEND_INFO: Record<InitBackend, { bin: string; npmPackage: string; labelKey: string; loginHintKey: string }> = {
   claude: {
     bin: 'claude',
     npmPackage: '@anthropic-ai/claude-code',
-    label: 'Claude Code',
-    loginHint: 'Run `claude login` to authenticate.',
+    labelKey: 'init.backend.label.claude',
+    loginHintKey: 'init.backend.loginHint.claude',
   },
   pi: {
     bin: 'pi',
     npmPackage: '@mariozechner/pi-coding-agent',
-    label: 'PI',
-    loginHint: 'Configure your provider in PI settings.',
+    labelKey: 'init.backend.label.pi',
+    loginHintKey: 'init.backend.loginHint.pi',
   },
 };
 
@@ -344,7 +347,7 @@ function copyToClipboard(text: string): boolean {
 async function promptCopyManifestToClipboard(manifest: string): Promise<void> {
   if (!process.stdin.isTTY) return; // Non-interactive mode, skip
 
-  process.stdout.write('\nPress "c" to copy manifest to clipboard (any other key to skip)...');
+  process.stdout.write(t('init.clipboard.prompt'));
 
   return new Promise((resolve) => {
     const wasRaw = (process.stdin as NodeJS.ReadStream & { isRaw?: boolean }).isRaw ?? false;
@@ -376,10 +379,10 @@ async function promptCopyManifestToClipboard(manifest: string): Promise<void> {
       if (ch.toLowerCase() === 'c') {
         const ok = copyToClipboard(manifest);
         if (ok) {
-          clack.log.success('Manifest copied to clipboard!');
+          clack.log.success(t('init.clipboard.copied'));
         } else {
-          clack.log.warn('Could not copy. If running in a terminal, ensure OSC 52 is enabled.');
-          clack.log.info('The manifest text is shown above — please copy it manually.');
+          clack.log.warn(t('init.clipboard.failed'));
+          clack.log.info(t('init.clipboard.manual'));
         }
       }
       resolve();
@@ -449,23 +452,24 @@ function detectGpuCount(): number {
 async function checkAndInstallBackends(backends: InitBackend[]): Promise<void> {
   for (const backend of backends) {
     const info = BACKEND_INFO[backend];
+    const label = t(info.labelKey);
     const installed = isBackendInstalled(backend);
 
     if (installed) {
-      clack.log.success(`${info.label} is already installed.`);
+      clack.log.success(t('init.backend.alreadyInstalled', { label }));
     } else {
       const s = clack.spinner();
-      s.start(`Installing ${info.label}...`);
+      s.start(t('init.backend.installing', { label }));
       try {
         execSync(getInstallCommand(backend), { stdio: 'pipe', timeout: 120_000 });
-        s.stop(`${info.label} installed successfully.`);
+        s.stop(t('init.backend.installed', { label }));
       } catch (err: any) {
-        s.stop(`Failed to install ${info.label}.`);
-        clack.log.error(`Installation failed. Install manually: ${getInstallCommand(backend)}`);
+        s.stop(t('init.backend.installFailed', { label }));
+        clack.log.error(t('init.backend.installFailedHint', { command: getInstallCommand(backend) }));
       }
     }
 
-    clack.log.info(info.loginHint);
+    clack.log.info(t(info.loginHintKey));
   }
 }
 
@@ -604,8 +608,8 @@ function installService(dataDir: string): void {
     const plistPath = path.join(os.homedir(), 'Library', 'LaunchAgents', plistName);
 
     writeFileSync(plistPath, plistContent);
-    clack.log.success(`launchd plist written to ${plistPath}`);
-    clack.log.info('To start now: launchctl load ' + plistPath);
+    clack.log.success(t('init.service.launchdWritten', { path: plistPath }));
+    clack.log.info(t('init.service.launchdStartHint', { path: plistPath }));
   } else if (platform === 'linux') {
     const unitContent = generateSystemdUnit(user, cortexBin, dataDir);
     const unitName = 'cortex.service';
@@ -617,8 +621,8 @@ function installService(dataDir: string): void {
       mkdirSync(userUnitDir, { recursive: true });
       const userUnitPath = path.join(userUnitDir, unitName);
       writeFileSync(userUnitPath, unitContent);
-      clack.log.success(`systemd unit written to ${userUnitPath}`);
-      clack.log.info('To enable: sudo systemctl --user enable --now cortex');
+      clack.log.success(t('init.service.systemdUserWritten', { path: userUnitPath }));
+      clack.log.info(t('init.service.systemdUserEnableHint'));
       return;
     } catch {
       // Fall through to system-level
@@ -630,20 +634,20 @@ function installService(dataDir: string): void {
         const tmpPath = path.join(os.tmpdir(), unitName);
         writeFileSync(tmpPath, unitContent);
         execSync(`sudo cp ${tmpPath} ${systemPath} && sudo systemctl daemon-reload`, { stdio: 'pipe' });
-        clack.log.success(`systemd unit installed to ${systemPath}`);
-        clack.log.info('To enable: sudo systemctl enable --now cortex');
+        clack.log.success(t('init.service.systemdInstalled', { path: systemPath }));
+        clack.log.info(t('init.service.systemdEnableHint'));
       } catch (err: any) {
-        clack.log.warn(`Failed to install system service: ${err.message}`);
+        clack.log.warn(t('init.service.systemInstallFailed', { message: err.message }));
       }
     } else {
       // No sudo — write to config dir and show instructions
       const localPath = path.join(dataDir, 'config', unitName);
       writeFileSync(localPath, unitContent);
-      clack.log.warn('No sudo access. Service file saved locally.');
-      clack.log.info(`To install manually:\n  sudo cp ${localPath} ${systemPath}\n  sudo systemctl daemon-reload\n  sudo systemctl enable --now cortex`);
+      clack.log.warn(t('init.service.noSudo'));
+      clack.log.info(t('init.service.manualInstallHint', { localPath, systemPath }));
     }
   } else {
-    clack.log.warn(`Service registration is not supported on ${platform}. Start Cortex manually with \`cortex daemon\`.`);
+    clack.log.warn(t('init.service.unsupported', { platform }));
   }
 }
 
@@ -651,40 +655,17 @@ function installService(dataDir: string): void {
 
 function handleCancel(value: unknown): asserts value {
   if (clack.isCancel(value)) {
-    clack.cancel('Init cancelled.');
+    clack.cancel(t('init.cancel'));
     process.exit(0);
   }
 }
 
 async function collectSlackConfig(prefill?: { signingSecret?: string; appToken?: string; botToken?: string }): Promise<SlackInitConfig> {
-  clack.note(SLACK_APP_MANIFEST, 'Slack App Manifest — copy and paste when creating the app');
+  clack.note(SLACK_APP_MANIFEST, t('init.slack.manifestTitle'));
 
   clack.note(
-    [
-      'To set up Slack, you need a Slack App:',
-      '',
-      '1. Go to https://api.slack.com/apps',
-      '2. Click "Create New App" → "From a manifest"',
-      '3. Select your workspace, then paste the manifest (shown above)',
-      '4. Go to "Basic Information" → copy the Signing Secret',
-      '5. Under Basic Information, generate an App-Level Token',
-      '   (scope: connections:write, name it "cortex-socket")',
-      '6. Go to "OAuth & Permissions" → Install to Workspace',
-      '   Copy the *Bot User OAuth Token* after installing',
-      '7. Go to "App Home" → Show Tabs → enable *Messages Tab*',
-      '   and check "Allow users to send messages from the messages tab"',
-      '   (required for DM support)',
-      '',
-      'The manifest includes socket_mode_enabled, so Socket Mode',
-      'is automatically enabled when you import it.',
-      '',
-      'Required Bot Token Scopes (included in manifest):',
-      '  chat:write, im:history, im:write, reactions:read, reactions:write,',
-      '  users:read, commands, app_mentions:read,',
-      '  channels:history, channels:read, groups:history,',
-      '  files:read, files:write, emoji:read, pins:read, pins:write',
-    ].join('\n'),
-    'Slack App Setup Guide',
+    t('init.slack.guide'),
+    t('init.slack.guideTitle'),
   );
 
   await promptCopyManifestToClipboard(SLACK_APP_MANIFEST);
@@ -696,10 +677,10 @@ async function collectSlackConfig(prefill?: { signingSecret?: string; appToken?:
   let botToken: string | symbol;
 
   if (hasPrefill) {
-    clack.log.info('Found existing Slack configuration. Press Enter to skip, or type anything to re-enter.');
+    clack.log.info(t('init.slack.prefillFound'));
     const skip = await clack.text({
-      message: 'Skip Slack configuration? (Enter = skip, any key + Enter = re-enter)',
-      placeholder: 'Press Enter to skip',
+      message: t('init.slack.skipPrompt'),
+      placeholder: t('init.slack.skipPlaceholder'),
       defaultValue: '',
     });
     handleCancel(skip);
@@ -714,27 +695,27 @@ async function collectSlackConfig(prefill?: { signingSecret?: string; appToken?:
 
   if (!signingSecret) {
     signingSecret = await (clack.password as any)({
-      message: 'Step 1/3: SLACK_SIGNING_SECRET (from Basic Information):',
+      message: t('init.slack.signingSecretPrompt'),
       validate(value) {
-        if (!value) return 'Signing secret is required.';
+        if (!value) return t('init.slack.signingSecretRequired');
       },
     });
     handleCancel(signingSecret);
 
     appToken = await (clack.password as any)({
-      message: 'Step 2/3: SLACK_APP_TOKEN (App-Level Token, starts with xapp-):',
+      message: t('init.slack.appTokenPrompt'),
       validate(value) {
-        if (!value) return 'App token is required.';
-        if (!value.startsWith('xapp-')) return 'Token should start with xapp-';
+        if (!value) return t('init.slack.appTokenRequired');
+        if (!value.startsWith('xapp-')) return t('init.slack.appTokenPrefix');
       },
     });
     handleCancel(appToken);
 
     botToken = await (clack.password as any)({
-      message: 'Step 3/3: SLACK_BOT_TOKEN (Bot User OAuth Token, starts with xoxb-):',
+      message: t('init.slack.botTokenPrompt'),
       validate(value) {
-        if (!value) return 'Bot token is required.';
-        if (!value.startsWith('xoxb-')) return 'Token should start with xoxb-';
+        if (!value) return t('init.slack.botTokenRequired');
+        if (!value.startsWith('xoxb-')) return t('init.slack.botTokenPrefix');
       },
     });
     handleCancel(botToken);
@@ -749,41 +730,29 @@ async function collectSlackConfig(prefill?: { signingSecret?: string; appToken?:
 
 async function collectFeishuConfig(): Promise<FeishuInitConfig> {
   clack.note(
-    [
-      'To set up Feishu (飞书), create a Feishu app:',
-      '',
-      '1. Go to https://open.feishu.cn/app',
-      '2. Click "Create Agentic App" (创建agentic应用)',
-      '3. Enter agent name (e.g. CortexAgent), select an avatar, and click Create',
-      '4. After creation, the page will display App ID and App Secret — copy them directly',
-      '5. Enable bot events and subscribe to: im.message.receive_v1',
-      '',
-      'Identity for MCP document operations (docx/wiki/bitable/sheets/drive):',
-      '  - bot:  documents are created/owned by the app (default)',
-      '  - user: documents are created/owned by YOUR Feishu account (Recommended)',
-    ].join('\n'),
-    'Feishu App Setup Guide',
+    t('init.feishu.guide'),
+    t('init.feishu.guideTitle'),
   );
 
   const appId = await clack.text({
-    message: 'FEISHU_APP_ID:',
+    message: t('init.feishu.appIdPrompt'),
     validate(value) {
-      if (!value) return 'App ID is required.';
+      if (!value) return t('init.feishu.appIdRequired');
     },
   });
   handleCancel(appId);
 
   const appSecret = await clack.password({
-    message: 'FEISHU_APP_SECRET:',
+    message: t('init.feishu.appSecretPrompt'),
     validate(value) {
-      if (!value) return 'App secret is required.';
+      if (!value) return t('init.feishu.appSecretRequired');
     },
   });
   handleCancel(appSecret);
 
   const domainRaw = await clack.text({
-    message: 'FEISHU_DOMAIN (optional, "feishu" or "lark"):',
-    placeholder: 'feishu (leave blank to use default)',
+    message: t('init.feishu.domainPrompt'),
+    placeholder: t('init.feishu.domainPlaceholder'),
   });
   handleCancel(domainRaw);
 
@@ -793,10 +762,10 @@ async function collectFeishuConfig(): Promise<FeishuInitConfig> {
     : undefined;
 
   const authMode = await clack.select({
-    message: 'Identity for MCP document operations:',
+    message: t('init.feishu.authModePrompt'),
     options: [
-      { value: 'bot' as const, label: 'bot', hint: 'documents owned by the app' },
-      { value: 'user' as const, label: 'user (Recommended)', hint: 'documents owned by your Feishu account' },
+      { value: 'bot' as const, label: t('init.feishu.authModeBotLabel'), hint: t('init.feishu.authModeBotHint') },
+      { value: 'user' as const, label: t('init.feishu.authModeUserLabel'), hint: t('init.feishu.authModeUserHint') },
     ],
     initialValue: 'user' as const,
   });
@@ -844,18 +813,18 @@ export async function runFeishuUserLogin(
 }
 
 async function collectAnswersInteractive(paths: InitPaths): Promise<InitAnswers> {
-  clack.intro('Cortex Setup');
+  clack.intro(t('init.intro'));
 
   // Step 1: Backend selection
   clack.note(
-    'Both Claude Code and PI support API key access to any model.',
-    'Backend info',
+    t('init.backend.noteBody'),
+    t('init.backend.noteTitle'),
   );
   const backends = await clack.multiselect({
-    message: 'Which backends would you like to use?',
+    message: t('init.backend.prompt'),
     options: [
-      { value: 'claude' as InitBackend, label: 'Claude Code', hint: 'recommended, for Claude subscription' },
-      { value: 'pi' as InitBackend, label: 'PI', hint: 'for other subscription' },
+      { value: 'claude' as InitBackend, label: t('init.backend.claudeLabel'), hint: t('init.backend.claudeHint') },
+      { value: 'pi' as InitBackend, label: t('init.backend.piLabel'), hint: t('init.backend.piHint') },
     ],
     required: true,
   });
@@ -864,10 +833,10 @@ async function collectAnswersInteractive(paths: InitPaths): Promise<InitAnswers>
   // Step 2: Platform selection (multi-select — Slack and Feishu can run simultaneously).
   // Leave empty to skip and configure platforms later by editing .env manually.
   const platformsSel = await clack.multiselect({
-    message: 'Which interaction platform(s) would you like to use? (space to toggle, enter to confirm, leave empty to skip)',
+    message: t('init.platform.prompt'),
     options: [
-      { value: 'slack' as PlatformChoice, label: 'Slack', hint: 'recommended' },
-      { value: 'feishu' as PlatformChoice, label: 'Feishu (飞书)' },
+      { value: 'slack' as PlatformChoice, label: t('init.platform.slackLabel'), hint: t('init.platform.slackHint') },
+      { value: 'feishu' as PlatformChoice, label: t('init.platform.feishuLabel') },
     ],
     required: false,
   });
@@ -890,12 +859,12 @@ async function collectAnswersInteractive(paths: InitPaths): Promise<InitAnswers>
     // hint to run `cortex feishu login` later). Best-effort: a failed/abandoned login won't abort
     // init — credentials are already captured in feishuConfig and the operator can retry.
     if (feishuConfig.authMode === 'user') {
-      clack.log.info('Starting Feishu user login (OAuth device flow)...');
+      clack.log.info(t('init.feishu.loginStarting'));
       const res = await runFeishuUserLogin(feishuConfig, paths.CONFIG_DIR);
       if (res.exitCode === 0) {
-        clack.log.success('Feishu user login complete.');
+        clack.log.success(t('init.feishu.loginComplete'));
       } else {
-        clack.log.warn('Feishu user login did not complete. Retry later with `cortex feishu login`.');
+        clack.log.warn(t('init.feishu.loginIncomplete'));
       }
     }
   }
@@ -903,11 +872,11 @@ async function collectAnswersInteractive(paths: InitPaths): Promise<InitAnswers>
   // Step 3: Machine identity
   const hostname = os.hostname();
   const machineName = await clack.text({
-    message: 'Machine name for this device:',
+    message: t('init.machine.prompt'),
     placeholder: hostname,
     defaultValue: hostname,
     validate(value) {
-      if (!value) return 'Machine name is required.';
+      if (!value) return t('init.machine.required');
     },
   });
   handleCancel(machineName);
@@ -915,45 +884,34 @@ async function collectAnswersInteractive(paths: InitPaths): Promise<InitAnswers>
   // GPU detection
   const gpuCount = detectGpuCount();
   if (gpuCount > 0) {
-    clack.log.success(`Detected ${gpuCount} NVIDIA GPU(s)`);
+    clack.log.success(t('init.machine.gpuDetected', { count: gpuCount }));
   } else {
-    clack.log.info('No NVIDIA GPU detected (gpuCount=0)');
+    clack.log.info(t('init.machine.gpuNone'));
   }
 
   // Step 4: Gateway usage
   clack.note(
-    [
-      'Cortex includes an open-source local gateway that proxies all',
-      'LLM calls, providing multi-key rotation, automatic failover,',
-      'and per-request cost tracking.',
-      '',
-      'You can optionally share anonymous token usage with aistatus.cc,',
-      'an AI model status monitoring site. Your token usage will appear',
-      'on the public leaderboard (name + org + token counts). Email is',
-      'used only as an identity key and is never displayed.',
-      '',
-      'Learn more: https://aistatus.cc',
-    ].join('\n'),
-    'Gateway & aistatus',
+    t('init.gateway.note'),
+    t('init.gateway.noteTitle'),
   );
 
   const enableGateway = await clack.confirm({
-    message: 'Enable token usage reporting to aistatus?',
+    message: t('init.gateway.enablePrompt'),
     initialValue: true,
   });
   handleCancel(enableGateway);
 
   let gatewayUsage: GatewayUsageConfig = { enabled: false };
   if (enableGateway) {
-    const name = await clack.text({ message: 'Name:', placeholder: 'your name' });
+    const name = await clack.text({ message: t('init.gateway.namePrompt'), placeholder: t('init.gateway.namePlaceholder') });
     handleCancel(name);
 
-    const org = await clack.text({ message: 'Organization:', placeholder: 'your organization' });
+    const org = await clack.text({ message: t('init.gateway.orgPrompt'), placeholder: t('init.gateway.orgPlaceholder') });
     handleCancel(org);
 
     const email = await clack.text({
-      message: 'Email (identity only, not displayed):',
-      placeholder: 'you@example.com',
+      message: t('init.gateway.emailPrompt'),
+      placeholder: t('init.gateway.emailPlaceholder'),
     });
     handleCancel(email);
 
@@ -962,7 +920,7 @@ async function collectAnswersInteractive(paths: InitPaths): Promise<InitAnswers>
 
   // Step 5: Service registration
   const wantService = await clack.confirm({
-    message: 'Register Cortex as a system service (auto-start on boot)?',
+    message: t('init.serviceRegister.prompt'),
     initialValue: true,
   });
   handleCancel(wantService);
@@ -1155,7 +1113,7 @@ export function getGitInstallHint(): string {
 export function ensureGitInstalled(): boolean {
   if (isGitInstalled()) return true;
 
-  clack.log.warn('Git is required but was not found on your system.');
+  clack.log.warn(t('init.git.required'));
 
   // Build the auto-install command for the current platform
   let installCmd: string | null = null;
@@ -1176,21 +1134,21 @@ export function ensureGitInstalled(): boolean {
 
   if (installCmd) {
     const s = clack.spinner();
-    s.start('Attempting automatic git installation...');
+    s.start(t('init.git.autoInstalling'));
     try {
       execSync(installCmd, { stdio: 'pipe', timeout: 120_000 });
-      s.stop('Git installed successfully.');
+      s.stop(t('init.git.installed'));
       // Verify the install actually put git on PATH
       if (isGitInstalled()) return true;
-      clack.log.warn('Git was installed but is not on PATH. You may need to restart your shell.');
+      clack.log.warn(t('init.git.notOnPath'));
     } catch (err: any) {
-      s.stop('Automatic installation failed.');
+      s.stop(t('init.git.autoInstallFailed'));
       clack.log.warn(err.message);
     }
   }
 
   const hint = getGitInstallHint();
-  clack.log.info(`Please install git manually:  ${hint}`);
+  clack.log.info(t('init.git.manualHint', { hint }));
   return false;
 }
 
@@ -1201,7 +1159,7 @@ function ensureGitRepo(dataDir: string): void {
   try {
     execSync('git init', { cwd: dataDir, stdio: 'pipe' });
   } catch (err: any) {
-    clack.log.warn(`git init failed: ${err.message}`);
+    clack.log.warn(t('init.git.initFailed', { message: err.message }));
   }
 }
 
@@ -1386,7 +1344,7 @@ async function pickPlanExecuteInteractive(
   // If existing profiles.json has plan/execute, ask before overwriting
   if (detectExistingPlanOrExecute(configDir)) {
     const confirm = await clack.confirm({
-      message: 'Existing `plan` or `execute` profile detected. Overwrite with a new selection?',
+      message: t('init.gatewaySetup.overwritePrompt'),
       initialValue: false,
     });
     handleCancel(confirm);
@@ -1413,14 +1371,14 @@ async function pickPlanExecuteInteractive(
   const firstChoiceValue = formatValue(choices[0]);
 
   const planSel = await clack.select({
-    message: 'Pick model for the `plan` profile (used by executor agents — planner, doc-writer, coder, etc.):',
+    message: t('init.gatewaySetup.planPrompt'),
     options,
     initialValue: firstChoiceValue,
   });
   handleCancel(planSel);
 
   const execSel = await clack.select({
-    message: 'Pick model for the `execute` profile (used by reviewer agents — reviewer, doc-reviewer, coder-reviewer, etc.):',
+    message: t('init.gatewaySetup.executePrompt'),
     options,
     initialValue: firstChoiceValue,
   });
@@ -1438,7 +1396,7 @@ async function pickPlanExecuteInteractive(
   let planFallback: ModelChoice[] | undefined;
   if (planFallbackOptions.length > 0) {
     const sel = await clack.multiselect({
-      message: 'Pick fallback models for `plan` (in order, space to toggle, enter to confirm, leave empty for no fallback):',
+      message: t('init.gatewaySetup.planFallbackPrompt'),
       options: planFallbackOptions,
       required: false,
       initialValues: [],
@@ -1451,7 +1409,7 @@ async function pickPlanExecuteInteractive(
   let executeFallback: ModelChoice[] | undefined;
   if (execFallbackOptions.length > 0) {
     const sel = await clack.multiselect({
-      message: 'Pick fallback models for `execute` (in order, space to toggle, enter to confirm, leave empty for no fallback):',
+      message: t('init.gatewaySetup.executeFallbackPrompt'),
       options: execFallbackOptions,
       required: false,
       initialValues: [],
@@ -1465,7 +1423,7 @@ async function pickPlanExecuteInteractive(
   let extraProfiles: ModelChoice[] | undefined;
   if (options.length > 0) {
     const sel = await clack.multiselect({
-      message: 'Pick additional models to register as standalone profiles (profile name = model name, space to toggle, enter to confirm, leave empty to skip):',
+      message: t('init.gatewaySetup.extraProfilesPrompt'),
       options,
       required: false,
       initialValues: [],
@@ -1495,8 +1453,8 @@ async function runGatewaySetup(
   const endpoints = discoverEndpoints(backends);
 
   if (endpoints.length === 0) {
-    clack.log.warn('No backends discovered. Make sure you have logged into Claude Code and/or PI first.');
-    clack.log.info('You can re-run detection later with: cortex setup-gateway');
+    clack.log.warn(t('init.gatewaySetup.noBackends'));
+    clack.log.info(t('init.gatewaySetup.rerunHint'));
     return;
   }
 
@@ -1504,18 +1462,18 @@ async function runGatewaySetup(
   const summary = endpoints.map(ep =>
     `  ${ep.mode}/${ep.endpoint}: ${ep.models.slice(0, 3).join(', ')}${ep.models.length > 3 ? ', ...' : ''} (${ep.keys.length > 0 ? 'with key' : 'passthrough'})`,
   ).join('\n');
-  clack.log.success(`Discovered ${endpoints.length} endpoint modes:\n${summary}`);
+  clack.log.success(t('init.gatewaySetup.discovered', { count: endpoints.length, summary }));
 
   // Generate gateway.yaml — scoped to gatewayConfigDir when provided (test/alt env),
   // otherwise defaults to ~/.aistatus/gateway.yaml (production). Merge-aware: preserves
   // hand-maintained modes/keys and never drops previously-configured modes if discovery
   // under-reports (e.g. a transient `pi --list-models` failure).
   const { path: gatewayPath, result: mergeResult } = writeMergedGatewayYaml(endpoints, gatewayConfigDir);
-  clack.log.success(`Gateway config written to ${gatewayPath}`);
+  clack.log.success(t('init.gatewaySetup.gatewayWritten', { path: gatewayPath }));
   if (mergeResult.droppedFromDiscovery.length > 0) {
     const list = mergeResult.droppedFromDiscovery.map(p => `${p.mode}/${p.endpoint}`).join(', ');
-    clack.log.warn(`Preserved ${mergeResult.droppedFromDiscovery.length} existing gateway mode(s) that discovery did not report: ${list}`);
-    clack.log.info('If these should have been auto-detected, check `pi /login` / `pi --list-models` and re-run.');
+    clack.log.warn(t('init.gatewaySetup.preservedModes', { count: mergeResult.droppedFromDiscovery.length, list }));
+    clack.log.info(t('init.gatewaySetup.preservedModesHint'));
   }
 
   // Resolve plan/execute choices + fallback chains + extra profiles + overwrite intent.
@@ -1552,20 +1510,20 @@ async function runGatewaySetup(
     extraProfiles,
     overwrite,
   });
-  clack.log.success(`Profiles written to ${profilesPath}`);
+  clack.log.success(t('init.gatewaySetup.profilesWritten', { path: profilesPath }));
 
   // Show profile summary (reflects what was actually generated, not what was merged)
   const profiles = generateProfiles(endpoints, { planChoice, executeChoice, planFallback, executeFallback, extraProfiles });
   const profileNames = Object.keys(profiles.profiles).join(', ');
-  clack.log.info(`Generated profiles: ${profileNames} (default: ${profiles.defaultProfile})`);
+  clack.log.info(t('init.gatewaySetup.generatedProfiles', { names: profileNames, default: profiles.defaultProfile }));
 
   // Validate profile ↔ gateway mode coupling. A profile referencing a non-existent gateway mode is
   // exactly what produces a silent `400 Unknown mode: <x>` at runtime. Non-fatal — warn only.
   const issues = validateProfilesAgainstGateway(mergeResult.endpoints, paths.CONFIG_DIR);
   if (issues.length > 0) {
     const lines = issues.map(i => `  - ${i.profile}: ${i.reason}`).join('\n');
-    clack.log.warn(`${issues.length} profile(s) reference a gateway mode that is not configured:\n${lines}`);
-    clack.log.info('These would fail at runtime with "Unknown mode". Add the mode to gateway.yaml or fix the profile.');
+    clack.log.warn(t('init.gatewaySetup.profileIssues', { count: issues.length, lines }));
+    clack.log.info(t('init.gatewaySetup.profileIssuesHint'));
   }
 }
 
@@ -1614,24 +1572,18 @@ export async function runInit(options: InitOptions = {}): Promise<void> {
   if (processStdin.isTTY) {
     const loginHints = answers.backends.map(b => {
       const info = BACKEND_INFO[b];
-      return `  • ${info.label}:  ${info.loginHint.replace(/^Run /, '').replace(/\.$/, '')}`;
+      return `  • ${t(info.labelKey)}:  ${t(info.loginHintKey).replace(/^Run /, '').replace(/\.$/, '')}`;
     }).join('\n');
 
     clack.note(
-      [
-        'Cortex can auto-detect your Claude Code and PI configurations',
-        'to generate gateway.yaml and profiles.json automatically.',
-        '',
-        'Make sure you have logged into:',
-        loginHints,
-      ].join('\n'),
-      'Gateway & Profile Setup',
+      t('init.gatewayProfile.note', { loginHints }),
+      t('init.gatewayProfile.noteTitle'),
     );
 
     let gatewayDone = false;
     while (!gatewayDone) {
       const ready = await clack.confirm({
-        message: 'Have you logged in and are ready to auto-detect?',
+        message: t('init.gatewayProfile.readyPrompt'),
         initialValue: true,
       });
       handleCancel(ready);
@@ -1641,17 +1593,17 @@ export async function runInit(options: InitOptions = {}): Promise<void> {
         gatewayDone = true;
       } else {
         // User hasn't logged in yet — let them choose to go log in or skip entirely
-        clack.log.info(`Please log in now. Once done, come back and select "Yes".\n${loginHints}`);
+        clack.log.info(t('init.gatewayProfile.loginNow', { loginHints }));
         const action = await clack.select({
-          message: 'What would you like to do?',
+          message: t('init.gatewayProfile.actionPrompt'),
           options: [
-            { value: 'retry', label: 'I\'ve logged in, retry detection' },
-            { value: 'skip', label: 'Skip for now (run `cortex setup-gateway` later)' },
+            { value: 'retry', label: t('init.gatewayProfile.retryLabel') },
+            { value: 'skip', label: t('init.gatewayProfile.skipLabel') },
           ],
         });
         handleCancel(action);
         if (action === 'skip') {
-          clack.log.info('Skipped. Run `cortex setup-gateway` later to auto-configure.');
+          clack.log.info(t('init.gatewayProfile.skipped'));
           gatewayDone = true;
         }
         // action === 'retry' → loop continues, re-prompt the confirm
@@ -1684,5 +1636,5 @@ export async function runInit(options: InitOptions = {}): Promise<void> {
   }
 
   // 9. Done
-  clack.outro(`Cortex initialized at ${paths.DATA_DIR}. Run \`cortex start\` to launch.`);
+  clack.outro(t('init.outro', { dataDir: paths.DATA_DIR }));
 }

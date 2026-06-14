@@ -1,0 +1,50 @@
+// input:  nothing (leaf data slice)
+// output: statusEn / statusZh — message slice (filled by i18n extraction)
+// pos:    one locale slice; aggregated by core/locales/en.ts & zh.ts barrels
+// >>> Keep en and zh keys in lockstep (zh typed against keyof typeof statusEn) <<<
+
+export const statusEn = {
+  // --- Status / lifecycle phrases ---
+  'status.processing': 'Processing',
+  'status.done': 'Done',
+  'status.waitingForUserInput': 'Waiting for user input',
+  'status.cancelled': 'Cancelled',
+  'status.error': 'Error',
+  'status.supersededByEdit': 'Superseded by edit',
+  'status.retryEdited': 'edited',
+  'status.retry': 'Retry',
+  'status.rateLimitedExhausted': 'Rate limited — all fallbacks exhausted',
+  'status.supersededSeeNewReply': 'see new reply',
+  'status.processingAskResponse': 'Processing AskUserQuestion response...',
+  'status.errorBody': 'Error: ${message}',
+  // --- Execution report ---
+  'status.noRunningExecutions': 'No running executions.',
+  'status.runningExecutions': 'Running executions: ${count}',
+  // --- Button labels ---
+  'btn.cancel': 'Cancel',
+  'btn.resume': 'Resume',
+  'btn.new': 'New',
+} as const;
+
+export const statusZh: Record<keyof typeof statusEn, string> = {
+  // --- Status / lifecycle phrases ---
+  'status.processing': '处理中',
+  'status.done': '完成',
+  'status.waitingForUserInput': '等待用户输入',
+  'status.cancelled': '已取消',
+  'status.error': '错误',
+  'status.supersededByEdit': '已被编辑取代',
+  'status.retryEdited': '已编辑',
+  'status.retry': '重试',
+  'status.rateLimitedExhausted': '触发限流 — 所有回退已用尽',
+  'status.supersededSeeNewReply': '查看新回复',
+  'status.processingAskResponse': '正在处理 AskUserQuestion 回复……',
+  'status.errorBody': '错误：${message}',
+  // --- Execution report ---
+  'status.noRunningExecutions': '没有正在运行的执行。',
+  'status.runningExecutions': '正在运行的执行：${count}',
+  // --- Button labels ---
+  'btn.cancel': '取消',
+  'btn.resume': '恢复',
+  'btn.new': '新建',
+};

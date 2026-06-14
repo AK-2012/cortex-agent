@@ -5,6 +5,7 @@
 
 import type { RichBlock, ModalDefinition, ActionElement } from './types.js';
 import { Icons } from '../core/icons.js';
+import { t } from '../core/i18n.js';
 
 // --- Question group types ---
 
@@ -49,7 +50,7 @@ export function buildQuestionGroupBlocks(group: QuestionGroup): RichBlock[] {
       type: 'actions',
       elements: [{
         type: 'button' as const,
-        text: `Answer (${group.answers.size}/${group.questions.length})`,
+        text: t('modal.answer', { answered: group.answers.size, total: group.questions.length }),
         actionId: 'ask_user_question_open_modal',
         value: group.groupId,
         style: 'primary' as const,
@@ -74,9 +75,9 @@ export function buildQuestionModalDefinition(group: QuestionGroup): ModalDefinit
       fields.push({
         type: q.multiSelect ? 'multi_select' : 'select',
         blockId: `q_${qIdx}`,
-        label: q.multiSelect ? 'Select one or more' : 'Select one',
+        label: q.multiSelect ? t('modal.selectOneOrMore') : t('modal.selectOne'),
         actionId: 'selection',
-        placeholder: q.multiSelect ? 'Select one or more' : 'Select one',
+        placeholder: q.multiSelect ? t('modal.selectOneOrMore') : t('modal.selectOne'),
         options: q.options.map((option, optIdx) => ({
           label: option.label,
           value: String(optIdx),
@@ -86,9 +87,9 @@ export function buildQuestionModalDefinition(group: QuestionGroup): ModalDefinit
       fields.push({
         type: 'text_input',
         blockId: `q_${qIdx}_other`,
-        label: 'Or type your answer',
+        label: t('modal.typeAnswerLabel'),
         actionId: 'other_text',
-        placeholder: 'Custom answer (overrides selection above)',
+        placeholder: t('modal.customAnswerPlaceholder'),
         optional: true,
       });
     } else {
@@ -96,18 +97,18 @@ export function buildQuestionModalDefinition(group: QuestionGroup): ModalDefinit
       fields.push({
         type: 'text_input',
         blockId: `q_${qIdx}_other`,
-        label: 'Your answer',
+        label: t('modal.yourAnswerLabel'),
         actionId: 'other_text',
-        placeholder: 'Type your answer',
+        placeholder: t('modal.yourAnswerPlaceholder'),
         optional: false,
       });
     }
   }
   return {
     callbackId: 'ask_user_question_modal_submit',
-    title: 'Questions',
-    submitLabel: 'Submit',
-    closeLabel: 'Cancel',
+    title: t('modal.questionsTitle'),
+    submitLabel: t('modal.submit'),
+    closeLabel: t('modal.cancel'),
     privateMetadata: JSON.stringify({ groupId: group.groupId }),
     fields,
   };
@@ -118,11 +119,11 @@ export function buildQuestionModalDefinition(group: QuestionGroup): ModalDefinit
 export function buildPlanApprovalContent(requestId: string): { richBlocks: RichBlock[]; actions: ActionElement[] } {
   return {
     richBlocks: [
-      { type: 'section', text: `${Icons.memo} *Plan ready for review.* Approve to proceed or provide feedback.` },
+      { type: 'section', text: `${Icons.memo} ${t('modal.planReady')}` },
     ],
     actions: [
-      { type: 'button', text: 'Approve', actionId: 'hook_plan_approve', value: requestId, style: 'primary' },
-      { type: 'button', text: 'Provide Feedback', actionId: 'hook_plan_feedback', value: requestId },
+      { type: 'button', text: t('modal.approve'), actionId: 'hook_plan_approve', value: requestId, style: 'primary' },
+      { type: 'button', text: t('modal.provideFeedback'), actionId: 'hook_plan_feedback', value: requestId },
     ],
   };
 }
@@ -130,17 +131,17 @@ export function buildPlanApprovalContent(requestId: string): { richBlocks: RichB
 export function buildPlanFeedbackModal(requestId: string): ModalDefinition {
   return {
     callbackId: 'hook_plan_feedback_submit',
-    title: 'Plan Feedback',
-    submitLabel: 'Submit',
-    closeLabel: 'Cancel',
+    title: t('modal.planFeedbackTitle'),
+    submitLabel: t('modal.submit'),
+    closeLabel: t('modal.cancel'),
     privateMetadata: JSON.stringify({ requestId }),
     fields: [{
       type: 'text_input',
       blockId: 'feedback',
-      label: 'Your feedback (Cortex will revise the plan)',
+      label: t('modal.feedbackLabel'),
       actionId: 'text',
       multiline: true,
-      placeholder: 'What should be changed?',
+      placeholder: t('modal.feedbackPlaceholder'),
     }],
   };
 }

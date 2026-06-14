@@ -2,6 +2,7 @@ import { createLogger } from '@core/log.js';
 import type { Destination, PlatformAdapter } from '@platform/index.js';
 import type { CommandResult } from './command-context.js';
 import { Icons } from '../../../core/icons.js';
+import { t } from '../../../core/i18n.js';
 import type { CommandActionRouter } from '@orch/interactions/command-action-router.js';
 import { closeSession, getActiveBackend, getActiveProfile } from '@domain/agents/index.js';
 
@@ -59,7 +60,7 @@ export async function handleNewCmd(
   const cleared = planApprovals.clearByChannel(channel);
   if (cleared > 0) log.info('Cleared pending plan for channel:', channel);
   log.info('New conversation started in channel:', channel);
-  await adapter.postMessage(dest, { text: `--- new conversation --- (profile: ${profileName})` });
+  await adapter.postMessage(dest, { text: t('cmd.session.newConversation', { profile: profileName }) });
 }
 
 const MAX_RESUME_BUTTONS = 10;
@@ -74,16 +75,16 @@ export function createResumeHandler(router?: CommandActionRouter) {
       if (!record) {
         if (ctx.messageRef) {
           await adapter.updateMessage(ctx.messageRef, {
-            text: `${Icons.error} Session \`${name}\` not found.`,
+            text: `${Icons.error} ${t('cmd.session.notFound', { name })}`,
           }).catch(() => {});
         }
         return;
       }
       await attachExistingSession(ctx.channelId, { sessionId: record.sessionId, sessionName: name, backend: record.backend, profileName: record.profileName });
-      const profileNote = record.profileName ? ` (profile: ${record.profileName})` : '';
+      const profileNote = record.profileName ? t('cmd.session.profileNote', { profile: record.profileName }) : '';
       if (ctx.messageRef) {
         await adapter.updateMessage(ctx.messageRef, {
-          text: `${Icons.refresh} Switched to session \`${name}\`${profileNote}`,
+          text: `${Icons.refresh} ${t('cmd.session.switched', { name, profileNote })}`,
         }).catch(() => {});
       }
     };
@@ -105,26 +106,26 @@ export function createResumeHandler(router?: CommandActionRouter) {
       const name = args[0];
       const record = await sessionStore.lookupSession(name);
       if (!record) {
-        await adapter.postMessage(dest, { text: `${Icons.error} Session \`${name}\` not found. Run \`!resume\` to list sessions.` });
+        await adapter.postMessage(dest, { text: `${Icons.error} ${t('cmd.session.notFoundList', { name })}` });
         return;
       }
       await attachExistingSession(channel, { sessionId: record.sessionId, sessionName: name, backend: record.backend, profileName: record.profileName });
-      const profileNote = record.profileName ? ` (profile: ${record.profileName})` : '';
-      await adapter.postMessage(dest, { text: `${Icons.refresh} Switched to session \`${name}\`${profileNote}` });
+      const profileNote = record.profileName ? t('cmd.session.profileNote', { profile: record.profileName }) : '';
+      await adapter.postMessage(dest, { text: `${Icons.refresh} ${t('cmd.session.switched', { name, profileNote })}` });
       return;
     }
 
     const sessions = await sessionStore.listRecentSessions(10);
     if (sessions.length === 0) {
-      await adapter.postMessage(dest, { text: 'No sessions recorded yet.' });
+      await adapter.postMessage(dest, { text: t('cmd.session.noSessions') });
       return;
     }
     const activeId = await sessionStore.getActiveSessionName(channel, getActiveBackend());
     const now = Date.now();
-    const lines = ['*Recent sessions*'];
+    const lines = [t('cmd.session.recentHeader')];
     for (const s of sessions) {
       const isActive = s.name === activeId;
-      const activeTag = isActive ? ' *(active)*' : '';
+      const activeTag = isActive ? t('cmd.session.activeTag') : '';
       const ago = formatTimeAgo(now - new Date(s.lastUsedAt).getTime());
       const label = s.label ? ` — ${s.label}` : '';
       const kind = s.kind === 'scheduled' ? ` ${Icons.scheduled}` : '';

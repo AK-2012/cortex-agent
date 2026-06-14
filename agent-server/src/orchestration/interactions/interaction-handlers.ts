@@ -22,6 +22,7 @@ import { conversationLedger } from '@store/conversation-ledger-repo.js';
 import { closeSession, getActiveBackend, getActiveProfile, setActiveProfile, resolveBackendForChannel } from '@domain/agents/index.js';
 import { fireAndForgetPreCloseHook } from '@domain/sessions/session-hooks.js';
 import { Icons } from '../../core/icons.js';
+import { t } from '../../core/i18n.js';
 import * as sessionBackup from '@domain/sessions/session-backup.js';
 import { cancelThread as cancelThreadById } from '@domain/threads/index.js';
 import type { PendingPlan } from './plan-approvals.js';
@@ -55,7 +56,7 @@ async function handleOpenModal(ctx: ActionContext): Promise<void> {
   const group = askUserQuestion.getGroup(ctx.value);
   if (!group || askUserQuestion.isExpired(group)) {
     if (group && askUserQuestion.isExpired(group)) askUserQuestion.deleteGroup(group.groupId);
-    const msg = group ? 'This AskUserQuestion prompt has expired. Please ask again if you still need it.' : 'This AskUserQuestion prompt is no longer active.';
+    const msg = group ? t('interaction.askExpired') : t('interaction.askInactive');
     if (ctx.channelId) {
       const expiredDest: Destination = { type: 'interactive-reply', conduit: ctx.channelId, sessionId: '' };
       await _adapter.postMessage(expiredDest, { text: msg }).catch(() => {});
@@ -131,7 +132,7 @@ function collectModalAnswers(group: QuestionGroup, values: Record<string, Record
       if (idx != null) answer = q.options[parseInt(idx)]?.label;
     }
     if (!answer || (Array.isArray(answer) && answer.length === 0)) {
-      errors[`q_${qIdx}`] = 'Please select an option or type a custom answer.';
+      errors[`q_${qIdx}`] = t('interaction.selectOrType');
     } else {
       collected.set(q.pendingId, { header: q.header, value: answer });
     }
@@ -145,7 +146,7 @@ async function updateQuestionMessage(group: QuestionGroup & { responseMessageTs?
   await _adapter.updateMessage(
     { conduit: group.channel, messageId: group.responseMessageTs },
     {
-      text: `Questions (${group.answers.size}/${group.questions.length} answered)`,
+      text: t('interaction.questionsProgress', { answered: group.answers.size, total: group.questions.length }),
       richBlocks: askUserQuestion.buildQuestionGroupBlocks(group),
     },
   ).catch(() => {});
@@ -197,8 +198,8 @@ function registerExitPlanModeHandlers(adapter: PlatformAdapter): void {
       await adapter.updateMessage(
         ctx.messageRef,
         {
-          text: `${Icons.ok} Plan approved \u2014 Cortex will proceed.`,
-          richBlocks: [{ type: 'section', text: `${Icons.ok} *Plan approved* \u2014 Cortex will proceed.` }],
+          text: `${Icons.ok} ${t('interaction.planApproved')}`,
+          richBlocks: [{ type: 'section', text: `${Icons.ok} ${t('interaction.planApprovedRich')}` }],
         },
       ).catch(() => {});
     }
@@ -215,12 +216,12 @@ function registerExitPlanModeHandlers(adapter: PlatformAdapter): void {
     const { requestId } = JSON.parse(ctx.privateMetadata);
     const pending = planApprovals.reject(requestId);
     if (!pending) return;
-    const feedback = ctx.values?.feedback?.text?.value || 'No specific feedback';
+    const feedback = ctx.values?.feedback?.text?.value || t('interaction.noSpecificFeedback');
     // PI path: send extension_ui_response directly; Claude path: resolve pending HTTP request
     if (!tryResolvePIPlan(pending, feedback)) {
       resolveHookRequest(requestId, { approved: false, reason: feedback });
     }
-    const feedbackText = `${Icons.edit} Plan feedback sent \u2014 Cortex will revise.\n> ${feedback}`;
+    const feedbackText = `${Icons.edit} ${t('interaction.planFeedbackSent', { feedback })}`;
     const streamingCb = getStreamingCallback(pending.channel);
     const feedbackDest: Destination = { type: 'interactive-reply', conduit: pending.channel, sessionId: '' };
     if (streamingCb) {
@@ -268,7 +269,7 @@ async function handleStatusCancel(ctx: ActionContext): Promise<void> {
     conduitQueues.delete(exec.channel ?? channel);
     if (ctx.messageRef) {
       await _adapter.updateMessage(ctx.messageRef, {
-        text: `${Icons.stopped} Cancelled. Session preserved — next message will resume.`,
+        text: `${Icons.stopped} ${t('interaction.cancelledPreserved')}`,
       }).catch(() => {});
     }
     return;
@@ -308,10 +309,10 @@ async function handleStatusResume(ctx: ActionContext): Promise<void> {
   await conversationLedger.switchSession(ctx.channelId, {
     sessionId: record.sessionId, sessionName, backend: record.backend, profileName: record.profileName,
   });
-  const profileNote = record.profileName ? ` (profile: ${record.profileName})` : '';
+  const profileNote = record.profileName ? t('interaction.sessionProfileNote', { profileName: record.profileName }) : '';
   const resumeDest: Destination = { type: 'interactive-reply', conduit: ctx.channelId, sessionId: record.sessionId ?? '' };
   await _adapter.postMessage(resumeDest, {
-    text: `${Icons.refresh} Session \`${sessionName}\` active — send your message below.${profileNote}`,
+    text: `${Icons.refresh} ${t('interaction.sessionActive', { sessionName, profileNote })}`,
   }).catch(() => {});
 }
 
@@ -336,6 +337,6 @@ async function handleStatusNew(ctx: ActionContext): Promise<void> {
   planApprovals.clearByChannel(channel);
   const newDest: Destination = { type: 'interactive-reply', conduit: ctx.channelId, sessionId: '' };
   await _adapter.postMessage(newDest, {
-    text: `--- new conversation --- (profile: ${profileName})`,
+    text: t('interaction.newConversation', { profileName }),
   }).catch(() => {});
 }

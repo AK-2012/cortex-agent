@@ -1,5 +1,6 @@
 import type { Destination, PlatformAdapter } from '@platform/index.js';
 import { Icons } from '../../../core/icons.js';
+import { t } from '../../../core/i18n.js';
 import type { CommandResult } from './command-context.js';
 import type { CommandActionRouter } from '@orch/interactions/command-action-router.js';
 import type { Task } from '@core/task-parser.js';
@@ -22,8 +23,8 @@ function formatTaskList(tasks: Task[], filter: TaskFilter, project: string): str
     }
   });
 
-  const filterLabel = filter === 'all' ? '' : ` — ${filter}`;
-  const lines = [`*Tasks for \`${project}\`* (${filtered.length}/${tasks.length})${filterLabel}\n`];
+  const filterLabel = filter === 'all' ? '' : t('cmd.task.filterLabel', { filter });
+  const lines = [`${t('cmd.task.header', { project, shown: filtered.length, total: tasks.length, filterLabel })}\n`];
 
   for (const task of filtered) {
     const status = task.status === 'done' ? Icons.ok : (task.blocked_by ? Icons.blocked : (task.claimed_by ? Icons.refresh : (task.paused ? Icons.paused : Icons.pending)));
@@ -32,25 +33,25 @@ function formatTaskList(tasks: Task[], filter: TaskFilter, project: string): str
     if (task.priority) tags.push(task.priority);
     if (task.gpu) tags.push(`gpu:${task.gpu}`);
 
-    const statusLabel = task.status === 'done' ? 'completed'
-      : task.blocked_by ? `blocked: ${task.blocked_by}`
-      : task.claimed_by ? `in-progress: ${task.claimed_by}`
-      : task.paused ? 'paused'
-      : (task.approval_needed && !task.approved_at) ? 'approval-needed'
-      : isActionable(task, completed) ? 'actionable'
-      : 'open';
+    const statusLabel = task.status === 'done' ? t('cmd.task.statusCompleted')
+      : task.blocked_by ? t('cmd.task.statusBlocked', { by: task.blocked_by })
+      : task.claimed_by ? t('cmd.task.statusInProgress', { by: task.claimed_by })
+      : task.paused ? t('cmd.task.statusPaused')
+      : (task.approval_needed && !task.approved_at) ? t('cmd.task.statusApprovalNeeded')
+      : isActionable(task, completed) ? t('cmd.task.statusActionable')
+      : t('cmd.task.statusOpen');
 
     lines.push(`${status} ${id} *${task.text}*`);
-    lines.push(`    Status: ${statusLabel} · Priority: ${task.priority}`);
-    if (tags.length) lines.push(`    Tags: ${tags.join(', ')}`);
-    if (task.why) lines.push(`    Why: ${task.why}`);
-    if (task.done_when) lines.push(`    Done when: ${task.done_when}`);
-    if (task.depends_on.length) lines.push(`    Depends on: ${task.depends_on.join(', ')}`);
+    lines.push(t('cmd.task.statusLine', { status: statusLabel, priority: task.priority }));
+    if (tags.length) lines.push(t('cmd.task.tagsLine', { tags: tags.join(', ') }));
+    if (task.why) lines.push(t('cmd.task.whyLine', { why: task.why }));
+    if (task.done_when) lines.push(t('cmd.task.doneWhenLine', { doneWhen: task.done_when }));
+    if (task.depends_on.length) lines.push(t('cmd.task.dependsLine', { depends: task.depends_on.join(', ') }));
     lines.push('');
   }
 
   if (filtered.length === 0) {
-    lines.push(`No ${filter} tasks found.`);
+    lines.push(t('cmd.task.noneFound', { filter }));
   }
 
   return lines.join('\n');
@@ -78,10 +79,10 @@ function textToSectionBlocks(text: string): import('@platform/index.js').RichBlo
 
 function buildFilterButtons(project: string): import('@platform/index.js').ActionElement[] {
   const TASK_FILTERS: { label: string; value: string }[] = [
-    { label: 'All', value: 'all' },
-    { label: 'Actionable', value: 'actionable' },
-    { label: 'In Progress', value: 'in-progress' },
-    { label: 'Blocked', value: 'blocked' },
+    { label: t('cmd.task.filterAll'), value: 'all' },
+    { label: t('cmd.task.filterActionable'), value: 'actionable' },
+    { label: t('cmd.task.filterInProgress'), value: 'in-progress' },
+    { label: t('cmd.task.filterBlocked'), value: 'blocked' },
   ];
   return TASK_FILTERS.map(f => ({
     type: 'button' as const,
@@ -123,18 +124,18 @@ export function createTasksHandler(router?: CommandActionRouter) {
     const dest: Destination = { type: 'interactive-reply', conduit: channel, sessionId: '' };
     const args = trimmedMessage.split(/\s+/).slice(1);
     if (args.length === 0) {
-      await adapter.postMessage(dest, { text: `${Icons.error} Usage: \`!tasks <project>\`` });
+      await adapter.postMessage(dest, { text: `${Icons.error} ${t('cmd.task.usage')}` });
       return;
     }
     const project = args[0];
     const projectDir = path.join(PROJECTS_DIR, project);
     if (!existsSync(projectDir)) {
-      await adapter.postMessage(dest, { text: `${Icons.error} Project not found: \`${project}\`` });
+      await adapter.postMessage(dest, { text: `${Icons.error} ${t('cmd.task.projectNotFound', { project })}` });
       return;
     }
     const tasks = scanAllTasks(project);
     if (tasks.length === 0) {
-      await adapter.postMessage(dest, { text: `No tasks found for \`${project}\`.` });
+      await adapter.postMessage(dest, { text: t('cmd.task.noTasks', { project }) });
       return;
     }
 

@@ -4,6 +4,7 @@
 // >>> If I am updated, update my header comment and the parent folder's CORTEX.md <<<
 import { createLogger } from '@core/log.js';
 import { Icons } from '../core/icons.js';
+import { t } from '../core/i18n.js';
 import type { Destination, PlatformAdapter, MessageRef } from '@platform/index.js';
 import type { AgentResult } from '@core/types/agent-types.js';
 import type { ExecutionRecord } from '@domain/executions/registry.js';
@@ -47,8 +48,8 @@ export async function handleAgentSuccess({ result, channel, adapter, statusMsg, 
   const stream = (onAssistantMessage as any)?.stream ?? null;
   const askCount = await askUserQuestion.sendMessages(result, channel, adapter, statusMsg.messageId, threadAnchorId, stream);
   const statusText = askCount > 0
-    ? `${Icons.waiting} ${sessionTag}Waiting for user input (${elapsedStr}${metrics})`
-    : `${Icons.ok} Done | ${sessionTag}(${elapsedStr}${metrics})`;
+    ? `${Icons.waiting} ${sessionTag}${t('status.waitingForUserInput')} (${elapsedStr}${metrics})`
+    : `${Icons.ok} ${t('status.done')} | ${sessionTag}(${elapsedStr}${metrics})`;
   await sealStatus(adapter, statusMsg, statusText, buildSealedStatusActionBlocks(statusText, { channel, sessionName, isDm: true }));
 
   if (userMessageTs) {
@@ -122,7 +123,7 @@ export async function handleAgentError({ error, channel, adapter, statusMsg, sta
   if (error?.cancelled && supersededEdits.check(channel)) {
     supersededEdits.clear(channel);
     finalizeLocalExecution({ executionId, status: 'cancelled', error, durationS: elapsedS });
-    const supersededText = `${Icons.superseded} ${sessionTag}Superseded by edit (${elapsedStr})`;
+    const supersededText = `${Icons.superseded} ${sessionTag}${t('status.supersededByEdit')} (${elapsedStr})`;
     await sealStatus(adapter, statusMsg, supersededText, buildSealedStatusActionBlocks(supersededText, { channel, sessionName, isDm: true }));
     return;
   }
@@ -132,21 +133,21 @@ export async function handleAgentError({ error, channel, adapter, statusMsg, sta
 
   if (error?.cancelled) {
     finalizeLocalExecution({ executionId, status: 'failed', error, durationS: elapsedS });
-    const cancelledText = `${Icons.stopped} ${sessionTag}Cancelled (${elapsedStr})`;
+    const cancelledText = `${Icons.stopped} ${sessionTag}${t('status.cancelled')} (${elapsedStr})`;
     await sealStatus(adapter, statusMsg, cancelledText, buildSealedStatusActionBlocks(cancelledText, { channel, sessionName, isDm: true }));
     return;
   }
 
   log.error('Agent error:', error.message);
   finalizeLocalExecution({ executionId, status: 'failed', error, durationS: elapsedS });
-  const errorText = `${Icons.error} ${sessionTag}Error (${elapsedStr})`;
+  const errorText = `${Icons.error} ${sessionTag}${t('status.error')} (${elapsedStr})`;
   await sealStatus(adapter, statusMsg, errorText, buildSealedStatusActionBlocks(errorText, { channel, sessionName, isDm: true }));
   const errorDest: Destination = { type: 'interactive-reply', conduit: channel, sessionId: resolvedSessionId ?? '' };
   const queue = getOutboundQueue();
   if (queue) {
-    await durablePost(queue, adapter, errorDest, { text: `Error: ${error.message}` }, threadAnchorId ? { threadId: threadAnchorId } : undefined);
+    await durablePost(queue, adapter, errorDest, { text: t('status.errorBody', { message: error.message }) }, threadAnchorId ? { threadId: threadAnchorId } : undefined);
   } else {
-    await adapter.postMessage(errorDest, { text: `Error: ${error.message}` }, threadAnchorId ? { threadId: threadAnchorId } : undefined);
+    await adapter.postMessage(errorDest, { text: t('status.errorBody', { message: error.message }) }, threadAnchorId ? { threadId: threadAnchorId } : undefined);
   }
 }
 
@@ -166,7 +167,7 @@ async function persistErrorSession(resolvedSessionId: string | null, sessionName
 
 export async function resumeAskUserQuestionGroup({ adapter, group, responseText }: { adapter: PlatformAdapter; group: { channel: string; sessionId: string; groupId: string; threadId?: string | null }; responseText: string }): Promise<void> {
   const askDest: Destination = { type: 'interactive-reply', conduit: group.channel, sessionId: group.sessionId };
-  const statusMsg = await adapter.postMessage(askDest, { text: `${Icons.processing} Processing AskUserQuestion response...` });
+  const statusMsg = await adapter.postMessage(askDest, { text: `${Icons.processing} ${t('status.processingAskResponse')}` });
   const startTime = Date.now();
   let executionId = null;
   let handle;
@@ -216,7 +217,7 @@ async function executeRetry(channel: string, text: string, adapter: PlatformAdap
   const userMessageTs = opts.originalTs;
   const retryDest: Destination = { type: 'interactive-reply', conduit: channel, sessionId: sessionId ?? '' };
 
-  const retryPrefix = `${Icons.refresh} Retry (edited) | `;
+  const retryPrefix = `${Icons.refresh} ${t('status.retry')} (${t('status.retryEdited')}) | `;
   const retryStatusText = retryPrefix + buildUserProcessingMessage({ startTime, profileName: getActiveProfile(channel), sessionName, sessionId });
   const retryBlocksTemplate = { channel, sessionName, isDm: true };
   const statusMsg = await adapter.postMessage(retryDest, {
@@ -260,7 +261,7 @@ async function runRetryAgent({ channel, text, adapter, statusMsg, startTime, ses
 
     if (result?.rateLimited) {
       const { elapsedStr } = computeElapsed(startTime);
-      const rateLimitText = `${Icons.warning} ${buildSessionTag(sessionName, sessionId)}Rate limited \u2014 all fallbacks exhausted (${elapsedStr})`;
+      const rateLimitText = `${Icons.warning} ${buildSessionTag(sessionName, sessionId)}${t('status.rateLimitedExhausted')} (${elapsedStr})`;
       await sealStatus(adapter, statusMsg, rateLimitText, buildSealedStatusActionBlocks(rateLimitText, { channel, sessionName, isDm: true }));
     } else {
       await handleAgentSuccess({ result, channel, adapter, statusMsg, startTime, userMessage: text, executionId, trigger: 'edit-retry', sessionName, userMessageTs, onAssistantMessage: onAssistantMsg });
@@ -291,13 +292,13 @@ function updateRetryPermalinks(adapter: PlatformAdapter, channel: string, userMe
 
   Promise.all([userPermalinkP, statusPermalinkP]).then(([userPermalink, statusPermalink]) => {
     if (userPermalink) {
-      writeStatus(adapter, statusMsg, `${Icons.refresh} Retry (<${userPermalink}|edited>) | ` + buildUserProcessingMessage({ startTime, profileName: getActiveProfile(channel), sessionName, sessionId }));
+      writeStatus(adapter, statusMsg, `${Icons.refresh} ${t('status.retry')} (<${userPermalink}|${t('status.retryEdited')}>) | ` + buildUserProcessingMessage({ startTime, profileName: getActiveProfile(channel), sessionName, sessionId }));
     }
     if (statusPermalink && supersededTimestamps?.length) {
       for (const oldTs of supersededTimestamps) {
         adapter.updateMessage(
           { conduit: channel, messageId: oldTs },
-          { text: `${Icons.superseded} Superseded by edit \u2014 <${statusPermalink}|see new reply>` },
+          { text: `${Icons.superseded} ${t('status.supersededByEdit')} \u2014 <${statusPermalink}|${t('status.supersededSeeNewReply')}>` },
         ).catch(() => {});
       }
     }

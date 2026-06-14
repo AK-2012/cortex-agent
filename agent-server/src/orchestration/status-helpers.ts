@@ -4,6 +4,7 @@
 // >>> If I am updated, update my header comment and the parent folder's CORTEX.md <<<
 import { createLogger } from '@core/log.js';
 import { Icons } from '../core/icons.js';
+import { t } from '../core/i18n.js';
 import type { Destination, PlatformAdapter, MessageRef, IncomingAttachment, RichBlock, ActionElement, OutputStream } from '@platform/index.js';
 import type { AgentResult } from '@core/types/agent-types.js';
 import type { ExecutionRecord } from '@domain/executions/registry.js';
@@ -24,9 +25,9 @@ export function resolveExecutionProject({ execution, fallbackMessage }: { execut
 
 export function buildExecutionStatusReport(): string {
   const running = executionRegistry.getRunningExecutions();
-  if (running.length === 0) return 'No running executions.';
+  if (running.length === 0) return t('status.noRunningExecutions');
 
-  const lines = [`Running executions: ${running.length}`];
+  const lines = [t('status.runningExecutions', { count: running.length })];
   for (const record of running) {
     const location = record.kind === 'dispatch'
       ? `${record.dispatch?.machine || '?'}:${record.dispatch?.taskId || record.id}`
@@ -133,7 +134,7 @@ function buildActionElements({ channel, sessionName, isDm, includeCancel, thread
   if (includeCancel) {
     elements.push({
       type: 'button',
-      text: 'Cancel',
+      text: t('btn.cancel'),
       actionId: 'status_cancel',
       value: JSON.stringify({ channel, threadId: threadId ?? null, executionId: executionId ?? null }),
       style: 'danger',
@@ -142,7 +143,7 @@ function buildActionElements({ channel, sessionName, isDm, includeCancel, thread
   if (sessionName) {
     elements.push({
       type: 'button',
-      text: 'Resume',
+      text: t('btn.resume'),
       actionId: 'status_resume',
       value: sessionName,
     });
@@ -150,7 +151,7 @@ function buildActionElements({ channel, sessionName, isDm, includeCancel, thread
   if (isDm) {
     elements.push({
       type: 'button',
-      text: 'New',
+      text: t('btn.new'),
       actionId: 'status_new',
       value: channel,
     });
