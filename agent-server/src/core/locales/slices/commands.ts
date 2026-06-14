@@ -180,6 +180,7 @@ export const commandsEn = {
   'cmd.help.heading': '*Commands*',
   'cmd.help.headingCategory': '*Commands — ${label}*',
   'cmd.help.selfLine': '`!help` — this message',
+  'cmd.help.showAll': 'Show All',
 
   // --- schedule (wrapper replies only) ---
   'cmd.schedule.none': 'No scheduled tasks.',
@@ -188,6 +189,8 @@ export const commandsEn = {
   'cmd.schedule.resumeButton': 'Resume ${id}',
   'cmd.schedule.pauseButton': 'Pause ${id}',
   'cmd.schedule.now': 'now',
+  'cmd.schedule.paused': 'paused',
+  'cmd.schedule.nextLabel': 'next',
 
   // --- device (devices) ---
   'cmd.device.header': '*Devices*',
@@ -422,6 +425,7 @@ export const commandsZh: Record<keyof typeof commandsEn, string> = {
   'cmd.help.heading': '*命令*',
   'cmd.help.headingCategory': '*命令 — ${label}*',
   'cmd.help.selfLine': '`!help` — 显示此消息',
+  'cmd.help.showAll': '全部显示',
 
   // --- schedule ---
   'cmd.schedule.none': '没有定时任务。',
@@ -430,6 +434,8 @@ export const commandsZh: Record<keyof typeof commandsEn, string> = {
   'cmd.schedule.resumeButton': '恢复 ${id}',
   'cmd.schedule.pauseButton': '暂停 ${id}',
   'cmd.schedule.now': '现在',
+  'cmd.schedule.paused': '已暂停',
+  'cmd.schedule.nextLabel': '下次',
 
   // --- device ---
   'cmd.device.header': '*设备*',

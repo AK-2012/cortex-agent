@@ -5,6 +5,7 @@
 
 import { createLogger } from '@core/log.js';
 import { Icons } from '../../../core/icons.js';
+import { t } from '../../../core/i18n.js';
 import type { Destination, PlatformAdapter } from '@platform/index.js';
 import { threadStore } from '@store/thread-repo.js';
 import { listTemplates, listAgents } from '@domain/threads/index.js';
@@ -18,19 +19,19 @@ async function handleThreadStatus(channel: string, adapter: PlatformAdapter) {
   const dest: Destination = { type: 'interactive-reply', conduit: channel, sessionId: '' };
   const active = threadStore.findActive(channel);
   if (!active) {
-    await adapter.postMessage(dest, { text: 'No active thread in this channel.' });
+    await adapter.postMessage(dest, { text: t('cmd.thread.noActive') });
     return;
   }
   const agents = Object.keys(active.agents).join(', ');
-  const modeLabel = active.templateName ? active.templateName : 'ad-hoc';
+  const modeLabel = active.templateName ? active.templateName : t('cmd.thread.adHoc');
   const lines = [
-    `*Active Thread* \`${active.id}\` (${modeLabel})`,
-    `Status: ${active.status} | Active agent: ${active.activeAgent}`,
-    `Steps: ${active.steps.length} | Cost: $${active.totalCostUsd.toFixed(4)}`,
-    `Agents: ${agents}`,
+    t('cmd.thread.activeHeader', { id: active.id, mode: modeLabel }),
+    t('cmd.thread.statusLine', { status: active.status, agent: active.activeAgent }),
+    t('cmd.thread.stepsLine', { steps: active.steps.length, cost: active.totalCostUsd.toFixed(4) }),
+    t('cmd.thread.agentsLine', { agents }),
   ];
   if (active.status === 'aborted' && active.abortReason) {
-    lines.push(`Abort reason: ${active.abortReason}`);
+    lines.push(t('cmd.thread.abortLine', { reason: active.abortReason }));
   }
   await adapter.postMessage(dest, { text: lines.join('\n') });
 }
@@ -39,13 +40,13 @@ async function handleThreadTemplates(channel: string, adapter: PlatformAdapter) 
   const dest: Destination = { type: 'interactive-reply', conduit: channel, sessionId: '' };
   const templates = listTemplates();
   if (templates.length === 0) {
-    await adapter.postMessage(dest, { text: 'No thread templates configured.' });
+    await adapter.postMessage(dest, { text: t('cmd.thread.noTemplates') });
     return;
   }
-  const lines = ['*Available Thread Templates*'];
-  for (const t of templates) {
-    const agentList = t.agents.map(a => typeof a === 'string' ? a : a.ref).join(', ');
-    lines.push(`• \`${t.name}\` — ${t.description} [agents: ${agentList}]`);
+  const lines = [t('cmd.thread.templatesHeader')];
+  for (const tpl of templates) {
+    const agentList = tpl.agents.map(a => typeof a === 'string' ? a : a.ref).join(', ');
+    lines.push(`• ${t('cmd.thread.templateLine', { name: tpl.name, description: tpl.description, agents: agentList })}`);
   }
   await adapter.postMessage(dest, { text: lines.join('\n') });
 }
@@ -55,21 +56,21 @@ async function handleThreadAgents(channel: string, adapter: PlatformAdapter) {
   const agentDefs = listAgents();
   const lines: string[] = [];
   if (agentDefs.length > 0) {
-    lines.push('*Available Agents*');
+    lines.push(t('cmd.thread.agentsTitle'));
     for (const a of agentDefs) {
-      lines.push(`• \`${a.name}\` (${a.profile}) — ${a.description || ''}`);
+      lines.push(`• ${t('cmd.thread.agentLine', { name: a.name, profile: a.profile, description: a.description || '' })}`);
     }
   } else {
-    lines.push('No agents configured.');
+    lines.push(t('cmd.thread.noAgents'));
   }
   const active = threadStore.findActive(channel);
   if (active) {
     lines.push('');
-    lines.push(`*Active Thread* \`${active.id}\``);
+    lines.push(t('cmd.thread.activeThreadHeader', { id: active.id }));
     for (const [slotId, slot] of Object.entries(active.agents)) {
       const isActiveAgent = slotId === active.activeAgent ? ` ${Icons.arrowLeft}` : '';
-      const sessionStr = slot.sessionName || 'no session';
-      lines.push(`  • *${slotId}* (${slot.profile}) — ${slot.status} | ${sessionStr}${isActiveAgent}`);
+      const sessionStr = slot.sessionName || t('cmd.thread.noSession');
+      lines.push(`  • ${t('cmd.thread.slotLine', { slotId, profile: slot.profile, status: slot.status, session: sessionStr })}${isActiveAgent}`);
     }
   }
   await adapter.postMessage(dest, { text: lines.join('\n') });
@@ -87,9 +88,9 @@ async function handleThreadCancelAlias(channel: string, adapter: PlatformAdapter
   if (execs.length > 0) {
     log.info('Cancel requested for channel:', channel);
     conduitQueues.delete(channel);
-    await adapter.postMessage(dest, { text: `${Icons.stopped} Cancelled. Session preserved — next message will resume.` });
+    await adapter.postMessage(dest, { text: `${Icons.stopped} ${t('cmd.thread.cancelledSessionPreserved')}` });
   } else {
-    await adapter.postMessage(dest, { text: 'Nothing running to cancel.' });
+    await adapter.postMessage(dest, { text: t('cmd.thread.nothingRunning') });
   }
 }
 
@@ -97,13 +98,13 @@ async function handleThreadList(channel: string, adapter: PlatformAdapter) {
   const dest: Destination = { type: 'interactive-reply', conduit: channel, sessionId: '' };
   const threads = threadStore.findByChannel(channel).slice(0, 10);
   if (threads.length === 0) {
-    await adapter.postMessage(dest, { text: 'No threads found for this channel.' });
+    await adapter.postMessage(dest, { text: t('cmd.thread.noThreadsChannel') });
     return;
   }
-  const lines = ['*Recent Threads*'];
-  for (const t of threads) {
-    const modeLabel = t.templateName || 'ad-hoc';
-    lines.push(`• \`${t.id}\` ${modeLabel} — ${t.status} | ${t.steps.length} steps | $${t.totalCostUsd.toFixed(4)}`);
+  const lines = [t('cmd.thread.recentHeader')];
+  for (const thr of threads) {
+    const modeLabel = thr.templateName || t('cmd.thread.adHoc');
+    lines.push(`• ${t('cmd.thread.recentLine', { id: thr.id, mode: modeLabel, status: thr.status, steps: thr.steps.length, cost: thr.totalCostUsd.toFixed(4) })}`);
   }
   await adapter.postMessage(dest, { text: lines.join('\n') });
 }
@@ -112,16 +113,16 @@ async function handleThreadListRunning(channel: string, adapter: PlatformAdapter
   const dest: Destination = { type: 'interactive-reply', conduit: channel, sessionId: '' };
   const executions = runningExecutions.getAll().filter(e => e.threadId);
   if (executions.length === 0) {
-    await adapter.postMessage(dest, { text: 'No running threads.' });
+    await adapter.postMessage(dest, { text: t('cmd.thread.noRunning') });
     return;
   }
-  const lines = ['*Running Threads*'];
+  const lines = [t('cmd.thread.runningHeader')];
   for (const exec of executions) {
     const thread = exec.threadId ? threadStore.get(exec.threadId) : null;
-    const modeLabel = thread?.templateName || 'ad-hoc';
+    const modeLabel = thread?.templateName || t('cmd.thread.adHoc');
     const stepCount = thread?.steps.length ?? 0;
     const cost = thread?.totalCostUsd ?? 0;
-    lines.push(`• \`${exec.threadId}\` — ${exec.channel || '?'} | ${modeLabel} | ${stepCount} step(s) | $${cost.toFixed(4)}`);
+    lines.push(`• ${t('cmd.thread.runningLine', { id: exec.threadId ?? '', channel: exec.channel || '?', mode: modeLabel, steps: stepCount, cost: cost.toFixed(4) })}`);
   }
   await adapter.postMessage(dest, { text: lines.join('\n') });
 }
@@ -130,16 +131,16 @@ async function sendThreadUsage(channel: string, adapter: PlatformAdapter) {
   const dest: Destination = { type: 'interactive-reply', conduit: channel, sessionId: '' };
   await adapter.postMessage(dest, {
     text: [
-      '*Thread Commands*',
-      '`!thread` — show active thread status',
-      '`!thread agents` — list available agents',
-      '`!thread templates` — list available templates',
-      '`!thread <agent> <message>` — start ad-hoc thread with one agent',
-      '`!thread <template> <message>` — start template-based thread',
-      '`!thread add <agent> [message]` — add agent to current thread',
-      '`!cancel` — cancel active thread (also `!thread cancel`)',
-      '`!thread list` — list recent threads',
-      '`!thread list --running` — list running threads across channels',
+      t('cmd.thread.usageHeader'),
+      t('cmd.thread.usageStatus'),
+      t('cmd.thread.usageAgents'),
+      t('cmd.thread.usageTemplates'),
+      t('cmd.thread.usageAdHoc'),
+      t('cmd.thread.usageTemplate'),
+      t('cmd.thread.usageAdd'),
+      t('cmd.thread.usageCancel'),
+      t('cmd.thread.usageList'),
+      t('cmd.thread.usageListRunning'),
     ].join('\n'),
   });
 }

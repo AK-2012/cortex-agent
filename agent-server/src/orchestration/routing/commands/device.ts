@@ -4,6 +4,7 @@ import type { CommandActionRouter } from '@orch/interactions/command-action-rout
 import { getOnlineDevices } from '@domain/remote/client-manager.js';
 import { getMachineRegistry } from '@domain/tasks/dispatch-utils.js';
 import { Icons } from '../../../core/icons.js';
+import { t } from '../../../core/i18n.js';
 
 function formatTimeAgo(ms: number): string {
   const seconds = Math.floor(ms / 1000);
@@ -22,32 +23,33 @@ function buildDevicesText(): string {
   for (const d of onlineDevices) knownNames.add(d.device);
 
   const now = Date.now();
-  const lines: string[] = ['*Devices*'];
+  const lines: string[] = [t('cmd.device.header')];
 
   for (const name of [...knownNames].sort()) {
     const online = onlineDevices.find(d => d.device === name);
     if (online) {
       const connAgo = formatTimeAgo(now - online.connectedAt.getTime());
       const hbAgo = formatTimeAgo(now - online.lastHeartbeat.getTime());
-      lines.push(`${Icons.ok} \`${name}\`  ${online.platform}  connected ${connAgo}  heartbeat ${hbAgo}`);
+      lines.push(`${Icons.ok} ${t('cmd.device.online', { name, platform: online.platform, connAgo, hbAgo })}`);
     } else {
-      lines.push(`${Icons.error} \`${name}\`  offline`);
+      lines.push(`${Icons.error} ${t('cmd.device.offline', { name })}`);
     }
   }
 
   if (knownNames.size === 0) {
-    lines.push('No devices registered or online.');
+    lines.push(t('cmd.device.none'));
   }
 
   return lines.join('\n');
 }
 
-const REFRESH_BUTTON = {
+// Built per call so the label is resolved in the active locale (not frozen at import time).
+const refreshButton = () => ({
   type: 'button' as const,
-  text: 'Refresh',
+  text: t('cmd.device.refreshButton'),
   actionId: 'cmd:devices:refresh',
   value: 'refresh',
-};
+});
 
 export function createDevicesHandler(router?: CommandActionRouter) {
   if (router) {
@@ -62,7 +64,7 @@ export function createDevicesHandler(router?: CommandActionRouter) {
             text,
             richBlocks: [
               { type: 'section', text },
-              { type: 'actions', elements: [REFRESH_BUTTON] },
+              { type: 'actions', elements: [refreshButton()] },
             ],
           }).catch(() => {});
         },
@@ -82,7 +84,7 @@ export function createDevicesHandler(router?: CommandActionRouter) {
     return {
       text,
       richBlocks: [{ type: 'section' as const, text }],
-      actions: [REFRESH_BUTTON],
+      actions: [refreshButton()],
     };
   };
 }
