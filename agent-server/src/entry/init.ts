@@ -25,7 +25,7 @@ import { mergeThreadTemplates } from '@domain/threads/index.js';
 import type { ModelChoice } from '@core/profile-generator.js';
 import { createLogger } from '@core/log.js';
 import { INSTALL_ROOT, DEFAULTS_DIR } from '@core/utils.js';
-import { t } from '../core/i18n.js';
+import { t, setLocale, normalizeLocale, type Locale } from '../core/i18n.js';
 import { cmdFeishu, type CliResult } from './feishu-login.js';
 
 // ─── Path computation (DATA_DIR resolved locally to support --home override) ──
@@ -96,6 +96,8 @@ export interface GatewayUsageConfig {
 }
 
 export interface InitAnswers {
+  /** UI language for system-generated messages. Persisted to config/preferences.json. */
+  lang: Locale;
   backends: InitBackend[];
   machineName: string;
   gpuCount: number;
@@ -813,6 +815,21 @@ export async function runFeishuUserLogin(
 }
 
 async function collectAnswersInteractive(paths: InitPaths): Promise<InitAnswers> {
+  // Step 0: Language selection — shown first and bilingually (no locale chosen yet). The choice
+  // is applied immediately via setLocale() so every subsequent prompt renders in that language,
+  // and persisted to config/preferences.json by generateConfigs().
+  const langSel = await clack.select({
+    message: 'Select language / 选择语言',
+    options: [
+      { value: 'en' as Locale, label: 'English' },
+      { value: 'zh' as Locale, label: '中文 (Simplified Chinese)' },
+    ],
+    initialValue: 'en' as Locale,
+  });
+  handleCancel(langSel);
+  const lang = langSel as Locale;
+  setLocale(lang);
+
   clack.intro(t('init.intro'));
 
   // Step 1: Backend selection
@@ -926,6 +943,7 @@ async function collectAnswersInteractive(paths: InitPaths): Promise<InitAnswers>
   handleCancel(wantService);
 
   return {
+    lang,
     backends: backends as InitBackend[],
     machineName: machineName as string,
     gpuCount,
@@ -1007,6 +1025,7 @@ async function collectAnswersNonInteractive(): Promise<InitAnswers> {
   const extraProfiles = parseExtraProfilesLine(lines[profileChoiceStart + 2]);
 
   return {
+    lang: normalizeLocale(process.env.CORTEX_LANG),
     backends: backends.length > 0 ? backends : ['claude'],
     machineName: os.hostname(),
     gpuCount: detectGpuCount(),
@@ -1248,7 +1267,7 @@ function deployHooks(paths: InitPaths, force: boolean): void {
   }
 }
 
-function generateConfigs(paths: InitPaths, answers: InitAnswers, force: boolean): void {
+export function generateConfigs(paths: InitPaths, answers: InitAnswers, force: boolean): void {
   // MCP configs — always regenerate (machine-specific, in .gitignore)
   writeFileSync(path.join(paths.CONFIG_DIR, 'mcp-config.json'), JSON.stringify(buildFullConfig(INSTALL_ROOT), null, 2));
   writeFileSync(path.join(paths.CONFIG_DIR, 'mcp-config-core.json'), JSON.stringify(buildCoreConfig(INSTALL_ROOT), null, 2));
@@ -1259,6 +1278,13 @@ function generateConfigs(paths: InitPaths, answers: InitAnswers, force: boolean)
   if (!existsSync(modeJsonPath) || force) {
     const primaryBackend = answers.backends[0] || 'claude';
     writeFileSync(modeJsonPath, generateDefaultModeJson(primaryBackend));
+  }
+
+  // preferences.json — operator UI language (read at startup by domain/system/preferences.ts).
+  // Skip if exists (user may have changed it via !lang) unless --force.
+  const prefsJsonPath = path.join(paths.CONFIG_DIR, 'preferences.json');
+  if (!existsSync(prefsJsonPath) || force) {
+    writeFileSync(prefsJsonPath, JSON.stringify({ lang: answers.lang }, null, 2) + '\n');
   }
 
   // machines.json — runtime machine registry, server won't start without it

@@ -12,6 +12,7 @@ import * as fs from 'node:fs';
 // Import pure functions from init.ts
 import {
   getResolvedPaths,
+  generateConfigs,
   generateDotEnvContent,
   generateDefaultModeJson,
   formatConfigOutput,
@@ -29,6 +30,49 @@ import {
 } from '../src/entry/init.js';
 
 import type { InitAnswers, FeishuInitConfig } from '../src/entry/init.js';
+
+// ─── generateConfigs: preferences.json (i18n language) ──────────
+
+function baseAnswers(lang: 'en' | 'zh'): InitAnswers {
+  return {
+    lang,
+    backends: ['claude'],
+    machineName: 'testbox',
+    gpuCount: 0,
+    platforms: [],
+    gatewayUsage: { enabled: false },
+    installService: false,
+  };
+}
+
+test('generateConfigs writes config/preferences.json with the chosen language', () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'cortex-init-prefs-'));
+  const paths = getResolvedPaths(home);
+  fs.mkdirSync(paths.CONFIG_DIR, { recursive: true });
+  fs.mkdirSync(paths.STORE_DIR, { recursive: true });
+
+  generateConfigs(paths, baseAnswers('zh'), false);
+
+  const prefs = JSON.parse(fs.readFileSync(path.join(paths.CONFIG_DIR, 'preferences.json'), 'utf8'));
+  assert.equal(prefs.lang, 'zh');
+});
+
+test('generateConfigs preserves an existing preferences.json without --force', () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'cortex-init-prefs-'));
+  const paths = getResolvedPaths(home);
+  fs.mkdirSync(paths.CONFIG_DIR, { recursive: true });
+  fs.mkdirSync(paths.STORE_DIR, { recursive: true });
+  const prefsPath = path.join(paths.CONFIG_DIR, 'preferences.json');
+  fs.writeFileSync(prefsPath, JSON.stringify({ lang: 'zh' }));
+
+  // Re-running init with en must NOT clobber the user's existing zh preference.
+  generateConfigs(paths, baseAnswers('en'), false);
+  assert.equal(JSON.parse(fs.readFileSync(prefsPath, 'utf8')).lang, 'zh');
+
+  // ...unless --force is passed.
+  generateConfigs(paths, baseAnswers('en'), true);
+  assert.equal(JSON.parse(fs.readFileSync(prefsPath, 'utf8')).lang, 'en');
+});
 
 // ─── getResolvedPaths ───────────────────────────────────────────
 
