@@ -1,5 +1,5 @@
-# Dependencies
-node_modules/
+# Dependencies (match both real dirs and stray symlinks named node_modules)
+node_modules
 
 # OS
 .DS_Store
