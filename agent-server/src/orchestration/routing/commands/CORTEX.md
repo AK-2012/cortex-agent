@@ -6,6 +6,7 @@ Per-command-family handler files split from `command-handlers.ts` ([S10-B]). Eac
 |------|----------|------------|
 | `index.ts` | Aggregator: `registerCommands(deps)` → `dispatchCommand` | All below |
 | `orient.ts` | `!orient` | None (placeholder) |
+| `lang.ts` | `!lang` | `core/i18n` (setLocale), `domain/system/preferences` (setLang) — show/switch UI language, persist + live switch |
 | `thread.ts` | `!thread` | Re-exports from `command-thread-handlers.ts` |
 | `schedule.ts` | `!schedule` | Re-exports from `schedule-command.ts` (needs scheduler dep) |
 | `cost.ts` | `!cost`, `!budget` | `cost-tracker` |

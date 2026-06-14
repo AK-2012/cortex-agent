@@ -1,6 +1,7 @@
 import type { PlatformAdapter } from '@platform/index.js';
 import type { CommandResult } from './command-context.js';
 import type { CommandActionRouter } from '@orch/interactions/command-action-router.js';
+import { t } from '../../../core/i18n.js';
 
 export function createStatusHandler(getExecutionStatusReport: (() => string) | null, router?: CommandActionRouter) {
   // Register refresh action handler
@@ -20,7 +21,7 @@ export function createStatusHandler(getExecutionStatusReport: (() => string) | n
                 type: 'actions',
                 elements: [{
                   type: 'button',
-                  text: 'Refresh',
+                  text: t('cmd.status.refreshButton'),
                   actionId: 'cmd:status:refresh',
                   value: 'refresh',
                 }],
@@ -33,7 +34,7 @@ export function createStatusHandler(getExecutionStatusReport: (() => string) | n
   }
 
   return async function handleStatusCmd(channel: string, adapter: PlatformAdapter): Promise<CommandResult | void> {
-    const text = getExecutionStatusReport ? getExecutionStatusReport() : 'Execution status reporting is not available in this process.';
+    const text = getExecutionStatusReport ? getExecutionStatusReport() : t('cmd.status.unavailable');
 
     if (!router) {
       await adapter.postMessage({ type: 'interactive-reply', conduit: channel, sessionId: '' }, { text });
@@ -45,7 +46,7 @@ export function createStatusHandler(getExecutionStatusReport: (() => string) | n
       richBlocks: [{ type: 'section' as const, text }],
       actions: [{
         type: 'button',
-        text: 'Refresh',
+        text: t('cmd.status.refreshButton'),
         actionId: 'cmd:status:refresh',
         value: 'refresh',
       }],
@@ -55,88 +56,94 @@ export function createStatusHandler(getExecutionStatusReport: (() => string) | n
 
 // --- Help command categories ---
 
-const HELP_CATEGORIES: Record<string, { label: string; commands: string[] }> = {
-  session: {
-    label: 'Session',
-    commands: [
-      '`!new` — start a new conversation; runs pre-close hook (`!newq` to skip)',
-      '`!cancel [taskId]` — stop current task, or a dispatched task by id',
-      '`!resume [cortex-XXXX]` — list recent sessions, or switch to one',
-    ],
-  },
-  config: {
-    label: 'Config',
-    commands: [
-      '`!mode` — toggle API / Plan mode',
-      '`!backend` — toggle Claude Code / Codex backend',
-      '`!model [name]` — show or set Claude model',
-      '`!profile [name]` — show active profile or switch to one',
-      '`!skills` — list available skills',
-    ],
-  },
-  monitoring: {
-    label: 'Monitoring',
-    commands: [
-      '`!cost [project]` — show cost summary (global or per-project)',
-      '`!status` — show running execution summary',
-      '`!budget $X/d $Y/m` — set daily/monthly budget',
-      '`!schedule` — list, add, pause, resume, or remove scheduled tasks',
-    ],
-  },
-  tasks: {
-    label: 'Tasks',
-    commands: [
-      '`!tasks <project>` — list all tasks with details for a project',
-      '`!projects` — list projects and their registered channels',
-      '`!register <project>` — register this channel for project task notifications',
-      '`!unregister <project>` — unregister this channel from a project',
-      '`!project-dir` — manage project code directories per machine',
-    ],
-  },
-  devices: {
-    label: 'Devices',
-    commands: [
-      '`!devices` — show online/offline status of all cortex-client devices',
-      '`!nvidia-smi [machine]` — show GPU status (default: local)',
-      '`!nvtop [machine|stop]` — live GPU monitor with sparkline view',
-      '`!tail [stop]` — live-tail daemon.log',
-      '`!sendFile <machine> <path>` — send a file to Slack',
-    ],
-  },
-  threads: {
-    label: 'Threads',
-    commands: [
-      '`!thread` — manage threads: status, start, add agent, cancel, list agents/templates',
-      '`!agent [name|off]` — show, set, or disable default agent',
-    ],
-  },
-};
+// Built per call so labels and command descriptions resolve in the ACTIVE locale (the !lang
+// command can switch it at runtime). A module-level const would freeze English at import time.
+function getHelpCategories(): Record<string, { label: string; commands: string[] }> {
+  return {
+    session: {
+      label: t('cmd.help.catSession'),
+      commands: [
+        t('cmd.help.session.new'),
+        t('cmd.help.session.cancel'),
+        t('cmd.help.session.resume'),
+      ],
+    },
+    config: {
+      label: t('cmd.help.catConfig'),
+      commands: [
+        t('cmd.help.config.mode'),
+        t('cmd.help.config.backend'),
+        t('cmd.help.config.model'),
+        t('cmd.help.config.profile'),
+        t('cmd.help.config.skills'),
+      ],
+    },
+    monitoring: {
+      label: t('cmd.help.catMonitoring'),
+      commands: [
+        t('cmd.help.monitoring.cost'),
+        t('cmd.help.monitoring.status'),
+        t('cmd.help.monitoring.budget'),
+        t('cmd.help.monitoring.schedule'),
+      ],
+    },
+    tasks: {
+      label: t('cmd.help.catTasks'),
+      commands: [
+        t('cmd.help.tasks.tasks'),
+        t('cmd.help.tasks.projects'),
+        t('cmd.help.tasks.register'),
+        t('cmd.help.tasks.unregister'),
+        t('cmd.help.tasks.projectDir'),
+      ],
+    },
+    devices: {
+      label: t('cmd.help.catDevices'),
+      commands: [
+        t('cmd.help.devices.devices'),
+        t('cmd.help.devices.nvidiaSmi'),
+        t('cmd.help.devices.nvtop'),
+        t('cmd.help.devices.tail'),
+        t('cmd.help.devices.sendfile'),
+      ],
+    },
+    threads: {
+      label: t('cmd.help.catThreads'),
+      commands: [
+        t('cmd.help.threads.thread'),
+        t('cmd.help.threads.agent'),
+      ],
+    },
+  };
+}
 
 function buildHelpText(category?: string): string {
-  if (category && category !== 'all' && HELP_CATEGORIES[category]) {
-    const cat = HELP_CATEGORIES[category];
-    return `*Commands — ${cat.label}*\n${cat.commands.join('\n')}`;
+  const categories = getHelpCategories();
+  if (category && category !== 'all' && categories[category]) {
+    const cat = categories[category];
+    return `${t('cmd.help.headingCategory', { label: cat.label })}\n${cat.commands.join('\n')}`;
   }
-  const allCommands = Object.values(HELP_CATEGORIES).flatMap(c => c.commands);
-  return ['*Commands*', ...allCommands, '`!help` — this message'].join('\n');
+  const allCommands = Object.values(categories).flatMap(c => c.commands);
+  return [t('cmd.help.heading'), ...allCommands, t('cmd.help.selfLine')].join('\n');
 }
 
 // Slack section blocks have a 3000-char limit; split into one block per category.
 function buildHelpRichBlocks(category?: string): import('@platform/index.js').RichBlock[] {
-  if (category && category !== 'all' && HELP_CATEGORIES[category]) {
-    const cat = HELP_CATEGORIES[category];
-    return [{ type: 'section' as const, text: `*Commands — ${cat.label}*\n${cat.commands.join('\n')}` }];
+  const categories = getHelpCategories();
+  if (category && category !== 'all' && categories[category]) {
+    const cat = categories[category];
+    return [{ type: 'section' as const, text: `${t('cmd.help.headingCategory', { label: cat.label })}\n${cat.commands.join('\n')}` }];
   }
-  return Object.values(HELP_CATEGORIES).map(cat => ({
+  return Object.values(categories).map(cat => ({
     type: 'section' as const,
     text: `*${cat.label}*\n${cat.commands.join('\n')}`,
   }));
 }
 
-const HELP_CATEGORY_KEYS = [...Object.keys(HELP_CATEGORIES), 'all'];
+const HELP_CATEGORY_KEYS = ['session', 'config', 'monitoring', 'tasks', 'devices', 'threads', 'all'];
 
 function buildHelpButtons(): import('@platform/index.js').ActionElement[] {
-  const buttons: import('@platform/index.js').ActionElement[] = Object.entries(HELP_CATEGORIES).map(([key, cat]) => ({
+  const buttons: import('@platform/index.js').ActionElement[] = Object.entries(getHelpCategories()).map(([key, cat]) => ({
     type: 'button' as const,
     text: cat.label,
     actionId: `cmd:help:cat-${key}`,
@@ -144,7 +151,7 @@ function buildHelpButtons(): import('@platform/index.js').ActionElement[] {
   }));
   buttons.push({
     type: 'button' as const,
-    text: 'Show All',
+    text: t('cmd.help.showAll'),
     actionId: 'cmd:help:cat-all',
     value: 'all',
   });

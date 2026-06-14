@@ -1,5 +1,6 @@
 import { createLogger } from '@core/log.js';
 import { Icons } from '../../../core/icons.js';
+import { t } from '../../../core/i18n.js';
 import type { Destination, PlatformAdapter } from '@platform/index.js';
 import type { CommandResult } from './command-context.js';
 import type { CommandActionRouter } from '@orch/interactions/command-action-router.js';
@@ -19,6 +20,7 @@ import { createDevicesHandler } from './device.js';
 import { handleTailCmd } from './tail.js';
 import { handleSendFileCmd } from './sendfile.js';
 import { handleDispatchCmd } from './dispatch.js';
+import { handleLangCmd } from './lang.js';
 
 const log = createLogger('command-handler');
 
@@ -74,7 +76,7 @@ const catchHandlerError = (promise: Promise<unknown>, cmd: string, channel: stri
     log.error(`Error in ${cmd}:`, err?.message || err);
     if (err?.data) log.error(`Slack error data:`, JSON.stringify(err.data));
     const cmdDest: Destination = { type: 'interactive-reply', conduit: channel, sessionId: '' };
-    adapter.postMessage(cmdDest, { text: `${Icons.error} Command error: ${err?.message || 'unknown error'}` }).catch(() => {});
+    adapter.postMessage(cmdDest, { text: `${Icons.error} ${t('cmd.error', { error: err?.message || t('cmd.errorUnknown') })}` }).catch(() => {});
   });
 };
 
@@ -108,6 +110,7 @@ export function registerCommands(deps: CommandDeps) {
     '!thread':   (ch, ad, msg) => handleThreadCmd(ch, ad, msg),
     '!agent':    (ch, ad, msg) => handleAgentCmdInteractive(ch, ad, msg),
     '!orient':   (ch, ad, _msg) => handleOrientCmd(ch, ad),
+    '!lang':     (ch, ad, msg) => handleLangCmd(ch, ad, msg),
   };
 
   const PREFIX_COMMANDS: { prefix: string; handler: Handler }[] = [
@@ -130,6 +133,7 @@ export function registerCommands(deps: CommandDeps) {
     { prefix: '!agent',      handler: handleAgentCmdInteractive },
     { prefix: '!sendFile',   handler: handleSendFileCmd },
     { prefix: '!dispatch',  handler: handleDispatchCmd as Handler },
+    { prefix: '!lang',       handler: handleLangCmd },
   ];
 
   const dispatchFn = function dispatchCommand(trimmedMessage: string | undefined, channel: string, adapter: PlatformAdapter, threadAnchorId?: string | null): boolean {
@@ -151,7 +155,7 @@ export function registerCommands(deps: CommandDeps) {
     if (trimmedMessage.startsWith('!')) {
       const cmd = trimmedMessage.split(/\s+/)[0];
       const cmdDest: Destination = { type: 'interactive-reply', conduit: channel, sessionId: '' };
-      adapter.postMessage(cmdDest, { text: `${Icons.error} Unknown command: \`${cmd}\`. Run \`!help\` for available commands.` });
+      adapter.postMessage(cmdDest, { text: `${Icons.error} ${t('cmd.unknown', { cmd })}` });
       return true;
     }
     return false;

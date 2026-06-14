@@ -5,6 +5,7 @@
 
 import { formatDurationCompact } from './utils.js';
 import { Icons } from './icons.js';
+import { t } from './i18n.js';
 
 export function computeElapsed(startTime: number): { elapsedStr: string; elapsedS: number } {
   const elapsedS = (Date.now() - startTime) / 1000;
@@ -30,5 +31,5 @@ export function buildUserProcessingMessage({ startTime, elapsed_s = null, num_tu
   const elapsed = elapsed_s ?? ((Date.now() - startTime) / 1000);
   const sessionTag = buildSessionTag(sessionName, sessionId);
   const turnsStr = num_turns != null ? ` | ${Icons.repeat} ${num_turns} turns` : '';
-  return `${Icons.processing} Processing | ${sessionTag}${profileName || 'default'} | ${Icons.stopwatch} ${formatDurationCompact(elapsed || 0)}${turnsStr}`;
+  return `${Icons.processing} ${t('status.processing')} | ${sessionTag}${profileName || 'default'} | ${Icons.stopwatch} ${formatDurationCompact(elapsed || 0)}${turnsStr}`;
 }

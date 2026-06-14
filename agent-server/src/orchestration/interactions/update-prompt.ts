@@ -9,6 +9,7 @@ import type { CommandActionRouter } from '@orch/interactions/command-action-rout
 import type { UpdateChoice, UpdatePrompt } from '@domain/system/update-prompt.js';
 import { fetchReleaseNote, buildGitHubReleaseUrl } from '@domain/system/github-release.js';
 import { createLogger } from '@core/log.js';
+import { t } from '../../core/i18n.js';
 
 const log = createLogger('update-prompt');
 
@@ -46,11 +47,11 @@ export function createUpdatePrompt(
   const resolveText = (choice: UpdateChoice, version: string): string => {
     switch (choice) {
       case 'apply':
-        return `Installing @cortex-agent/server@${version}... daemon will restart shortly.`;
+        return t('update.installing', { version });
       case 'skip':
-        return `Skipped version ${version}.`;
+        return t('update.skipped', { version });
       case 'cancel':
-        return `Update cancelled. Will check again at next interval.`;
+        return t('update.cancelled');
     }
   };
 
@@ -59,19 +60,19 @@ export function createUpdatePrompt(
    * Truncates if too long (safe for Slack/Feishu 4000 char limit).
    */
   const formatReleaseNoteMessage = (releaseInfo: import('@domain/system/github-release.js').ReleaseInfo): MessageContent => {
-    let body = releaseInfo.body || '(No release notes available)';
+    let body = releaseInfo.body || t('update.releaseNotesEmpty');
 
     // Truncate to safe length (~3500 chars to leave room for header/footer)
     if (body.length > 3500) {
-      body = body.substring(0, 3500).trimEnd() + '\n\n_[Truncated — view full notes on GitHub]_';
+      body = body.substring(0, 3500).trimEnd() + t('update.releaseNotesTruncated');
     }
 
     return {
-      text: `Cortex Server v${releaseInfo.version} Release Notes`,
+      text: t('update.releaseNotesTitle', { version: releaseInfo.version }),
       richBlocks: [
         {
           type: 'section',
-          text: `**${releaseInfo.name}**\n\n${body}\n\n[View full release notes](${releaseInfo.htmlUrl})`,
+          text: t('update.releaseNotesBody', { name: releaseInfo.name, body, url: releaseInfo.htmlUrl }),
         },
       ],
     };
@@ -113,7 +114,7 @@ export function createUpdatePrompt(
         const url = buildGitHubReleaseUrl(version);
         await adapter
           .postMessage({ type: 'system-notice' }, {
-            text: `Failed to fetch release notes for v${version}. View on GitHub: ${url}`,
+            text: t('update.releaseNotesFetchFailed', { version, url }),
           })
           .catch((e) => {
             log.error(`Failed to post fallback release note: ${(e as Error).message}`);
@@ -138,10 +139,10 @@ export function createUpdatePrompt(
   // --- Button templates (value filled in at ask time) ---
 
   const buttonTemplates: ActionElement[] = [
-    { type: 'button', text: 'Update', actionId: 'cmd:update:apply', value: '', style: 'primary' },
-    { type: 'button', text: 'Release Note', actionId: 'cmd:update:release-note', value: '' },
-    { type: 'button', text: 'Skip this version', actionId: 'cmd:update:skip', value: '' },
-    { type: 'button', text: 'Cancel', actionId: 'cmd:update:cancel', value: '', style: 'danger' },
+    { type: 'button', text: t('update.button.update'), actionId: 'cmd:update:apply', value: '', style: 'primary' },
+    { type: 'button', text: t('update.button.releaseNote'), actionId: 'cmd:update:release-note', value: '' },
+    { type: 'button', text: t('update.button.skip'), actionId: 'cmd:update:skip', value: '' },
+    { type: 'button', text: t('update.button.cancel'), actionId: 'cmd:update:cancel', value: '', style: 'danger' },
   ];
 
   // --- Return the UpdatePrompt implementation ---
@@ -154,7 +155,7 @@ export function createUpdatePrompt(
         clearPending();
         old.resolve(null);
         if (old.messageRef) {
-          await adapter.updateMessage(old.messageRef, { text: 'Superseded by a newer update prompt.' }).catch(() => {});
+          await adapter.updateMessage(old.messageRef, { text: t('update.superseded') }).catch(() => {});
         }
       }
 
@@ -171,9 +172,9 @@ export function createUpdatePrompt(
       const messageRef = await adapter.postInteractive(
         { type: 'system-notice' },
         {
-          text: `Cortex Server v${spec.latestVersion} is available. Update now?`,
+          text: t('update.available', { version: spec.latestVersion }),
           richBlocks: [
-            { type: 'section', text: `Cortex Server v${spec.latestVersion} is available.` },
+            { type: 'section', text: t('update.availableSection', { version: spec.latestVersion }) },
           ],
           actions: versionedButtons,
         },
@@ -188,7 +189,7 @@ export function createUpdatePrompt(
           const ref = pending.messageRef;
           clearPending();
           resolve(null);
-          adapter.updateMessage(ref, { text: 'Update prompt timed out.' }).catch(() => {});
+          adapter.updateMessage(ref, { text: t('update.timedOut') }).catch(() => {});
         }, timeoutMs).unref();
       });
     },

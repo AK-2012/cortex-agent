@@ -1,6 +1,7 @@
 import type { Destination, PlatformAdapter } from '@platform/index.js';
 import type { CommandResult } from './command-context.js';
 import { Icons } from '../../../core/icons.js';
+import { t } from '../../../core/i18n.js';
 import type { CommandActionRouter } from '@orch/interactions/command-action-router.js';
 import { switchMode, getActiveBackend, setActiveBackend, getClaudeModel, setClaudeModel, getActiveProfile, setActiveProfile, clearChannelProfile, getDefaultAgent, setDefaultAgent } from '@domain/agents/index.js';
 import { getDefaultProfileName, listProfiles, resolveProfile } from '@domain/agents/profile-manager.js';
@@ -14,9 +15,9 @@ function formatProfileList(channel?: string): string {
   const defaultName = getDefaultProfileName();
   return listProfiles().map(profile => {
     const markers = [];
-    if (profile.name === defaultName) markers.push('default');
-    if (profile.name === (globalActive || defaultName)) markers.push('global');
-    if (channel && channelActive !== globalActive && profile.name === channelActive) markers.push('channel');
+    if (profile.name === defaultName) markers.push(t('cmd.profile.markerDefault'));
+    if (profile.name === (globalActive || defaultName)) markers.push(t('cmd.profile.markerGlobal'));
+    if (channel && channelActive !== globalActive && profile.name === channelActive) markers.push(t('cmd.profile.markerChannel'));
     const suffix = markers.length ? ` (${markers.join(', ')})` : '';
     const backend = profile.backend || 'claude';
     const mode = profile.mode || '-';
@@ -27,7 +28,7 @@ function formatProfileList(channel?: string): string {
 export async function handleModeCmd(channel: string, adapter: PlatformAdapter): Promise<void> {
   const { newMode } = switchMode();
   const dest: Destination = { type: 'interactive-reply', conduit: channel, sessionId: '' };
-  await adapter.postMessage(dest, { text: `${Icons.refresh} Switched to *${newMode === 'api' ? 'API' : 'Plan'}* mode` });
+  await adapter.postMessage(dest, { text: `${Icons.refresh} ${t('cmd.mode.switched', { mode: newMode === 'api' ? t('cmd.mode.apiLabel') : t('cmd.mode.planLabel') })}` });
 }
 
 export async function handleBackendCmd(channel: string, adapter: PlatformAdapter, trimmedMessage: string): Promise<void> {
@@ -36,7 +37,7 @@ export async function handleBackendCmd(channel: string, adapter: PlatformAdapter
   setActiveBackend(newBackend);
   const dest: Destination = { type: 'interactive-reply', conduit: channel, sessionId: '' };
   await adapter.postMessage(dest, {
-    text: `${Icons.refresh} Backend: *${newBackend === 'claude' ? 'Claude Code' : 'Codex'}*`,
+    text: `${Icons.refresh} ${t('cmd.backend.switched', { backend: newBackend === 'claude' ? t('cmd.backend.claudeLabel') : t('cmd.backend.codexLabel') })}`,
   });
 }
 
@@ -44,16 +45,16 @@ export async function handleModelCmd(channel: string, adapter: PlatformAdapter, 
   const args = trimmedMessage.split(/\s+/).slice(1);
   const dest: Destination = { type: 'interactive-reply', conduit: channel, sessionId: '' };
   if (args.length === 0) {
-    await adapter.postMessage(dest, { text: `Current Claude model: *${getClaudeModel()}*` });
+    await adapter.postMessage(dest, { text: t('cmd.model.current', { model: getClaudeModel() }) });
     return;
   }
   const model = args.join(' ').trim();
   if (!model) {
-    await adapter.postMessage(dest, { text: `${Icons.error} Usage: \`!model <model-name>\`` });
+    await adapter.postMessage(dest, { text: `${Icons.error} ${t('cmd.model.usage')}` });
     return;
   }
   setClaudeModel(model);
-  await adapter.postMessage(dest, { text: `${Icons.ok} Claude model set to *${getClaudeModel()}*` });
+  await adapter.postMessage(dest, { text: `${Icons.ok} ${t('cmd.model.set', { model: getClaudeModel() })}` });
 }
 
 const MAX_PROFILE_BUTTONS = 10;
@@ -63,8 +64,8 @@ function buildProfileText(channel?: string): string {
   const globalProfile = getActiveProfile() || getDefaultProfileName();
   const isOverridden = channel && effective !== globalProfile;
   const header = isOverridden
-    ? `Channel profile: *${effective}* (global: ${globalProfile})`
-    : `Active profile: *${effective}*`;
+    ? t('cmd.profile.channelHeader', { effective, global: globalProfile })
+    : t('cmd.profile.activeHeader', { effective });
   return `${header}\n${formatProfileList(channel)}`;
 }
 
@@ -87,7 +88,7 @@ export function createProfileHandler(router?: CommandActionRouter) {
         const { name, channel } = JSON.parse(ctx.value) as { name: string; channel: string };
         resolveProfile(name);
         setActiveProfile(name, channel);
-        const text = `${Icons.ok} Channel profile set to *${name}*\n${formatProfileList(channel)}`;
+        const text = `${Icons.ok} ${t('cmd.profile.channelSet', { name })}\n${formatProfileList(channel)}`;
         if (ctx.messageRef) {
           await adapter.updateMessage(ctx.messageRef, {
             text,
@@ -124,21 +125,21 @@ export function createProfileHandler(router?: CommandActionRouter) {
       if (args[0] === 'reset') {
         clearChannelProfile(channel);
         const fallback = getActiveProfile() || getDefaultProfileName();
-        await adapter.postMessage(dest, { text: `${Icons.ok} Channel profile cleared, using global: *${fallback}*` });
+        await adapter.postMessage(dest, { text: `${Icons.ok} ${t('cmd.profile.cleared', { name: fallback })}` });
         await handleNewCmd(channel, adapter, { skipHook: true });
         return;
       }
 
       if (args[0] === 'global') {
         if (args.length < 2) {
-          await adapter.postMessage(dest, { text: `${Icons.error} Usage: \`!profile global <name>\`` });
+          await adapter.postMessage(dest, { text: `${Icons.error} ${t('cmd.profile.globalUsage')}` });
           return;
         }
         const profileName = args[1];
         try {
           resolveProfile(profileName);
           setActiveProfile(profileName);
-          await adapter.postMessage(dest, { text: `${Icons.ok} Global profile set to *${profileName}*\n${formatProfileList(channel)}` });
+          await adapter.postMessage(dest, { text: `${Icons.ok} ${t('cmd.profile.globalSet', { name: profileName })}\n${formatProfileList(channel)}` });
           await handleNewCmd(channel, adapter, { skipHook: true });
         } catch (error) {
           await adapter.postMessage(dest, { text: `${Icons.error} ${(error as Error).message}` });
@@ -150,7 +151,7 @@ export function createProfileHandler(router?: CommandActionRouter) {
       try {
         resolveProfile(profileName);
         setActiveProfile(profileName, channel);
-        await adapter.postMessage(dest, { text: `${Icons.ok} Channel profile set to *${profileName}*\n${formatProfileList(channel)}` });
+        await adapter.postMessage(dest, { text: `${Icons.ok} ${t('cmd.profile.channelSet', { name: profileName })}\n${formatProfileList(channel)}` });
         await handleNewCmd(channel, adapter, { skipHook: true });
       } catch (error) {
         await adapter.postMessage(dest, { text: `${Icons.error} ${(error as Error).message}` });
@@ -183,12 +184,12 @@ export async function handleSkillsCmd(channel: string, adapter: PlatformAdapter)
   const groups = getDisplaySkillGroups();
   const dest: Destination = { type: 'interactive-reply', conduit: channel, sessionId: '' };
   if (groups.length === 0) {
-    await adapter.postMessage(dest, { text: 'No skills found.' });
+    await adapter.postMessage(dest, { text: t('cmd.skills.none') });
     return;
   }
-  const lines = ['*Available skills*'];
+  const lines = [t('cmd.skills.header')];
   for (const { plugin, skills } of groups) {
-    lines.push(plugin ? `_${plugin}_` : '_.claude/skills_');
+    lines.push(plugin ? `_${plugin}_` : `_${t('cmd.skills.localGroup')}_`);
     for (const skill of skills) {
       lines.push(`• \`${skill}\``);
     }
@@ -205,9 +206,9 @@ function buildAgentText(): string {
     const agentDef = getAgent(current);
     const profile = agentDef?.profile || '?';
     const claudeAgentStr = agentDef?.claudeAgent ? ` · agent:${agentDef.claudeAgent}` : '';
-    return `Default agent: *${current}* (${profile}${claudeAgentStr})`;
+    return t('cmd.agent.current', { name: current, detail: `${profile}${claudeAgentStr}` });
   }
-  return 'No default agent set.\nAvailable: ' + agents.map(a => `\`${a.name}\``).join(', ');
+  return t('cmd.agent.none', { agents: agents.map(a => `\`${a.name}\``).join(', ') });
 }
 
 function buildAgentButtons(): import('@platform/index.js').ActionElement[] {
@@ -220,7 +221,7 @@ function buildAgentButtons(): import('@platform/index.js').ActionElement[] {
   }));
   buttons.push({
     type: 'button' as const,
-    text: 'Disable',
+    text: t('cmd.agent.disableButton'),
     actionId: 'cmd:agent:disable',
     value: 'off',
     style: 'danger' as const,
@@ -238,7 +239,7 @@ export function createAgentHandler(router?: CommandActionRouter) {
       if (!agentDef) return;
       setDefaultAgent(name);
       const claudeAgentStr = agentDef.claudeAgent ? ` · agent:${agentDef.claudeAgent}` : '';
-      const text = `${Icons.ok} Default agent set to *${name}* (${agentDef.profile}${claudeAgentStr})`;
+      const text = `${Icons.ok} ${t('cmd.agent.defaultSet', { name, detail: `${agentDef.profile}${claudeAgentStr}` })}`;
       if (ctx.messageRef) {
         await adapter.updateMessage(ctx.messageRef, {
           text,
@@ -255,9 +256,9 @@ export function createAgentHandler(router?: CommandActionRouter) {
       setDefaultAgent(null);
       if (ctx.messageRef) {
         await adapter.updateMessage(ctx.messageRef, {
-          text: `${Icons.ok} Default agent disabled.`,
+          text: `${Icons.ok} ${t('cmd.agent.disabled')}`,
           richBlocks: [
-            { type: 'section', text: `${Icons.ok} Default agent disabled.` },
+            { type: 'section', text: `${Icons.ok} ${t('cmd.agent.disabled')}` },
             { type: 'actions', elements: buildAgentButtons() },
           ],
         }).catch(() => {});
@@ -284,18 +285,18 @@ export function createAgentHandler(router?: CommandActionRouter) {
       const name = args.split(/\s+/)[0];
       if (name === 'off' || name === 'none' || name === 'disable') {
         setDefaultAgent(null);
-        await adapter.postMessage(dest, { text: `${Icons.ok} Default agent disabled.` });
+        await adapter.postMessage(dest, { text: `${Icons.ok} ${t('cmd.agent.disabled')}` });
         return;
       }
       const agentDef = getAgent(name);
       if (!agentDef) {
         const available = listAgents().map(a => `\`${a.name}\``).join(', ');
-        await adapter.postMessage(dest, { text: `${Icons.error} Unknown agent: \`${name}\`\nAvailable: ${available}` });
+        await adapter.postMessage(dest, { text: `${Icons.error} ${t('cmd.agent.unknown', { name, available })}` });
         return;
       }
       setDefaultAgent(name);
       const claudeAgentStr = agentDef.claudeAgent ? ` · agent:${agentDef.claudeAgent}` : '';
-      await adapter.postMessage(dest, { text: `${Icons.ok} Default agent set to *${name}* (${agentDef.profile}${claudeAgentStr})` });
+      await adapter.postMessage(dest, { text: `${Icons.ok} ${t('cmd.agent.defaultSet', { name, detail: `${agentDef.profile}${claudeAgentStr}` })}` });
       return;
     }
 

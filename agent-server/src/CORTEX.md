@@ -12,7 +12,7 @@ agent-server's TypeScript ESM runtime source, organized by six-layer structure (
 | L5 | `entry/` | Entry points: app.ts / daemon.ts / startup-helpers / startup-notify |
 
 ### L0: core/
-`async-mutex.ts` `atomic-write.ts` `json-repository.ts` `paths.ts` `version.ts` `cli-utils.ts` `utils.ts` `status-format.ts` `running-executions.ts` `task-parser.ts` `singleton-lock.ts` (PID-file singleton lock shared by daemon.ts/app.ts) `types/agent-types.ts` `types/thread-types.ts`
+`async-mutex.ts` `atomic-write.ts` `json-repository.ts` `paths.ts` `version.ts` `cli-utils.ts` `utils.ts` `status-format.ts` `running-executions.ts` `task-parser.ts` `singleton-lock.ts` (PID-file singleton lock shared by daemon.ts/app.ts) `i18n.ts` (zero-dep localization: `t()`/`setLocale`/`getLocale`; locale set by entry/app.ts, never reads domain) `locales/` (`en.ts`/`zh.ts` barrels aggregating per-cluster `slices/*`; zh typed `Record<MessageKey,string>` for compile-time parity) `types/agent-types.ts` `types/thread-types.ts`
 
 ### L1: store/
 `in-memory-repository.ts` + 11 repos: `thread-repo` `session-repo` `conversation-ledger-repo` `session-registry-repo` `execution-repo` `project-dir-repo` `schedule-repo` `cost-repo` `profile-repo` `task-repo` + `outbound-queue` (WAL)
@@ -33,7 +33,7 @@ Project→conduit mapping (formerly `channel-repo.ts`) has moved into `platform/
 | `memory/` | `index-regen.ts` `consolidate.ts` `watcher.ts` `skill-scanner.ts` `claude-md-scanner.ts` `claude-md-injector.ts` |
 | `monitor/` | `gpu-monitor.ts` `disk-monitor.ts` |
 | `remote/` | `client-manager.ts` `client-bootstrap.ts` `client-hot-reload.ts` `cortex-client.ts` |
-| `system/` | `update-state.ts` (DR-0013 update-state I/O) |
+| `system/` | `update-state.ts` (DR-0013 update-state I/O) `preferences.ts` (config/preferences.json — operator UI language `loadLang`/`setLang`) |
 | `threads/` | `index.ts` `utils.ts` `artifact-io.ts` `template-loader.ts` `prompt-builder.ts` `state-machine.ts` `runner.ts` `hook-runner.ts` `auto-thread.ts` `template-resolver.ts` |
 | `mcp/` | `server.ts` + `tools/slack.ts` `cost.ts` `executions.ts` `task-ops.ts` `context.ts` `schedule.ts` (16 tools total) |
 

@@ -1,0 +1,108 @@
+// input:  nothing (leaf data slice)
+// output: interactionsEn / interactionsZh — message slice (filled by i18n extraction)
+// pos:    one locale slice; aggregated by core/locales/en.ts & zh.ts barrels
+// >>> Keep en and zh keys in lockstep (zh typed against keyof typeof interactionsEn) <<<
+
+export const interactionsEn = {
+  // --- interaction-handlers.ts ---
+  'interaction.askExpired': 'This AskUserQuestion prompt has expired. Please ask again if you still need it.',
+  'interaction.askInactive': 'This AskUserQuestion prompt is no longer active.',
+  'interaction.selectOrType': 'Please select an option or type a custom answer.',
+  'interaction.questionsProgress': 'Questions (${answered}/${total} answered)',
+  'interaction.planApproved': 'Plan approved — Cortex will proceed.',
+  'interaction.planApprovedRich': '*Plan approved* — Cortex will proceed.',
+  'interaction.planFeedbackSent': 'Plan feedback sent — Cortex will revise.\n> ${feedback}',
+  'interaction.noSpecificFeedback': 'No specific feedback',
+  'interaction.cancelledPreserved': 'Cancelled. Session preserved — next message will resume.',
+  'interaction.sessionActive': 'Session `${sessionName}` active — send your message below.${profileNote}',
+  'interaction.sessionProfileNote': ' (profile: ${profileName})',
+  'interaction.newConversation': '--- new conversation --- (profile: ${profileName})',
+
+  // --- update-prompt.ts / update-prompt-slack.ts ---
+  'update.installing': 'Installing @cortex-agent/server@${version}... daemon will restart shortly.',
+  'update.skipped': 'Skipped version ${version}.',
+  'update.cancelled': 'Update cancelled. Will check again at next interval.',
+  'update.releaseNotesTitle': 'Cortex Server v${version} Release Notes',
+  'update.releaseNotesEmpty': '(No release notes available)',
+  'update.releaseNotesTruncated': '\n\n_[Truncated — view full notes on GitHub]_',
+  'update.releaseNotesBody': '**${name}**\n\n${body}\n\n[View full release notes](${url})',
+  'update.releaseNotesFetchFailed': 'Failed to fetch release notes for v${version}. View on GitHub: ${url}',
+  'update.available': 'Cortex Server v${version} is available. Update now?',
+  'update.availableSection': 'Cortex Server v${version} is available.',
+  'update.superseded': 'Superseded by a newer update prompt.',
+  'update.timedOut': 'Update prompt timed out.',
+  'update.button.update': 'Update',
+  'update.button.releaseNote': 'Release Note',
+  'update.button.skip': 'Skip this version',
+  'update.button.cancel': 'Cancel',
+
+  // --- interactive-builder.ts ---
+  'modal.answer': 'Answer (${answered}/${total})',
+  'modal.selectOneOrMore': 'Select one or more',
+  'modal.selectOne': 'Select one',
+  'modal.typeAnswerLabel': 'Or type your answer',
+  'modal.customAnswerPlaceholder': 'Custom answer (overrides selection above)',
+  'modal.yourAnswerLabel': 'Your answer',
+  'modal.yourAnswerPlaceholder': 'Type your answer',
+  'modal.questionsTitle': 'Questions',
+  'modal.submit': 'Submit',
+  'modal.cancel': 'Cancel',
+  'modal.planReady': '*Plan ready for review.* Approve to proceed or provide feedback.',
+  'modal.approve': 'Approve',
+  'modal.provideFeedback': 'Provide Feedback',
+  'modal.planFeedbackTitle': 'Plan Feedback',
+  'modal.feedbackLabel': 'Your feedback (Cortex will revise the plan)',
+  'modal.feedbackPlaceholder': 'What should be changed?',
+} as const;
+
+export const interactionsZh: Record<keyof typeof interactionsEn, string> = {
+  // --- interaction-handlers.ts ---
+  'interaction.askExpired': '此 AskUserQuestion 提问已过期。如仍需要请重新提问。',
+  'interaction.askInactive': '此 AskUserQuestion 提问已不再有效。',
+  'interaction.selectOrType': '请选择一个选项或输入自定义答案。',
+  'interaction.questionsProgress': '问题（已回答 ${answered}/${total}）',
+  'interaction.planApproved': '计划已批准 — Cortex 将继续执行。',
+  'interaction.planApprovedRich': '*计划已批准* — Cortex 将继续执行。',
+  'interaction.planFeedbackSent': '计划反馈已发送 — Cortex 将进行修订。\n> ${feedback}',
+  'interaction.noSpecificFeedback': '没有具体反馈',
+  'interaction.cancelledPreserved': '已取消。会话已保留 — 下一条消息将继续。',
+  'interaction.sessionActive': '会话 `${sessionName}` 已激活 — 请在下方发送你的消息。${profileNote}',
+  'interaction.sessionProfileNote': '（profile：${profileName}）',
+  'interaction.newConversation': '--- 新会话 --- (profile: ${profileName})',
+
+  // --- update-prompt.ts / update-prompt-slack.ts ---
+  'update.installing': '正在安装 @cortex-agent/server@${version}……守护进程稍后将重启。',
+  'update.skipped': '已跳过版本 ${version}。',
+  'update.cancelled': '更新已取消。将在下次检查间隔再次检查。',
+  'update.releaseNotesTitle': 'Cortex Server v${version} 发布说明',
+  'update.releaseNotesEmpty': '（无可用的发布说明）',
+  'update.releaseNotesTruncated': '\n\n_[已截断 — 在 GitHub 上查看完整说明]_',
+  'update.releaseNotesBody': '**${name}**\n\n${body}\n\n[查看完整发布说明](${url})',
+  'update.releaseNotesFetchFailed': '获取 v${version} 的发布说明失败。在 GitHub 上查看：${url}',
+  'update.available': 'Cortex Server v${version} 已可用。现在更新吗？',
+  'update.availableSection': 'Cortex Server v${version} 已可用。',
+  'update.superseded': '已被更新的更新提示取代。',
+  'update.timedOut': '更新提示已超时。',
+  'update.button.update': '更新',
+  'update.button.releaseNote': '发布说明',
+  'update.button.skip': '跳过此版本',
+  'update.button.cancel': '取消',
+
+  // --- interactive-builder.ts ---
+  'modal.answer': '回答（${answered}/${total}）',
+  'modal.selectOneOrMore': '选择一个或多个',
+  'modal.selectOne': '选择一个',
+  'modal.typeAnswerLabel': '或输入你的答案',
+  'modal.customAnswerPlaceholder': '自定义答案（覆盖上方选择）',
+  'modal.yourAnswerLabel': '你的答案',
+  'modal.yourAnswerPlaceholder': '输入你的答案',
+  'modal.questionsTitle': '问题',
+  'modal.submit': '提交',
+  'modal.cancel': '取消',
+  'modal.planReady': '*计划已就绪，等待审阅。* 批准以继续，或提供反馈。',
+  'modal.approve': '批准',
+  'modal.provideFeedback': '提供反馈',
+  'modal.planFeedbackTitle': '计划反馈',
+  'modal.feedbackLabel': '你的反馈（Cortex 将修订计划）',
+  'modal.feedbackPlaceholder': '应该修改什么？',
+};

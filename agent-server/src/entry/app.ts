@@ -34,6 +34,8 @@ import { loadConfig as loadThreadConfig, startConfigWatcher as startThreadConfig
 import { startMemoryWatcher } from '@domain/memory/watcher.js';
 import { getActiveBackend, configureEnvForMode, loadMode } from '@domain/agents/index.js';
 import { createEditHandler } from '@orch/routing/edit-handler.js';
+import { setLocale, normalizeLocale } from '@core/i18n.js';
+import { loadLang } from '@domain/system/preferences.js';
 
 // Extracted modules
 import { cleanupLogs, ensureMcpConfig } from './startup-helpers.js';
@@ -77,6 +79,11 @@ dotenv.config({ path: path.join(CONFIG_DIR, '.env') });
 // side effect inside domain/agents/config.ts; it is explicit here so that CLI processes
 // (cortex init / setup-gateway) importing that module don't get their env mutated.
 configureEnvForMode(loadMode());
+
+// Resolve the UI language for all system-generated user-facing text. Precedence:
+// CORTEX_LANG env (escape hatch, now that .env is loaded) > config/preferences.json > 'en'.
+// The !lang command switches this live at runtime via setLocale().
+setLocale(process.env.CORTEX_LANG ? normalizeLocale(process.env.CORTEX_LANG) : loadLang());
 
 const log = createLogger('app');
 

@@ -5,12 +5,15 @@
 
 import type { PlatformAdapter } from '@platform/index.js';
 import { CORTEX_VERSION } from '@core/version.js';
+import { t } from '../core/i18n.js';
 
 function buildStartupMessage({ machine, restartReason }: { machine?: string; restartReason?: string }) {
   const machineLabel = machine || 'unknown-machine';
-  const verb = restartReason ? 'restarted' : 'started';
-  const base = `Cortex agent v${CORTEX_VERSION} ${verb} on ${machineLabel}.`;
-  return restartReason ? `${base} Reason: ${restartReason}.` : base;
+  const base = t(restartReason ? 'startup.restarted' : 'startup.started', {
+    version: CORTEX_VERSION,
+    machine: machineLabel,
+  });
+  return restartReason ? `${base}${t('startup.reason', { reason: restartReason })}` : base;
 }
 
 async function sendStartupDmIfConfigured(

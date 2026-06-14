@@ -1,5 +1,6 @@
 import { createLogger } from '@core/log.js';
 import { Icons } from '../../../core/icons.js';
+import { t } from '../../../core/i18n.js';
 import type { Destination, PlatformAdapter } from '@platform/index.js';
 import type { CommandResult } from './command-context.js';
 import type { CommandActionRouter } from '@orch/interactions/command-action-router.js';
@@ -46,7 +47,7 @@ export function createCancelHandler(cancelDispatchedTask: ((opts: { taskId: stri
 
       if (ctx.messageRef) {
         await adapter.updateMessage(ctx.messageRef, {
-          text: `${Icons.stopped} Cancelled (${threadId || executionId})`,
+          text: `${Icons.stopped} ${t('cmd.cancel.cancelledShort', { id: threadId || executionId })}`,
         }).catch(() => {});
       }
     };
@@ -68,14 +69,14 @@ export function createCancelHandler(cancelDispatchedTask: ((opts: { taskId: stri
       if (firstArg === '--all') {
         const executions = runningExecutions.getByChannel(channel);
         if (executions.length === 0) {
-          await adapter.postMessage(dest, { text: 'Nothing running to cancel.' });
+          await adapter.postMessage(dest, { text: t('cmd.cancel.nothingRunning') });
           return;
         }
         for (const exec of executions) {
           await cancelLive(exec, channel);
         }
         conduitQueues.delete(channel);
-        await adapter.postMessage(dest, { text: `${Icons.stopped} Cancelled ${executions.length} execution(s).` });
+        await adapter.postMessage(dest, { text: `${Icons.stopped} ${t('cmd.cancel.cancelledN', { n: executions.length })}` });
         return;
       }
 
@@ -85,16 +86,16 @@ export function createCancelHandler(cancelDispatchedTask: ((opts: { taskId: stri
         if (exec) {
           await cancelLive(exec, channel);
           log.info('Cancel requested for thread:', firstArg);
-          await adapter.postMessage(dest, { text: `${Icons.stopped} Thread \`${firstArg}\` cancelled.` });
+          await adapter.postMessage(dest, { text: `${Icons.stopped} ${t('cmd.cancel.threadCancelled', { id: firstArg })}` });
         } else {
-          await adapter.postMessage(dest, { text: `No running thread \`${firstArg}\` found to cancel.` });
+          await adapter.postMessage(dest, { text: t('cmd.cancel.threadNotFound', { id: firstArg }) });
         }
         return;
       }
 
       // Fallback: dispatched-task cancellation
       if (!cancelDispatchedTask) {
-        await adapter.postMessage(dest, { text: 'Dispatched-task cancellation is not available in this process.' });
+        await adapter.postMessage(dest, { text: t('cmd.cancel.dispatchUnavailable') });
         return;
       }
       const result = await cancelDispatchedTask({ taskId: firstArg, channel });
@@ -115,20 +116,20 @@ export function createCancelHandler(cancelDispatchedTask: ((opts: { taskId: stri
     if (executions.length === 1) {
       await cancelLive(executions[0], channel);
       conduitQueues.delete(channel);
-      await adapter.postMessage(dest, { text: `${Icons.stopped} Cancelled. Session preserved — next message will resume.` });
+      await adapter.postMessage(dest, { text: `${Icons.stopped} ${t('cmd.cancel.cancelledSessionPreserved')}` });
       return;
     }
 
     // 2+ executions: show interactive list with cancel buttons
     return {
-      text: `Running tasks (${executions.length}):`,
+      text: t('cmd.cancel.runningTasks', { n: executions.length }),
       richBlocks: executions.map(exec => ({
         type: 'section' as const,
         text: `\`${exec.threadId || exec.registryKey}\` · started ${new Date(exec.startTime).toLocaleTimeString()} · ${exec.backend}${exec.channel ? ` · ${exec.channel}` : ''}`,
       })),
       actions: executions.map((exec, i) => ({
         type: 'button' as const,
-        text: `Cancel ${exec.threadId || exec.registryKey}`,
+        text: t('cmd.cancel.cancelButton', { id: exec.threadId || exec.registryKey }),
         actionId: `cmd:cancel:exec-${i}`,
         value: JSON.stringify({
           threadId: exec.threadId,

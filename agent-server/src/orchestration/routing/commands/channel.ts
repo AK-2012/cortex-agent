@@ -5,6 +5,7 @@ import type { ModalDefinition } from '@platform/types.js';
 import { projectStore } from '@domain/projects/index.js';
 import { projectDirRepo } from '@store/project-dir-repo.js';
 import { Icons } from '../../../core/icons.js';
+import { t } from '../../../core/i18n.js';
 import { getMachineRegistry } from '@domain/tasks/dispatch-utils.js';
 
 /**
@@ -23,7 +24,7 @@ export async function handleProjectsCmd(channel: string, adapter: PlatformAdapte
   const dest: Destination = { type: 'interactive-reply', conduit: channel, sessionId: '' };
   const projects = projectStore.list().map(p => p.id);
   if (projects.length === 0) {
-    await adapter.postMessage(dest, { text: 'No projects found.' });
+    await adapter.postMessage(dest, { text: t('cmd.channel.noProjects') });
     return;
   }
   const registrations = await adapter.getProjectConduits();
@@ -32,7 +33,7 @@ export async function handleProjectsCmd(channel: string, adapter: PlatformAdapte
     const status = ch ? ` → ${displayConduit(ch)}` : '';
     return `• \`${p}\`${status}`;
   });
-  await adapter.postMessage(dest, { text: `*Projects*\n${lines.join('\n')}` });
+  await adapter.postMessage(dest, { text: t('cmd.channel.projectsHeader', { list: lines.join('\n') }) });
 }
 
 const MAX_PROJECT_BUTTONS = 10;
@@ -47,7 +48,7 @@ export function createRegisterHandler(router?: CommandActionRouter) {
         await adapter.bindProjectConduit(project, ctx.channelId);
         if (ctx.messageRef) {
           await adapter.updateMessage(ctx.messageRef, {
-            text: `${Icons.ok} Registered for \`${project}\` task notifications.`,
+            text: `${Icons.ok} ${t('cmd.channel.registeredNotification', { project })}`,
           }).catch(() => {});
         }
       } catch { /* ignore */ }
@@ -70,11 +71,11 @@ export function createRegisterHandler(router?: CommandActionRouter) {
       const project = args[0];
       const projects = projectStore.list().map(p => p.id);
       if (!projects.includes(project)) {
-        await adapter.postMessage(dest, { text: `${Icons.error} Unknown project: \`${project}\`\nAvailable: ${projects.map(p => `\`${p}\``).join(', ')}` });
+        await adapter.postMessage(dest, { text: `${Icons.error} ${t('cmd.channel.unknownProject', { project, available: projects.map(p => `\`${p}\``).join(', ') })}` });
         return;
       }
       await adapter.bindProjectConduit(project, channel);
-      await adapter.postMessage(dest, { text: `${Icons.ok} This channel is now registered for project \`${project}\` task notifications.` });
+      await adapter.postMessage(dest, { text: `${Icons.ok} ${t('cmd.channel.channelRegistered', { project })}` });
       return;
     }
 
@@ -85,12 +86,12 @@ export function createRegisterHandler(router?: CommandActionRouter) {
 
     const lines: string[] = [];
     if (bound.length > 0) {
-      lines.push(`Registered: ${bound.map(p => `\`${p}\``).join(', ')}`);
+      lines.push(t('cmd.channel.registeredList', { list: bound.map(p => `\`${p}\``).join(', ') }));
     } else {
-      lines.push('This channel is not registered to any project.');
+      lines.push(t('cmd.channel.notRegisteredAny'));
     }
     if (unbound.length > 0) {
-      lines.push(`Available: ${unbound.map(p => `\`${p}\``).join(', ')}`);
+      lines.push(t('cmd.channel.availableList', { list: unbound.map(p => `\`${p}\``).join(', ') }));
     }
     const text = lines.join('\n');
 
@@ -123,34 +124,34 @@ export async function handleUnregisterCmd(channel: string, adapter: PlatformAdap
   const dest: Destination = { type: 'interactive-reply', conduit: channel, sessionId: '' };
   const args = trimmedMessage.split(/\s+/).slice(1);
   if (args.length === 0) {
-    await adapter.postMessage(dest, { text: 'Usage: `!unregister <project>`' });
+    await adapter.postMessage(dest, { text: t('cmd.channel.unregisterUsage') });
     return;
   }
   const project = args[0];
   const registrations = await adapter.getProjectConduits();
   const current = registrations[project] ?? null;
   if (!current || current !== channel) {
-    await adapter.postMessage(dest, { text: `${Icons.error} This channel is not registered for project \`${project}\`.` });
+    await adapter.postMessage(dest, { text: `${Icons.error} ${t('cmd.channel.notRegistered', { project })}` });
     return;
   }
   await adapter.unbindProjectConduit(project);
-  await adapter.postMessage(dest, { text: `${Icons.ok} Unregistered this channel from project \`${project}\`.` });
+  await adapter.postMessage(dest, { text: `${Icons.ok} ${t('cmd.channel.unregistered', { project })}` });
 }
 
 function buildProjectDirModal(channel: string): ModalDefinition {
   const machines = Object.keys(getMachineRegistry());
   return {
     callbackId: 'cmd_project_dir_add',
-    title: 'Add Project Directory',
-    submitLabel: 'Save',
+    title: t('cmd.channel.modalTitle'),
+    submitLabel: t('cmd.channel.modalSubmit'),
     privateMetadata: JSON.stringify({ channel }),
     fields: [
-      { type: 'text_input', blockId: 'pd_project', label: 'Project name', actionId: 'text', placeholder: 'e.g. example-project-dataset' },
+      { type: 'text_input', blockId: 'pd_project', label: t('cmd.channel.modalProjectLabel'), actionId: 'text', placeholder: t('cmd.channel.modalProjectPlaceholder') },
       {
-        type: 'select', blockId: 'pd_machine', label: 'Machine', actionId: 'selection',
+        type: 'select', blockId: 'pd_machine', label: t('cmd.channel.modalMachineLabel'), actionId: 'selection',
         options: machines.map(m => ({ label: m, value: m })),
       },
-      { type: 'text_input', blockId: 'pd_path', label: 'Directory path', actionId: 'text', placeholder: 'e.g. /home/user/project' },
+      { type: 'text_input', blockId: 'pd_path', label: t('cmd.channel.modalPathLabel'), actionId: 'text', placeholder: t('cmd.channel.modalPathPlaceholder') },
     ],
   };
 }
@@ -180,7 +181,7 @@ export function createProjectDirHandler(router?: CommandActionRouter) {
           if (!project || !machine || !dirPath) return;
           await projectDirRepo.setProjectDir(project, machine, dirPath);
           await adapter.postMessage(modalDest, {
-            text: `${Icons.ok} \`${project}\` on \`${machine}\` → \`${dirPath}\``,
+            text: `${Icons.ok} ${t('cmd.channel.dirSet', { project, machine, dir: dirPath })}`,
           });
         },
       }],
@@ -195,32 +196,32 @@ export function createProjectDirHandler(router?: CommandActionRouter) {
 
     if (args.length > 0) {
       if (args.length < 2) {
-        await adapter.postMessage(dest, { text: `${Icons.error} Usage: \`!project-dir <project> <machine> <path>\` or \`!project-dir <project> <machine> --remove\`` });
+        await adapter.postMessage(dest, { text: `${Icons.error} ${t('cmd.channel.projectDirUsage')}` });
         return;
       }
       const [project, machine] = args;
       const validMachines = Object.keys(getMachineRegistry());
       if (!validMachines.includes(machine)) {
-        await adapter.postMessage(dest, { text: `${Icons.error} Unknown machine: \`${machine}\`\nValid: ${validMachines.map(m => `\`${m}\``).join(', ')}` });
+        await adapter.postMessage(dest, { text: `${Icons.error} ${t('cmd.channel.unknownMachine', { machine, valid: validMachines.map(m => `\`${m}\``).join(', ') })}` });
         return;
       }
       if (args.length === 2 || args[2] === '--remove') {
         if (args[2] === '--remove') {
           await projectDirRepo.removeProjectDir(project, machine);
-          await adapter.postMessage(dest, { text: `${Icons.ok} Removed \`${project}\` directory on \`${machine}\`.` });
+          await adapter.postMessage(dest, { text: `${Icons.ok} ${t('cmd.channel.dirRemoved', { project, machine })}` });
         } else {
           const dir = await projectDirRepo.getProjectDir(project, machine);
           if (dir) {
-            await adapter.postMessage(dest, { text: `\`${project}\` on \`${machine}\` → \`${dir}\`` });
+            await adapter.postMessage(dest, { text: t('cmd.channel.dirShow', { project, machine, dir }) });
           } else {
-            await adapter.postMessage(dest, { text: `No directory registered for \`${project}\` on \`${machine}\`.` });
+            await adapter.postMessage(dest, { text: t('cmd.channel.dirNone', { project, machine }) });
           }
         }
         return;
       }
       const dirPath = args.slice(2).join(' ');
       await projectDirRepo.setProjectDir(project, machine, dirPath);
-      await adapter.postMessage(dest, { text: `${Icons.ok} \`${project}\` on \`${machine}\` → \`${dirPath}\`` });
+      await adapter.postMessage(dest, { text: `${Icons.ok} ${t('cmd.channel.dirSet', { project, machine, dir: dirPath })}` });
       return;
     }
 
@@ -230,8 +231,8 @@ export function createProjectDirHandler(router?: CommandActionRouter) {
       ? entries.flatMap(([project, machines]) =>
           Object.entries(machines).map(([machine, dir]) => `• \`${project}\` on \`${machine}\` → \`${dir}\``)
         )
-      : ['No project directories registered.'];
-    const text = `*Project Directories*\n${lines.join('\n')}`;
+      : [t('cmd.channel.noProjectDirs')];
+    const text = t('cmd.channel.projectDirsHeader', { list: lines.join('\n') });
 
     if (!router) {
       await adapter.postMessage(dest, { text });
@@ -243,7 +244,7 @@ export function createProjectDirHandler(router?: CommandActionRouter) {
       richBlocks: [{ type: 'section' as const, text }],
       actions: [{
         type: 'button' as const,
-        text: 'Add',
+        text: t('cmd.channel.addButton'),
         actionId: 'cmd:project-dir:open-add',
         value: 'add',
         style: 'primary' as const,

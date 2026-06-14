@@ -3,6 +3,7 @@ import type { CommandResult } from './command-context.js';
 import type { CommandActionRouter } from '@orch/interactions/command-action-router.js';
 import { handleScheduleCommand } from '@domain/scheduling/schedule-command.js';
 import type { ScheduleTask } from '@domain/scheduling/scheduler.js';
+import { t } from '../../../core/i18n.js';
 
 const MAX_SCHEDULE_BUTTONS = 10;
 
@@ -10,7 +11,7 @@ const FMT_OPTS: Intl.DateTimeFormatOptions = { month: 'short', day: 'numeric', h
 const fmtTime = (ts: number): string => new Date(ts).toLocaleString('en-US', FMT_OPTS);
 
 function formatTimeUntilCompact(ms: number): string {
-  if (ms <= 0) return 'now';
+  if (ms <= 0) return t('cmd.schedule.now');
   const seconds = Math.floor(ms / 1000);
   if (seconds < 60) return `${seconds}s`;
   const minutes = Math.floor(seconds / 60);
@@ -20,34 +21,34 @@ function formatTimeUntilCompact(ms: number): string {
   return `${Math.floor(hours / 24)}d`;
 }
 
-function formatTaskLine(t: ScheduleTask, now: number): string {
-  const id = `\`${t.id}\``;
-  const profile = t.profile ? ` · ${t.profile}` : '';
-  const paused = t.isPaused ? ' · *paused*' : '';
-  const nextMs = (t.nextRun || t.runAt || 0) - now;
-  const next = t.isPaused ? '' : ` · next: ${formatTimeUntilCompact(nextMs)}`;
-  const msg = t.message.length > 40 ? t.message.slice(0, 37) + '...' : t.message;
-  return `${id} ${t.type}${profile}${paused}${next} · "${msg}"`;
+function formatTaskLine(task: ScheduleTask, now: number): string {
+  const id = `\`${task.id}\``;
+  const profile = task.profile ? ` · ${task.profile}` : '';
+  const paused = task.isPaused ? ` · *${t('cmd.schedule.paused')}*` : '';
+  const nextMs = (task.nextRun || task.runAt || 0) - now;
+  const next = task.isPaused ? '' : ` · ${t('cmd.schedule.nextLabel')}: ${formatTimeUntilCompact(nextMs)}`;
+  const msg = task.message.length > 40 ? task.message.slice(0, 37) + '...' : task.message;
+  return `${id} ${task.type}${profile}${paused}${next} · "${msg}"`;
 }
 
 function buildScheduleTaskButtons(tasks: ScheduleTask[]): import('@platform/index.js').ActionElement[] {
   const buttons: import('@platform/index.js').ActionElement[] = [];
   for (let i = 0; i < Math.min(tasks.length, MAX_SCHEDULE_BUTTONS); i++) {
-    const t = tasks[i];
-    if (t.type === 'once') {
+    const task = tasks[i];
+    if (task.type === 'once') {
       buttons.push({
-        type: 'button', text: `Remove ${t.id}`,
-        actionId: `cmd:schedule:remove-${i}`, value: t.id, style: 'danger',
+        type: 'button', text: t('cmd.schedule.removeButton', { id: task.id }),
+        actionId: `cmd:schedule:remove-${i}`, value: task.id, style: 'danger',
       });
-    } else if (t.isPaused) {
+    } else if (task.isPaused) {
       buttons.push({
-        type: 'button', text: `Resume ${t.id}`,
-        actionId: `cmd:schedule:resume-${i}`, value: t.id,
+        type: 'button', text: t('cmd.schedule.resumeButton', { id: task.id }),
+        actionId: `cmd:schedule:resume-${i}`, value: task.id,
       });
     } else {
       buttons.push({
-        type: 'button', text: `Pause ${t.id}`,
-        actionId: `cmd:schedule:pause-${i}`, value: t.id,
+        type: 'button', text: t('cmd.schedule.pauseButton', { id: task.id }),
+        actionId: `cmd:schedule:pause-${i}`, value: task.id,
       });
     }
   }
@@ -60,8 +61,8 @@ export function createScheduleHandler(scheduler: any, router?: CommandActionRout
       const tasks: ScheduleTask[] = await scheduler.list();
       const now = Date.now();
       const text = tasks.length === 0
-        ? 'No scheduled tasks.'
-        : `*Scheduled tasks (${tasks.length}):*\n${tasks.map(t => `• ${formatTaskLine(t, now)}`).join('\n')}`;
+        ? t('cmd.schedule.none')
+        : `${t('cmd.schedule.header', { n: tasks.length })}\n${tasks.map(task => `• ${formatTaskLine(task, now)}`).join('\n')}`;
       await adapter.updateMessage(messageRef, {
         text,
         richBlocks: [
@@ -115,11 +116,11 @@ export function createScheduleHandler(scheduler: any, router?: CommandActionRout
     if (router && scheduler && (!sub || sub === 'list')) {
       const tasks: ScheduleTask[] = await scheduler.list();
       if (tasks.length === 0) {
-        await adapter.postMessage(dest, { text: 'No scheduled tasks.' });
+        await adapter.postMessage(dest, { text: t('cmd.schedule.none') });
         return;
       }
       const now = Date.now();
-      const text = `*Scheduled tasks (${tasks.length}):*\n${tasks.map(t => `• ${formatTaskLine(t, now)}`).join('\n')}`;
+      const text = `${t('cmd.schedule.header', { n: tasks.length })}\n${tasks.map(task => `• ${formatTaskLine(task, now)}`).join('\n')}`;
       return {
         text,
         richBlocks: [{ type: 'section' as const, text }],
