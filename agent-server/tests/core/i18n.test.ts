@@ -5,7 +5,7 @@
 
 import { describe, it, afterEach } from 'node:test';
 import * as assert from 'node:assert/strict';
-import { t, setLocale, getLocale, normalizeLocale } from '../../src/core/i18n.js';
+import { t, setLocale, getLocale, normalizeLocale, detectSystemLocale } from '../../src/core/i18n.js';
 import { en } from '../../src/core/locales/en.js';
 import { zh } from '../../src/core/locales/zh.js';
 
@@ -18,6 +18,27 @@ describe('i18n', () => {
     assert.equal(normalizeLocale('fr'), 'en');
     assert.equal(normalizeLocale(undefined), 'en');
     assert.equal(normalizeLocale(''), 'en');
+  });
+
+  it('detectSystemLocale maps Chinese locale env vars to zh', () => {
+    assert.equal(detectSystemLocale({ LANG: 'zh_CN.UTF-8' }), 'zh');
+    assert.equal(detectSystemLocale({ LC_ALL: 'zh_TW.UTF-8' }), 'zh');
+    assert.equal(detectSystemLocale({ LANGUAGE: 'zh_CN:en_US' }), 'zh');
+    assert.equal(detectSystemLocale({ LC_MESSAGES: 'zh-Hans' }), 'zh');
+  });
+
+  it('detectSystemLocale defaults to en for non-Chinese / unset env', () => {
+    assert.equal(detectSystemLocale({ LANG: 'en_US.UTF-8' }), 'en');
+    assert.equal(detectSystemLocale({ LANG: 'fr_FR.UTF-8' }), 'en');
+    assert.equal(detectSystemLocale({ LANG: 'C' }), 'en');
+    assert.equal(detectSystemLocale({}), 'en');
+  });
+
+  it('detectSystemLocale precedence: LC_ALL > LC_MESSAGES > LANG > LANGUAGE', () => {
+    // LC_ALL overrides everything, even a Chinese LANG
+    assert.equal(detectSystemLocale({ LC_ALL: 'en_US.UTF-8', LANG: 'zh_CN.UTF-8' }), 'en');
+    // LANG used when LC_ALL/LC_MESSAGES absent
+    assert.equal(detectSystemLocale({ LANG: 'zh_CN.UTF-8', LANGUAGE: 'en' }), 'zh');
   });
 
   it('setLocale/getLocale round-trip', () => {

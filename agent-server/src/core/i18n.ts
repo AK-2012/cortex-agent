@@ -16,6 +16,17 @@ export function normalizeLocale(raw: string | undefined | null): Locale {
   return raw === 'zh' ? 'zh' : 'en';
 }
 
+/**
+ * Best-effort detection of the operator's system language from POSIX locale env vars.
+ * Precedence follows POSIX: LC_ALL > LC_MESSAGES > LANG > LANGUAGE. A value whose language
+ * tag starts with "zh" (zh_CN, zh_TW, zh-Hans, ...) maps to 'zh'; everything else (incl. unset,
+ * "C", "POSIX") falls back to 'en'. Used by `cortex init` to pre-select the language option.
+ */
+export function detectSystemLocale(env: NodeJS.ProcessEnv = process.env): Locale {
+  const raw = env.LC_ALL || env.LC_MESSAGES || env.LANG || env.LANGUAGE || '';
+  return raw.toLowerCase().startsWith('zh') ? 'zh' : 'en';
+}
+
 // Initial locale comes only from the environment (escape hatch / boot default). The wiring layer
 // overrides it with the persisted preference via setLocale() right after config load.
 let currentLocale: Locale = normalizeLocale(process.env.CORTEX_LANG);
