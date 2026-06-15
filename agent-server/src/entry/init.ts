@@ -25,7 +25,7 @@ import { mergeThreadTemplates } from '@domain/threads/index.js';
 import type { ModelChoice } from '@core/profile-generator.js';
 import { createLogger } from '@core/log.js';
 import { INSTALL_ROOT, DEFAULTS_DIR } from '@core/utils.js';
-import { t, setLocale, normalizeLocale, type Locale } from '../core/i18n.js';
+import { t, setLocale, normalizeLocale, detectSystemLocale, type Locale } from '../core/i18n.js';
 import { cmdFeishu, type CliResult } from './feishu-login.js';
 
 // ─── Path computation (DATA_DIR resolved locally to support --home override) ──
@@ -815,16 +815,19 @@ export async function runFeishuUserLogin(
 }
 
 async function collectAnswersInteractive(paths: InitPaths): Promise<InitAnswers> {
-  // Step 0: Language selection — shown first and bilingually (no locale chosen yet). The choice
-  // is applied immediately via setLocale() so every subsequent prompt renders in that language,
-  // and persisted to config/preferences.json by generateConfigs().
+  // Step 0: Language selection — shown first and bilingually (the prompt itself is always
+  // bilingual since no choice has been made yet). The option pre-selected as the default is
+  // inferred from the system locale (Chinese system → 中文 highlighted, otherwise English), so a
+  // Chinese user can just press Enter. The choice is applied immediately via setLocale() so every
+  // subsequent prompt renders in that language, and persisted to config/preferences.json.
+  const detected = detectSystemLocale();
   const langSel = await clack.select({
     message: 'Select language / 选择语言',
     options: [
       { value: 'en' as Locale, label: 'English' },
       { value: 'zh' as Locale, label: '中文 (Simplified Chinese)' },
     ],
-    initialValue: 'en' as Locale,
+    initialValue: detected,
   });
   handleCancel(langSel);
   const lang = langSel as Locale;
@@ -1025,7 +1028,7 @@ async function collectAnswersNonInteractive(): Promise<InitAnswers> {
   const extraProfiles = parseExtraProfilesLine(lines[profileChoiceStart + 2]);
 
   return {
-    lang: normalizeLocale(process.env.CORTEX_LANG),
+    lang: process.env.CORTEX_LANG ? normalizeLocale(process.env.CORTEX_LANG) : detectSystemLocale(),
     backends: backends.length > 0 ? backends : ['claude'],
     machineName: os.hostname(),
     gpuCount: detectGpuCount(),
