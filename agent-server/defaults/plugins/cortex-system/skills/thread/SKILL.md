@@ -59,63 +59,57 @@ Slack message / Scheduler / Task Dispatch
 | `completed` | All steps done | Yes |
 | `failed` | Unrecoverable error | Yes |
 | `cancelled` | User cancelled via `!thread cancel` | Yes |
-| `aborted` | Agent self-aborted via `[ABORT]` marker in artifact | Yes |
+| `aborted` | Agent self-aborted via the `thread_abort` tool | Yes |
 
 ---
 
-## Abort Mechanism
+## Control Plane (abort / split / wait) — DR-0015
 
-When an agent determines its task cannot be completed or is blocked by an irrecoverable condition, it can terminate the thread early by writing an abort marker to the artifact file.
+Thread control is **out-of-band**: an agent signals its own thread by calling explicit MCP tools, NOT by writing markers into the artifact. The artifact is plain prose — text that merely mentions `[ABORT]` / `[SPLIT]` / `[WAIT_CHILDREN]` (e.g. "No [ABORT]", or a plan that says "if X then abort") triggers **nothing**. This eliminated the false-positive class behind the 2026-06-13 double-abort incident (DR-0015 problem 1).
 
-### How Agents Know About Abort
+### The three control tools (self-control of the caller's own thread)
 
-The abort capability is **auto-injected** by the thread system — you do **not** need to add anything to an agent's directive. `thread-manager.buildStepPrompt` prepends a short `THREAD_PROTOCOL_PREAMBLE` block (defined in `agent-server/src/thread-manager.ts`) to every step prompt of any thread that owns a workspace artifact. The preamble is skipped for auto-record / default / direct paths (no artifact to write to) and skipped on `--resume` of a persistent session (already delivered on first trigger).
+All three target `CORTEX_THREAD_ID` (the thread you are running inside) — you never pass a thread id. Calling outside a thread is an error. After calling, end your step; the runner consumes the signal at the next step boundary.
 
-Practical consequence: adding a new artifact-writing agent to `thread-templates.json` automatically gets the abort capability without editing directive / promptTemplate / systemPrompt.
+- `thread_abort({ kind, diagnosis })` — terminate the thread early (terminal state `aborted`, distinct from `failed`). `kind ∈ {too-big, mis-scoped, blocked-external}`; `diagnosis` is required and becomes `thread.abortReason` (and, for a dispatch task, the task block reason). `too-big` / `mis-scoped` escalate to a re-planning manager; `blocked-external` escalates to a human.
+- `thread_split({ subtasks })` — propose a decomposition of a dispatch task instead of doing it: the task is decomposed keep-parent (your task becomes the join node), unclaimed, and the children flow through the dispatch queue. `subtasks` is a typed array (decomposeTask shape).
+- `thread_wait({ on_tasks?, on_threads? })` — suspend the thread until its awaited children finish; you are re-entered with their results once ALL are terminal.
 
-### Marker Format
+### How Agents Know About the Control Plane
 
-- `[ABORT]` — terminate with no reason
-- `[ABORT: <reason>]` — terminate with a free-text reason (trimmed, stored in `thread.abortReason`)
+The protocol is **auto-injected** by the thread system — you do **not** need to add anything to an agent's directive. `buildStepPrompt` prepends a short `THREAD_PROTOCOL_PREAMBLE` block (defined in `agent-server/src/domain/threads/prompt-builder.ts`) to every step prompt of any thread that owns a workspace artifact. The preamble is skipped for auto-record / default / direct paths (no artifact) and on `--resume` of a persistent session (already delivered). Adding a new artifact-writing agent to `thread-templates.json` automatically gets the control tools without editing its directive / promptTemplate / systemPrompt.
 
-The marker is matched with regex `/\[ABORT(?::\s*([^\]\n]*))?\]/`. It may appear anywhere in the artifact, but placement at the end is recommended for clarity.
+### When to Abort
 
-### When to Use
+Call `thread_abort` when:
 
-An agent should write `[ABORT: <reason>]` when:
+- **Upstream is missing or malformed** — required inputs are absent or corrupt and cannot be produced by retrying.
+- **Hardware / external resource unavailable** (`kind: blocked-external`) — target machine offline, GPU exhausted, external API permanently unreachable.
+- **Specification unresolvable** (`kind: mis-scoped`) — the requirements contain a contradiction that cannot be decided autonomously.
+- **Task is far bigger than described** (`kind: too-big`) — multiple independent units crammed together (prefer `thread_split` if you can already name the children).
 
-- **Upstream is missing or malformed** — required inputs (previous agent's artifact section, referenced files, dependencies) are absent or corrupt and cannot be produced by retrying.
-- **Hardware / external resource unavailable** — e.g., target machine offline, GPU exhausted, external API permanently unreachable.
-- **Specification unresolvable** — the user/task requirements contain a contradiction that cannot be decided autonomously.
-- **Repeated failure without signal of progress** — the agent is stuck in a loop that more retries will not fix.
-
-Do **not** abort for:
-
-- Normal retry situations (use the `[REVISED]` convention and let the reviewer loop handle it).
-- Minor warnings that do not block the task.
-- Disagreements with the plan that can be recorded as feedback in the artifact.
+Do **not** abort for: normal retry situations (use the `[REVISED]` convergence convention and let the reviewer loop handle it), minor warnings, or disagreements with the plan that can be recorded as feedback in the artifact.
 
 ### Execution Semantics
 
-When the thread-runner detects the marker after a step completes:
+When the runner reads `metadata.pendingControl` after a step completes:
 
-1. Thread status → `aborted`; `abortReason` is recorded.
-2. No further steps execute (transitions are skipped).
-3. `onEnd` hook still fires — `/compound-simple`, git commit, and other cleanup work normally.
-4. `finalizeThread` reads the artifact as the final output and flushes to Slack.
+1. `abort` → thread status `aborted`, `abortReason` recorded; for a dispatch thread the owning task is blocked BEFORE the `onEnd` hook runs (DR-0015 problem 2). No further steps. `onEnd` still fires; `finalizeThread` flushes the artifact.
+2. `split` → the runner breaks the loop leaving the signal in place; the dispatch path consumes `pendingControl.subtasks` and decomposes keep-parent.
+3. `wait` → if live children remain the thread enters `waiting`; otherwise it continues.
+
+The signal is cleared after consumption so an intent fires exactly once; the webhook rejects a second concurrent control on the same thread.
 
 ### Comparison with Other Terminators
 
-| Mechanism | Who writes it | Effect |
-|-----------|---------------|--------|
-| `[APPROVED]` / `[IMPL-APPROVED]` | Reviewer agent | Convergence marker — reviewer approves, transition to next agent |
-| `[REVISED]` | Doer agent (after retry) | Signals retry complete; `output_not_contains` transition terminates loop |
-| `[ABORT[: reason]]` | Any agent | Global abort — thread enters `aborted` terminal state, overrides all transitions |
+| Mechanism | Who triggers it | Effect |
+|-----------|-----------------|--------|
+| `[APPROVED]` / `[IMPL-APPROVED]` | Reviewer agent (artifact text) | Convergence marker — reviewer approves, transition to next agent |
+| `[REVISED]` | Doer agent (artifact text, after retry) | Signals retry complete; `output_not_contains` transition terminates loop |
+| `thread_abort` tool | Any agent | Global abort — thread enters `aborted` terminal state, overrides all transitions |
 | `!thread cancel` | User (Slack command) | Thread enters `cancelled` terminal state |
 
-### Quoting Caveat
-
-If an agent needs to quote or reference the literal string `[ABORT]` (e.g., reviewer explaining the mechanism), it should wrap it in backticks (`` `[ABORT]` ``) or escape the brackets. The marker regex matches unescaped bracketed text anywhere in the artifact, so unquoted references can accidentally trigger abort.
+(`[APPROVED]` / `[REVISED]` remain in-band transition markers matched against agent output — they are evaluated by template `transitions`, a separate mechanism from the control plane.)
 
 ---
 

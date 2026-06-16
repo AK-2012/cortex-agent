@@ -211,15 +211,15 @@ A thread moves through these states during its lifetime:
 running → completed   (all steps finished successfully)
 running → failed      (unrecoverable error)
 running → cancelled   (user cancelled via !cancel or button)
-running → aborted     (agent self-aborted via [ABORT] marker in artifact)
+running → aborted     (agent self-aborted via the thread_abort tool)
 running → waiting     (waiting for user input — Phase 6 buffering)
 ```
 
 Terminal states: `completed`, `failed`, `cancelled`, `aborted`.
 
-### Agent-Initiated Abort
+### Agent-Initiated Control (abort / split / wait)
 
-Any agent in a thread can abort the entire thread by writing `[ABORT]` or `[ABORT: <reason>]` to the artifact file. The abort marker is checked after every agent step completion and has **higher priority than all transition rules**. When detected, the thread is immediately terminated with status `aborted`, but `onEnd` hooks still fire.
+Thread control is out-of-band: an agent signals its own thread by calling the `thread_abort`, `thread_split`, or `thread_wait` MCP tools, never by writing markers into the artifact (text mentioning those keywords in the artifact does nothing). The tool writes a structured `metadata.pendingControl` on the agent's own thread; the runner reads it after every step completion, with **higher priority than all transition rules**. `thread_abort({ kind, diagnosis })` immediately terminates the thread with status `aborted` (but `onEnd` hooks still fire); `thread_split({ subtasks })` proposes a decomposition of the owning dispatch task; `thread_wait` suspends until awaited children finish.
 
 ### Execution Loop
 
@@ -232,7 +232,7 @@ The main execution loop in `runner.ts` runs as follows:
    c. Set up streaming callbacks (assistant message aggregation, tool traces)
    d. Execute the agent (spawn LLM process, await result)
    e. Record step outcome (persist to thread store, register session, finalize execution)
-   f. Check for abort marker (`[ABORT]` in artifact)
+   f. Read metadata.pendingControl (abort / split / wait) written by the control tools
    g. Evaluate transitions (first matching rule wins, or stop)
    h. **onTransition hook**: Fire between steps (if transitioning)
 3. **onEnd hook**: Fire after the main loop completes

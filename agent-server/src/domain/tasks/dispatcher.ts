@@ -334,13 +334,13 @@ function buildDispatchPrompt(task: any): string {
   sections.push(isolation.join('\n'));
 
   const escalation = [
-    '## If This Task Is Mis-Scoped ([ABORT])',
+    '## If This Task Is Mis-Scoped (thread_abort)',
     '',
-    'If during execution you discover this task is far bigger than its description suggests, or its scope is wrong (multiple independent work units crammed together, missing prerequisites, contradictory requirements), do NOT grind through it. Append to the artifact:',
+    'If during execution you discover this task is far bigger than its description suggests, or its scope is wrong (multiple independent work units crammed together, missing prerequisites, contradictory requirements), do NOT grind through it. Call the `thread_abort` tool:',
     '',
-    '    [ABORT: too-big — <one-line diagnosis of what the real structure is>]',
+    '    thread_abort(kind="too-big", diagnosis="<one-line diagnosis of what the real structure is>")',
     '',
-    'The task will be blocked with your diagnosis and escalated: its manager (or a human) re-plans the decomposition with full context. A precise diagnosis is the most valuable thing you can produce here — it beats a half-done grind every time.',
+    'The task will be blocked with your diagnosis and escalated: its manager (or a human) re-plans the decomposition with full context. A precise diagnosis is the most valuable thing you can produce here — it beats a half-done grind every time. (Use kind="too-big" or "mis-scoped" for structural problems, "blocked-external" for a missing external resource.) If instead you can already see the right decomposition, call `thread_split` with the subtasks.',
   ];
   sections.push(escalation.join('\n'));
 

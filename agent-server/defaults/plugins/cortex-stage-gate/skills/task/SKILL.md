@@ -467,13 +467,13 @@ investigation — do not force a premature decomposition. Instead create ONE tas
 
 - A manager thread (strong model, persistent session) is dispatched for it: it orients,
   decomposes into child tasks (`decompose --keep-parent`, children carry `parent`), suspends
-  on `[WAIT_CHILDREN]`, and is woken to verify each child's deliverable against its done_when
+  via the `thread_wait` tool, and is woken to verify each child's deliverable against its done_when
   before completing the parent. Acceptance is part of the node, not an afterthought.
 - Rule of thumb: expected to span 2+ independently verifiable units, or the decomposition
   itself needs judgment → `manager`. A single well-scoped unit → a worker template
   (coder-review / execute-review / ...).
-- Worker escalation: a worker that discovers its task is mis-scoped writes
-  `[ABORT: too-big — <diagnosis>]`; the task gets blocked with the diagnosis and the owning
+- Worker escalation: a worker that discovers its task is mis-scoped calls the `thread_abort`
+  tool (kind `too-big`, with a diagnosis); the task gets blocked with the diagnosis and the owning
   manager (or a human) re-plans. Workers never decompose tasks themselves.
 
 ### Stage Boundary Constraints

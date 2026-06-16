@@ -212,15 +212,15 @@
 running → completed   （所有步骤成功完成）
 running → failed      （不可恢复的错误）
 running → cancelled   （用户通过 !cancel 或按钮取消）
-running → aborted     （智能体通过产物中的 [ABORT] 标记自行中止）
+running → aborted     （智能体通过 thread_abort 工具自行中止）
 running → waiting     （等待用户输入 — 第 6 阶段缓冲）
 ```
 
 终止状态：`completed`、`failed`、`cancelled`、`aborted`。
 
-### 智能体发起的中止
+### 智能体发起的控制（中止 / 拆分 / 等待）
 
-线程中的任何智能体都可以通过向产物文件写入 `[ABORT]` 或 `[ABORT: <reason>]` 来中止整个线程。中止标记在每个智能体步骤完成后检查，并且**优先级高于所有转换规则**。检测到时，线程立即终止，状态为 `aborted`，但 `onEnd` 钩子仍然触发。
+线程控制是带外（out-of-band）的：智能体通过调用 `thread_abort`、`thread_split`、`thread_wait` MCP 工具来控制自己的线程，而不是向产物写入标记（在产物里提及这些关键字不会触发任何动作）。工具会在该智能体自己的线程上写入结构化的 `metadata.pendingControl`；runner 在每步完成后读取它，**优先级高于所有转换规则**。`thread_abort({ kind, diagnosis })` 立即将线程终止为 `aborted`（`onEnd` 钩子仍会触发）；`thread_split({ subtasks })` 提议对所属派发任务做分解；`thread_wait` 挂起直到被等待的子项完成。
 
 ### 执行循环
 
@@ -233,7 +233,7 @@ running → waiting     （等待用户输入 — 第 6 阶段缓冲）
    c. 设置流式回调（助手消息聚合、工具追踪）
    d. 执行智能体（生成 LLM 进程，等待结果）
    e. 记录步骤结果（持久化到线程存储、注册会话、完成执行）
-   f. 检查中止标记（产物中的 `[ABORT]`）
+   f. 读取控制工具写入的 metadata.pendingControl（中止 / 拆分 / 等待）
    g. 评估转换（第一个匹配的规则胜出，或停止）
    h. **onTransition 钩子**：步骤之间触发（如果正在转换）
 3. **onEnd 钩子**：主循环完成后触发

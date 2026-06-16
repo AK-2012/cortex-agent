@@ -46,11 +46,11 @@ run `cortex-task tree --task-id <your Task ID>` (and `cortex-task show`) to see 
 
    If the audit keeps failing across re-cuts, the task is not decomposable here — fall back to the coupled-core / refactor-first options in step 2.
 6. **Write your reasoning down** (MANDATORY — fallback memory for a fresh manager if this session is ever lost): the seam map, why this decomposition, what each child must deliver, your per-child acceptance checklist, and the self-audit results. Write it BOTH to your artifact AND to `context/projects/<project>/manager-notes-<your Task ID>.md` — the project file survives thread-workspace cleanup; the artifact does not.
-7. End your step with the marker `[WAIT_CHILDREN]` on its own line.
+7. Call the `thread_wait` tool, then end your step.
 
 **Queue semantics — read carefully (this is where managers go wrong):**
 - Your children are dispatched by the task queue ONLY AFTER your step ends and you suspend. You will NEVER see them start, run, or finish during your own step. Children sitting `open`/unclaimed while you are still running is the EXPECTED state, not a failure.
-- NEVER block, complete, or unclaim your own task in Phase A, and never conclude "the dispatcher isn't working" from inside your own step. Emit `[WAIT_CHILDREN]` and end — the system does the rest.
+- NEVER block, complete, or unclaim your own task in Phase A, and never conclude "the dispatcher isn't working" from inside your own step. Call `thread_wait` and end — the system does the rest.
 - Do not poll or wait in-step. Suspension is free; polling burns budget.
 
 ## Phase B — Verify & Correct (woken with child results)
@@ -60,18 +60,18 @@ Child results arrive as injected messages; ALWAYS cross-check against `cortex-ta
 For each finished child, **acceptance before trust**:
 1. Read the actual deliverable (code, files, experiment records) and check it against the child's done_when. Run tests where code is involved. Never accept a completion note as evidence.
 2. **Pass** → distill the key conclusions into your artifact; move on.
-3. **Fail** → write the expected/actual gap and your hypothesis into the artifact, then either `cortex-task uncomplete` + edit the child with a sharper contract, or add a revision child via the same `decompose --keep-parent` call. End with `[WAIT_CHILDREN]` again.
+3. **Fail** → write the expected/actual gap and your hypothesis into the artifact, then either `cortex-task uncomplete` + edit the child with a sharper contract, or add a revision child via the same `decompose --keep-parent` call. Call `thread_wait` again.
 4. **Blocked child** (escalation from a worker — e.g. `worker-abort: too-big`): this means YOUR decomposition needs revising. Diagnose, then `cortex-task unblock` + edit, or rebuild the unit as new children. Do not just retry the same contract.
-5. **Direction is wrong** (the decomposition premise no longer holds, or the problem exceeds your node's authority): append `[ABORT: <one-line diagnosis>]` to the artifact — your own parent manager (or a human) re-plans with your diagnosis.
+5. **Direction is wrong** (the decomposition premise no longer holds, or the problem exceeds your node's authority): call the `thread_abort` tool with a one-line diagnosis — your own parent manager (or a human) re-plans with your diagnosis.
 
 When ALL children are verified:
 6. Integrate: check the combined result against YOUR task's original done_when (the children passing individually is not enough).
 7. Update the project's `STATUS.md`; record durable findings in the project knowledge files.
 8. `cortex-task complete --project <project> --task-id <your Task ID> --note "<what was delivered + verification evidence>"`.
-9. End normally — WITHOUT `[WAIT_CHILDREN]`.
+9. End normally — WITHOUT calling `thread_wait`.
 
 # Tools & Limits
 
 - `thread_start` remains available for quick sub-calls that don't deserve a task (an independent verifier pass on a child's deliverable, a short research probe before deciding a split). Minutes-scale only; tree guards (width/depth/budget) apply.
-- Stay within your node: don't touch sibling tasks or re-plan above your level — that's what `[ABORT: <diagnosis>]` is for.
+- Stay within your node: don't touch sibling tasks or re-plan above your level — that's what the `thread_abort` tool (with a diagnosis) is for.
 - Rework discipline: at most 2 revision rounds per child; if a unit fails a third time, escalate with your accumulated diagnosis instead of iterating.

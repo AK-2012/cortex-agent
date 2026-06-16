@@ -306,7 +306,7 @@
     },
     "manager": {
       "name": "manager",
-      "description": "Resident manager of a composite task node (DR-0014 \u00a78): decomposes into child tasks (decompose --keep-parent), suspends via [WAIT_CHILDREN], re-enters its own session to verify deliverables, rework, or escalate. persistSession is load-bearing \u2014 re-entry resumes the SAME session with full memory.",
+      "description": "Resident manager of a composite task node (DR-0014 \u00a78): decomposes into child tasks (decompose --keep-parent), suspends via the thread_wait tool, re-enters its own session to verify deliverables, rework, or escalate. persistSession is load-bearing \u2014 re-entry resumes the SAME session with full memory.",
       "profile": "__active__",
       "persistSession": true,
       "directive": "file:manager.md",
@@ -581,7 +581,7 @@
     },
     "manager": {
       "name": "manager",
-      "description": "Composite-task node manager (DR-0014 \u00a78). Single resident agent: Phase A decomposes the task into children (keep-parent) and suspends on [WAIT_CHILDREN]; woken per task.completed/task.blocked events, Phase B verifies deliverables against done_when, reworks or escalates, finally completes its own task. Assign this template at task creation to any task expected to span 2+ independently verifiable units.",
+      "description": "Composite-task node manager (DR-0014 \u00a78). Single resident agent: Phase A decomposes the task into children (keep-parent) and suspends via the thread_wait tool; woken per task.completed/task.blocked events, Phase B verifies deliverables against done_when, reworks or escalates, finally completes its own task. Assign this template at task creation to any task expected to span 2+ independently verifiable units.",
       "agents": [
         "manager"
       ],

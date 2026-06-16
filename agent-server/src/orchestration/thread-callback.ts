@@ -73,7 +73,7 @@ export function buildChildResultNotice(child: ThreadRecord): string {
   lines.push('2. 达标 → 蒸馏关键结论进你的 artifact，继续你的计划。');
   lines.push('3. 未达标 → 写出 expected/actual 差异与失败假设，用修订后的契约重新 thread_start' +
     `（你已使用 ${childCount}/${maxChildren} 个子线程额度；额度耗尽时 thread_start 会被拒绝）。`);
-  lines.push('4. 无法判断或方向性问题 → 在 artifact 写 [ABORT: <诊断>] 升级到你的上层。');
+  lines.push('4. 无法判断或方向性问题 → 调用 thread_abort 工具（附一行诊断）升级到你的上层。');
   return lines.join('\n');
 }
 
@@ -227,16 +227,16 @@ export function buildTaskResultNotice(task: Task, kind: 'completed' | 'blocked')
     lines.push('验收要求（必须执行，不得凭完成备注直接采信）:');
     lines.push('1. 读取实际产出（代码/文档/实验记录），逐条核对 done_when；涉及代码的跑测试验证。');
     lines.push('2. 达标 → 蒸馏关键结论进你的 artifact，继续你的计划。');
-    lines.push(`3. 未达标 → cortex-task uncomplete 后修订该任务，或用 decompose --keep-parent 增加修订子任务，再 [WAIT_CHILDREN]。`);
-    lines.push('4. 方向性问题 → 在 artifact 写 [ABORT: <诊断>] 升级。');
+    lines.push(`3. 未达标 → cortex-task uncomplete 后修订该任务，或用 decompose --keep-parent 增加修订子任务，再调用 thread_wait。`);
+    lines.push('4. 方向性问题 → 调用 thread_abort 工具（附一行诊断）升级。');
   } else {
     lines.push(`[子任务被阻塞 — 升级信号] #${task.id} ${task.text}`);
     lines.push(`阻塞原因: ${task.blocked_by || '(未记录)'}`);
     lines.push('');
     lines.push('这是子任务的升级：它无法自行完成。你必须处理:');
     lines.push('1. 诊断原因（读它的产出/日志；too-big 类原因 = 你当初的分解需要修订）。');
-    lines.push('2. 可修复 → cortex-task unblock 并修订任务描述/done_when，或重建修订后的子任务（decompose --keep-parent），再 [WAIT_CHILDREN]。');
-    lines.push('3. 超出你的职权或方向性问题 → 在 artifact 写 [ABORT: <诊断>] 向上升级。');
+    lines.push('2. 可修复 → cortex-task unblock 并修订任务描述/done_when，或重建修订后的子任务（decompose --keep-parent），再调用 thread_wait。');
+    lines.push('3. 超出你的职权或方向性问题 → 调用 thread_abort 工具（附一行诊断）向上升级。');
   }
   return lines.join('\n');
 }
@@ -387,7 +387,7 @@ export async function recoverWaitingThreads(deps: { resume?: ResumeFn } = {}): P
 
 /**
  * Fire the completion callback for an MCP-spawned thread once it is terminal.
- *  - Non-terminal statuses (e.g. a parent that suspended via [WAIT_CHILDREN] and returned
+ *  - Non-terminal statuses (e.g. a parent that suspended via thread_wait and returned
  *    from runThread in 'waiting') are ignored — suspension is not completion.
  *  - Interactive parent (no parentThreadId): wake the parent by routing a synthetic turn onto
  *    its channel via agentRunner.route.
