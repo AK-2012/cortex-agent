@@ -22,7 +22,7 @@ import {
   resolveAgentSlotConfig,
   THREAD_PROTOCOL_PREAMBLE,
 } from '../src/domain/threads/index.js';
-import { buildThreadSummary } from '../src/domain/threads/runner.js';
+import { buildThreadSummary, finalizeAbortedThread } from '../src/domain/threads/runner.js';
 import type { ThreadRecord } from '../src/core/types/thread-types.js';
 
 const THREADS_FILE = path.join(DATA_DIR, 'threads.json');
@@ -197,6 +197,41 @@ test('cancelThread returns false after abortThread has terminated the thread (ab
   const thread = makeAdHocThreadWithArtifact('[ABORT: first]\n');
   assert.equal(await abortThread(thread.id, 'first'), true);
   assert.equal(await cancelThread(thread.id), false);
+  assert.equal(threadStore.get(thread.id)!.status, 'aborted');
+});
+
+// --- finalizeAbortedThread: block owning task BEFORE onEnd (DR-0015 problem 2) ---
+
+test('finalizeAbortedThread aborts the thread then invokes onAbort with the owning task + reason', async () => {
+  const thread = makeAdHocThreadWithArtifact('[ABORT: too-big]\n');
+  const calls: Array<{ taskId: string; project: string | null; reason: string | null }> = [];
+  await finalizeAbortedThread(
+    thread.id,
+    { taskId: 'abcd', taskProject: 'proj' } as any,
+    'too-big',
+    { onAbort: async (info) => { calls.push(info); } } as any,
+  );
+  assert.equal(threadStore.get(thread.id)!.status, 'aborted');
+  assert.equal(calls.length, 1);
+  assert.deepEqual(calls[0], { taskId: 'abcd', project: 'proj', reason: 'too-big' });
+});
+
+test('finalizeAbortedThread skips onAbort when metadata has no taskId (non-dispatch thread)', async () => {
+  const thread = makeAdHocThreadWithArtifact('[ABORT]\n');
+  const calls: unknown[] = [];
+  await finalizeAbortedThread(
+    thread.id,
+    { taskId: null, taskProject: null } as any,
+    null,
+    { onAbort: async (info) => { calls.push(info); } } as any,
+  );
+  assert.equal(threadStore.get(thread.id)!.status, 'aborted');
+  assert.equal(calls.length, 0);
+});
+
+test('finalizeAbortedThread tolerates a missing onAbort callback', async () => {
+  const thread = makeAdHocThreadWithArtifact('[ABORT: x]\n');
+  await finalizeAbortedThread(thread.id, { taskId: 'efgh', taskProject: 'p' } as any, 'x', {} as any);
   assert.equal(threadStore.get(thread.id)!.status, 'aborted');
 });
 

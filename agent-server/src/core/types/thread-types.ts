@@ -360,6 +360,12 @@ export interface RunThreadOptions {
   onPlanWritten?: ((event: { path: string; content: string; toolUseId: string }) => void) | null;
   /** Called by the facade event loop when an ask_user_question NormalizedEvent fires (PI backend: during turn). */
   onAskUserQuestion?: ((event: { toolUseId: string; questions: Array<{ question: string; options?: string[]; multi?: boolean }> }) => void) | null;
+  /** Invoked when the thread terminates via agent abort, BEFORE onEnd hooks run, so the
+   *  dispatch path can block the owning task in time (DR-0015 problem 2: otherwise the onEnd
+   *  task-status-check sees a still-claimed task and "recovers" it by unclaiming, which lets the
+   *  dispatcher re-grab the task before the abort→block lands). Injected by task-dispatch; absent
+   *  for non-dispatch threads (no owning task). */
+  onAbort?: ((info: { taskId: string; project: string | null; reason: string | null }) => Promise<void> | void) | null;
   /** Per-call lifecycle hooks injected by the caller (task-dispatcher / scheduled-runner / etc.).
    *  Executed AFTER the template's hook at the same phase (template first, extra second) and share
    *  the same execution semantics (HookContext via stdin, insertAgent / targetAgent result).

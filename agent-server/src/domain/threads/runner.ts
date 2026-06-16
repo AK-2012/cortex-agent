@@ -455,6 +455,23 @@ async function finalizeThread(threadId: string, ctx: ThreadContext): Promise<Thr
   };
 }
 
+/** Terminate a thread by agent abort and, BEFORE onEnd hooks run, hand the owning task to the
+ *  caller's onAbort so it can reach a terminal (blocked) state in time (DR-0015 problem 2).
+ *  No-op on the task side for non-dispatch threads (metadata has no taskId) or when the caller
+ *  did not inject onAbort. Exported for unit testing. */
+export async function finalizeAbortedThread(
+  threadId: string,
+  meta: ThreadRecord['metadata'],
+  reason: string | null,
+  opts: Pick<RunThreadOptions, 'onAbort'>,
+): Promise<void> {
+  await abortThread(threadId, reason);
+  const taskId = meta?.taskId ?? null;
+  if (taskId && opts.onAbort) {
+    await opts.onAbort({ taskId, project: meta?.taskProject ?? null, reason });
+  }
+}
+
 async function runThread(threadId: string, opts: RunThreadOptions): Promise<ThreadRunResult> {
   const ctx = initThreadContext(threadId, opts);
   let enteredWaiting = false;
@@ -478,7 +495,9 @@ async function runThread(threadId: string, opts: RunThreadOptions): Promise<Thre
       // Global check, higher precedence than transitions. Loop exits → onEnd hook still fires.
       const abortCheck = detectAbortMarker(threadId);
       if (abortCheck.aborted) {
-        await abortThread(threadId, abortCheck.reason);
+        // DR-0015 problem 2: abort the thread AND block the owning task here, BEFORE the onEnd
+        // hook runs below — otherwise task-status-check sees a still-claimed task and unclaims it.
+        await finalizeAbortedThread(threadId, ctx.meta, abortCheck.reason, opts);
         if (ctx.stream) {
           const reasonStr = abortCheck.reason ? `: ${abortCheck.reason}` : '';
           const abortLabel = formatAgentStageLabel(stepCtx.agentSlotId, stepCtx.stage);

@@ -213,6 +213,15 @@ export interface AbortOutcome {
   error?: string;
 }
 
+/** Canonical block reason for a worker-aborted task. Single source so the runner's
+ *  pre-onEnd block (DR-0015 problem 2) and processAbortOutcome produce byte-identical
+ *  reasons — a second block with the same reason is a no-op commit (git porcelain sees no
+ *  change), so blocking in both places is safe. */
+export function formatWorkerAbortReason(raw: string | null): string {
+  const r = (raw || 'no reason given').replace(/\s+/g, ' ').trim() || 'no reason given';
+  return `worker-abort: ${r}`.slice(0, 280);
+}
+
 /** Process an aborted dispatch thread: the worker said "I can't" ([ABORT: <reason>]) —
  *  block the task with the abort reason. taskMutator.block publishes task.blocked, which
  *  wakes a manager thread waiting on this task (its parent re-plans); with no manager the
@@ -233,7 +242,7 @@ async function processAbortOutcome(
     return { handled: false };
   }
   const rawReason = (thread.abortReason || 'no reason given').replace(/\s+/g, ' ').trim();
-  const reason = `worker-abort: ${rawReason}`.slice(0, 280);
+  const reason = formatWorkerAbortReason(thread.abortReason);
   const result = await deps.block(args.taskId, reason);
   if (!result.success) {
     return { handled: true, error: result.message };

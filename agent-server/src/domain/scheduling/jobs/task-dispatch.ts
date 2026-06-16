@@ -17,7 +17,7 @@ import { taskStore } from '../../tasks/store.js';
 import { taskMutator } from '../../tasks/mutator.js';
 import { createThread, detectSplitMarker } from '../../threads/index.js';
 import { runThread as runThreadExec } from '../../threads/runner.js';
-import { processSplitOutcome, processAbortOutcome } from '../../tasks/dispatch-utils.js';
+import { processSplitOutcome, processAbortOutcome, formatWorkerAbortReason } from '../../tasks/dispatch-utils.js';
 import { threadStore } from '@store/thread-repo.js';
 import { buildUserProcessingMessage, computeElapsed, buildSessionTag } from '@core/status-format.js';
 import { finalizeThreadSuccess } from './_shared.js';
@@ -151,6 +151,9 @@ async function executeDispatchTask({ selected, selectedTask, channel, scheduleTa
     adapter, channel: channel, threadAnchorId: statusMsg?.messageId || null, statusMsg, startTime,
     destination: { type: 'project-report', projectId: selectedTask.project || channel, trigger: 'task-dispatch', sessionId: '' },
     onToolUse: icb?.onToolUse ?? null, onPlanWritten: icb?.onPlanWritten ?? null, onAskUserQuestion: icb?.onAskUserQuestion ?? null,
+    // DR-0015 problem 2: block the owning task at abort time, BEFORE the onEnd task-status-check
+    // hook runs, so the hook sees a blocked task and does not unclaim it back to actionable.
+    onAbort: async ({ taskId, reason }) => { await taskMutator.block(taskId, formatWorkerAbortReason(reason)); },
     extraHooks: {
       onEnd: {
         command: 'node hooks/task-status-check.mjs',
