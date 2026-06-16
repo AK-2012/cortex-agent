@@ -153,6 +153,10 @@ export interface HookContext {
   artifactContent: string;           // current artifact file content
   userMessage: string;
   totalCostUsd: number;
+  /** Out-of-band control intent on this thread (DR-0015): 'abort' | 'split' | 'wait' | null.
+   *  Hooks (e.g. task-status-check) use this — NOT artifact scanning — to tell an intentional
+   *  non-completion (abort/split) from a stuck task. */
+  pendingControlAction?: 'abort' | 'split' | 'wait' | null;
 }
 
 /** Lifecycle hooks for thread templates */
@@ -319,6 +323,21 @@ export interface ThreadMetadata {
   /** Live status message persisted at suspension so the post-resume settle can refresh it
    *  (otherwise it reads "suspended — waiting on children" forever — 2026-06-11 finding). */
   statusMsgRef?: MessageRef | null;
+  /** Out-of-band control signal written by the agent's own thread_abort / thread_split /
+   *  thread_wait MCP tool (DR-0015 problem 1). The runner reads this at the step boundary and
+   *  CLEARS it after consuming, so a control intent fires exactly once. Replaces the old in-band
+   *  artifact string markers ([ABORT]/[SPLIT]/[WAIT_CHILDREN]) — agent prose that merely mentions
+   *  those tokens can no longer trigger a control action. Set only via the webhook `control`
+   *  action, which rejects a second concurrent control on the same thread. */
+  pendingControl?: {
+    action: 'abort' | 'split' | 'wait';
+    kind?: string | null;            // abort: too-big | mis-scoped | blocked-external
+    diagnosis?: string | null;       // abort: required free-text diagnosis (= thread.abortReason)
+    subtasks?: any[] | null;         // split: decompose subtask array (decomposeTask shape)
+    onTasks?: string[] | null;       // wait: explicit task ids to wait on (optional hint)
+    onThreads?: string[] | null;     // wait: explicit thread ids to wait on (optional hint)
+    requestedAtStep?: number;        // step index at which the agent requested control
+  } | null;
 }
 
 // --- Thread Step Result (returned by thread-manager.stepThread) ---

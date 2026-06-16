@@ -1,8 +1,11 @@
 // input:  McpServer, webhook proxy, CORTEX_* env (channel/project/depth)
-// output: thread_start/status/result/list_templates/cancel tool registrations
+// output: thread_start/status/result/list_templates/cancel + thread_abort/split/wait registrations
 // pos:    MCP tools letting any agent drive the Thread (multi-agent pipeline) system, proxied
 //         through the daemon webhook. Async: thread_start fires-and-returns a threadId; poll
-//         thread_status / thread_result. Depth guard caps agent→thread→agent recursion.
+//         thread_status / thread_result. Depth guard caps agent→thread→agent recursion. The
+//         control tools (thread_abort / thread_split / thread_wait) are the out-of-band control
+//         plane (DR-0015): an agent signals its OWN thread (CORTEX_THREAD_ID) and the runner reads
+//         metadata.pendingControl at the step boundary — no more artifact string markers.
 // >>> If I am updated, update my header comment and the parent folder's CORTEX.md <<<
 
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
@@ -29,8 +32,8 @@ export function registerThreadTools(server: McpServer): void {
   server.tool(
     'thread_start',
     'Start a Thread (multi-agent pipeline) and return its threadId immediately (async — does NOT wait for completion). Provide exactly one of `template` (a multi-agent pipeline) or `agent` (a single ad-hoc agent); use thread_list_templates to discover both. '
-    + 'For substantive delegated work, pass a structured contract (goal / done_when / deliverable_path / context_files / budget_usd) — your child is graded against done_when and you must verify its deliverable before accepting. Reserve bare-message calls for small, quick side-quests; substantial multi-step work belongs in the task system ([SPLIT]) instead. '
-    + 'If you are an agent inside a thread: spawns default to wait=true — after spawning, end your current step with the marker [WAIT_CHILDREN] to suspend; you will be re-entered with each child\'s result once ALL awaited children finish. Pass wait=false for fire-and-forget. Interactive (non-thread) callers are woken automatically on completion. Spawns can be rejected by tree guards (max children / nodes / budget) — do not retry a rejected spawn; fold the work in or escalate.',
+    + 'For substantive delegated work, pass a structured contract (goal / done_when / deliverable_path / context_files / budget_usd) — your child is graded against done_when and you must verify its deliverable before accepting. Reserve bare-message calls for small, quick side-quests; substantial multi-step work belongs in the task system (call thread_split to decompose) instead. '
+    + 'If you are an agent inside a thread: spawns default to wait=true — after spawning, call the thread_wait tool to suspend; you will be re-entered with each child\'s result once ALL awaited children finish. Pass wait=false for fire-and-forget. Interactive (non-thread) callers are woken automatically on completion. Spawns can be rejected by tree guards (max children / nodes / budget) — do not retry a rejected spawn; fold the work in or escalate via thread_abort.',
     {
       template: z.string().optional().describe('Template name for a multi-agent pipeline (mutually exclusive with `agent`)'),
       agent: z.string().optional().describe('Agent name for a single ad-hoc agent (mutually exclusive with `template`)'),
@@ -161,6 +164,87 @@ export function registerThreadTools(server: McpServer): void {
         return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
       } catch (e) {
         return { content: [{ type: 'text', text: `thread_cancel error: ${(e as Error).message}` }], isError: true };
+      }
+    },
+  );
+
+  // --- Control plane (DR-0015): self-control of the CALLER'S OWN thread ---
+  // All three target CORTEX_THREAD_ID (the thread you are running inside) — you never pass a
+  // threadId. They write a structured intent the runner consumes at the next step boundary, then
+  // your step should end. These replace the old artifact string markers ([ABORT]/[SPLIT]/
+  // [WAIT_CHILDREN]) — writing those tokens in your artifact now does NOTHING; you MUST call the
+  // tool. Calling outside a thread (no CORTEX_THREAD_ID) is an error.
+
+  const selfThreadId = (): string => {
+    const id = process.env.CORTEX_THREAD_ID;
+    if (!id) throw new Error('not running inside a thread (CORTEX_THREAD_ID unset) — control tools only work from within a thread');
+    return id;
+  };
+
+  // --- thread_abort ---
+
+  server.tool(
+    'thread_abort',
+    'Abort (escalate) YOUR OWN thread when the task cannot be completed as scoped — terminal state `aborted`, distinct from `failed`. Use only when truly blocked: a missing prerequisite, contradictory requirements, or a task far bigger / mis-scoped than its description. A precise diagnosis is the most valuable thing you can produce — it beats a half-done grind. For a dispatch task this blocks the task with your diagnosis and escalates it (its manager, or a human, re-plans). Normal retries, minor issues, or disagreements with the plan are NOT abort cases. After calling, end your step.',
+    {
+      kind: z.enum(['too-big', 'mis-scoped', 'blocked-external']).describe('Why you are aborting: "too-big" (needs decomposition into independent units), "mis-scoped" (the task definition is wrong) — both route to a re-planning manager; "blocked-external" (a missing external resource / dependency you cannot obtain) routes to a human.'),
+      diagnosis: z.string().min(1).describe('Required one-line diagnosis of the real structure / blocker. Becomes the abort reason and the task block reason.'),
+    },
+    async ({ kind, diagnosis }: { kind: string; diagnosis: string }) => {
+      try {
+        const threadId = selfThreadId();
+        const result = await proxyThreadOp('control', { threadId, control: { action: 'abort', kind, diagnosis } });
+        return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+      } catch (e) {
+        return { content: [{ type: 'text', text: `thread_abort error: ${(e as Error).message}` }], isError: true };
+      }
+    },
+  );
+
+  // --- thread_split ---
+
+  server.tool(
+    'thread_split',
+    'Propose a decomposition of YOUR OWN (dispatch) task instead of doing it: the task is decomposed into the given children (keep-parent — your task becomes the join/acceptance node depending on all children), unclaimed, and the children flow through the normal dispatch queue. Use when the task is actually several independently verifiable units. After calling, end your step.',
+    {
+      subtasks: z.array(z.object({
+        key: z.string().optional().describe('Local key for sibling depends_on references within this batch.'),
+        text: z.string().describe('What this child must do (imperative, one unit of work).'),
+        template: z.string().optional().describe('Thread template the child runs under (e.g. coder-review). Inherits the parent template when omitted.'),
+        why: z.string().optional().describe('Why this child exists.'),
+        done_when: z.string().optional().describe('Verifiable completion criteria for this child.'),
+        priority: z.string().optional(),
+        plan: z.string().optional(),
+        depends_on: z.array(z.string()).optional().describe('Sibling keys (from this batch) or existing 4-hex task ids this child depends on.'),
+      })).min(1).describe('Non-empty array of child subtasks (decomposeTask shape).'),
+    },
+    async ({ subtasks }: { subtasks: any[] }) => {
+      try {
+        const threadId = selfThreadId();
+        const result = await proxyThreadOp('control', { threadId, control: { action: 'split', subtasks } });
+        return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+      } catch (e) {
+        return { content: [{ type: 'text', text: `thread_split error: ${(e as Error).message}` }], isError: true };
+      }
+    },
+  );
+
+  // --- thread_wait ---
+
+  server.tool(
+    'thread_wait',
+    'Suspend YOUR OWN thread until its awaited children finish (DR-0014 parent suspension). Call this after spawning awaited children via thread_start (wait=true) or after creating child tasks you depend on — you are re-entered once ALL awaited children are terminal, with their results injected. If nothing is left to wait on, the thread simply continues. After calling, end your step.',
+    {
+      on_tasks: z.array(z.string()).optional().describe('Optional explicit child task ids to wait on (otherwise inferred from the thread / task tree).'),
+      on_threads: z.array(z.string()).optional().describe('Optional explicit child thread ids to wait on (otherwise inferred from spawned children).'),
+    },
+    async ({ on_tasks, on_threads }: { on_tasks?: string[]; on_threads?: string[] }) => {
+      try {
+        const threadId = selfThreadId();
+        const result = await proxyThreadOp('control', { threadId, control: { action: 'wait', on_tasks, on_threads } });
+        return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+      } catch (e) {
+        return { content: [{ type: 'text', text: `thread_wait error: ${(e as Error).message}` }], isError: true };
       }
     },
   );

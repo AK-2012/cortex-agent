@@ -39,6 +39,10 @@ export const TOOL_NAMES: readonly string[] = [
   'thread_list',
   'thread_list_templates',
   'thread_cancel',
+  // DR-0015 control plane: an agent signals its own thread (abort / split / wait).
+  'thread_abort',
+  'thread_split',
+  'thread_wait',
 ];
 
 // --- Start (called by barrel when run as standalone) ---

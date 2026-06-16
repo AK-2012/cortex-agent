@@ -15,7 +15,7 @@ import { getActiveProfile, getActiveBackend } from '../../agents/index.js';
 import { selectAndClaimTask, computeNextInterval, updateScheduleInterval } from '../../tasks/dispatcher.js';
 import { taskStore } from '../../tasks/store.js';
 import { taskMutator } from '../../tasks/mutator.js';
-import { createThread, detectSplitMarker } from '../../threads/index.js';
+import { createThread, detectSplitFromControl, clearPendingControl } from '../../threads/index.js';
 import { runThread as runThreadExec } from '../../threads/runner.js';
 import { processSplitOutcome, processAbortOutcome, formatWorkerAbortReason } from '../../tasks/dispatch-utils.js';
 import { threadStore } from '@store/thread-repo.js';
@@ -211,19 +211,22 @@ async function executeDispatchTask({ selected, selectedTask, channel, scheduleTa
     return { success: !abortOutcome.error, skipped: false, note: abortOutcome.error ? `abort-block failed: ${abortOutcome.error}` : `[${selectedTask.project}] ${abortOutcome.note}` };
   }
 
-  // DR-0014: the worker proposed a [SPLIT] decomposition instead of doing the task.
-  // Decompose keep-parent (task becomes the join/acceptance node) and unclaim; the
-  // children flow through the normal dispatch queue.
+  // DR-0014: the worker proposed a decomposition (thread_split) instead of doing the task.
+  // The signal rides on metadata.pendingControl (DR-0015 problem 1), read via detectSplitFromControl.
+  // Decompose keep-parent (task becomes the join/acceptance node) and unclaim; the children flow
+  // through the normal dispatch queue.
   const splitOutcome = await processSplitOutcome(
     { threadId: thread.id, taskId: selectedTask.id ?? null, project: selectedTask.project },
     {
-      detect: detectSplitMarker,
+      detect: detectSplitFromControl,
       // system:true — no agent lock in the dispatch path; defer if a foreign lock exists.
       decompose: (p, t, subs, tid, opts) => taskMutator.decompose(p, t, subs, tid, { ...opts, system: true }),
       unclaim: (tid) => taskMutator.unclaim(tid),
     },
   );
   if (splitOutcome.handled) {
+    // Control intent consumed — clear it so a re-read never re-fires.
+    await clearPendingControl(thread.id);
     const text = splitOutcome.error
       ? `${Icons.error} [${selectedTask.project}] ${selectedTask.text.substring(0, 80)} | [SPLIT] proposal invalid: ${splitOutcome.error} — task unclaimed`
       : `🌿 [${selectedTask.project}] ${selectedTask.text.substring(0, 80)} | ${splitOutcome.note}`;

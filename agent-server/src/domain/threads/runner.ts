@@ -12,8 +12,8 @@ import {
   completeThread,
   failThread,
   abortThread,
-  detectAbortMarker,
-  detectWaitMarker,
+  peekPendingControl,
+  clearPendingControl,
   tryEnterWaiting,
   checkContractBudget,
   isAdHocThread,
@@ -491,29 +491,49 @@ async function runThread(threadId: string, opts: RunThreadOptions): Promise<Thre
       const result = await executeAndAwaitAgent(threadId, stepCtx, callbacks, ctx, opts);
       await recordStepOutcome(threadId, stepCtx, result, ctx, opts);
 
-      // Agent-initiated abort: [ABORT] / [ABORT: <reason>] marker in artifact.
-      // Global check, higher precedence than transitions. Loop exits → onEnd hook still fires.
-      const abortCheck = detectAbortMarker(threadId);
-      if (abortCheck.aborted) {
+      // Out-of-band control plane (DR-0015 problem 1): the agent signals abort / split / wait by
+      // calling the thread_abort / thread_split / thread_wait MCP tools, which write a typed
+      // metadata.pendingControl on this thread. Read it here at the step boundary — never scan the
+      // artifact (prose mentioning "[ABORT]" no longer triggers anything). Higher precedence than
+      // transitions.
+      const control = peekPendingControl(threadId);
+
+      // Agent-initiated abort. Global check. Loop exits → onEnd hook still fires.
+      if (control?.action === 'abort') {
+        await clearPendingControl(threadId);
+        const reason = control.diagnosis ?? null;
         // DR-0015 problem 2: abort the thread AND block the owning task here, BEFORE the onEnd
         // hook runs below — otherwise task-status-check sees a still-claimed task and unclaims it.
-        await finalizeAbortedThread(threadId, ctx.meta, abortCheck.reason, opts);
+        await finalizeAbortedThread(threadId, ctx.meta, reason, opts);
         if (ctx.stream) {
-          const reasonStr = abortCheck.reason ? `: ${abortCheck.reason}` : '';
+          const reasonStr = reason ? `: ${reason}` : '';
           const abortLabel = formatAgentStageLabel(stepCtx.agentSlotId, stepCtx.stage);
           ctx.stream.emitText(`${Icons.stopped} Thread aborted by *${abortLabel}*${reasonStr}`);
         }
         break;
       }
 
-      // Parent suspension (DR-0014): [WAIT_CHILDREN] marker in last step output / artifact.
-      // Checked after abort, before transitions. Three outcomes:
+      // Split proposal (DR-0014): the worker called thread_split with a typed subtask array. Leave
+      // metadata.pendingControl IN PLACE (do NOT clear) and break — the thread terminates and the
+      // dispatch path (processSplitOutcome) consumes control.subtasks to decompose keep-parent.
+      if (control?.action === 'split') {
+        if (ctx.stream) {
+          const splitLabel = formatAgentStageLabel(stepCtx.agentSlotId, stepCtx.stage);
+          const n = Array.isArray(control.subtasks) ? control.subtasks.length : 0;
+          ctx.stream.emitText(`${Icons.arrowRight} Thread split by *${splitLabel}* into ${n} subtask(s)`);
+        }
+        break;
+      }
+
+      // Parent suspension (DR-0014): the agent called thread_wait. Checked after abort/split,
+      // before transitions. Three outcomes:
       //  - live awaited children remain → thread enters 'waiting' (resumed by thread-callback
       //    when the last child turns terminal); skip onEnd — it fires once, at true termination.
       //  - all awaited children already terminal (callback won the race) and their results sit
       //    in pendingMessages → re-enter the loop immediately so the same agent processes them.
-      //  - marker but nothing to wait on or process → fall through to normal transitions.
-      if (detectWaitMarker(threadId)) {
+      //  - signal but nothing to wait on or process → fall through to normal transitions.
+      if (control?.action === 'wait') {
+        await clearPendingControl(threadId);
         if (await tryEnterWaiting(threadId)) {
           enteredWaiting = true;
           const n = threadStore.get(threadId)?.metadata?.waitingOn?.length ?? 0;

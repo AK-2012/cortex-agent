@@ -44,6 +44,7 @@ function buildHookContext(threadId: string, phase: 'start' | 'transition' | 'end
     artifactContent,
     userMessage: thread.userMessage,
     totalCostUsd: thread.totalCostUsd,
+    pendingControlAction: thread.metadata?.pendingControl?.action ?? null,
   };
 }
 

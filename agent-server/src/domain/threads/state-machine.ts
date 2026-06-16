@@ -2,8 +2,8 @@
 // input:  thread-store, template-loader, prompt-builder, utils, artifact-io
 // output: createThread / addAgentToThread /
 //         resolveNextStep / evaluateTransitions / recordStepResult / completeThread /
-//         failThread / cancelThread / abortThread / detectAbortMarker /
-//         detectWaitMarker / tryEnterWaiting / detectSplitMarker (DR-0014)
+//         failThread / cancelThread / abortThread / tryEnterWaiting /
+//         peekPendingControl / clearPendingControl / detectSplitFromControl (DR-0015 control plane)
 
 import { mkdirSync, writeFileSync, readFileSync } from 'fs';
 import * as path from 'path';
@@ -15,7 +15,6 @@ const log = createLogger('state-machine');
 import { getTemplate, getAgent } from './template-loader.js';
 import { resolveAgentSlotConfigByName, resolveTemplateAgents, resolveActiveAgentName } from './prompt-builder.js';
 import { resolveStageName, parseTarget } from './utils.js';
-import { readArtifact } from './artifact-io.js';
 import { checkContractBudget } from './contract.js';
 import { scanAllTasks } from '@core/task-parser.js';
 import type {
@@ -411,31 +410,41 @@ export async function cancelThread(threadId: string): Promise<boolean> {
   return true;
 }
 
-const ABORT_MARKER_RE = /\[ABORT(?::\s*([^\]\n]*))?\]/;
+// --- Out-of-band control plane (DR-0015 problem 1) ---
+// Agents signal abort / split / wait_children by calling explicit MCP tools (thread_abort /
+// thread_split / thread_wait), which write metadata.pendingControl on their own thread via the
+// webhook `control` action. The runner reads that typed field at the step boundary — NEVER by
+// scanning the artifact for string markers. This eliminates the false-positive class where worker
+// prose that merely mentions "[ABORT]" / "No [ABORT]" / a plan saying "[ABORT: too-big]" used to
+// trip a real control action (2026-06-13 double-abort incident, DR-0015).
 
-/** Detect `[ABORT]` or `[ABORT: <reason>]` marker in the thread's current artifact. */
-export function detectAbortMarker(threadId: string): { aborted: boolean; reason: string | null } {
-  const content = readArtifact(threadId);
-  if (!content) return { aborted: false, reason: null };
-  const m = ABORT_MARKER_RE.exec(content);
-  if (!m) return { aborted: false, reason: null };
-  const raw = m[1] != null ? m[1].trim() : '';
-  return { aborted: true, reason: raw.length > 0 ? raw : null };
+export type PendingControl = NonNullable<ThreadRecord['metadata']>['pendingControl'];
+
+/** Peek the thread's pending control signal (does NOT clear it). Returns null when none set. */
+export function peekPendingControl(threadId: string): PendingControl | null {
+  return threadStore.get(threadId)?.metadata?.pendingControl ?? null;
 }
 
-// --- Wait-on-children + split markers (DR-0014) ---
-
-const WAIT_MARKER_RE = /\[WAIT_CHILDREN\]/;
-
-/** Detect `[WAIT_CHILDREN]` in the last step's output or in the artifact. The marker alone
- *  does not suspend the thread — tryEnterWaiting() additionally requires live children. */
-export function detectWaitMarker(threadId: string): boolean {
+/** Clear the thread's pending control signal so an intent fires exactly once. */
+export async function clearPendingControl(threadId: string): Promise<void> {
   const thread = threadStore.get(threadId);
-  if (!thread) return false;
-  const lastStep = thread.steps[thread.steps.length - 1];
-  if (lastStep?.output && WAIT_MARKER_RE.test(lastStep.output)) return true;
-  const content = readArtifact(threadId);
-  return !!content && WAIT_MARKER_RE.test(content);
+  if (!thread?.metadata?.pendingControl) return;
+  await threadStore.mutate(threadId, (t) => {
+    if (t.metadata) t.metadata.pendingControl = null;
+  });
+}
+
+/** Derive a split detection from a thread's pending control signal — the dispatch path's
+ *  injected `detect` (replaces the old artifact-scanning detectSplitMarker). The subtask array
+ *  was validated as a typed tool argument, so the only "error" case is an empty array. */
+export function detectSplitFromControl(threadId: string): SplitDetection {
+  const control = peekPendingControl(threadId);
+  if (!control || control.action !== 'split') return { split: false, subtasks: null, error: null };
+  const subtasks = control.subtasks;
+  if (!Array.isArray(subtasks) || subtasks.length === 0) {
+    return { split: true, subtasks: null, error: 'thread_split called with an empty subtasks array' };
+  }
+  return { split: true, subtasks, error: null };
 }
 
 function isTerminal(status: ThreadRecord['status']): boolean {
@@ -506,32 +515,10 @@ export async function tryEnterWaiting(threadId: string): Promise<boolean> {
   return entered;
 }
 
-const SPLIT_MARKER_RE = /\[SPLIT\]/;
-const SPLIT_JSON_FENCE_RE = /\[SPLIT\][\s\S]*?```json\s*\n([\s\S]*?)\n\s*```/;
-
 export interface SplitDetection {
   split: boolean;
   subtasks: any[] | null;
   error: string | null;
-}
-
-/** Detect a `[SPLIT]` decomposition proposal in the artifact: the marker followed by a
- *  ```json fenced block containing `{ "subtasks": [...] }`. Parse failures are surfaced
- *  (not swallowed) so the dispatch path can report them instead of silently dropping. */
-export function detectSplitMarker(threadId: string): SplitDetection {
-  const content = readArtifact(threadId) || '';
-  if (!SPLIT_MARKER_RE.test(content)) return { split: false, subtasks: null, error: null };
-  const fence = SPLIT_JSON_FENCE_RE.exec(content);
-  if (!fence) return { split: true, subtasks: null, error: '[SPLIT] marker present but no ```json fenced block follows' };
-  try {
-    const parsed = JSON.parse(fence[1]);
-    if (!parsed || !Array.isArray(parsed.subtasks) || parsed.subtasks.length === 0) {
-      return { split: true, subtasks: null, error: '[SPLIT] JSON must be an object with a non-empty "subtasks" array' };
-    }
-    return { split: true, subtasks: parsed.subtasks, error: null };
-  } catch (e: any) {
-    return { split: true, subtasks: null, error: `[SPLIT] JSON parse failed: ${e?.message || e}` };
-  }
 }
 
 /** Terminate the thread with status='aborted'. Idempotent — returns false if thread is already terminal. */

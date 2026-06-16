@@ -178,7 +178,7 @@ function createWebhookHandler({
             const parentThread = data.parentThreadId ? threadStore.get(String(data.parentThreadId)) : null;
             const guard = checkSpawnGuards(parentThread);
             if (guard.ok === false) {
-              return reply({ success: false, error: `${guard.reason}. Do NOT retry this spawn — fold the remaining work into your own step, or escalate via [ABORT: <diagnosis>].` });
+              return reply({ success: false, error: `${guard.reason}. Do NOT retry this spawn — fold the remaining work into your own step, or escalate by calling the thread_abort tool with a diagnosis.` });
             }
             const projectId = data.projectId || 'general';
             // The originating conduit (the starter agent's SLACK_CHANNEL, forwarded by thread-ops.ts).
@@ -347,6 +347,42 @@ function createWebhookHandler({
               trigger: t.metadata?.trigger ?? null, depth: t.metadata?.depth ?? null,
             }));
             return reply({ success: true, data: { scope, count: out.length, threads: out } });
+          }
+          if (action === 'control') {
+            // DR-0015 problem 1: out-of-band control plane. The agent's own thread_abort /
+            // thread_split / thread_wait tool POSTs { threadId, control:{ action, ... } } here.
+            // Validate the thread exists and is not terminal; reject a second concurrent control;
+            // then persist metadata.pendingControl for the runner to read at the step boundary.
+            const threadId = data.threadId;
+            const control = data.control;
+            if (!threadId || !control || typeof control.action !== 'string') {
+              return reply({ success: false, error: 'control requires threadId and control.action' });
+            }
+            if (!['abort', 'split', 'wait'].includes(control.action)) {
+              return reply({ success: false, error: `unknown control action: ${control.action}` });
+            }
+            const t = threadStore.get(threadId);
+            if (!t) return reply({ success: false, error: 'thread not found' });
+            if (['completed', 'failed', 'cancelled', 'aborted'].includes(t.status)) {
+              return reply({ success: false, error: `thread is ${t.status} (terminal) — cannot accept control` });
+            }
+            if (t.metadata?.pendingControl) {
+              return reply({ success: false, error: `thread already has a pending ${t.metadata.pendingControl.action} control — only one control intent at a time` });
+            }
+            const requestedAtStep = t.currentStepIndex;
+            await threadStore.mutate(threadId, (r) => {
+              (r.metadata ??= {}).pendingControl = {
+                action: control.action,
+                kind: control.kind ?? null,
+                diagnosis: control.diagnosis ?? null,
+                subtasks: Array.isArray(control.subtasks) ? control.subtasks : null,
+                onTasks: Array.isArray(control.on_tasks) ? control.on_tasks : null,
+                onThreads: Array.isArray(control.on_threads) ? control.on_threads : null,
+                requestedAtStep,
+              };
+            });
+            log.info(`thread-op control ${threadId}: ${control.action}${control.kind ? ` (${control.kind})` : ''}`);
+            return reply({ success: true, data: { threadId, action: control.action, requestedAtStep, accepted: true } });
           }
           if (action === 'cancel') {
             const cancelled = await cancelThread(data.threadId);

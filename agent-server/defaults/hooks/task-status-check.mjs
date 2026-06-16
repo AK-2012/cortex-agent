@@ -119,13 +119,15 @@ async function main() {
 
   if (!project || !taskId) { noop(); return; }
 
-  // [SPLIT] decomposition proposal (DR-0014): the task is INTENTIONALLY not done — the
-  // dispatcher decomposes it keep-parent and unclaims. Don't burn an agent turn nagging.
-  if ((ctx.artifactContent || '').includes('[SPLIT]')) { noop(); return; }
-
-  // [ABORT] worker escalation (DR-0014 §8): the dispatcher blocks the task with the abort
-  // reason right after this hook returns — the task is intentionally not done.
-  if (/\[ABORT(?::|\])/.test(ctx.artifactContent || '')) { noop(); return; }
+  // Out-of-band control intent (DR-0015): the agent signalled abort/split/wait via a tool, not
+  // by writing a marker into the artifact. Read the typed signal — never scan the artifact (prose
+  // mentioning "[ABORT]"/"[SPLIT]" must not trip this).
+  //  - split: the task is INTENTIONALLY not done — the dispatcher decomposes it keep-parent and
+  //    unclaims right after this hook returns. Don't burn an agent turn nagging. (The runner
+  //    leaves pendingControl set for the dispatch path, so it is still present here.)
+  //  - abort: the runner already blocked the task BEFORE this hook (DR-0015 problem 2) and cleared
+  //    the control, so the blocked-by guard below covers it; this is belt-and-suspenders.
+  if (ctx.pendingControlAction === 'split' || ctx.pendingControlAction === 'abort') { noop(); return; }
 
   const tasksPath = path.join(PROJECTS_DIR, project, 'TASKS.yaml');
   if (!existsSync(tasksPath)) { noop(); return; }
