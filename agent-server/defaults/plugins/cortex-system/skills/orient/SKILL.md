@@ -54,7 +54,7 @@ Read the following in parallel:
 ### Task supply and decomposition
 
 While scanning TASKS.md files, improve task quality:
-- Decompose tasks with >2 independent steps into subtasks
+- **Flag** tasks with >2 steps as decomposition *candidates* — do NOT auto-split. Step/file count is only a hint; apply the /task decomposition self-audit (cut at the thin seam, not the finest grain) before splitting. Many-step tasks that share one abstraction are coupled and should stay whole. When unsure, leave a candidate note rather than fragmenting.
 - Remove stale `[blocked-by]` tags where the referenced condition is resolved
 - If `ISSUES.md` shows recurring or unresolved workflow friction with no corresponding open task, decompose it into one or more concrete follow-up tasks in the same project's `TASKS.md`
 
@@ -217,11 +217,11 @@ Extract all unblocked tasks from TASKS.md files. For each task, assess:
 - If no new preconditions → prefer an alternative task
 - If no alternatives → recommend but note the repetition risk
 
-**Decomposition scan:** While scanning tasks, check for decomposition opportunities:
-1. Tasks with >2 independent steps → split into subtasks
-2. Tasks touching >3 files → split
-3. Tasks mixing mechanical and judgment work → split
-Report any decomposition updates made.
+**Decomposition scan:** While scanning tasks, surface decomposition *candidates* — these signals say "run the /task self-audit", NOT "split now":
+1. Tasks with >2 steps → candidate (split only if each step survives the others' refactor)
+2. Tasks touching >3 files → candidate (3+ files sharing one abstraction are coupled — keep whole)
+3. Tasks mixing mechanical and judgment work with a clean handoff → candidate
+Cut only at thin seams (low coupling), never on count alone. Report candidates flagged and any splits actually made (with the seam justification).
 
 Do NOT recommend tasks from:
 - Tasks with `[blocked-by]` tags with unresolved blockers

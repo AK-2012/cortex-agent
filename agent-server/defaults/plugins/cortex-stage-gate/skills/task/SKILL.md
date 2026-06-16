@@ -295,19 +295,71 @@ The `gpu` field specifies that a task needs to use GPU on a particular machine. 
 
 ### Task Decomposition
 
-#### Iron Rule 1: One-Criterion-One-Task
+**The variable you optimize is decomposability, not fineness.** A good cut is the one that
+falls at the *narrowest interface* between the pieces (lowest coupling), NOT the one that
+produces the *most* pieces. Splitting a task into many tightly-coupled fragments — each of
+which still needs the whole system in context to do its part — is worse than not splitting at
+all: you pay full delegation overhead and every fragment drifts. Cut where the seam is thin;
+leave coupled work whole.
 
-**Each independently completable/verifiable condition in the Done when must be a separate task.**
+#### Iron Rule 1: Cut at the Seam
 
-Judgment criteria: After condition A is completed, even if condition B has not started, is the result of A already usable? If yes, it must be split.
+A condition being **independently verifiable is necessary but not sufficient** to make it its
+own task. The cut is valid only when, in addition:
 
-**Anti-pattern: Checklist-in-Task** — Do not use numbered sub-conditions (1)(2)(3)... to pack multiple independent work items into a single "Done when".
+- **(a) Verifiable without naming the sibling's internals**: the child's `done-when` can be
+  written and checked without dictating *how* another child is implemented (no "call the
+  `foo()` that task X creates" at line level). If you must specify another child's
+  implementation to make this one verifiable, the seam is in the wrong place.
+- **(b) Interface-stable**: if a sibling's internal implementation changed but its *interface*
+  held, this child would not need to change. If a sibling's internal change forces this child
+  to change, they are coupled — keep them in one task.
 
-**Exception 1 — Atomic verification**: Multiple sub-conditions are different verification dimensions of the same atomic operation (e.g., "script runs without errors + output file exists + metrics within reasonable range").
+"One criterion = one task" still holds **as a corollary** when the criteria are genuinely
+decoupled (the usual case for independent experiments / parallel artifacts). It does NOT hold
+when criteria share mutable state or a single evolving abstraction.
 
-**Exception 2 — Article writing**: Long-form writing tasks such as papers are not split by section; execute as a single task to ensure cross-section coherence.
+**Anti-pattern: Checklist-in-Task** — Do not use numbered sub-conditions (1)(2)(3)... to pack
+multiple *independent* work items into one "Done when".
 
-**Example**:
+**Exception 1 — Atomic verification**: Multiple sub-conditions are different verification
+dimensions of the same atomic operation (e.g., "script runs without errors + output file
+exists + metrics within reasonable range").
+
+**Exception 2 — Article writing**: Long-form writing such as papers is not split by section;
+execute as a single task to ensure cross-section coherence.
+
+#### Decomposition self-audit (run per child BEFORE committing the split)
+
+For each proposed child, answer all four. **Any "no" → re-cut, merge, or refuse to split.**
+Do not treat the split as final until every child passes.
+
+1. **Interface stated in 1–2 lines?** Can you say what this child consumes and what it
+   produces in one or two lines? Can't state it crisply → the interface is fat → bad cut.
+2. **`done-when` verifiable without naming implementation?** If you have to name specific
+   functions/lines of another child to verify this one → either it is actually a leaf (just do
+   it inline, don't spawn) or the cut is wrong.
+3. **Survives a sibling refactor?** If a sibling's interface holds but its internals change,
+   does this child stay unaffected? If not → coupled → merge them.
+4. **Distinct context from the parent?** Does this child read a meaningfully *smaller /
+   different* slice of context than the parent? If it needs the same broad context → the cut
+   bought nothing.
+
+#### When NOT to decompose
+
+Forcing a split on a non-decomposable problem produces drift, not progress. If no thin seam
+exists (the self-audit keeps failing because everything depends on everything — a tangled
+reconcile loop, a single evolving abstraction, shared mutable state):
+
+- **Do the coupled core whole**, in one strong-model task. Coupling that cannot be cut is a
+  signal to keep the work together, not to fragment it.
+- **Or create a "refactor to expose seams" task first**, then decompose the now-modular result.
+  "Make it decomposable" is itself a legitimate task.
+
+Refusing to split, with a one-line reason, is a valid and often correct outcome.
+
+**Example A — clean seam (parallel, DO split)**: independent experiments share no mutable
+state; each passes the self-audit.
 
 ```yaml
 # ❌ 3 independent experiments + analysis packed into 1 task
@@ -338,6 +390,37 @@ Judgment criteria: After condition A is completed, even if condition B has not s
   done-when: "Three sets of experiment results compared and analyzed, conclusions recorded in experiments/EXP-NNN.md"
 ```
 
+**Example B — coupled code (DON'T fine-split)**: "fix the reconcile loop so state X, Y, Z
+converge" reads like three criteria, but X/Y/Z are updated through one shared state machine —
+changing the convergence logic for X forces Y and Z to change too (self-audit #3 fails).
+
+```yaml
+# ❌ Fine-split by symptom — each child needs the whole state machine in context, and they
+#    stomp on each other. Three drifting fragments, full delegation overhead, no real seam.
+- id: y001
+  text: "Make state X converge"
+  done-when: "X reaches steady state"
+- id: y002
+  text: "Make state Y converge"
+  done-when: "Y reaches steady state"
+- id: y003
+  text: "Make state Z converge"
+  done-when: "Z reaches steady state"
+
+# ✅ Keep the coupled core whole (one strong-model task)...
+- id: y010
+  text: "Rework reconcile loop so X/Y/Z converge to a stable state"
+  plan: context/projects/foo/decisions/DR-00NN.md
+  done-when: "Reconcile converges X, Y, Z together under the loop's tests; no oscillation"
+
+# ✅ ...OR, if the loop is too tangled to reason about, expose seams FIRST, then decompose
+- id: y020
+  text: "Refactor reconcile loop to isolate X/Y/Z update paths behind a clear interface"
+  plan: context/projects/foo/decisions/DR-00NN.md
+  done-when: "Each state's update path is a separately-testable function with a stated contract"
+# (a follow-up task, depends-on: [y020], may then split convergence work along the new seams)
+```
+
 #### Iron Rule 2: Explicit Dependency Declaration
 
 If decomposed tasks have execution order requirements, they **must use `depends-on` or `blocked-by` to explicitly declare** them. Do not rely on implicit list order.
@@ -362,14 +445,18 @@ If decomposed tasks have execution order requirements, they **must use `depends-
   done-when: "Eval metrics recorded in experiments/EXP-NNN.md"
 ```
 
-#### Decomposition Trigger Conditions
+#### Decomposition candidate signals (NOT auto-split triggers)
 
-- Done when contains multiple independently completable conditions (Iron Rule 1, highest priority)
-- Decomposed subtasks have sequential dependencies but are not declared (Iron Rule 2)
-- Has 2+ independent steps
-- Involves 3+ files
+These are hints that a task *might* be decomposable — they tell you to **run the self-audit**,
+not to split on sight. A task touching many files or steps may still be one coupled unit; file
+count is never sufficient justification to cut. Split only if the self-audit passes.
+
+- Done-when contains multiple **decoupled** completable conditions (Iron Rule 1)
+- Subtasks have sequential dependencies that are not yet declared (Iron Rule 2)
+- 2+ steps that pass the interface-stable test (each survives the others' refactor)
+- 3+ files **with a thin seam between them** (not 3+ files that all share one abstraction)
 - Mixes blocked and unblocked work
-- Mixes mechanical work and judgment-based work
+- Mixes mechanical work and judgment-based work *and* the two have a clean handoff
 
 #### Composite Tasks: Assign the `manager` Template (DR-0014 §8)
 
