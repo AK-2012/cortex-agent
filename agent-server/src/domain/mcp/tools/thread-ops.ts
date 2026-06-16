@@ -44,7 +44,7 @@ export function registerThreadTools(server: McpServer): void {
       context_files: z.array(z.string()).optional().describe('Absolute paths the child must read before working.'),
       deliverable_path: z.string().optional().describe('Where the child must write its output.'),
       budget_usd: z.number().optional().describe('Budget for the child\'s subtree in USD. Exhaustion trips the circuit breaker.'),
-      wait: z.boolean().optional().describe('Thread-parent only. true (default): child is awaited — emit [WAIT_CHILDREN] to suspend until all awaited children finish. false: fire-and-forget (result still lands in your pendingMessages).'),
+      wait: z.boolean().optional().describe('Thread-parent only. true (default): child is awaited — call the thread_wait tool to suspend until all awaited children finish. false: fire-and-forget (result still lands in your pendingMessages).'),
     },
     async ({ template, agent, message, project, goal, done_when, context_files, deliverable_path, budget_usd, wait }: {
       template?: string; agent?: string; message: string; project?: string;
