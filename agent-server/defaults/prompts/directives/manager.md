@@ -72,6 +72,6 @@ When ALL children are verified:
 
 # Tools & Limits
 
-- `thread_start` remains available for quick sub-calls that don't deserve a task (an independent verifier pass on a child's deliverable, a short research probe before deciding a split). Minutes-scale only; tree guards (width/depth/budget) apply.
+- For a quick sub-call that doesn't merit a full decomposition (an independent verifier pass on a child's deliverable, a short research probe before deciding a split), create a single child with `cortex-task spawn --text "..." --template <name>` (it hangs under you and joins via `depends_on`, like decompose) and then call `thread_wait`. It flows through the dispatch queue like any child — there is no in-process thread spawn (`thread_start` was removed; tasks are the only delegation primitive).
 - Stay within your node: don't touch sibling tasks or re-plan above your level — that's what the `thread_abort` tool (with a diagnosis) is for.
 - Rework discipline: at most 2 revision rounds per child; if a unit fails a third time, escalate with your accumulated diagnosis instead of iterating.

@@ -43,9 +43,12 @@ but not platform-specific, cost, or schedule tools.
 | `remote_edit` | `device`, `file_path`, `old_string`, `new_string`, `replace_all?` | Edit a file on a remote device by string replacement |
 | `remote_glob` | `device`, `pattern`, `path?` | Find files matching a glob pattern on a remote device |
 | `remote_grep` | `device`, `pattern`, `path?`, `glob?`, `type?`, `output_mode?`, `-A?`, `-B?`, `-C?`, `-i?`, `-n?`, `head_limit?`, `offset?`, `multiline?` | Search file contents on a remote device using ripgrep |
-| `thread_start` | `message`, `template?`, `agent?`, `goal?`, `done_when?`, `deliverable_path?`, `context_files?`, `budget_usd?`, `project?`, `wait?` | Start a child thread (sub-pipeline) from within an agent |
-| `thread_status` | `threadId` | Query a thread's execution status (running/waiting/completed/failed/cancelled/aborted) |
-| `thread_cancel` | `threadId` | Cancel a running thread by ID |
+| `thread_abort` | `kind`, `diagnosis` | Escalate YOUR OWN thread when the task is too-big / mis-scoped / blocked-external (terminal `aborted`) |
+| `thread_split` | `subtasks` | Decompose YOUR OWN task into children (keep-parent join) that flow through the dispatch queue |
+| `thread_wait` | `on_tasks?`, `on_threads?` | Suspend YOUR OWN thread until awaited children finish; pair with `cortex-task spawn` |
+| `task_status` | `task_id`, `project?` | Read a task's lifecycle state (status, actionable, claimed_by, blocked_by, deps, parent) |
+| `task_result` | `task_id`, `project?` | Read a task's outcome (done/blocked, done_when, completion note, block reason) |
+| `task_list` | `project?`, `status?`, `parent?`, `limit?` | List tasks (optionally by status or parent) |
 | `current_time` | `timezone?` | Get the current date/time; optional IANA timezone (defaults to server local). Returns Unix epoch, UTC ISO, and localized wall-clock with offset |
 
 The server implementation is at

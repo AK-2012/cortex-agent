@@ -79,6 +79,7 @@ How to run tests without tripping it:
 | `task-parent-split.test.ts` | Test | DR-0014 task tree: Task.parent round-trip / decompose keepParent / lint parent rules / processSplitOutcome |
 | `thread-wait-tasks.test.ts` | Test | DR-0014 §8: tryEnterWaiting task-children snapshot / restart preservation / cleanup orphan detection |
 | `thread-task-bridge.test.ts` | Test | DR-0014 §8: notifyTaskParentThreads / reconcileWaitingTasks race closer / recovery keeps open task children |
+| `task-origin-wake.test.ts` | Test | Problem 1: notifyTaskOriginSession wakes the origin channel on task complete/blocked; defers to thread-parent path; single-fire |
 | `task-abort-outcome.test.ts` | Test | DR-0014 §8: processAbortOutcome worker escalation (aborted thread → block task; fixes aborted-as-success bug) |
 | `thread-statusmsg-seal.test.ts` | Test | DR-0014 §8: sealSuspendedStatusMsg refreshes the stale "suspended" status message after resume |
 | `thread-stages.test.ts` | Test | Thread step stage progression |
@@ -100,8 +101,9 @@ How to run tests without tripping it:
 | `client-manager.test.ts` | Test | client-manager handshake/sendCommand + `buildRemoteSpawnCommand` cmd.exe-wrap regression + retry-on-spawn-failure regression |
 | `cortex-run-callback-handler.test.ts` | Test | task-callback handler (DR-0011 §4.4): idempotency, skipVerify, ghost callback, blockTask note |
 | `mcp-server.test.ts` | Test | Import safety and startup hints |
-| `domain/mcp/tools-registration.test.ts` | Test | All MCP tool names registered (ext: 10; core: 6 remote_* + current_time) |
+| `domain/mcp/tools-registration.test.ts` | Test | All MCP tool names registered (ext: 9; core: 6 remote_* + current_time + thread_abort/split/wait + task_status/result/list) |
 | `domain/mcp/time-tool.test.ts` | Test | current_time handler: valid tz payload, default tz, invalid-tz error |
+| `domain/mcp/task-monitor-tool.test.ts` | Test | task_status/task_result/task_list handlers read TASKS.yaml (status/terminal/parent filter) |
 | `domain/mcp/server.test.ts` | Test | Server module loads without Slack env + no wildcard registration ([S10-A]) |
 | `domain/mcp/cortex-schedule.test.ts` | Test | resolveTargetShorthand: __current__ to concrete ID 12-way resolution and error paths |
 | `scheduled-target-dispatch.test.ts` | Test | planScheduledDispatch: fresh/channel/session/thread + fallback decision tree |

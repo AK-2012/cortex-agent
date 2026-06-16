@@ -33,6 +33,12 @@ export interface Task {
   completed_at: string | null;
   completed_note: string | null;
   pending_at: string | null;
+  /** Provenance for session→task wake (Problem 1). Captured from CORTEX_* / channel env when a
+   *  task is created from within a running session or agent. On task.completed, if origin_channel
+   *  is set (and no thread is waiting on this task), the originating session is woken. */
+  origin_session_id: string | null;
+  origin_channel: string | null;
+  origin_thread_id: string | null;
 }
 
 // ── Lock state interface ──
@@ -59,6 +65,9 @@ const YAML_TO_TS: Record<string, string> = {
   'completed-at': 'completed_at',
   'completed-note': 'completed_note',
   'pending-at': 'pending_at',
+  'origin-session-id': 'origin_session_id',
+  'origin-channel': 'origin_channel',
+  'origin-thread-id': 'origin_thread_id',
 };
 
 const TS_TO_YAML: Record<string, string> = Object.fromEntries(
@@ -97,6 +106,9 @@ const TASK_DEFAULTS: Partial<Task> = {
   completed_at: null,
   completed_note: null,
   pending_at: null,
+  origin_session_id: null,
+  origin_channel: null,
+  origin_thread_id: null,
 };
 
 // ── Parsing ──
@@ -130,6 +142,9 @@ function rawToTask(raw: any, project: string): Task {
     completed_at: mapped.completed_at != null ? String(mapped.completed_at) : null,
     completed_note: mapped.completed_note != null ? String(mapped.completed_note) : null,
     pending_at: mapped.pending_at != null ? String(mapped.pending_at) : null,
+    origin_session_id: mapped.origin_session_id != null ? String(mapped.origin_session_id) : null,
+    origin_channel: mapped.origin_channel != null ? String(mapped.origin_channel) : null,
+    origin_thread_id: mapped.origin_thread_id != null ? String(mapped.origin_thread_id) : null,
   };
 }
 
@@ -176,6 +191,7 @@ const REQUIRED_KEYS = ['id', 'text', 'why', 'done_when', 'priority', 'status', '
 const OPTIONAL_KEY_ORDER = [
   'parent', 'depends_on', 'gpu', 'gpu_count', 'blocked_by', 'claimed_by', 'claimed_at',
   'paused', 'approval_needed', 'approved_at', 'not_before', 'pending_at', 'completed_at', 'completed_note',
+  'origin_session_id', 'origin_channel', 'origin_thread_id',
 ];
 
 function isDefault(key: string, value: any): boolean {

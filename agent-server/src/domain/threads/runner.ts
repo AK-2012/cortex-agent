@@ -286,6 +286,8 @@ async function executeAndAwaitAgent(
     trigger: meta?.trigger || undefined,
     threadId,
     threadDepth: meta?.depth ?? 0,
+    taskId: meta?.taskId ?? null,
+    taskProject: meta?.taskProject ?? null,
     useCoreMcp: true,
     sessionName: stepCtx.sessionName,
     claudeAgent: agentConfig.claudeAgent || null,

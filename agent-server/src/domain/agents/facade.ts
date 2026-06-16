@@ -54,6 +54,10 @@ export interface RunAgentOptions {
   /** Recursion depth of the owning thread, surfaced to the spawned agent as CORTEX_THREAD_DEPTH
    *  so the thread_start MCP tool can forward it for the depth guard. */
   threadDepth?: number | null;
+  /** Owning dispatch task id/project, surfaced as CORTEX_TASK_ID / CORTEX_TASK_PROJECT so
+   *  `cortex-task spawn` can infer the current task as the parent of a child task. */
+  taskId?: string | null;
+  taskProject?: string | null;
   onProgress?: ((progress: any) => void) | null;
   onAssistantMessage?: ((msg: string) => void) | null;
   onToolUse?: ((name: string, input: any) => void) | null;
@@ -97,8 +101,10 @@ function buildSpawnConfig(
     executionId: options.executionId ?? null,
     useCoreMcp: options.useCoreMcp ?? undefined,
     threadDepth: options.threadDepth ?? null,
+    taskId: options.taskId ?? null,
+    taskProject: options.taskProject ?? null,
   };
-  const hasContext = !!(ctx.threadId || ctx.profile || ctx.project || ctx.sessionName || ctx.executionId || ctx.useCoreMcp || ctx.threadDepth != null);
+  const hasContext = !!(ctx.threadId || ctx.profile || ctx.project || ctx.sessionName || ctx.executionId || ctx.useCoreMcp || ctx.threadDepth != null || ctx.taskId || ctx.taskProject);
 
   // Load global rules (no paths frontmatter) and inject as appendSystemPrompt.
   // Scoped rules (with paths) are handled by the Read/Grep PostToolUse hook.

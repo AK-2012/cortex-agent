@@ -505,6 +505,22 @@ test('buildClaudeEnv — omitted context fields do not pollute env with empty st
   assert.equal(env.CORTEX_SESSION_NAME, undefined);
 });
 
+test('buildClaudeEnv — context.taskId/taskProject surface as CORTEX_TASK_ID/PROJECT', () => {
+  const env = buildClaudeEnv('C1', 'sid-1', null, null, undefined, undefined, {
+    threadId: 'thr_abc',
+    taskId: 'a1b2',
+    taskProject: 'cortex-self',
+  });
+  assert.equal(env.CORTEX_TASK_ID, 'a1b2');
+  assert.equal(env.CORTEX_TASK_PROJECT, 'cortex-self');
+});
+
+test('buildClaudeEnv — omitted task context does not set CORTEX_TASK_* vars', () => {
+  const env = buildClaudeEnv('C1', 'sid-1');
+  assert.equal(env.CORTEX_TASK_ID, undefined);
+  assert.equal(env.CORTEX_TASK_PROJECT, undefined);
+});
+
 test('buildClaudeEnv — partial context (only threadId) sets only that var', () => {
   const env = buildClaudeEnv('C1', 'sid-1', null, null, undefined, undefined, { threadId: 'thr_xyz' });
   assert.equal(env.CORTEX_THREAD_ID, 'thr_xyz');

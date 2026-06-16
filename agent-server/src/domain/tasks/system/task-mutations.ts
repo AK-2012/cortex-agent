@@ -3,6 +3,16 @@ import { type Task } from '@core/task-parser.js';
 import { collectAllExistingHashes, generateHash } from './task-id-utils.js';
 import { editTask, findTask, getTasksPath, readTasks, VALID_PRIORITIES, validateTemplateName, writeTasks } from './task-lifecycle-edit.js';
 
+// ── Provenance for session→task wake (Problem 1) ──
+// Captured from CORTEX_* / channel env at task-creation time so task.completed can wake the
+// originating session. Only top-level `add` populates this; children created via decompose/spawn
+// are owned by the thread-wait (thread_wait) resume path, not the session-wake path.
+export interface TaskOrigin {
+  sessionId?: string | null;
+  channel?: string | null;
+  threadId?: string | null;
+}
+
 // ── Bulk task input type ──
 
 interface BulkTaskInput {
@@ -27,6 +37,7 @@ function addTask(
   template: string | null = null,
   dependsOn: string[] | null = null,
   plan: string | null = null,
+  origin: TaskOrigin | null = null,
 ) {
   if (!text || text === 'null') {
     return { success: false, message: '--text is required and must not be empty' };
@@ -75,6 +86,9 @@ function addTask(
     completed_at: null,
     completed_note: null,
     pending_at: null,
+    origin_session_id: origin?.sessionId ?? null,
+    origin_channel: origin?.channel ?? null,
+    origin_thread_id: origin?.threadId ?? null,
   };
 
   tasks.push(newTask);
@@ -181,6 +195,9 @@ function decomposeTask(
       completed_at: null,
       completed_note: null,
       pending_at: null,
+      origin_session_id: null,
+      origin_channel: null,
+      origin_thread_id: null,
     });
   }
 
@@ -324,6 +341,9 @@ function bulkAddTasks(project: string, inputs: BulkTaskInput[]) {
       completed_at: null,
       completed_note: null,
       pending_at: null,
+      origin_session_id: null,
+      origin_channel: null,
+      origin_thread_id: null,
     };
     tasks.push(newTask);
     created.push({ key: inp.key.trim(), id: taskId, text: inp.text });

@@ -640,3 +640,108 @@ test('lock-acquire uses fixed 20min TTL', () => {
     for (const r of Object.values(repos)) r.cleanup();
   }
 });
+
+// ── Provenance capture + context-aware project + spawn (Problem 1 & 2) ──
+
+function withEnv(vars: Record<string, string | undefined>, fn: () => void): void {
+  const prev: Record<string, string | undefined> = {};
+  for (const k of Object.keys(vars)) { prev[k] = process.env[k]; if (vars[k] === undefined) delete process.env[k]; else process.env[k] = vars[k]; }
+  try { fn(); } finally {
+    for (const k of Object.keys(vars)) { if (prev[k] === undefined) delete process.env[k]; else process.env[k] = prev[k]; }
+  }
+}
+
+test('add captures origin session/channel/thread from env', () => {
+  const proj = np();
+  const repos = makeRepo({ [proj]: 'tasks:\n' });
+  try {
+    lockProject(proj);
+    withEnv({ CORTEX_SESSION_ID: 'sess-1', SLACK_CHANNEL: 'C999', CORTEX_THREAD_ID: 'thr_p' }, () => {
+      const result = runTask(['add', '--project', proj, '--template', 'coder-review', '--text', 'origin task', '--done-when', 'd']);
+      assert.equal(result.success, true);
+    });
+    const yaml = readYaml(repos[proj].tasksPath);
+    const t = yaml.tasks[0];
+    assert.equal(t['origin-session-id'], 'sess-1');
+    assert.equal(t['origin-channel'], 'C999');
+    assert.equal(t['origin-thread-id'], 'thr_p');
+  } finally {
+    for (const r of Object.values(repos)) r.cleanup();
+  }
+});
+
+test('add --no-notify suppresses origin capture', () => {
+  const proj = np();
+  const repos = makeRepo({ [proj]: 'tasks:\n' });
+  try {
+    lockProject(proj);
+    withEnv({ CORTEX_SESSION_ID: 'sess-1', SLACK_CHANNEL: 'C999' }, () => {
+      const result = runTask(['add', '--project', proj, '--template', 'coder-review', '--text', 'no-notify task', '--done-when', 'd', '--no-notify']);
+      assert.equal(result.success, true);
+    });
+    const yaml = readYaml(repos[proj].tasksPath);
+    const t = yaml.tasks[0];
+    assert.equal(t['origin-session-id'], undefined);
+    assert.equal(t['origin-channel'], undefined);
+  } finally {
+    for (const r of Object.values(repos)) r.cleanup();
+  }
+});
+
+test('add falls back to CORTEX_PROJECT when --project omitted', () => {
+  const proj = np();
+  const repos = makeRepo({ [proj]: 'tasks:\n' });
+  try {
+    lockProject(proj);
+    withEnv({ CORTEX_PROJECT: proj, CORTEX_SESSION_ID: undefined, SLACK_CHANNEL: undefined }, () => {
+      const result = runTask(['add', '--template', 'coder-review', '--text', 'env-project task', '--done-when', 'd']);
+      assert.equal(result.success, true);
+    });
+    const yaml = readYaml(repos[proj].tasksPath);
+    assert.equal(yaml.tasks.length, 1);
+    assert.equal(yaml.tasks[0].text, 'env-project task');
+  } finally {
+    for (const r of Object.values(repos)) r.cleanup();
+  }
+});
+
+test('spawn creates a child of the current task (CORTEX_TASK_ID) and makes parent a join node', () => {
+  const proj = np();
+  const parentId = uid();
+  const repos = makeRepo({ [proj]: `tasks:\n  - id: ${parentId}\n    text: "Parent"\n    why: "w"\n    done-when: "d"\n    priority: high\n    status: open\n    template: coder-review\n    plan: ""\n` });
+  try {
+    lockProject(proj);
+    let childId = '';
+    withEnv({ CORTEX_TASK_ID: parentId, CORTEX_TASK_PROJECT: proj, CORTEX_PROJECT: proj }, () => {
+      const result = runTask(['spawn', '--text', 'child work', '--done-when', 'child done']);
+      assert.equal(result.success, true);
+      childId = result['child-id'] || (result['child-ids'] && result['child-ids'][0]);
+      assert.ok(childId, 'spawn must return a child id');
+    });
+    const yaml = readYaml(repos[proj].tasksPath);
+    const child = findTask(yaml.tasks, childId);
+    assert.ok(child, 'child task must exist');
+    assert.equal(child.parent, parentId);
+    assert.equal(child.template, 'coder-review', 'child inherits parent template');
+    // child carries no origin (thread-wait path owns resumption)
+    assert.equal(child['origin-session-id'], undefined);
+    const parent = findTask(yaml.tasks, parentId);
+    assert.ok((parent['depends-on'] || []).includes(childId), 'parent becomes a join node depending on the child');
+  } finally {
+    for (const r of Object.values(repos)) r.cleanup();
+  }
+});
+
+test('spawn without a current task id errors', () => {
+  const proj = np();
+  const repos = makeRepo({ [proj]: 'tasks:\n' });
+  try {
+    withEnv({ CORTEX_TASK_ID: undefined, CORTEX_TASK_PROJECT: undefined, CORTEX_PROJECT: proj }, () => {
+      const result = runCli(['spawn', '--text', 'orphan', '--done-when', 'd']);
+      assert.equal(result.exitCode, 1);
+      assert.match(result.stderr + result.stdout, /current task|CORTEX_TASK_ID|--task-id/);
+    });
+  } finally {
+    for (const r of Object.values(repos)) r.cleanup();
+  }
+});

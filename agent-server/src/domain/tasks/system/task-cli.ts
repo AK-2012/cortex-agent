@@ -34,7 +34,7 @@ import {
   unclaimTask,
 } from './task-state.js';
 import { completeTask, uncompleteTask } from './task-completion.js';
-import { addTask, batchEdit, bulkAddTasks, decomposeTask } from './task-mutations.js';
+import { addTask, batchEdit, bulkAddTasks, decomposeTask, type TaskOrigin } from './task-mutations.js';
 import { stopTask, stopTaskDryRun } from './task-process.js';
 import {
   acquireLock,
@@ -75,6 +75,7 @@ interface ParsedValues {
   force: boolean;
   showDeps: boolean;
   autoLock: boolean;
+  noNotify: boolean;
 }
 
 const READ_COMMANDS = new Set(['list', 'all', 'query', 'show', 'deps', 'lint', 'stats', 'tree']);
@@ -83,7 +84,7 @@ const WRITE_COMMANDS = new Set([
   'claim', 'unclaim', 'pause', 'resume', 'pending', 'complete', 'uncomplete',
   'request-approval', 'approve', 'clear-approval',
   'block', 'unblock',
-  'add', 'edit', 'batch-edit', 'bulk-add', 'decompose',
+  'add', 'spawn', 'edit', 'batch-edit', 'bulk-add', 'decompose',
   'assign-ids', 'validate', 'stop',
   'lock-acquire', 'lock-release', 'lock-status', 'lock-force-release',
 ]);
@@ -102,7 +103,7 @@ const COMMANDS_NEEDING_PROJECT = new Set([
   'claim', 'unclaim', 'pause', 'resume', 'pending', 'complete', 'uncomplete',
   'request-approval', 'approve', 'clear-approval',
   'block', 'unblock',
-  'add', 'edit', 'batch-edit', 'bulk-add', 'decompose',
+  'add', 'spawn', 'edit', 'batch-edit', 'bulk-add', 'decompose',
   'lock-acquire', 'lock-release', 'lock-force-release',
 ]);
 
@@ -115,7 +116,8 @@ const COMMAND_FLAG_ALLOWLIST: Record<string, Set<string>> = {
   show: new Set([...COMMON_FLAGS, '--json', '--task-ids']),
   deps: new Set([...COMMON_FLAGS, '--json', '--task-ids']),
   tree: new Set([...COMMON_FLAGS]),
-  add: new Set([...COMMON_FLAGS, '--text', '--why', '--done-when', '--plan', '--priority', '--template', '--depends-on', '--auto-lock']),
+  add: new Set([...COMMON_FLAGS, '--text', '--why', '--done-when', '--plan', '--priority', '--template', '--depends-on', '--auto-lock', '--no-notify']),
+  spawn: new Set([...COMMON_FLAGS, '--text', '--why', '--done-when', '--plan', '--priority', '--template', '--depends-on', '--auto-lock']),
   lint: new Set([...COMMON_FLAGS, '--json']),
   stats: new Set([...COMMON_FLAGS, '--json']),
   claim: new Set([...COMMON_FLAGS, '--task', '--agent']),
@@ -196,7 +198,8 @@ const HELP_CONFIG = {
     {
       heading: 'Mutation',
       commands: [
-        { name: 'add', description: 'Add new task (--text, --why, --done-when, --plan, --template ...)' },
+        { name: 'add', description: 'Add new task (--text, --why, --done-when, --plan, --template ...). Captures origin from env for completion wake.' },
+        { name: 'spawn', description: 'Create a child of the current task (CORTEX_TASK_ID or --task-id); parent becomes a join node. Pair with the thread_wait tool to await it.' },
         { name: 'bulk-add', description: 'Bulk-add tasks from JSON file (--file, use "key" for intra-batch deps)' },
         { name: 'edit', description: 'Edit task fields (--text, --why, --done-when, ...)' },
         { name: 'batch-edit', description: 'Apply same edit to multiple tasks (--task-ids)' },
@@ -251,6 +254,7 @@ const HELP_CONFIG = {
     { flag: '--dry-run', description: 'Preview without executing (stop, decompose)' },
     { flag: '--keep-parent', description: 'decompose: keep the original task as a join/acceptance node depending on all subtasks (DR-0014 task tree)' },
     { flag: '--auto-lock', description: 'Auto-acquire project lock before write (does NOT auto-release)' },
+    { flag: '--no-notify', description: 'add: do not capture origin session/channel (suppresses completion wake)' },
     { flag: '--skip-verify', description: 'Skip completion evidence check for `complete` (escape hatch)' },
     { flag: '--skip-verify-reason <text>', description: 'Reason for skipping verification (logged in result)' },
     { flag: '--help', description: 'Show this help' },
@@ -339,6 +343,7 @@ function createDefaults(): ParsedValues {
     force: false,
     showDeps: false,
     autoLock: false,
+    noNotify: false,
   };
 }
 
@@ -414,6 +419,9 @@ function parseOptions(args: string[], values: ParsedValues, seen: Set<string>): 
     } else if (token === '--auto-lock') {
       seen.add(token);
       values.autoLock = true;
+    } else if (token === '--no-notify') {
+      seen.add(token);
+      values.noNotify = true;
     } else {
       throw cliError(`Unknown argument: ${token}`);
     }
@@ -458,6 +466,13 @@ function validateCommand(command: string, values: ParsedValues): void {
   if (command === 'add' && !values.text) {
     throw cliError('--text is required for add');
   }
+  if (command === 'spawn') {
+    if (!values.text) throw cliError('--text is required for spawn');
+    const parent = values.taskId || process.env.CORTEX_TASK_ID;
+    if (!parent) {
+      throw cliError('spawn needs a current task: run inside a dispatched task (CORTEX_TASK_ID set) or pass --task-id <parent>');
+    }
+  }
   if (command === 'add' && values.template && (values.template === 'default' || values.template === 'scheduler')) {
     throw cliError(`Template '${values.template}' is forbidden. The 'default' and 'scheduler' templates are single-agent templates with no review pipeline and are not allowed for task dispatch. Use a multi-agent review template instead (run 'cortex-task --help' to see available templates).`);
   }
@@ -470,6 +485,17 @@ function validateCommand(command: string, values: ParsedValues): void {
 
 }
 
+/** Context-aware defaults: a running agent already knows its project (and current task) via
+ *  CORTEX_* env. Fill --project from env for write commands so agents don't re-declare it.
+ *  `spawn` lives under the current task, so it prefers that task's project. */
+function applyContextDefaults(command: string, values: ParsedValues): void {
+  if (!values.project && COMMANDS_NEEDING_PROJECT.has(command)) {
+    const envProject = (command === 'spawn' ? process.env.CORTEX_TASK_PROJECT : null)
+      || process.env.CORTEX_PROJECT || null;
+    if (envProject) values.project = envProject;
+  }
+}
+
 function parseArgs(argv: string[]) {
   const split = splitCommand(argv);
   const command = split.command ?? 'list';
@@ -477,6 +503,7 @@ function parseArgs(argv: string[]) {
   const seen = new Set<string>();
   parseOptions(split.args, values, seen);
   validateFlagsForCommand(command, seen);
+  applyContextDefaults(command, values);
   validateCommand(command, values);
   return { command, values };
 }
@@ -720,6 +747,54 @@ function handleStop(v: ParsedValues) {
   return v.dryRun ? stopTaskDryRun(v.taskId!) : stopTask(v.taskId!);
 }
 
+/** Capture provenance from env so task.completed can wake the originating session (Problem 1).
+ *  Suppressed by --no-notify. Returns null when no env context (e.g. a human at a raw shell). */
+function readOriginFromEnv(noNotify: boolean): TaskOrigin | null {
+  if (noNotify) return null;
+  const channel = process.env.SLACK_CHANNEL || process.env.FEISHU_CHANNEL || null;
+  const sessionId = process.env.CORTEX_SESSION_ID || null;
+  const threadId = process.env.CORTEX_THREAD_ID || null;
+  if (!channel && !sessionId && !threadId) return null;
+  return { sessionId, channel, threadId };
+}
+
+const MAX_SPAWN_DEPTH = 6;
+
+/** `spawn`: create a single child under the current task (CORTEX_TASK_ID, or --task-id override),
+ *  reusing decompose's keep-parent join semantics. The child inherits the parent template unless
+ *  overridden. No origin is captured — an in-task agent resumes via the thread_wait path, not the
+ *  session-wake path. A parent-chain depth cap bounds runaway recursion (replaces thread tree guard). */
+function handleSpawn(v: ParsedValues) {
+  const parentId = v.taskId || process.env.CORTEX_TASK_ID || null;
+  if (!parentId) {
+    return { success: false, message: 'spawn needs a current task (CORTEX_TASK_ID) or --task-id <parent>' };
+  }
+  // Depth guard: walk the parent chain.
+  const tasks = scanAllTasks(v.project!);
+  const byId = new Map(tasks.filter((t) => t.id).map((t) => [t.id, t] as const));
+  let cur = byId.get(parentId);
+  for (let depth = 0; cur && cur.parent; depth++) {
+    if (depth >= MAX_SPAWN_DEPTH) {
+      return { success: false, message: `spawn refused: task tree deeper than ${MAX_SPAWN_DEPTH} — fold the work in or escalate instead of nesting further` };
+    }
+    cur = byId.get(cur.parent);
+  }
+  const subtask = {
+    text: v.text!,
+    why: v.why || undefined,
+    done_when: v.doneWhen || undefined,
+    template: v.template || undefined,
+    priority: v.priority || undefined,
+    plan: v.plan || undefined,
+    depends_on: v.dependsOn.length > 0 ? v.dependsOn : undefined,
+  };
+  const result = decomposeTask(v.project!, null, [subtask], parentId, { keepParent: true });
+  if (result.success && (result as any).child_ids?.length) {
+    return { success: true, message: `Spawned child of ${parentId}`, child_id: (result as any).child_ids[0], parent_id: parentId };
+  }
+  return result;
+}
+
 // ── Lock helpers ──
 
 function formatLockResult(project: string, owner: string | null, lock: any, opts: { force?: boolean }) {
@@ -798,7 +873,8 @@ const WRITE_HANDLERS: Record<string, WriteHandler> = {
   'clear-approval': (v) => clearApprovalTask(v.task, v.project!, v.taskId),
   block: (v) => blockTask(v.task, v.project!, v.reason!, v.taskId),
   unblock: (v) => unblockTask(v.task, v.project!, v.taskId),
-  add: (v) => addTask(v.project!, v.text, v.why, v.doneWhen, v.priority || 'medium', v.template, v.dependsOn.length > 0 ? v.dependsOn : null, v.plan),
+  add: (v) => addTask(v.project!, v.text, v.why, v.doneWhen, v.priority || 'medium', v.template, v.dependsOn.length > 0 ? v.dependsOn : null, v.plan, readOriginFromEnv(v.noNotify)),
+  spawn: handleSpawn,
   edit: handleEdit,
   'batch-edit': handleBatchEdit,
   decompose: handleDecompose,
@@ -823,7 +899,7 @@ const WRITE_HANDLERS: Record<string, WriteHandler> = {
   'lock-force-release': handleLockForceRelease,
 };
 
-const LOCK_GUARD_COMMANDS = new Set(['add', 'edit', 'batch-edit', 'bulk-add', 'decompose']);
+const LOCK_GUARD_COMMANDS = new Set(['add', 'spawn', 'edit', 'batch-edit', 'bulk-add', 'decompose']);
 
 const LOCK_GUARD_ASSIGN_IDS = 'assign-ids';
 

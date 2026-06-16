@@ -91,6 +91,10 @@ export interface AgentSpawnConfig {
     executionId?: string | null;
     /** When true, load only core MCP server (remote_* tools). Used by template thread sessions. */
     useCoreMcp?: boolean;
+    threadDepth?: number | null;
+    /** Owning dispatch task id/project, surfaced as CORTEX_TASK_ID / CORTEX_TASK_PROJECT. */
+    taskId?: string | null;
+    taskProject?: string | null;
   };
 }
 

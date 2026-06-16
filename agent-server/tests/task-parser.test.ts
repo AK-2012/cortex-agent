@@ -454,6 +454,69 @@ test('serializeTasksFileWithLock: lock with null is treated as no lock', () => {
   assert.equal(out, 'tasks: []\n');
 });
 
+// ── Provenance / origin fields (session→task wake) ──
+
+import { serializeTasksFile, parseTasksFile } from '../src/core/task-parser.js';
+
+function baseTask(overrides: Record<string, any> = {}) {
+  return {
+    id: 'o1',
+    text: 'origin task',
+    why: 'w',
+    done_when: 'dw',
+    priority: 'high' as const,
+    status: 'open' as const,
+    template: 'default',
+    plan: '',
+    project: 'p1',
+    parent: null,
+    depends_on: [] as string[],
+    gpu: null,
+    gpu_count: 1,
+    blocked_by: null,
+    claimed_by: null,
+    claimed_at: null,
+    paused: false,
+    approval_needed: false,
+    approved_at: null,
+    not_before: null,
+    completed_at: null,
+    completed_note: null,
+    pending_at: null,
+    origin_session_id: null,
+    origin_channel: null,
+    origin_thread_id: null,
+    ...overrides,
+  };
+}
+
+test('origin_* fields round-trip through serialize/parse', () => {
+  const tasks = [baseTask({
+    origin_session_id: 'sess-abc',
+    origin_channel: 'C12345',
+    origin_thread_id: 'thr_xyz',
+  })];
+  const yaml = serializeTasksFile(tasks as any);
+  // kebab-case keys on disk
+  assert.match(yaml, /origin-session-id: sess-abc/);
+  assert.match(yaml, /origin-channel: C12345/);
+  assert.match(yaml, /origin-thread-id: thr_xyz/);
+  const parsed = parseTasksFile(yaml, 'p1');
+  assert.equal(parsed.length, 1);
+  assert.equal(parsed[0].origin_session_id, 'sess-abc');
+  assert.equal(parsed[0].origin_channel, 'C12345');
+  assert.equal(parsed[0].origin_thread_id, 'thr_xyz');
+});
+
+test('origin_* null fields are omitted from serialized YAML', () => {
+  const yaml = serializeTasksFile([baseTask()] as any);
+  assert.ok(!yaml.includes('origin-'), 'null origin fields must not be serialized');
+  const parsed = parseTasksFile(yaml, 'p1');
+  assert.equal(parsed[0].origin_session_id, null);
+  assert.equal(parsed[0].origin_channel, null);
+  assert.equal(parsed[0].origin_thread_id, null);
+});
+
 test('serializeTasksFileWithLock: round-trip non-empty tasks', () => {
   const tasks = [{
     id: 'a1',

@@ -302,6 +302,60 @@ export async function notifyTaskParentThreads(taskId: string, kind: 'completed' 
   }
 }
 
+type WakeFn = (channel: string, notice: string) => void | Promise<void>;
+
+/** Wake (or create) the session on a channel by routing a synthetic user message — the same
+ *  mechanism the interactive thread-parent path uses. Shared by thread completion (fireThreadCallback)
+ *  and task completion (notifyTaskOriginSession). agentRunner.route find-or-creates the channel's
+ *  session, so this works whether or not a live session still exists. */
+async function wakeSession(channel: string, notice: string, tag: string): Promise<void> {
+  const adapter = jobCtx.adapter;
+  if (!adapter) { log.error(`no adapter; cannot wake session on ${channel} (${tag})`); return; }
+  const message: IncomingMessage = {
+    ref: { conduit: channel, messageId: `cb_${tag}_${Date.now()}` },
+    text: notice,
+    senderId: 'cortex-thread-callback',
+    isBot: false,
+    kind: 'user',
+    raw: { source: 'task-callback', tag },
+  };
+  log.info(`waking session on ${channel} for ${tag}`);
+  await agentRunner.route({
+    message, channel, adapter, threadAnchorId: null, hasFiles: false, userMessage: notice, agentMessage: notice,
+  });
+}
+
+/** Origin-session notice: a task created by an interactive session/agent finished — concise,
+ *  no manager-style verification ceremony (the recipient is the requester, not a join node). */
+function buildTaskOriginNotice(task: Task, kind: 'completed' | 'blocked'): string {
+  if (kind === 'completed') {
+    const note = task.completed_note ? `\n备注: ${task.completed_note}` : '';
+    return `[任务完成] 你布置的任务 #${task.id} (${task.project})「${task.text}」已完成。${note}\n用 cortex-task show --task-id ${task.id} 查看详情。`;
+  }
+  return `[任务受阻] 你布置的任务 #${task.id} (${task.project})「${task.text}」被阻塞。\n阻塞原因: ${task.blocked_by || '(未记录)'}\n用 cortex-task show --task-id ${task.id} 查看详情，处理后可 cortex-task unblock。`;
+}
+
+/** Session→task wake (Problem 1): when a task created by an interactive session/agent turns
+ *  terminal, route a notice back to its origin channel. Default-on, no fallback — if origin_channel
+ *  is set we always wake it. Mutually exclusive with the thread-parent path: if any thread is
+ *  currently waiting on this task (waitingOnTasks), that path owns the result and we defer.
+ *  `wake` is injectable for testing (mirrors the `resume` injection on notifyTaskParentThreads). */
+export async function notifyTaskOriginSession(taskId: string, kind: 'completed' | 'blocked', deps: { wake?: WakeFn } = {}): Promise<void> {
+  for (const t of threadStore.getAll()) {
+    if (t.status === 'waiting' && t.metadata?.waitingOnTasks?.includes(taskId)) return;
+  }
+  const key = `task_${taskId}_${kind}`;
+  if (fired.has(key)) return;
+  // The event carries only the id; origin fields live on the task — scan disk to find it.
+  const task = scanAllTasks().find((t) => t.id === taskId);
+  if (!task || !task.origin_channel) return;
+  if (kind === 'completed' && task.status !== 'done') return; // dispatch publishes loosely
+  if (kind === 'blocked' && !task.blocked_by) return;
+  fired.add(key);
+  const wake = deps.wake ?? ((ch, n) => wakeSession(ch, n, `task_${taskId}`));
+  await wake(task.origin_channel, buildTaskOriginNotice(task, kind));
+}
+
 /** Sweep one waiting thread's waitingOnTasks against disk state: deliver already-done and
  *  already-blocked children, drop missing ones, keep open ones. Closes the race window
  *  where a child task turns terminal between the suspension snapshot and the waiting
@@ -341,9 +395,11 @@ export async function reconcileWaitingTasks(threadId: string, deps: { resume?: R
 export function registerTaskTreeSubscribers(bus: { subscribe: (type: any, fn: (e: any) => void) => unknown }): void {
   bus.subscribe('task.completed', (e: { taskId: string }) => {
     void notifyTaskParentThreads(e.taskId, 'completed').catch((err) => log.error(`task.completed bridge: ${(err as Error).message}`));
+    void notifyTaskOriginSession(e.taskId, 'completed').catch((err) => log.error(`task.completed origin-wake: ${(err as Error).message}`));
   });
   bus.subscribe('task.blocked', (e: { taskId: string }) => {
     void notifyTaskParentThreads(e.taskId, 'blocked').catch((err) => log.error(`task.blocked bridge: ${(err as Error).message}`));
+    void notifyTaskOriginSession(e.taskId, 'blocked').catch((err) => log.error(`task.blocked origin-wake: ${(err as Error).message}`));
   });
 }
 
@@ -421,29 +477,9 @@ export async function fireThreadCallback(threadId: string): Promise<void> {
   if (fired.has(threadId)) return;
   fired.add(threadId);
   const notice = buildNotice(threadId);
-  const adapter = jobCtx.adapter;
 
   if (m.parentChannel) {
-    if (!adapter) { log.error(`no adapter; cannot wake parent for ${threadId}`); return; }
-    const channel = m.parentChannel;
-    const message: IncomingMessage = {
-      ref: { conduit: channel, messageId: `cb_${threadId}_${Date.now()}` },
-      text: notice,
-      senderId: 'cortex-thread-callback',
-      isBot: false,
-      kind: 'user',
-      raw: { source: 'thread-callback', threadId },
-    };
-    log.info(`waking parent session on ${channel} for thread ${threadId}`);
-    await agentRunner.route({
-      message,
-      channel,
-      adapter,
-      threadAnchorId: null,
-      hasFiles: false,
-      userMessage: notice,
-      agentMessage: notice,
-    });
+    await wakeSession(m.parentChannel, notice, `thr_${threadId}`);
     return;
   }
 

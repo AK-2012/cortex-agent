@@ -122,6 +122,11 @@ export interface CortexAgentContext {
   /** Recursion depth of the owning thread, surfaced as CORTEX_THREAD_DEPTH so the thread_start
    *  MCP tool can forward it and the daemon-side depth guard can cap nested thread spawning. */
   threadDepth?: number | null;
+  /** Owning dispatch task id/project (when the agent runs inside a task-dispatched thread),
+   *  surfaced as CORTEX_TASK_ID / CORTEX_TASK_PROJECT so `cortex-task spawn` can infer the
+   *  current task as the parent of a child task without the agent re-declaring it. */
+  taskId?: string | null;
+  taskProject?: string | null;
 }
 
 export function buildClaudeEnv(
@@ -162,12 +167,16 @@ export function buildClaudeEnv(
   delete env.CORTEX_PROJECT;
   delete env.CORTEX_SESSION_NAME;
   delete env.CORTEX_THREAD_DEPTH;
+  delete env.CORTEX_TASK_ID;
+  delete env.CORTEX_TASK_PROJECT;
   if (context?.threadId) env.CORTEX_THREAD_ID = context.threadId;
   if (context?.threadDepth != null) env.CORTEX_THREAD_DEPTH = String(context.threadDepth);
   if (context?.profile) env.CORTEX_PROFILE = context.profile;
   if (context?.project) env.CORTEX_PROJECT = context.project;
   if (context?.sessionName) env.CORTEX_SESSION_NAME = context.sessionName;
   if (context?.executionId) env.CORTEX_EXECUTION_ID = context.executionId;
+  if (context?.taskId) env.CORTEX_TASK_ID = context.taskId;
+  if (context?.taskProject) env.CORTEX_TASK_PROJECT = context.taskProject;
   if (extraEnv) {
     for (const [k, v] of Object.entries(extraEnv)) env[k] = v;
   }

@@ -38,7 +38,7 @@ test('slack-server (slack-server.ts) registers 1 platform-specific tool name', a
   assert.equal(new Set(names).size, 1, 'no duplicate tool names');
 });
 
-test('core-server (core-server.ts) registers 6 remote_* tools, current_time, and 9 thread_* tools', async () => {
+test('core-server (core-server.ts) registers 6 remote_* tools, current_time, 3 thread control tools, and 3 task-monitor tools', async () => {
   const mod = await import('../../../src/domain/mcp/core-server.js');
   const names: readonly string[] = mod.TOOL_NAMES;
 
@@ -50,19 +50,18 @@ test('core-server (core-server.ts) registers 6 remote_* tools, current_time, and
     'remote_glob',
     'remote_grep',
     'current_time',
-    'thread_start',
-    'thread_status',
-    'thread_result',
-    'thread_list',
-    'thread_list_templates',
-    'thread_cancel',
-    // DR-0015 control plane tools
+    // DR-0015 control plane tools (self-control of the caller's own thread) — retained
     'thread_abort',
     'thread_split',
     'thread_wait',
+    // Task delegation is now the single agent-facing primitive: spawning via cortex-task,
+    // monitoring via these read-only task tools (thread_start + 5 monitoring tools removed).
+    'task_status',
+    'task_result',
+    'task_list',
   ];
 
   assert.deepEqual([...names].sort(), [...expected].sort());
-  assert.equal(names.length, 16);
-  assert.equal(new Set(names).size, 16, 'no duplicate tool names');
+  assert.equal(names.length, 13);
+  assert.equal(new Set(names).size, 13, 'no duplicate tool names');
 });

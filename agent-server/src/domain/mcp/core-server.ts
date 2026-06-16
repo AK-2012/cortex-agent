@@ -1,7 +1,9 @@
-// input:  MCP SDK, task-ops + time + thread-ops tool modules
-// output: MCP stdio service, exposing remote_* tools, current_time, and thread_* tools
+// input:  MCP SDK, remote-ops + time + thread control + task-monitor tool modules
+// output: MCP stdio service, exposing remote_* tools, current_time, thread control tools, task_* tools
 // pos:    Core MCP server — thread agents load only this one (no Slack/cost/schedule tools).
-//         thread_* tools let any agent drive the Thread system via the daemon webhook.
+//         Delegation is via the task system (cortex-task CLI); thread control tools (abort/split/wait)
+//         let an agent steer its own thread; task_* tools monitor tasks. The agent-facing thread
+//         spawn/monitor tools (thread_start + status/result/list/list_templates/cancel) were removed.
 // >>> If I am updated, update my header comment and the parent folder's CORTEX.md <<<
 
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
@@ -9,6 +11,7 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { registerTaskOpsTools } from './tools/task-ops.js';
 import { registerTimeTools } from './tools/time.js';
 import { registerThreadTools } from './tools/thread-ops.js';
+import { registerTaskMonitorTools } from './tools/task-monitor.js';
 import { isMainModule } from '@core/utils.js';
 import { createLogger } from '@core/log.js';
 import { CORTEX_VERSION } from '@core/version.js';
@@ -22,6 +25,7 @@ const server = new McpServer({ name: 'cortex-core', version: CORTEX_VERSION });
 registerTaskOpsTools(server);
 registerTimeTools(server);
 registerThreadTools(server);
+registerTaskMonitorTools(server);
 
 // --- Exported tool name list (for verification) ---
 
@@ -33,16 +37,14 @@ export const TOOL_NAMES: readonly string[] = [
   'remote_glob',
   'remote_grep',
   'current_time',
-  'thread_start',
-  'thread_status',
-  'thread_result',
-  'thread_list',
-  'thread_list_templates',
-  'thread_cancel',
   // DR-0015 control plane: an agent signals its own thread (abort / split / wait).
   'thread_abort',
   'thread_split',
   'thread_wait',
+  // Task monitoring (delegation itself is via the cortex-task CLI).
+  'task_status',
+  'task_result',
+  'task_list',
 ];
 
 // --- Start (called by barrel when run as standalone) ---
