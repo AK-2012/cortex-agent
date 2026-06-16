@@ -1,12 +1,11 @@
-// input:  Node test runner + thread-manager abort + summary
-// output: detectAbortMarker + abortThread state tests
-// pos:    Verify agent-initiated abort infrastructure
+// input:  Node test runner + thread control plane (pendingControl) + abort + summary
+// output: peekPendingControl / clearPendingControl / abortThread state + preamble tests
+// pos:    Verify agent-initiated abort infrastructure (DR-0015 control plane — tool-driven)
 // >>> If I am updated, update my header comment and the parent folder's CORTEX.md <<<
 
 import test, { before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import * as fs from 'node:fs';
-import * as os from 'node:os';
 import * as path from 'node:path';
 import { DATA_DIR } from '../src/core/utils.js';
 import { threadStore } from '../src/store/thread-repo.js';
@@ -16,7 +15,8 @@ import {
   cancelThread,
   cleanupWorkspace,
   createThread,
-  detectAbortMarker,
+  peekPendingControl,
+  clearPendingControl,
   listAgents,
   loadConfig,
   resolveAgentSlotConfig,
@@ -65,7 +65,7 @@ function trackThreadId(id: string): string {
   return id;
 }
 
-function makeAdHocThreadWithArtifact(artifactBody: string): ThreadRecord {
+function makeAdHocThread(artifactBody = ''): ThreadRecord {
   const anyAgent = listAgents()[0];
   assert.ok(anyAgent, 'loadConfig should populate at least one agent');
   const thread = createThread(`C-abort-${Math.random().toString(36).slice(2, 8)}`, {
@@ -74,79 +74,74 @@ function makeAdHocThreadWithArtifact(artifactBody: string): ThreadRecord {
     userMessageTs: 'ts',
   });
   trackThreadId(thread.id);
-  fs.writeFileSync(thread.artifactPath, artifactBody);
+  if (artifactBody) fs.writeFileSync(thread.artifactPath, artifactBody);
   return thread;
 }
 
-// --- detectAbortMarker ---
+/** Simulate the webhook `control` action writing pendingControl (out-of-band signal). */
+async function setControl(threadId: string, control: NonNullable<ThreadRecord['metadata']>['pendingControl']): Promise<void> {
+  await threadStore.mutate(threadId, (t) => { (t.metadata ??= {}).pendingControl = control; });
+}
 
-test('detectAbortMarker returns aborted=false when artifact has no marker', () => {
-  const thread = makeAdHocThreadWithArtifact('normal output without any abort signal.\n');
-  const result = detectAbortMarker(thread.id);
-  assert.equal(result.aborted, false);
-  assert.equal(result.reason, null);
+// --- pendingControl: abort signal (out-of-band, tool-driven) ---
+
+test('peekPendingControl returns null when no control signal is set', () => {
+  const thread = makeAdHocThread('normal output without any abort signal.\n');
+  assert.equal(peekPendingControl(thread.id), null);
 });
 
-test('detectAbortMarker returns aborted=false for missing / unknown thread id', () => {
-  const result = detectAbortMarker('thr_does-not-exist-' + Date.now());
-  assert.equal(result.aborted, false);
-  assert.equal(result.reason, null);
+test('peekPendingControl returns null for missing / unknown thread id', () => {
+  assert.equal(peekPendingControl('thr_does-not-exist-' + Date.now()), null);
 });
 
-test('detectAbortMarker returns aborted=false when artifact is empty', () => {
-  const thread = makeAdHocThreadWithArtifact('');
-  const result = detectAbortMarker(thread.id);
-  assert.equal(result.aborted, false);
-  assert.equal(result.reason, null);
+test('peekPendingControl returns the abort signal written by the control action', async () => {
+  const thread = makeAdHocThread();
+  await setControl(thread.id, { action: 'abort', kind: 'too-big', diagnosis: 'three independent units' });
+  const c = peekPendingControl(thread.id);
+  assert.equal(c?.action, 'abort');
+  assert.equal(c?.kind, 'too-big');
+  assert.equal(c?.diagnosis, 'three independent units');
 });
 
-test('detectAbortMarker recognises bare [ABORT] with no reason', () => {
-  const thread = makeAdHocThreadWithArtifact('some output\n[ABORT]\n');
-  const result = detectAbortMarker(thread.id);
-  assert.equal(result.aborted, true);
-  assert.equal(result.reason, null);
+test('peekPendingControl does NOT clear; clearPendingControl removes the signal so it fires once', async () => {
+  const thread = makeAdHocThread();
+  await setControl(thread.id, { action: 'abort', kind: 'mis-scoped', diagnosis: 'scope wrong' });
+  assert.equal(peekPendingControl(thread.id)?.action, 'abort');
+  assert.equal(peekPendingControl(thread.id)?.action, 'abort', 'peek is non-destructive');
+  await clearPendingControl(thread.id);
+  assert.equal(peekPendingControl(thread.id), null);
 });
 
-test('detectAbortMarker extracts trimmed reason from [ABORT: <reason>]', () => {
-  const thread = makeAdHocThreadWithArtifact('progress...\n\n[ABORT:   stuck on unresolvable dep  ]\n');
-  const result = detectAbortMarker(thread.id);
-  assert.equal(result.aborted, true);
-  assert.equal(result.reason, 'stuck on unresolvable dep');
+test('clearPendingControl is a no-op when nothing is set (and for unknown ids)', async () => {
+  const thread = makeAdHocThread();
+  await clearPendingControl(thread.id); // no throw
+  await clearPendingControl('thr_nope-' + Date.now()); // no throw
+  assert.equal(peekPendingControl(thread.id), null);
 });
 
-test('detectAbortMarker returns reason=null when reason body is only whitespace', () => {
-  const thread = makeAdHocThreadWithArtifact('[ABORT:   ]\n');
-  const result = detectAbortMarker(thread.id);
-  assert.equal(result.aborted, true);
-  assert.equal(result.reason, null);
+// --- REGRESSION: artifact prose mentioning the old markers must NOT trigger control ---
+// These reproduce the 2026-06-13 double-abort incident: worker artifact text that merely
+// references [ABORT] must produce NO control signal under the out-of-band mechanism.
+
+test('artifact text "No [ABORT]." does NOT produce any pending control', () => {
+  const thread = makeAdHocThread('Feasibility confirmed. Proceed. No [ABORT].\n');
+  assert.equal(peekPendingControl(thread.id), null, 'prose mentioning [ABORT] must not signal abort');
 });
 
-test('detectAbortMarker matches marker inline (not only at line start)', () => {
-  const thread = makeAdHocThreadWithArtifact('mid-line finale: [ABORT: blocker] trailing.\n');
-  const result = detectAbortMarker(thread.id);
-  assert.equal(result.aborted, true);
-  assert.equal(result.reason, 'blocker');
+test('a plan that says "[ABORT: too-big — ...]" in the artifact does NOT produce any pending control', () => {
+  const thread = makeAdHocThread('Plan: if the LEAP asset is missing, escalate with [ABORT: too-big — LEAP asset].\n');
+  assert.equal(peekPendingControl(thread.id), null, 'conditional plan text must not signal abort');
 });
 
-test('detectAbortMarker stops at the closing bracket — reason does not span newline', () => {
-  const thread = makeAdHocThreadWithArtifact('[ABORT: first reason\ncontinued unrelated content]');
-  const result = detectAbortMarker(thread.id);
-  // Regex character class is [^\]\n], so the literal newline ends matching before any ']' is found.
-  // Therefore no closing bracket is captured — the whole construct is not a marker.
-  assert.equal(result.aborted, false);
-});
-
-test('detectAbortMarker picks the first marker when multiple present', () => {
-  const thread = makeAdHocThreadWithArtifact('[ABORT: first] more text [ABORT: second]\n');
-  const result = detectAbortMarker(thread.id);
-  assert.equal(result.aborted, true);
-  assert.equal(result.reason, 'first');
+test('artifact mentioning [SPLIT] / [WAIT_CHILDREN] prose does NOT produce any pending control', () => {
+  const thread = makeAdHocThread('We could [SPLIT] this, or emit [WAIT_CHILDREN] later, but for now we just do it.\n');
+  assert.equal(peekPendingControl(thread.id), null);
 });
 
 // --- abortThread ---
 
 test('abortThread transitions running thread to aborted + records reason + sets endedAt', async () => {
-  const thread = makeAdHocThreadWithArtifact('[ABORT: test case 1]\n');
+  const thread = makeAdHocThread();
   const ok = await abortThread(thread.id, 'test case 1');
   assert.equal(ok, true);
 
@@ -158,7 +153,7 @@ test('abortThread transitions running thread to aborted + records reason + sets 
 });
 
 test('abortThread with null reason leaves abortReason as null', async () => {
-  const thread = makeAdHocThreadWithArtifact('[ABORT]\n');
+  const thread = makeAdHocThread();
   const ok = await abortThread(thread.id, null);
   assert.equal(ok, true);
 
@@ -168,11 +163,10 @@ test('abortThread with null reason leaves abortReason as null', async () => {
 });
 
 test('abortThread is idempotent — second call returns false and does not mutate', async () => {
-  const thread = makeAdHocThreadWithArtifact('[ABORT: once]\n');
+  const thread = makeAdHocThread();
   assert.equal(await abortThread(thread.id, 'once'), true);
   const firstEndedAt = threadStore.get(thread.id)!.endedAt;
 
-  // Second call on an already-aborted thread returns false.
   assert.equal(await abortThread(thread.id, 'twice'), false);
   const updated = threadStore.get(thread.id)!;
   assert.equal(updated.abortReason, 'once', 'abortReason should not be overwritten');
@@ -184,17 +178,16 @@ test('abortThread returns false for unknown thread id', async () => {
 });
 
 test('abortThread returns false after cancelThread has terminated the thread (cancelled wins)', async () => {
-  const thread = makeAdHocThreadWithArtifact('(nothing yet)\n');
+  const thread = makeAdHocThread();
   assert.equal(await cancelThread(thread.id), true);
   assert.equal(threadStore.get(thread.id)!.status, 'cancelled');
-  // First-to-terminate wins: abort attempted afterwards is a no-op.
   assert.equal(await abortThread(thread.id, 'late abort'), false);
   assert.equal(threadStore.get(thread.id)!.status, 'cancelled');
   assert.equal(threadStore.get(thread.id)!.abortReason, null);
 });
 
 test('cancelThread returns false after abortThread has terminated the thread (aborted wins)', async () => {
-  const thread = makeAdHocThreadWithArtifact('[ABORT: first]\n');
+  const thread = makeAdHocThread();
   assert.equal(await abortThread(thread.id, 'first'), true);
   assert.equal(await cancelThread(thread.id), false);
   assert.equal(threadStore.get(thread.id)!.status, 'aborted');
@@ -203,7 +196,7 @@ test('cancelThread returns false after abortThread has terminated the thread (ab
 // --- finalizeAbortedThread: block owning task BEFORE onEnd (DR-0015 problem 2) ---
 
 test('finalizeAbortedThread aborts the thread then invokes onAbort with the owning task + reason', async () => {
-  const thread = makeAdHocThreadWithArtifact('[ABORT: too-big]\n');
+  const thread = makeAdHocThread();
   const calls: Array<{ taskId: string; project: string | null; reason: string | null }> = [];
   await finalizeAbortedThread(
     thread.id,
@@ -217,7 +210,7 @@ test('finalizeAbortedThread aborts the thread then invokes onAbort with the owni
 });
 
 test('finalizeAbortedThread skips onAbort when metadata has no taskId (non-dispatch thread)', async () => {
-  const thread = makeAdHocThreadWithArtifact('[ABORT]\n');
+  const thread = makeAdHocThread();
   const calls: unknown[] = [];
   await finalizeAbortedThread(
     thread.id,
@@ -230,7 +223,7 @@ test('finalizeAbortedThread skips onAbort when metadata has no taskId (non-dispa
 });
 
 test('finalizeAbortedThread tolerates a missing onAbort callback', async () => {
-  const thread = makeAdHocThreadWithArtifact('[ABORT: x]\n');
+  const thread = makeAdHocThread();
   await finalizeAbortedThread(thread.id, { taskId: 'efgh', taskProject: 'p' } as any, 'x', {} as any);
   assert.equal(threadStore.get(thread.id)!.status, 'aborted');
 });
@@ -267,15 +260,18 @@ test('buildThreadSummary renders "Aborted (no reason given)" when abortReason is
 
 // --- THREAD_PROTOCOL_PREAMBLE injection into buildStepPrompt ---
 
-test('THREAD_PROTOCOL_PREAMBLE mentions the [ABORT:] marker so agents can learn the convention from the injected text', () => {
-  // Guards against accidental edits that drop the actual instruction.
-  assert.match(THREAD_PROTOCOL_PREAMBLE, /\[ABORT: <reason>\]/);
+test('THREAD_PROTOCOL_PREAMBLE teaches the thread_abort tool (not the old artifact marker)', () => {
+  // Guards against accidental edits that drop the actual instruction OR reintroduce the marker.
+  assert.match(THREAD_PROTOCOL_PREAMBLE, /thread_abort/);
   assert.match(THREAD_PROTOCOL_PREAMBLE, /Cortex Thread Protocol/);
+  assert.doesNotMatch(THREAD_PROTOCOL_PREAMBLE, /\[ABORT/, 'must not instruct writing the old [ABORT] marker');
 });
 
-test('THREAD_PROTOCOL_PREAMBLE teaches the [WAIT_CHILDREN] suspend protocol and acceptance discipline (DR-0014)', () => {
-  assert.match(THREAD_PROTOCOL_PREAMBLE, /\[WAIT_CHILDREN\]/);
+test('THREAD_PROTOCOL_PREAMBLE teaches the thread_wait / thread_split tools and acceptance discipline (DR-0014/0015)', () => {
+  assert.match(THREAD_PROTOCOL_PREAMBLE, /thread_wait/);
+  assert.match(THREAD_PROTOCOL_PREAMBLE, /thread_split/);
   assert.match(THREAD_PROTOCOL_PREAMBLE, /thread_start/);
+  assert.doesNotMatch(THREAD_PROTOCOL_PREAMBLE, /\[WAIT_CHILDREN\]/, 'must not instruct writing the old marker');
   // Acceptance-before-trust: child results must be verified against the contract.
   assert.match(THREAD_PROTOCOL_PREAMBLE, /verif/i);
 });
@@ -304,7 +300,6 @@ test('buildStepPrompt does NOT inject preamble for a thread with no artifact pat
   });
   trackThreadId(thread.id);
 
-  // Clear the artifact path to simulate a thread without a workspace artifact.
   thread.artifactPath = '';
   threadStore.set(thread);
 
@@ -323,11 +318,9 @@ test('buildStepPrompt skips preamble when resuming a persistent session (slot.se
   });
   trackThreadId(thread.id);
 
-  // First invocation (fresh session) injects the preamble.
   const firstPrompt = buildStepPrompt(thread.id, agentConfig);
   assert.ok(firstPrompt.includes(THREAD_PROTOCOL_PREAMBLE), 'first trigger should include preamble');
 
-  // Simulate a running persistent session by setting slot.sessionId; subsequent calls should skip.
   const record = threadStore.get(thread.id)!;
   record.agents[agentConfig.slotId].sessionId = 'fake-session-uuid';
   threadStore.set(record);

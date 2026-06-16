@@ -98,7 +98,7 @@ test('buildChildResultNotice includes status, cost, contract fields, and verific
   assert.match(notice, /thread_result/);
   // Acceptance discipline: verify deliverable, do not trust the child's self-report.
   assert.match(notice, /done.?when/i);
-  assert.match(notice, /\[ABORT/);
+  assert.match(notice, /thread_abort/);
 });
 
 // --- fireThreadCallback terminal guard ---

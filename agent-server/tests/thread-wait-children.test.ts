@@ -1,6 +1,6 @@
-// input:  Node test runner + state-machine wait/split markers + thread-repo startup semantics
-// output: detectWaitMarker / tryEnterWaiting / detectSplitMarker / markRunningAsFailedOnStartup tests
-// pos:    Verify parent-thread suspend/re-entry infrastructure (DR-0014 Phase 1/2)
+// input:  Node test runner + control-plane (pendingControl wait/split) + thread-repo startup semantics
+// output: peekPendingControl(wait) / tryEnterWaiting / detectSplitFromControl / markRunningAsFailedOnStartup tests
+// pos:    Verify parent-thread suspend/re-entry infrastructure (DR-0014 Phase 1/2 + DR-0015 control plane)
 // >>> If I am updated, update my header comment and the parent folder's CORTEX.md <<<
 
 import test, { after } from 'node:test';
@@ -10,9 +10,10 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { threadStore } from '../src/store/thread-repo.js';
 import {
-  detectWaitMarker,
+  peekPendingControl,
+  clearPendingControl,
   tryEnterWaiting,
-  detectSplitMarker,
+  detectSplitFromControl,
 } from '../src/domain/threads/index.js';
 import type { ThreadRecord, ThreadMetadata, ThreadStatus, AgentStep } from '../src/core/types/thread-types.js';
 
@@ -78,27 +79,41 @@ function step(output: string | null): AgentStep {
   };
 }
 
-// --- detectWaitMarker ---
+// --- wait control signal (out-of-band, tool-driven) ---
 
-test('detectWaitMarker returns false when neither artifact nor last step contains the marker', () => {
+async function setControl(threadId: string, control: NonNullable<ThreadMetadata>['pendingControl']): Promise<void> {
+  await threadStore.mutate(threadId, (t) => { (t.metadata ??= {}).pendingControl = control; });
+}
+
+test('no wait control signal when neither artifact nor last step set one', () => {
   const t = makeThreadWithArtifact('normal progress.\n', { steps: [step('done with step')] });
-  assert.equal(detectWaitMarker(t.id), false);
+  assert.equal(peekPendingControl(t.id), null);
 });
 
-test('detectWaitMarker returns false for unknown thread id', () => {
-  assert.equal(detectWaitMarker('thr_nope_' + Date.now()), false);
+test('peekPendingControl returns null for unknown thread id', () => {
+  assert.equal(peekPendingControl('thr_nope_' + Date.now()), null);
 });
 
-test('detectWaitMarker detects [WAIT_CHILDREN] in the artifact', () => {
-  const t = makeThreadWithArtifact('spawned two children\n[WAIT_CHILDREN]\n');
-  assert.equal(detectWaitMarker(t.id), true);
+test('a wait control signal is read from pendingControl (set by thread_wait → control action)', async () => {
+  const t = makeThread();
+  await setControl(t.id, { action: 'wait', onThreads: null, onTasks: null });
+  assert.equal(peekPendingControl(t.id)?.action, 'wait');
 });
 
-test('detectWaitMarker detects [WAIT_CHILDREN] in the last step output when artifact lacks it', () => {
-  const t = makeThreadWithArtifact('clean artifact\n', {
-    steps: [step('spawned children, suspending now [WAIT_CHILDREN]')],
+test('clearPendingControl drains a wait signal so it fires exactly once', async () => {
+  const t = makeThread();
+  await setControl(t.id, { action: 'wait' });
+  assert.equal(peekPendingControl(t.id)?.action, 'wait');
+  await clearPendingControl(t.id);
+  assert.equal(peekPendingControl(t.id), null);
+});
+
+// REGRESSION: artifact prose mentioning [WAIT_CHILDREN] must NOT create a wait control signal.
+test('artifact text mentioning [WAIT_CHILDREN] does NOT create a wait control signal', () => {
+  const t = makeThreadWithArtifact('Plan: spawn children, then [WAIT_CHILDREN] when ready.\n', {
+    steps: [step('progress; will [WAIT_CHILDREN] next time')],
   });
-  assert.equal(detectWaitMarker(t.id), true);
+  assert.equal(peekPendingControl(t.id), null, 'prose must not trigger wait');
 });
 
 // --- tryEnterWaiting ---
@@ -145,57 +160,67 @@ test('tryEnterWaiting returns false for unknown thread id', async () => {
   assert.equal(await tryEnterWaiting('thr_nope_' + Date.now()), false);
 });
 
-// --- detectSplitMarker ---
+// --- detectSplitFromControl (DR-0015: derives split from pendingControl, not artifact) ---
 
-test('detectSplitMarker returns split=false when no marker present', () => {
+test('detectSplitFromControl returns split=false when no control signal present', () => {
   const t = makeThreadWithArtifact('just regular work\n');
-  const r = detectSplitMarker(t.id);
+  const r = detectSplitFromControl(t.id);
   assert.equal(r.split, false);
   assert.equal(r.subtasks, null);
   assert.equal(r.error, null);
 });
 
-test('detectSplitMarker parses subtasks JSON from fenced block after the marker', () => {
-  const body = [
-    'analysis: this task is actually three independent units.',
-    '[SPLIT]',
-    '```json',
-    JSON.stringify({ subtasks: [
-      { key: 'a', text: 'do part A', 'done-when': 'A exists' },
-      { key: 'b', text: 'do part B', depends_on: ['a'] },
-    ] }),
-    '```',
-  ].join('\n');
-  const t = makeThreadWithArtifact(body);
-  const r = detectSplitMarker(t.id);
+test('detectSplitFromControl returns split=false for a non-split control (e.g. abort)', async () => {
+  const t = makeThread();
+  await setControl(t.id, { action: 'abort', kind: 'too-big', diagnosis: 'x' });
+  const r = detectSplitFromControl(t.id);
+  assert.equal(r.split, false);
+});
+
+test('detectSplitFromControl returns the typed subtasks array from a split control', async () => {
+  const t = makeThread();
+  await setControl(t.id, { action: 'split', subtasks: [
+    { key: 'a', text: 'do part A', 'done-when': 'A exists' },
+    { key: 'b', text: 'do part B', depends_on: ['a'] },
+  ] });
+  const r = detectSplitFromControl(t.id);
   assert.equal(r.split, true);
   assert.equal(r.error, null);
   assert.equal(r.subtasks!.length, 2);
   assert.equal(r.subtasks![0].text, 'do part A');
 });
 
-test('detectSplitMarker reports error when marker present but no JSON fence follows', () => {
-  const t = makeThreadWithArtifact('[SPLIT]\nno json here\n');
-  const r = detectSplitMarker(t.id);
+test('detectSplitFromControl reports error when the subtasks array is empty', async () => {
+  const t = makeThread();
+  await setControl(t.id, { action: 'split', subtasks: [] });
+  const r = detectSplitFromControl(t.id);
   assert.equal(r.split, true);
   assert.equal(r.subtasks, null);
   assert.ok(r.error);
 });
 
-test('detectSplitMarker reports error on malformed JSON', () => {
-  const t = makeThreadWithArtifact('[SPLIT]\n```json\n{ not valid json\n```\n');
-  const r = detectSplitMarker(t.id);
+test('detectSplitFromControl reports error when subtasks is missing entirely', async () => {
+  const t = makeThread();
+  await setControl(t.id, { action: 'split', subtasks: null });
+  const r = detectSplitFromControl(t.id);
   assert.equal(r.split, true);
   assert.equal(r.subtasks, null);
   assert.ok(r.error);
 });
 
-test('detectSplitMarker reports error when JSON lacks a subtasks array', () => {
-  const t = makeThreadWithArtifact('[SPLIT]\n```json\n{"foo": 1}\n```\n');
-  const r = detectSplitMarker(t.id);
-  assert.equal(r.split, true);
-  assert.equal(r.subtasks, null);
-  assert.ok(r.error);
+// REGRESSION: artifact prose containing a fenced [SPLIT] block must NOT create a split.
+test('artifact text with a [SPLIT] code fence does NOT create a split control signal', () => {
+  const body = [
+    'analysis: this task is actually three independent units.',
+    '[SPLIT]',
+    '```json',
+    JSON.stringify({ subtasks: [{ text: 'do part A' }] }),
+    '```',
+  ].join('\n');
+  const t = makeThreadWithArtifact(body);
+  assert.equal(peekPendingControl(t.id), null, 'artifact prose must not signal split');
+  const r = detectSplitFromControl(t.id);
+  assert.equal(r.split, false);
 });
 
 // --- markRunningAsFailedOnStartup: waiting-on-children survives restart ---

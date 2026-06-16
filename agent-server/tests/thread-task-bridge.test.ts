@@ -83,7 +83,7 @@ test('buildTaskResultNotice completed: task identity + done_when + verification 
   assert.match(notice, /loss < 0.1 documented/);
   assert.match(notice, /run-42/);
   assert.match(notice, /done.?when/i);
-  assert.match(notice, /\[ABORT/);
+  assert.match(notice, /thread_abort/);
 });
 
 test('buildTaskResultNotice blocked: reason + escalation guidance', () => {

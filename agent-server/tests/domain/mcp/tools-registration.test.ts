@@ -38,7 +38,7 @@ test('slack-server (slack-server.ts) registers 1 platform-specific tool name', a
   assert.equal(new Set(names).size, 1, 'no duplicate tool names');
 });
 
-test('core-server (core-server.ts) registers 6 remote_* tools, current_time, and 6 thread_* tools', async () => {
+test('core-server (core-server.ts) registers 6 remote_* tools, current_time, and 9 thread_* tools', async () => {
   const mod = await import('../../../src/domain/mcp/core-server.js');
   const names: readonly string[] = mod.TOOL_NAMES;
 
@@ -56,9 +56,13 @@ test('core-server (core-server.ts) registers 6 remote_* tools, current_time, and
     'thread_list',
     'thread_list_templates',
     'thread_cancel',
+    // DR-0015 control plane tools
+    'thread_abort',
+    'thread_split',
+    'thread_wait',
   ];
 
   assert.deepEqual([...names].sort(), [...expected].sort());
-  assert.equal(names.length, 13);
-  assert.equal(new Set(names).size, 13, 'no duplicate tool names');
+  assert.equal(names.length, 16);
+  assert.equal(new Set(names).size, 16, 'no duplicate tool names');
 });
