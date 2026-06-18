@@ -563,11 +563,7 @@ export class FeishuAdapter implements PlatformAdapter {
     // images — the text is NOT a top-level `parsed.text` but buried in a 2D array
     // of paragraph element-runs, so the simple text/raw-string path below would
     // yield '' and drop the user's message. Parse post specially.
-    const text: string = messageType === 'post'
-      ? this.parsePostContent(parsed).text
-      : (typeof parsed.text === 'string'
-        ? parsed.text
-        : (typeof message.content === 'string' && !message.content.startsWith('{') ? message.content : ''));
+    let text = this.extractMessageText(messageType, parsed, message.content || '');
 
     const ref: MessageRef = {
       conduit: this._wrap(chatId),
@@ -577,7 +573,24 @@ export class FeishuAdapter implements PlatformAdapter {
 
     // Extract file references from the parsed content. The id (file_key/image_key)
     // plus message_id + resourceType are needed by downloadFile (messageResource.get).
-    const files = this.extractInboundFiles(messageType, parsed, messageId, chatId);
+    let files = this.extractInboundFiles(messageType, parsed, messageId, chatId);
+
+    // Quote/reply enrichment. When a message replies to another (parent_id set),
+    // Feishu delivers ONLY the reply — the quoted message's text/files are not
+    // inlined. A user sharing a file cannot @ the bot on the file message itself
+    // (file messages carry no text), so they reply-and-@ instead; without this the
+    // file would be lost. Fetch the direct parent (one level) unconditionally —
+    // including bot-authored parents — and merge its text + files into this message.
+    // Best-effort: a fetch failure must never drop the user's own message.
+    if (parentId) {
+      const quoted = await this.fetchQuotedParent(parentId, chatId);
+      if (quoted) {
+        if (quoted.text) text = text ? `${text}\n\n[引用消息]\n${quoted.text}` : quoted.text;
+        if (quoted.files && quoted.files.length) {
+          files = files ? [...files, ...quoted.files] : quoted.files;
+        }
+      }
+    }
 
     // TODO: Parse Feishu forwarded/merged messages (merge_forward msg type) into
     // IncomingAttachment[]. Feishu's format differs from Slack's msg.attachments.
@@ -693,6 +706,53 @@ export class FeishuAdapter implements PlatformAdapter {
       text = text ? `${parsed.title}\n${text}` : parsed.title.trim();
     }
     return { text, imageKeys };
+  }
+
+  /**
+   * Resolve a Feishu message's human-readable text from its type + parsed content.
+   * `post` (rich text) buries text in a 2D run array; plain text lives in
+   * parsed.text; a few legacy payloads ship a bare non-JSON string as content.
+   * Shared by both inbound messages and quoted-parent enrichment.
+   */
+  private extractMessageText(messageType: string, parsed: any, rawContent: string): string {
+    if (messageType === 'post') return this.parsePostContent(parsed).text;
+    if (typeof parsed?.text === 'string') return parsed.text;
+    if (typeof rawContent === 'string' && rawContent && !rawContent.startsWith('{')) return rawContent;
+    return '';
+  }
+
+  /**
+   * Fetch the directly-quoted parent message (one level) and project it to the same
+   * { text, files } shape an inbound message produces, so a reply can be enriched
+   * with what it quotes — notably files, since a Feishu file message carries no text
+   * and thus cannot @ the bot. Returns null on any failure (best-effort).
+   * NOTE: im.v1.message.get returns content under data.items[].body.content (a JSON
+   * string), NOT the top-level `content` field the receive_v1 event uses.
+   */
+  private async fetchQuotedParent(
+    parentId: string,
+    chatId: string,
+  ): Promise<{ text: string; files: PlatformFileRef[] | undefined } | null> {
+    try {
+      const resp: any = await this.client.im.v1.message.get({ path: { message_id: parentId } });
+      const item = resp?.data?.items?.[0];
+      if (!item) return null;
+      const messageType: string = item.msg_type || '';
+      const rawContent: string = item.body?.content || '';
+      let parsed: any = {};
+      try {
+        parsed = JSON.parse(rawContent || '{}');
+      } catch {
+        parsed = {};
+      }
+      const text = this.extractMessageText(messageType, parsed, rawContent);
+      // Files of the parent must download against the PARENT's message_id.
+      const files = this.extractInboundFiles(messageType, parsed, item.message_id || parentId, chatId);
+      return { text, files };
+    } catch (e) {
+      log.warn(`Failed to fetch quoted parent ${parentId}: ${(e as Error).message}`);
+      return null;
+    }
   }
 
   private async handleCardAction(data: any): Promise<any> {

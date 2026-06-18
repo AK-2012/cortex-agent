@@ -3,7 +3,8 @@
 //         inbound file extraction, project-report routing, thread reply conduit)
 // pos:    Regression tests for Feishu adapter bug fixes, incl. interactive-card
 //         config.update_multi (post-click update persistence) + reply_in_thread
-//         threading (cards land inside the 话题 topic)
+//         threading (cards land inside the 话题 topic) + reply/quote enrichment
+//         (parent_id pulls the quoted message's text+files via im.v1.message.get)
 // >>> If I am updated, update my header comment and the parent folder's CORTEX.md <<<
 
 import test from 'node:test';
@@ -142,6 +143,125 @@ test('Feishu handleIncomingMessage: mixed text+image post delivers text AND file
   assert.equal(received.kind, 'file_share');
   assert.equal(received.files.length, 1);
   assert.equal(received.files[0].id, 'img_post_1');
+});
+
+// =========================================================================
+// Quote/reply enrichment — a reply pulls its directly-quoted parent (one level)
+// so a file shared via reply-and-@ (file messages carry no text, cannot @ the
+// bot) is not lost. Unconditional, parent-bot included, single level.
+// message.get returns content under data.items[].body.content (a JSON string).
+// =========================================================================
+
+function makeReplyInbound(parentId: string, replyText = '处理这个', senderType = 'user') {
+  return {
+    sender: { sender_type: senderType, sender_id: { open_id: 'ou_user' } },
+    message: {
+      chat_id: 'oc_known',
+      chat_type: 'group',
+      message_id: 'om_reply',
+      parent_id: parentId,
+      message_type: 'text',
+      content: JSON.stringify({ text: replyText }),
+    },
+  };
+}
+
+test('Feishu handleIncomingMessage: reply pulls quoted parent FILE into files (download targets parent id)', async () => {
+  const a = makeAdapter();
+  a.config.adminChannel = 'oc_known';
+  let askedId: string | null = null;
+  a.client = { im: { v1: { message: { get: async (req: any) => {
+    askedId = req.path.message_id;
+    return { data: { items: [{
+      message_id: 'om_file_parent',
+      msg_type: 'file',
+      body: { content: JSON.stringify({ file_key: 'file_xyz', file_name: 'data.csv' }) },
+    }] } };
+  } } } } };
+  let received: any = null;
+  a.onMessage(async (ctx: any) => { received = ctx.message; });
+
+  await a.handleIncomingMessage(makeReplyInbound('om_file_parent'));
+
+  assert.equal(askedId, 'om_file_parent', 'fetches the parent_id, one level');
+  assert.equal(received.kind, 'file_share');
+  assert.equal(received.files.length, 1);
+  assert.equal(received.files[0].id, 'file_xyz');
+  assert.equal(received.files[0].name, 'data.csv');
+  // download must hit the PARENT message id, not the reply
+  assert.deepEqual(received.files[0].raw, { message_id: 'om_file_parent', resourceType: 'file' });
+  assert.equal(received.text, '处理这个', 'parent file has no text; reply text unchanged');
+});
+
+test('Feishu handleIncomingMessage: reply appends quoted parent TEXT under a marker', async () => {
+  const a = makeAdapter();
+  a.config.adminChannel = 'oc_known';
+  a.client = { im: { v1: { message: { get: async () => ({ data: { items: [{
+    message_id: 'om_text_parent',
+    msg_type: 'text',
+    body: { content: JSON.stringify({ text: '原始问题内容' }) },
+  }] } }) } } } };
+  let received: any = null;
+  a.onMessage(async (ctx: any) => { received = ctx.message; });
+
+  await a.handleIncomingMessage(makeReplyInbound('om_text_parent', '请回答'));
+
+  assert.ok(received.text.includes('请回答'), 'keeps the reply text');
+  assert.ok(received.text.includes('原始问题内容'), 'appends quoted parent text');
+  assert.equal(received.kind, 'user', 'no files → still a plain user message');
+});
+
+test('Feishu handleIncomingMessage: quoted parent that is a bot message is still pulled (unconditional)', async () => {
+  const a = makeAdapter();
+  a.config.adminChannel = 'oc_known';
+  let getCalled = false;
+  a.client = { im: { v1: { message: { get: async () => {
+    getCalled = true;
+    return { data: { items: [{
+      message_id: 'om_bot_parent',
+      msg_type: 'post',
+      body: { content: JSON.stringify({ content: [[{ tag: 'text', text: '机器人之前的回答' }]] }) },
+    }] } };
+  } } } } };
+  let received: any = null;
+  a.onMessage(async (ctx: any) => { received = ctx.message; });
+
+  await a.handleIncomingMessage(makeReplyInbound('om_bot_parent', '继续'));
+
+  assert.equal(getCalled, true, 'parent fetched even though it is a bot message');
+  assert.ok(received.text.includes('机器人之前的回答'));
+});
+
+test('Feishu handleIncomingMessage: quoted-parent fetch failure is non-fatal', async () => {
+  const a = makeAdapter();
+  a.config.adminChannel = 'oc_known';
+  a.client = { im: { v1: { message: { get: async () => { throw new Error('permission denied'); } } } } };
+  let received: any = null;
+  a.onMessage(async (ctx: any) => { received = ctx.message; });
+
+  await a.handleIncomingMessage(makeReplyInbound('om_missing', 'hello'));
+
+  assert.ok(received, 'handler still invoked despite fetch error');
+  assert.equal(received.text, 'hello');
+  assert.equal(received.files, undefined);
+});
+
+test('Feishu handleIncomingMessage: no parent_id never calls message.get', async () => {
+  const a = makeAdapter();
+  a.config.adminChannel = 'oc_known';
+  let getCalled = false;
+  a.client = { im: { v1: { message: { get: async () => { getCalled = true; return { data: { items: [] } }; } } } } };
+  a.onMessage(async () => {});
+
+  await a.handleIncomingMessage({
+    sender: { sender_type: 'user', sender_id: { open_id: 'ou_user' } },
+    message: {
+      chat_id: 'oc_known', chat_type: 'group', message_id: 'om_1',
+      message_type: 'text', content: JSON.stringify({ text: 'hi' }),
+    },
+  });
+
+  assert.equal(getCalled, false, 'a non-reply message must not trigger a parent fetch');
 });
 
 // =========================================================================
