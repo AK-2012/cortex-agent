@@ -71,6 +71,80 @@ test('Feishu extractInboundFiles: text message has no files', () => {
 });
 
 // =========================================================================
+// post (富文本) — text+image mixed message: text must NOT be dropped, and
+// inline images must be extracted as downloadable file refs.
+// =========================================================================
+
+// A real Feishu `post` receive payload: content is a 2D array of paragraphs.
+const POST_TEXT_AND_IMAGE = {
+  title: '',
+  content: [
+    [
+      { tag: 'text', text: 'look at this ' },
+      { tag: 'a', text: 'link', href: 'https://x' },
+    ],
+    [
+      { tag: 'img', image_key: 'img_post_1' },
+    ],
+  ],
+};
+
+test('Feishu parsePostContent: extracts text + image_keys from mixed post', () => {
+  const a = makeAdapter();
+  const { text, imageKeys } = a.parsePostContent(POST_TEXT_AND_IMAGE);
+  assert.equal(text, 'look at this link');
+  assert.deepEqual(imageKeys, ['img_post_1']);
+});
+
+test('Feishu parsePostContent: prefixes a non-empty title and renders @mentions', () => {
+  const a = makeAdapter();
+  const { text } = a.parsePostContent({
+    title: 'Heads up',
+    content: [[{ tag: 'at', user_name: 'Fang' }, { tag: 'text', text: ' please review' }]],
+  });
+  assert.equal(text, 'Heads up\n@Fang please review');
+});
+
+test('Feishu extractInboundFiles: post message yields one file ref per inline image', () => {
+  const a = makeAdapter();
+  const files = a.extractInboundFiles('post', POST_TEXT_AND_IMAGE, 'om_post', 'oc_chat');
+  assert.equal(files.length, 1);
+  assert.equal(files[0].id, 'img_post_1');
+  assert.equal(files[0].mimetype, 'image/png');
+  assert.deepEqual(files[0].raw, { message_id: 'om_post', resourceType: 'image' });
+});
+
+test('Feishu extractInboundFiles: text-only post has no files', () => {
+  const a = makeAdapter();
+  const post = { content: [[{ tag: 'text', text: 'just text' }]] };
+  assert.equal(a.extractInboundFiles('post', post, 'om_1', 'oc_1'), undefined);
+});
+
+test('Feishu handleIncomingMessage: mixed text+image post delivers text AND file (regression)', async () => {
+  const a = makeAdapter();
+  a.config.adminChannel = 'oc_known'; // suppress admin auto-detect side effects
+  let received: any = null;
+  a.onMessage(async (ctx: any) => { received = ctx.message; });
+
+  await a.handleIncomingMessage({
+    sender: { sender_type: 'user', sender_id: { open_id: 'ou_user' } },
+    message: {
+      chat_id: 'oc_known',
+      chat_type: 'group',
+      message_id: 'om_post',
+      message_type: 'post',
+      content: JSON.stringify(POST_TEXT_AND_IMAGE),
+    },
+  });
+
+  assert.ok(received, 'message handler should have been invoked');
+  assert.equal(received.text, 'look at this link', 'text must not be empty for mixed post');
+  assert.equal(received.kind, 'file_share');
+  assert.equal(received.files.length, 1);
+  assert.equal(received.files[0].id, 'img_post_1');
+});
+
+// =========================================================================
 // #1/#2 — project-report routing resolves through the conduit store
 // =========================================================================
 

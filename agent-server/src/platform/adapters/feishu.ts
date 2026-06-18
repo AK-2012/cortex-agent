@@ -559,9 +559,15 @@ export class FeishuAdapter implements PlatformAdapter {
     } catch {
       parsed = {};
     }
-    const text: string = typeof parsed.text === 'string'
-      ? parsed.text
-      : (typeof message.content === 'string' && !message.content.startsWith('{') ? message.content : '');
+    // `post` (富文本/rich-text) is what Feishu sends when a message mixes text and
+    // images — the text is NOT a top-level `parsed.text` but buried in a 2D array
+    // of paragraph element-runs, so the simple text/raw-string path below would
+    // yield '' and drop the user's message. Parse post specially.
+    const text: string = messageType === 'post'
+      ? this.parsePostContent(parsed).text
+      : (typeof parsed.text === 'string'
+        ? parsed.text
+        : (typeof message.content === 'string' && !message.content.startsWith('{') ? message.content : ''));
 
     const ref: MessageRef = {
       conduit: this._wrap(chatId),
@@ -625,9 +631,68 @@ export class FeishuAdapter implements PlatformAdapter {
       case 'image':
         if (!parsed.image_key) return undefined;
         return mk(parsed.image_key, `${parsed.image_key}.png`, 'image/png', 'image');
+      case 'post': {
+        // A rich-text post may embed any number of inline images (tag:'img'). Each
+        // image_key is a resource of THIS message, downloadable via the same
+        // messageResource.get(type:'image') path as a standalone image message.
+        const { imageKeys } = this.parsePostContent(parsed);
+        if (imageKeys.length === 0) return undefined;
+        return imageKeys.map(k => ({
+          id: k,
+          name: `${k}.png`,
+          mimetype: 'image/png',
+          url: '',
+          conduit: this._wrap(chatId),
+          raw: { message_id: messageId, resourceType: 'image' as const },
+        }));
+      }
       default:
         return undefined;
     }
+  }
+
+  /**
+   * Parse a Feishu `post` (富文本/rich-text) message content payload. Feishu wraps
+   * a single message that mixes text and images as a post, whose `content` is a 2D
+   * array of paragraphs, each a run of element nodes:
+   *   { title?, content: [ [ {tag:'text',text}, {tag:'a',text,href}, {tag:'at',user_name},
+   *                          {tag:'img',image_key} ], ... ] }
+   * Returns the concatenated text (paragraphs joined by '\n', non-empty title
+   * prefixed) and the list of inline image_keys, so callers recover BOTH the text
+   * and the images from one mixed message.
+   */
+  private parsePostContent(parsed: any): { text: string; imageKeys: string[] } {
+    const imageKeys: string[] = [];
+    const content = parsed?.content;
+    if (!Array.isArray(content)) return { text: '', imageKeys };
+    const lines: string[] = [];
+    for (const paragraph of content) {
+      if (!Array.isArray(paragraph)) continue;
+      let line = '';
+      for (const node of paragraph) {
+        if (!node || typeof node !== 'object') continue;
+        switch (node.tag) {
+          case 'text':
+          case 'a':
+            if (typeof node.text === 'string') line += node.text;
+            break;
+          case 'at':
+            if (typeof node.user_name === 'string') line += `@${node.user_name}`;
+            break;
+          case 'img':
+            if (typeof node.image_key === 'string') imageKeys.push(node.image_key);
+            break;
+          default:
+            break;
+        }
+      }
+      lines.push(line);
+    }
+    let text = lines.join('\n').trim();
+    if (typeof parsed.title === 'string' && parsed.title.trim()) {
+      text = text ? `${parsed.title}\n${text}` : parsed.title.trim();
+    }
+    return { text, imageKeys };
   }
 
   private async handleCardAction(data: any): Promise<any> {
