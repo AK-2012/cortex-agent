@@ -42,6 +42,7 @@ import {
   mergeSubstantialOutput,
   setActivePlanFile,
 } from './event-parser.js';
+import { BgTaskTracker, routeLine } from './bg-task-tracker.js';
 
 const log = createLogger('claude-bridge');
 
@@ -64,6 +65,24 @@ interface PendingTurn {
   rawStream: WriteStream;
   txtStream: WriteStream;
   killed: boolean;
+  /** True for a synthetic turn opened to capture a background-task continuation
+   *  (the spontaneous turn the CLI emits after a run_in_background task finishes). */
+  spontaneous?: boolean;
+}
+
+/** Session-level sink for background-task continuation turns. Registered by the
+ *  orchestration layer so the spontaneous turn the CLI emits after a background
+ *  task finishes is routed back to the originating channel (merged into the same
+ *  reply, status sealed once no background tasks remain). Persists across normal
+ *  turns and is cleared on session close/kill. */
+export interface ContinuationSink {
+  /** Assistant text from the continuation turn (append to the original reply). */
+  onAssistantText: (text: string) => void;
+  /** Optional tool_use trace from the continuation turn. */
+  onToolUse?: (name: string, input: any) => void;
+  /** Continuation turn's terminating result. `result.pendingBackgroundTasks` is the
+   *  number of background tasks still running (0 ⇒ safe to seal as complete). */
+  onResult: (result: AgentResult) => void;
 }
 
 interface ClaudeSessionOptions {
@@ -138,6 +157,10 @@ class ClaudeSession {
   private extraOption: Record<string, string> | undefined;
   private context: CortexAgentContext | undefined;
   private currentTurn: PendingTurn | null = null;
+  /** Tracks in-flight background tasks (run_in_background) for this session. */
+  private bgTracker = new BgTaskTracker();
+  /** Set by orchestration to receive spontaneous background-task continuation turns. */
+  private continuationSink: ContinuationSink | null = null;
   private alive: boolean = false;
   private needsResume: boolean;
   private idleTimer: ReturnType<typeof setTimeout> | null = null;
@@ -273,6 +296,44 @@ class ClaudeSession {
     };
   }
 
+  /** Register/replace the continuation sink. Persists across normal turns; lives as long
+   *  as the pooled session, until close()/kill(). */
+  setContinuationSink(sink: ContinuationSink): void {
+    this.continuationSink = sink;
+  }
+
+  clearContinuationSink(): void {
+    this.continuationSink = null;
+  }
+
+  /** Open a synthetic turn to capture the spontaneous continuation the CLI emits after a
+   *  background task finishes. Its assistant text / result are routed to continuationSink
+   *  (not to a send() promise — there is no caller awaiting it). */
+  private openContinuationTurn(): void {
+    this.bgTracker.disarmContinuation();
+    const streams = this.createTurnStreams('[background-task continuation]');
+    const sink = this.continuationSink;
+    this.currentTurn = {
+      resolve: (value: any) => { try { sink?.onResult(value as AgentResult); } catch (e) { log.warn('continuation onResult threw:', (e as Error).message); } },
+      reject: (err: Error) => { log.warn('continuation turn rejected:', err?.message ?? String(err)); },
+      resultData: null,
+      planFilePath: null,
+      enteredPlanMode: false,
+      exitedPlanMode: false,
+      askUserQuestions: [],
+      finalOutput: null,
+      longestOutput: null,
+      turnCount: 0,
+      onProgress: null,
+      onAssistantMessage: sink ? (text: string) => { try { sink.onAssistantText(text); } catch (e) { log.warn('continuation onAssistantText threw:', (e as Error).message); } } : null,
+      onToolUse: sink?.onToolUse ? (name: string, input: any) => { try { sink.onToolUse!(name, input); } catch {} } : null,
+      rawStream: streams.rawStream,
+      txtStream: streams.txtStream,
+      killed: false,
+      spontaneous: true,
+    };
+  }
+
   private writeTurnStdin(prompt: string): void {
     const stdinMsg = JSON.stringify({
       type: 'user',
@@ -366,6 +427,10 @@ class ClaudeSession {
     const result = extractResult(turn.resultData, this.sessionId, false, 0, '',
       turn.planFilePath, turn.enteredPlanMode, turn.exitedPlanMode, turn.askUserQuestions,
       turn.finalOutput, turn.longestOutput);
+    // Surface how many background tasks are still running. >0 tells orchestration to hold
+    // the status in a "waiting" state; the CLI will spontaneously emit a continuation turn
+    // once they finish (routed via continuationSink).
+    if (result.resolved) (result.value as AgentResult).pendingBackgroundTasks = this.bgTracker.pendingCount;
     this.currentTurn = null;
     if (this.turnIdleTimer) clearTimeout(this.turnIdleTimer);
     this.turnIdleTimer = null;
@@ -422,6 +487,15 @@ class ClaudeSession {
         const mode = this.anthropicBaseUrl?.match(/\/m\/([^/]+)\//)?.[1] || undefined;
         handleRateLimitEvent(data.rate_limit_info, mode).catch(e => log.error('handleRateLimitEvent error:', e));
       }
+      // Track background-task lifecycle on every line (even with no active turn) so the
+      // pending count stays accurate across the turn boundary.
+      this.bgTracker.observe(data);
+      // No active turn: a background task that just finished re-invokes the model and the
+      // CLI emits a spontaneous continuation turn. Open a synthetic turn for it so its
+      // output is routed (to continuationSink) instead of being dropped.
+      if (!this.currentTurn && this.continuationSink && routeLine(this.bgTracker, data, false) === 'open-continuation') {
+        this.openContinuationTurn();
+      }
       if (data.type === 'result' && this.currentTurn) {
         this.handleResultEvent(this.currentTurn, data);
         return;
@@ -445,6 +519,13 @@ class ClaudeSession {
 
   private resetIdleTimer() {
     if (this.idleTimer) clearTimeout(this.idleTimer);
+    // While background tasks are still running, the session must stay alive to receive the
+    // spontaneous continuation turn — even through a long silent wait. Don't arm idle-close
+    // (the overall maxTimer still bounds session lifetime).
+    if (this.bgTracker.hasPending()) {
+      this.idleTimer = null;
+      return;
+    }
     this.idleTimer = setTimeout(() => {
       log.info(`Session ${this.sessionId.substring(0, 8)} idle for 65min, closing`);
       this.close();
@@ -455,6 +536,7 @@ class ClaudeSession {
     if (this.idleTimer) clearTimeout(this.idleTimer);
     if (this.maxTimer) clearTimeout(this.maxTimer);
     if (this.turnIdleTimer) clearTimeout(this.turnIdleTimer);
+    this.continuationSink = null;
     if (!this.proc || !this.alive) {
       sessions.delete(this.sessionKey);
       return;
@@ -484,6 +566,7 @@ class ClaudeSession {
     if (this.idleTimer) clearTimeout(this.idleTimer);
     if (this.maxTimer) clearTimeout(this.maxTimer);
     if (this.turnIdleTimer) clearTimeout(this.turnIdleTimer);
+    this.continuationSink = null;
     if (!this.proc || this.proc.exitCode !== null) return false;
     this.alive = false;
     sessions.delete(this.sessionKey);
@@ -890,10 +973,34 @@ export function recoverTuiOrphans(exec?: TmuxExec): { found: string[]; killed: s
   return { found, killed };
 }
 
+/** Construct a ClaudeSession WITHOUT spawning the `claude` child process, for unit
+ *  testing handleLine / continuation routing. Initializes only the fields the line
+ *  handlers touch. Callers should stub createTurnStreams to avoid log file I/O and
+ *  register cleanup via t.after(() => session.close()) to clear the idle timer. */
+function makeSessionForTest(): ClaudeSession {
+  const s = Object.create(ClaudeSession.prototype) as any;
+  s.sessionId = 'test-session';
+  s.channel = 'test';
+  s.sessionKey = 'test';
+  s.bgTracker = new BgTaskTracker();
+  s.continuationSink = null;
+  s.currentTurn = null;
+  s.idleTimer = null;
+  s.turnIdleTimer = null;
+  s.maxTimer = null;
+  s.cumulativeCostUsd = 0;
+  s.lastTokenUsage = null;
+  s.lastModelName = null;
+  s.alive = true;
+  s.proc = null;
+  return s as ClaudeSession;
+}
+
 export const _test = {
   extractAskUserQuestions,
   mergeSubstantialOutput,
   computeSpawnArgs: computeSpawnArgsForConfig,
+  makeSessionForTest,
 };
 
 // Re-exported for webhook consumer (parity with pre-refactor claude-bridge.ts:286 export)

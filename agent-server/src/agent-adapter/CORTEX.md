@@ -18,6 +18,7 @@ Unified NormalizedEvent event schema and AgentAdapter contract.
 | `claude/tool-summarizers.ts` | summarizer | summarizeToolInput tool input rendering |
 | `claude/spawn-args.ts` | args | buildSpawnArgs constructs CLI args |
 | `claude/event-parser.ts` | parser | stream-json event parsing + plan tracking |
+| `claude/bg-task-tracker.ts` | tracker | background-task (run_in_background) pending-count + spontaneous continuation-turn detection (BgTaskTracker / routeLine / isContinuationResult) |
 | `claude/tmux-control.ts` | utility | tmux CLI wrapper (DR-0012 Phase 1, TUI mode foundation) |
 | `claude/jsonl-tail.ts` | utility | session jsonl file tail + NormalizedEvent translation (DR-0012 Phase 1) |
 | `claude/cost-from-usage.ts` | pricing | reverse-derive USD cost from message.usage tokens (DR-0012 Phase 1) |
