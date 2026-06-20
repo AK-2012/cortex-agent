@@ -36,10 +36,12 @@ export function buildContinuationSink(deps: ContinuationSinkDeps): ContinuationS
   };
 }
 
-/** Feature gate: background-task continuation is opt-in via CORTEX_BG_CONTINUATION. */
+/** Feature gate: background-task continuation is ON by default. Opt out by setting
+ *  CORTEX_BG_CONTINUATION to a falsy value (0 / false / off / no). */
 export function isBgContinuationEnabled(): boolean {
   const v = process.env.CORTEX_BG_CONTINUATION;
-  return v === '1' || v === 'true';
+  if (v === undefined) return true;
+  return !['0', 'false', 'off', 'no'].includes(v.trim().toLowerCase());
 }
 
 /** Scope gate: only interactive user conduits (Slack / Feishu), never thread/dispatch. */

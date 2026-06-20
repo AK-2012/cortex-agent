@@ -48,17 +48,23 @@ test('buildContinuationSink: missing pendingBackgroundTasks treated as 0 → onC
   assert.equal(completed, true);
 });
 
-test('isBgContinuationEnabled: gated by CORTEX_BG_CONTINUATION env', () => {
+test('isBgContinuationEnabled: default ON, opt-out via CORTEX_BG_CONTINUATION=0/false', () => {
   const prev = process.env.CORTEX_BG_CONTINUATION;
   try {
     delete process.env.CORTEX_BG_CONTINUATION;
-    assert.equal(isBgContinuationEnabled(), false);
+    assert.equal(isBgContinuationEnabled(), true, 'enabled by default when unset');
+    process.env.CORTEX_BG_CONTINUATION = '0';
+    assert.equal(isBgContinuationEnabled(), false, 'disabled by "0"');
+    process.env.CORTEX_BG_CONTINUATION = 'false';
+    assert.equal(isBgContinuationEnabled(), false, 'disabled by "false"');
+    process.env.CORTEX_BG_CONTINUATION = 'off';
+    assert.equal(isBgContinuationEnabled(), false, 'disabled by "off"');
     process.env.CORTEX_BG_CONTINUATION = '1';
-    assert.equal(isBgContinuationEnabled(), true);
+    assert.equal(isBgContinuationEnabled(), true, 'explicitly enabled');
     process.env.CORTEX_BG_CONTINUATION = 'true';
     assert.equal(isBgContinuationEnabled(), true);
-    process.env.CORTEX_BG_CONTINUATION = '0';
-    assert.equal(isBgContinuationEnabled(), false);
+    process.env.CORTEX_BG_CONTINUATION = '';
+    assert.equal(isBgContinuationEnabled(), true, 'empty string is not an opt-out');
   } finally {
     if (prev === undefined) delete process.env.CORTEX_BG_CONTINUATION;
     else process.env.CORTEX_BG_CONTINUATION = prev;
