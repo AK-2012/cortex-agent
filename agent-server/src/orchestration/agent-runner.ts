@@ -28,6 +28,8 @@ import { setStreamingCallback, clearStreamingCallback, publishPlanSubmitted, pub
 import { maybeNotifyCodexLowUsage } from '@domain/costs/codex-usage-monitor.js';
 import { getAgent } from '@domain/threads/index.js';
 import { runConversation } from './conversation-runner.js';
+import { isBgContinuationEnabled, isInteractiveChannel } from './bg-continuation.js';
+import type { ContinuationSink } from '../agent-adapter/types.js';
 import { downloadFiles as downloadPlatformFiles } from './routing/file-handler.js';
 import { WORKSPACE_DIR } from '@core/utils.js';
 
@@ -148,12 +150,22 @@ export class AgentRunner {
         onPlanWritten: interactiveCallbacks.onPlanWritten,
         onAskUserQuestion: interactiveCallbacks.onAskUserQuestion,
       });
-      clearStreamingCallback(channel);
+      // Background-task continuation: if the turn left a run_in_background task running and the
+      // feature is enabled for this interactive channel, keep the streaming callback alive so the
+      // spontaneous continuation turn merges into the same reply (handleAgentSuccess holds the
+      // status and registers a sink). Otherwise clear the callback as usual.
+      const pendingBg = convResult.result?.pendingBackgroundTasks ?? 0;
+      const proc = convResult.agentProcess as { setContinuationSink?: (s: ContinuationSink) => void } | undefined;
+      const holdForBg = isBgContinuationEnabled() && isInteractiveChannel(channel)
+        && pendingBg > 0 && !convResult.result?.rateLimited
+        && typeof proc?.setContinuationSink === 'function';
+      if (!holdForBg) clearStreamingCallback(channel);
       await maybeNotifyCodexLowUsage({ adapter, result: convResult.result });
       await handleDefaultAgentResult({
         result: convResult.result, channel, adapter, statusMsg, startTime, userMessage,
         executionId: convResult.executionId,
         sessionName, sessionId, threadAnchorId, messageTs, callbacks,
+        registerContinuationSink: holdForBg ? (sink: ContinuationSink) => proc!.setContinuationSink!(sink) : null,
       });
     } catch (error) {
       clearStreamingCallback(channel);
@@ -192,10 +204,11 @@ export function resolveDefaultAgent(agentMessage: string, channel?: string): Age
   };
 }
 
-async function handleDefaultAgentResult({ result, channel, adapter, statusMsg, startTime, userMessage, executionId, sessionName, sessionId, threadAnchorId, messageTs, callbacks }: {
+async function handleDefaultAgentResult({ result, channel, adapter, statusMsg, startTime, userMessage, executionId, sessionName, sessionId, threadAnchorId, messageTs, callbacks, registerContinuationSink = null }: {
   result: AgentResult; channel: string; adapter: PlatformAdapter; statusMsg: MessageRef; startTime: number;
   userMessage: string; executionId: string | null; sessionName: string; sessionId: string | null;
   threadAnchorId: string | null; messageTs: string; callbacks: AgentCallbacks;
+  registerContinuationSink?: ((sink: ContinuationSink) => void) | null;
 }): Promise<void> {
   if (result?.rateLimited) {
     const { elapsedStr } = computeElapsed(startTime);
@@ -203,7 +216,7 @@ async function handleDefaultAgentResult({ result, channel, adapter, statusMsg, s
     await sealStatus(adapter, statusMsg, fallbackText, buildSealedStatusActionBlocks(fallbackText, { channel, sessionName, isDm: true }));
     return;
   }
-  await handleAgentSuccess({ result, channel, adapter, statusMsg, startTime, userMessage, executionId, trigger: 'user', sessionName, threadAnchorId, userMessageTs: messageTs, onAssistantMessage: callbacks.onAssistantMsg });
+  await handleAgentSuccess({ result, channel, adapter, statusMsg, startTime, userMessage, executionId, trigger: 'user', sessionName, threadAnchorId, userMessageTs: messageTs, onAssistantMessage: callbacks.onAssistantMsg, registerContinuationSink });
 }
 
 export async function resolveSessionName(sessionId: string | null, channel: string, userMessage: string, adapter: PlatformAdapter): Promise<string> {

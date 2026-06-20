@@ -25,6 +25,9 @@ import { runAgent, getClaudeMode, getActiveProfile, resolveBackendForChannel } f
 import { projectStore } from '@domain/projects/index.js';
 
 import { setStreamingCallback, clearStreamingCallback } from './routing/hook-bridge.js';
+import { buildContinuationSink } from './bg-continuation.js';
+import { recordCost } from '@domain/costs/cost-tracker.js';
+import type { ContinuationSink } from '../agent-adapter/types.js';
 import { maybeNotifyCodexLowUsage } from '@domain/costs/codex-usage-monitor.js';
 import { normalizeSkillCommandPrefix } from '@domain/memory/skill-scanner.js';
 import { getOutboundQueue } from '@store/outbound-queue.js';
@@ -35,7 +38,7 @@ const log = createLogger('lifecycle');
 
 // --- Agent success handler ---
 
-export async function handleAgentSuccess({ result, channel, adapter, statusMsg, startTime, userMessage, executionId, trigger = 'user', sessionName = null, threadAnchorId = null, userMessageTs = null, onAssistantMessage = null }: { result: AgentResult; channel: string; adapter: PlatformAdapter; statusMsg: MessageRef; startTime: number; userMessage: string; executionId: string | null; trigger?: string; sessionName?: string | null; threadAnchorId?: string | null; userMessageTs?: string | null; onAssistantMessage?: ((text: string) => void) | null }): Promise<void> {
+export async function handleAgentSuccess({ result, channel, adapter, statusMsg, startTime, userMessage, executionId, trigger = 'user', sessionName = null, threadAnchorId = null, userMessageTs = null, onAssistantMessage = null, registerContinuationSink = null }: { result: AgentResult; channel: string; adapter: PlatformAdapter; statusMsg: MessageRef; startTime: number; userMessage: string; executionId: string | null; trigger?: string; sessionName?: string | null; threadAnchorId?: string | null; userMessageTs?: string | null; onAssistantMessage?: ((text: string) => void) | null; registerContinuationSink?: ((sink: ContinuationSink) => void) | null }): Promise<void> {
   if (result?.sessionId) await setSessionAsync(channel, result.sessionId, resolveBackendForChannel(channel));
 
   await registerOrUpdateSession(result, sessionName, channel, trigger, projectStore.resolveFromMessage(userMessage)?.id ?? 'general');
@@ -47,6 +50,34 @@ export async function handleAgentSuccess({ result, channel, adapter, statusMsg, 
   const sessionTag = buildSessionTag(sessionName, result?.sessionId);
   const stream = (onAssistantMessage as any)?.stream ?? null;
   const askCount = await askUserQuestion.sendMessages(result, channel, adapter, statusMsg.messageId, threadAnchorId, stream);
+  // Background-task continuation: a run_in_background task is still running. Hold the status
+  // in a "waiting" state (don't seal) and register a sink so the spontaneous continuation turn
+  // the CLI emits on completion merges into this reply and seals the status then. Only when
+  // there are no pending user questions and the assistant reply stream is available to merge into.
+  const pendingBg = result?.pendingBackgroundTasks ?? 0;
+  if (registerContinuationSink && stream && askCount === 0 && pendingBg > 0) {
+    const projectId = projectStore.resolveFromMessage(userMessage)?.id ?? 'general';
+    const backend = resolveBackendForChannel(channel);
+    const waitingText = (pending: number) =>
+      `${Icons.waiting} ${sessionTag}${t('status.backgroundRunning')} (${pending}) (${elapsedStr}${metrics})`;
+    await writeStatus(adapter, statusMsg, waitingText(pendingBg));
+    let finalized = false;
+    const sink = buildContinuationSink({
+      stream,
+      onWaiting: (pending) => { void writeStatus(adapter, statusMsg, waitingText(pending)); },
+      onComplete: (contResult) => {
+        if (finalized) return;
+        finalized = true;
+        void finalizeBackgroundContinuation({
+          adapter, statusMsg, channel, sessionName, sessionId: result?.sessionId ?? null,
+          startTime, baseResult: result, contResult, userMessageTs, executionId, trigger, projectId, backend,
+        }).catch((e) => log.error('finalizeBackgroundContinuation failed:', (e as Error)?.message ?? e));
+      },
+    });
+    registerContinuationSink(sink);
+    return; // status held; finalization deferred to the continuation turn
+  }
+
   const statusText = askCount > 0
     ? `${Icons.waiting} ${sessionTag}${t('status.waitingForUserInput')} (${elapsedStr}${metrics})`
     : `${Icons.ok} ${t('status.done')} | ${sessionTag}(${elapsedStr}${metrics})`;
@@ -84,6 +115,40 @@ export async function handleAgentSuccess({ result, channel, adapter, statusMsg, 
     } else {
       log.warn('onMessageEnd hook skipped: assistant stream unavailable on onAssistantMessage');
     }
+  }
+}
+
+/** Finalize a turn that was held in "waiting" state once its background-task continuation
+ *  completes: seal the status (combined metrics), complete the conversation turn, release the
+ *  streaming callback, and record the continuation's cost. Idempotency is guarded by the
+ *  caller (the sink fires onComplete once). */
+async function finalizeBackgroundContinuation({ adapter, statusMsg, channel, sessionName, sessionId, startTime, baseResult, contResult, userMessageTs, executionId, trigger, projectId, backend }: {
+  adapter: PlatformAdapter; statusMsg: MessageRef; channel: string; sessionName: string | null; sessionId: string | null;
+  startTime: number; baseResult: AgentResult; contResult: AgentResult; userMessageTs: string | null; executionId: string | null;
+  trigger: string; projectId: string; backend: string;
+}): Promise<void> {
+  const { elapsedStr } = computeElapsed(startTime);
+  const totalCost = (baseResult?.total_cost_usd ?? 0) + (contResult?.total_cost_usd ?? 0);
+  const totalTurns = (baseResult?.num_turns ?? 0) + (contResult?.num_turns ?? 0);
+  const metrics = formatMetricsSuffix({ costUsd: totalCost, numTurns: totalTurns });
+  const sessionTag = buildSessionTag(sessionName, sessionId);
+  const statusText = `${Icons.ok} ${t('status.done')} | ${sessionTag}(${elapsedStr}${metrics})`;
+  await sealStatus(adapter, statusMsg, statusText, buildSealedStatusActionBlocks(statusText, { channel, sessionName, isDm: true }));
+  if (userMessageTs) {
+    await conversationLedger.completeTurn(channel, userMessageTs, { executionId }).catch((e) => log.error('completeTurn failed:', (e as Error).message));
+  }
+  clearStreamingCallback(channel);
+  if (contResult?.total_cost_usd != null) {
+    await recordCost({
+      project: projectId,
+      trigger: trigger ? `${trigger}:bg-continuation` : 'bg-continuation',
+      cost_usd: contResult.total_cost_usd,
+      backend: backend as any,
+      mode: getClaudeMode(),
+      source: 'estimate',
+      input_tokens: 0,
+      output_tokens: 0,
+    }).catch((e) => log.warn('recordCost (bg-continuation) failed:', (e as Error).message));
   }
 }
 

@@ -98,6 +98,23 @@ export interface AgentSpawnConfig {
   };
 }
 
+/**
+ * Session-level sink for background-task continuation turns (run_in_background Bash/Agent).
+ * After a background task finishes, the Claude CLI spontaneously re-invokes the model and
+ * emits a follow-up turn with no caller awaiting it. The adapter routes that turn here so
+ * orchestration can merge it into the originating reply and seal the status once the
+ * background tasks are done. Only the Claude backend implements this (capability-gated).
+ */
+export interface ContinuationSink {
+  /** Assistant text from the continuation turn (append to the original reply). */
+  onAssistantText: (text: string) => void;
+  /** Optional tool_use trace from the continuation turn. */
+  onToolUse?: (name: string, input: any) => void;
+  /** Continuation turn's terminating result. `result.pendingBackgroundTasks` is the number
+   *  of background tasks still running (0 ⇒ safe to seal the status as complete). */
+  onResult: (result: AgentResult) => void;
+}
+
 export interface AgentProcess {
   sessionKey: string;
   /** May be null at spawn time; adapter fills in asynchronously when the backend assigns a session id. */
@@ -106,6 +123,9 @@ export interface AgentProcess {
   send(message: UserMessage): Promise<AgentResult>;
   /** Async iterable of normalized events. Iterator returns done after close(). */
   events: AsyncIterable<NormalizedEvent>;
+  /** Register a sink for spontaneous background-task continuation turns (Claude backend only).
+   *  Persists across normal turns; the adapter clears it on session close/kill. */
+  setContinuationSink?(sink: ContinuationSink): void;
   close(): Promise<void>;
   kill(): boolean;
 }

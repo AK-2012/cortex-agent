@@ -52,6 +52,9 @@ export interface RunConversationOptions {
 export interface ConversationResult {
   result: AgentResult;
   executionId: string;
+  /** Underlying agent process for the turn. Used by the background-task continuation path to
+   *  register a ContinuationSink on the (Claude) session. Opaque to other consumers. */
+  agentProcess?: unknown;
 }
 
 /**
@@ -149,5 +152,5 @@ export async function runConversation(opts: RunConversationOptions): Promise<Con
     executionRegistry.teardownExecution({ executionId: execution.id, status: 'completed', durationS, result });
   }
 
-  return { result, executionId: execution.id };
+  return { result, executionId: execution.id, agentProcess: handle.agentProcess };
 }

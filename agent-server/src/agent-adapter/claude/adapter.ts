@@ -13,7 +13,7 @@ import { createLogger } from '@core/log.js';
 import { handleRateLimitEvent } from '@domain/costs/rate-limit-throttle.js';
 import { fromCanonical } from '../normalize/tool-names.js';
 import { Capability, CAPABILITIES_BY_BACKEND } from '../capabilities.js';
-import type { AgentAdapter, AgentSpawnConfig, AgentProcess, Backend, UserMessage } from '../types.js';
+import type { AgentAdapter, AgentSpawnConfig, AgentProcess, Backend, UserMessage, ContinuationSink } from '../types.js';
 import type { AgentResult } from '@core/types/agent-types.js';
 import type { NormalizedEvent } from '../normalize/event-types.js';
 import { createEventStream } from '../normalize/event-stream.js';
@@ -68,21 +68,6 @@ interface PendingTurn {
   /** True for a synthetic turn opened to capture a background-task continuation
    *  (the spontaneous turn the CLI emits after a run_in_background task finishes). */
   spontaneous?: boolean;
-}
-
-/** Session-level sink for background-task continuation turns. Registered by the
- *  orchestration layer so the spontaneous turn the CLI emits after a background
- *  task finishes is routed back to the originating channel (merged into the same
- *  reply, status sealed once no background tasks remain). Persists across normal
- *  turns and is cleared on session close/kill. */
-export interface ContinuationSink {
-  /** Assistant text from the continuation turn (append to the original reply). */
-  onAssistantText: (text: string) => void;
-  /** Optional tool_use trace from the continuation turn. */
-  onToolUse?: (name: string, input: any) => void;
-  /** Continuation turn's terminating result. `result.pendingBackgroundTasks` is the
-   *  number of background tasks still running (0 ⇒ safe to seal as complete). */
-  onResult: (result: AgentResult) => void;
 }
 
 interface ClaudeSessionOptions {
@@ -860,6 +845,7 @@ export class ClaudeAdapter implements AgentAdapter {
         }
       },
       events: stream.iterable,
+      setContinuationSink(sink: ContinuationSink): void { session.setContinuationSink(sink); },
       // Intentionally does NOT call session.close(): sessions are pooled per sessionKey and
       // reused across runAgentOnce turns. Pool-level cleanup goes through ClaudeAdapter.close(key)
       // or the legacy closeSession / closeSessionsByPrefix exports.

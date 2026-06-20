@@ -7,6 +7,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { _test } from '../../src/agent-adapter/claude/adapter.js';
+import { buildContinuationSink } from '../../src/orchestration/bg-continuation.js';
+import { MockAdapter, MockOutputStream } from '../../src/platform/testing.js';
 
 const FAKE_STREAM = { write() {}, end() {} } as any;
 
@@ -75,6 +77,35 @@ test('handleLine: assistant with no active turn and NO continuation armed is dro
 
   s.handleLine(ASSISTANT_CONT); // no task ever started → not armed
   assert.equal(called, false, 'stray assistant output is not treated as a continuation');
+});
+
+test('integration: real captured line sequence merges continuation text + dispatches complete via production sink', (t) => {
+  const s: any = _test.makeSessionForTest();
+  s.createTurnStreams = () => ({ rawStream: FAKE_STREAM, txtStream: FAKE_STREAM });
+  t.after(() => s.close());
+
+  const stream = new MockOutputStream(new MockAdapter(), { type: 'interactive-reply', conduit: 'slack:D1', sessionId: '' });
+  let completedWith: any = null;
+  let waitingCalls = 0;
+  // Wire the adapter session to the PRODUCTION sink builder (orchestration/bg-continuation).
+  s.setContinuationSink(buildContinuationSink({
+    stream: stream as any,
+    onWaiting: () => { waitingCalls++; },
+    onComplete: (r: any) => { completedWith = r; },
+  }));
+
+  // Replay the exact event order captured from a real `claude -p` background run.
+  s.handleLine(TASK_STARTED);        // pending → 1
+  s.handleLine(TASK_NOTIFICATION);   // completion → arms continuation, pending → 0
+  s.handleLine(ASSISTANT_CONT);      // continuation text (merged into the reply stream)
+  s.handleLine(RESULT_CONT);         // continuation result → onComplete
+
+  // Merge: continuation text went into the SAME output stream (no new root message logic here).
+  const text = stream.segments.map((seg: any) => seg.text ?? '').join('');
+  assert.match(text, /Background task done: DONE/);
+  assert.ok(completedWith, 'production sink dispatched onComplete (seal)');
+  assert.equal(completedWith.pendingBackgroundTasks, 0);
+  assert.equal(waitingCalls, 0, 'no waiting dispatch when no tasks remain');
 });
 
 test('setContinuationSink/clearContinuationSink and close clear the sink', (t) => {
