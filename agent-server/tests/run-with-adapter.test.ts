@@ -258,6 +258,47 @@ test('runWithAdapter: askUserQuestions on AgentResult survives through handle.pr
   assert.equal(final.askUserQuestions![0].toolUseId, 'q-1');
 });
 
+// --- context_compacted: gated by CORTEX_NOTIFY_COMPACTION (default off) ---
+
+test('runWithAdapter: context_compacted notifies via onAssistantMessage only when CORTEX_NOTIFY_COMPACTION=1', async (t) => {
+  const prev = process.env.CORTEX_NOTIFY_COMPACTION;
+  t.after(() => {
+    if (prev === undefined) delete process.env.CORTEX_NOTIFY_COMPACTION;
+    else process.env.CORTEX_NOTIFY_COMPACTION = prev;
+  });
+
+  const makeAdapter = () => makeFakeAdapter('claude', {
+    events: [
+      { type: 'context_compacted', trigger: 'auto', preTokens: 37418 },
+      { type: 'turn_complete', numTurns: 1, totalCostUsd: null },
+    ],
+    resultOnResolve: defaultAgentResult('s-compact'),
+    recorded: { sendCalls: [], killed: false, closed: false },
+  });
+
+  // OFF (env unset): no notification.
+  delete process.env.CORTEX_NOTIFY_COMPACTION;
+  const offMsgs: string[] = [];
+  await runWithAdapter(
+    makeAdapter(), 'msg',
+    { channel: 'C1', onAssistantMessage: (m: string) => offMsgs.push(m) },
+    { model: 'm', backend: 'claude', mode: null }, undefined,
+  ).promise;
+  assert.deepEqual(offMsgs, [], 'no compaction notice when flag is off');
+
+  // ON: exactly one notification carrying trigger + token count.
+  process.env.CORTEX_NOTIFY_COMPACTION = '1';
+  const onMsgs: string[] = [];
+  await runWithAdapter(
+    makeAdapter(), 'msg',
+    { channel: 'C1', onAssistantMessage: (m: string) => onMsgs.push(m) },
+    { model: 'm', backend: 'claude', mode: null }, undefined,
+  ).promise;
+  assert.equal(onMsgs.length, 1, 'one compaction notice when flag is on');
+  assert.match(onMsgs[0], /auto/);
+  assert.match(onMsgs[0], /37418/);
+});
+
 // --- Error path: send() rejects; handle.promise rejects with the same error ---
 
 test('runWithAdapter: fatal error from send() rejects handle.promise', async () => {

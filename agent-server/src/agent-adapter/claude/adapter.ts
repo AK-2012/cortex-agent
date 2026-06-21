@@ -62,6 +62,7 @@ interface PendingTurn {
   onProgress: ((progress: any) => void) | null;
   onAssistantMessage: ((text: string) => void) | null;
   onToolUse: ((name: string, input: any) => void) | null;
+  onCompact: ((info: { trigger: string; preTokens?: number }) => void) | null;
   rawStream: WriteStream;
   txtStream: WriteStream;
   killed: boolean;
@@ -275,6 +276,7 @@ class ClaudeSession {
       onProgress: options.onProgress || null,
       onAssistantMessage: options.onAssistantMessage || null,
       onToolUse: options.onToolUse || null,
+      onCompact: options.onCompact || null,
       rawStream: streams.rawStream,
       txtStream: streams.txtStream,
       killed: false,
@@ -312,6 +314,7 @@ class ClaudeSession {
       onProgress: null,
       onAssistantMessage: sink ? (text: string) => { try { sink.onAssistantText(text); } catch (e) { log.warn('continuation onAssistantText threw:', (e as Error).message); } } : null,
       onToolUse: sink?.onToolUse ? (name: string, input: any) => { try { sink.onToolUse!(name, input); } catch {} } : null,
+      onCompact: null,
       rawStream: streams.rawStream,
       txtStream: streams.txtStream,
       killed: false,
@@ -355,6 +358,7 @@ class ClaudeSession {
     onProgress?: ((progress: any) => void) | null;
     onAssistantMessage?: ((text: string) => void) | null;
     onToolUse?: ((name: string, input: any) => void) | null;
+    onCompact?: ((info: { trigger: string; preTokens?: number }) => void) | null;
   }): Promise<any> {
     if (!this.alive) {
       this.needsResume = true;
@@ -468,6 +472,17 @@ class ClaudeSession {
 
     try {
       const data = JSON.parse(line);
+      // Context compaction boundary: Claude emits a system/compact_boundary line the instant it
+      // decides to compact. Surface it to the active turn so observers (e.g. Slack) can notify.
+      if (data.type === 'system' && data.subtype === 'compact_boundary' && this.currentTurn?.onCompact) {
+        const meta = data.compact_metadata ?? {};
+        try {
+          this.currentTurn.onCompact({
+            trigger: typeof meta.trigger === 'string' ? meta.trigger : 'auto',
+            preTokens: typeof meta.pre_tokens === 'number' ? meta.pre_tokens : undefined,
+          });
+        } catch (e) { log.warn('onCompact threw:', (e as Error).message); }
+      }
       if (data.type === 'rate_limit_event' && data.rate_limit_info) {
         const mode = this.anthropicBaseUrl?.match(/\/m\/([^/]+)\//)?.[1] || undefined;
         handleRateLimitEvent(data.rate_limit_info, mode).catch(e => log.error('handleRateLimitEvent error:', e));
@@ -795,6 +810,8 @@ export class ClaudeAdapter implements AgentAdapter {
             onAssistantMessage: (text: string) => stream.push({ type: 'assistant_text', text }),
             onToolUse: (name: string, input: any) =>
               stream.push({ type: 'tool_use', toolUseId: '', name, input }),
+            onCompact: (info: { trigger: string; preTokens?: number }) =>
+              stream.push({ type: 'context_compacted', trigger: info.trigger, preTokens: info.preTokens }),
             onProgress: (p: { num_turns?: number } | null) => {
               stream.push({ type: 'turn_progress', numTurns: p?.num_turns ?? 0 });
             },

@@ -202,6 +202,15 @@ export function runWithAdapter(
               model: event.model || undefined,
             }).catch(err => log.warn('recordCost failed:', (err as Error)?.message ?? err));
             break;
+          case 'context_compacted':
+            // Notify the user that the context was compacted. Off by default; opt in via
+            // CORTEX_NOTIFY_COMPACTION=1. Reuses onAssistantMessage so the notice reaches the
+            // user through the same channel as normal assistant output.
+            if (process.env.CORTEX_NOTIFY_COMPACTION === '1') {
+              const tokens = event.preTokens ? `，压缩前 ~${event.preTokens} tokens` : '';
+              options.onAssistantMessage?.(`🗜️ 上下文已自动压缩（${event.trigger}${tokens}）。早期对话历史已被摘要，如有需要请重述关键信息。`);
+            }
+            break;
           case 'plan_written':
             options.onPlanWritten?.({ path: event.path, content: event.content, toolUseId: event.toolUseId });
             break;

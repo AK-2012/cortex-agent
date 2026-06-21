@@ -1,5 +1,5 @@
 // input:  Node test runner + ClaudeSession handleLine wiring (_test.makeSessionForTest)
-// output: spec for background-task pending-count on result + spontaneous continuation routing
+// output: spec for background-task pending-count on result + spontaneous continuation routing + compact_boundary → onCompact
 // pos:    CC backend background-task continuation wiring tests (no child process)
 // >>> If I am updated, update my header comment and the parent folder's CORTEX.md <<<
 
@@ -18,7 +18,7 @@ function fakeTurn(capture: { value?: any; error?: any }) {
     reject: (e: any) => { capture.error = e; },
     resultData: null, planFilePath: null, enteredPlanMode: false, exitedPlanMode: false,
     askUserQuestions: [], finalOutput: null, longestOutput: null, turnCount: 0,
-    onProgress: null, onAssistantMessage: null, onToolUse: null,
+    onProgress: null, onAssistantMessage: null, onToolUse: null, onCompact: null,
     rawStream: FAKE_STREAM, txtStream: FAKE_STREAM, killed: false,
   };
 }
@@ -106,6 +106,33 @@ test('integration: real captured line sequence merges continuation text + dispat
   assert.ok(completedWith, 'production sink dispatched onComplete (seal)');
   assert.equal(completedWith.pendingBackgroundTasks, 0);
   assert.equal(waitingCalls, 0, 'no waiting dispatch when no tasks remain');
+});
+
+test('handleLine: compact_boundary fires onCompact with trigger + preTokens', (t) => {
+  const s: any = _test.makeSessionForTest();
+  s.createTurnStreams = () => ({ rawStream: FAKE_STREAM, txtStream: FAKE_STREAM });
+  t.after(() => s.close());
+
+  const cap: { value?: any } = {};
+  const turn: any = fakeTurn(cap);
+  const compactCalls: Array<{ trigger: string; preTokens?: number }> = [];
+  turn.onCompact = (info: { trigger: string; preTokens?: number }) => compactCalls.push(info);
+  s.currentTurn = turn;
+
+  s.handleLine(JSON.stringify({ type: 'system', subtype: 'compact_boundary', compact_metadata: { trigger: 'auto', pre_tokens: 37418 } }));
+
+  assert.deepEqual(compactCalls, [{ trigger: 'auto', preTokens: 37418 }]);
+});
+
+test('handleLine: compact_boundary with no active turn is a no-op', (t) => {
+  const s: any = _test.makeSessionForTest();
+  s.createTurnStreams = () => ({ rawStream: FAKE_STREAM, txtStream: FAKE_STREAM });
+  t.after(() => s.close());
+
+  // No currentTurn set — must not throw.
+  assert.doesNotThrow(() =>
+    s.handleLine(JSON.stringify({ type: 'system', subtype: 'compact_boundary', compact_metadata: { trigger: 'manual' } })),
+  );
 });
 
 test('setContinuationSink/clearContinuationSink and close clear the sink', (t) => {

@@ -664,9 +664,25 @@ test('edge: unknown event type → []', () => {
   const state = freshState();
   assert.deepEqual(piRpcLineToNormalized(line({ type: 'queue_update', data: {} }), state), []);
   assert.deepEqual(piRpcLineToNormalized(line({ type: 'turn_start' }), state), []);
-  assert.deepEqual(piRpcLineToNormalized(line({ type: 'compaction_start' }), state), []);
+  assert.deepEqual(piRpcLineToNormalized(line({ type: 'compaction_end', reason: 'threshold' }), state), []);
   assert.deepEqual(piRpcLineToNormalized(line({ type: 'auto_retry_end' }), state), []);
   assert.deepEqual(piRpcLineToNormalized(line({ type: 'agent_start' }), state), []);
+});
+
+// ---------------------------------------------------------------------------
+// context_compacted — compaction_start (compaction_end stays dropped)
+// ---------------------------------------------------------------------------
+
+test('context_compacted: compaction_start carries reason as trigger', () => {
+  const state = freshState();
+  const events = piRpcLineToNormalized(line({ type: 'compaction_start', reason: 'threshold' }), state);
+  assert.deepEqual(events, [{ type: 'context_compacted', trigger: 'threshold' }]);
+});
+
+test('context_compacted: compaction_start without reason defaults to auto', () => {
+  const state = freshState();
+  const events = piRpcLineToNormalized(line({ type: 'compaction_start' }), state);
+  assert.deepEqual(events, [{ type: 'context_compacted', trigger: 'auto' }]);
 });
 
 test('edge: successful non-bootstrap response → []', () => {

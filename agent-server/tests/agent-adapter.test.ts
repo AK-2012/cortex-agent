@@ -162,6 +162,7 @@ void function _normalizedEventExhaustive(e: NormalizedEvent): string {
     case 'ask_user_question': return e.toolUseId;
     case 'plan_mode_entered': return e.planFilePath;
     case 'plan_written': return e.path;
+    case 'context_compacted': return e.trigger;
     case 'rate_limit': return 'rate_limit';
     case 'cost_record': return e.provider;
     case 'turn_progress': return String(e.numTurns);
