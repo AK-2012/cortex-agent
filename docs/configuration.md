@@ -145,6 +145,7 @@ channel.
 | `CORTEX_INJECT_USER_CONTEXT` | — | Set to `1` to inject `USER.md` context into threads |
 | `CORTEX_GPU_MONITOR_MOCK` | — | Mock GPU data JSON for testing (overrides real nvidia-smi queries) |
 | `CORTEX_SERVER_UPDATE_DISABLE` | — | Set to `1` to disable the server auto-update check (enabled by default) |
+| `CORTEX_NOTIFY_COMPACTION` | — | Set to `1` to post a chat notice when an agent's context is compacted. Covers the Claude Code (print mode) and pi backends; the notice names the trigger and, for Claude Code, the pre-compaction token count |
 
 ### Task dispatch
 

@@ -129,6 +129,7 @@ $CORTEX_HOME/
 | `CORTEX_INJECT_USER_CONTEXT` | — | 设置为 `1` 以将 `USER.md` 上下文注入线程 |
 | `CORTEX_GPU_MONITOR_MOCK` | — | 用于测试的模拟 GPU 数据 JSON（覆盖真实的 nvidia-smi 查询） |
 | `CORTEX_SERVER_UPDATE_DISABLE` | — | 设置为 `1` 以禁用服务器自动更新检查（默认开启） |
+| `CORTEX_NOTIFY_COMPACTION` | — | 设置为 `1`，在 agent 的上下文被压缩（compaction）时向会话发送一条提示。覆盖 Claude Code（print 模式）与 pi 两个后端；提示会注明触发原因，Claude Code 还会附上压缩前的 token 数 |
 
 ### 任务派发
 
