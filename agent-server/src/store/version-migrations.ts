@@ -2,13 +2,15 @@
 // output: runMigrations() — applies pending file migrations before config loading
 // pos:    Version-tracked file migration runner. Tracks per-file applied migration versions
 //         in DATA_DIR/data/versions.json; on startup compares against CORTEX_VERSION and
-//         runs pending migrations in version order. Idempotent and crash-safe via atomicWrite.
+//         runs pending migrations in version order. Supports JSON (parse/serialize) and text
+//         (raw string, e.g. markdown system prompts) migrations. Idempotent and crash-safe
+//         via atomicWrite.
 // >>> If I am updated, update my header comment and the parent folder's CORTEX.md <<<
 
 import * as path from 'node:path';
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
-import { CORTEX_VERSION } from '@core/version.js';
+import { CORTEX_VERSION, CORTEX_DOCS_URL } from '@core/version.js';
 import { DATA_DIR, DEFAULTS_DIR } from '@core/paths.js';
 import { atomicWrite } from '@core/atomic-write.js';
 import { createLogger } from '@core/log.js';
@@ -43,11 +45,47 @@ export interface Migration {
   /** CalVer when this migration was introduced. Compared against the per-file
    *  version tracked in versions.json to decide whether to run. */
   version: string;
-  /** Idempotent migration function. Receives the parsed JSON of the target file
-   *  and optionally the parsed JSON of the corresponding defaults file (or undefined
-   *  if no defaults file applies or it couldn't be loaded). Must return the migrated
-   *  data — the runner compares before/after to decide whether to write. */
+  /** Target file format. 'json' (default) parses/serializes JSON; 'text' passes
+   *  the raw file contents (string) through unchanged. Determines how the runner
+   *  reads, diffs, and writes the file. */
+  format?: 'json' | 'text';
+  /** Idempotent migration function. For 'json' migrations, receives the parsed JSON
+   *  of the target file and optionally the parsed JSON of the corresponding defaults
+   *  file. For 'text' migrations, receives the raw file string and optionally the raw
+   *  defaults string. Must return the migrated data (object for json, string for text)
+   *  — the runner compares before/after to decide whether to write. */
   migrate(data: unknown, defaults?: unknown): unknown;
+}
+
+// ── Marker-block helpers (text migrations) ─────────────────────
+// Text migrations edit human-owned markdown (system prompts, CORTEX.md) without
+// clobbering user customizations: a versioned, marker-delimited block is upserted
+// (replaced in place if present, appended otherwise). Bumping the block version token
+// makes a future migration replace an older block cleanly.
+
+const DOCS_BLOCK_VERSION = 'v1';
+const DOCS_MARKER_START = `<!-- cortex:docs ${DOCS_BLOCK_VERSION} -->`;
+const DOCS_MARKER_END = '<!-- /cortex:docs -->';
+
+/** The canonical Cortex-docs block inserted into system prompts and CORTEX.md. */
+const DOCS_BLOCK = [
+  DOCS_MARKER_START,
+  '# Cortex documentation',
+  `For how to use Cortex — tasks, threads, scheduling, memory, skills, safety & approvals — consult the docs: ${CORTEX_DOCS_URL}`,
+  DOCS_MARKER_END,
+].join('\n');
+
+/** Replace any existing `<!-- cortex:docs ... -->` … `<!-- /cortex:docs -->` region with
+ *  `block`, or append `block` (separated by a blank line) when absent. Idempotent: feeding
+ *  the output back in is a no-op. Matches any block version on the start marker so an old
+ *  block is upgraded in place rather than duplicated. */
+export function upsertMarkerBlock(content: string, block: string): string {
+  const re = /<!-- cortex:docs[^>]*-->[\s\S]*?<!-- \/cortex:docs -->/;
+  if (re.test(content)) {
+    return content.replace(re, block);
+  }
+  const trimmed = content.replace(/\s+$/, '');
+  return `${trimmed}\n\n${block}\n`;
 }
 
 // ── Registry ───────────────────────────────────────────────────
@@ -175,6 +213,30 @@ const migrations: Migration[] = [
       return out;
     },
   },
+  // M4: Inject the Cortex usage-docs block into the user's system prompts and CORTEX.md.
+  // These are user-owned copies seeded at `cortex init` with force=false, so editing the
+  // shipped defaults only reaches new installs — existing installs need this migration to
+  // pick up the docs URL. Uses upsertMarkerBlock (text format) so the block is inserted
+  // once and user customizations around it are preserved. Idempotent: re-runs are no-ops,
+  // and fresh installs (whose seeded files already carry the block from defaults) match the
+  // existing-block branch and are left unchanged. New files skip gracefully via ENOENT.
+  ...[
+    'CORTEX.md',
+    'prompts/systemPrompts/direct.md',
+    'prompts/systemPrompts/web.md',
+    'prompts/systemPrompts/web-opus-4-6.md',
+    'prompts/systemPrompts/web-sonnet-4-6.md',
+    'prompts/systemPrompts/worker.md',
+    'prompts/systemPrompts/coder.md',
+  ].map((filePath): Migration => ({
+    filePath,
+    version: '2026.6.22',
+    format: 'text',
+    migrate(data: unknown): unknown {
+      if (typeof data !== 'string') return data;
+      return upsertMarkerBlock(data, DOCS_BLOCK);
+    },
+  })),
 ];
 
 // ── Versions file I/O ──────────────────────────────────────────
@@ -215,13 +277,13 @@ const DEFAULTS_MAP: Record<string, string> = {
   'config/thread-templates.json': 'config/thread-templates.json',
 };
 
-async function loadDefaultsForWith(filePath: string, defaultsDir: string): Promise<unknown> {
+async function loadDefaultsForWith(filePath: string, defaultsDir: string, format: 'json' | 'text' = 'json'): Promise<unknown> {
   const defaultsRel = DEFAULTS_MAP[filePath];
   if (!defaultsRel) return undefined;
   const defaultsPath = path.join(defaultsDir, defaultsRel);
   try {
     const raw = await fs.readFile(defaultsPath, 'utf8');
-    return JSON.parse(raw);
+    return format === 'text' ? raw : JSON.parse(raw);
   } catch (err: unknown) {
     const e = err as NodeJS.ErrnoException;
     if (e.code === 'ENOENT') {
@@ -274,12 +336,16 @@ export async function runMigrations(opts: MigrationOptions = {}): Promise<void> 
 
     if (pending.length === 0) continue;
 
+    // A file is either JSON or text — take the format from the pending migrations.
+    const format: 'json' | 'text' = pending.find(m => m.format === 'text') ? 'text' : 'json';
+    const serialize = (d: unknown): string => (format === 'text' ? String(d) : JSON.stringify(d));
+
     // Read target file
     const absPath = path.join(dataDir, filePath);
     let data: unknown;
     try {
       const raw = await fs.readFile(absPath, 'utf8');
-      data = JSON.parse(raw);
+      data = format === 'text' ? raw : JSON.parse(raw);
     } catch (err: unknown) {
       const e = err as NodeJS.ErrnoException;
       if (e.code === 'ENOENT') {
@@ -294,13 +360,13 @@ export async function runMigrations(opts: MigrationOptions = {}): Promise<void> 
     }
 
     // Load defaults once for this file (if any)
-    const defaultsData = await loadDefaultsForWith(filePath, defaultsDir);
+    const defaultsData = await loadDefaultsForWith(filePath, defaultsDir, format);
 
     // Apply all pending migrations in version order
     let changed = false;
     let anyFailed = false;
     for (const m of pending) {
-      const before = JSON.stringify(data);
+      const before = serialize(data);
       try {
         data = m.migrate(data, defaultsData);
       } catch (err: unknown) {
@@ -309,14 +375,15 @@ export async function runMigrations(opts: MigrationOptions = {}): Promise<void> 
         anyFailed = true;
         break;
       }
-      if (JSON.stringify(data) !== before) {
+      if (serialize(data) !== before) {
         log.info(`Migration ${m.version} applied to ${filePath}`);
         changed = true;
       }
     }
 
     if (changed) {
-      await atomicWrite(absPath, JSON.stringify(data, null, 2) + '\n');
+      const out = format === 'text' ? String(data) : JSON.stringify(data, null, 2) + '\n';
+      await atomicWrite(absPath, out);
     }
 
     // Only bump the tracked version if ALL pending migrations succeeded.

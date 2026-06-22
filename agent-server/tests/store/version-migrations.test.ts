@@ -1,5 +1,5 @@
 // input:  Node test runner, assert, tmp filesystem
-// output: regression tests for version-tracking migration runner (compareCalVer, runMigrations)
+// output: regression tests for version-tracking migration runner (compareCalVer, runMigrations, upsertMarkerBlock)
 // pos:    verifies store/version-migrations.ts idempotent migration behaviour
 // >>> If I am updated, update my header comment and the parent folder's CORTEX.md <<<
 
@@ -10,7 +10,7 @@ import path from 'node:path';
 import os from 'node:os';
 
 // Dynamic import of the module under test.
-const { compareCalVer, runMigrations, migrateAistatusConfigLocation } = await import('../../src/store/version-migrations.js');
+const { compareCalVer, runMigrations, migrateAistatusConfigLocation, upsertMarkerBlock } = await import('../../src/store/version-migrations.js');
 
 // ── Shared tmp directory ───────────────────────────────────────
 
@@ -46,6 +46,15 @@ async function writeJson(filePath: string, data: unknown): Promise<void> {
 
 async function readJson(filePath: string): Promise<unknown> {
   return JSON.parse(await fs.readFile(filePath, 'utf8'));
+}
+
+async function writeText(filePath: string, data: string): Promise<void> {
+  await fs.mkdir(path.dirname(filePath), { recursive: true });
+  await fs.writeFile(filePath, data);
+}
+
+async function readText(filePath: string): Promise<string> {
+  return fs.readFile(filePath, 'utf8');
 }
 
 // ── compareCalVer tests ────────────────────────────────────────
@@ -487,6 +496,103 @@ test('runMigrations - no defaults file, still runs (migration function handles u
   // But version should still be tracked (migration was "applied" — it was a no-op)
   const versions = await readJson(path.join(storeDir, 'versions.json')) as any;
   assert.ok(versions['config/thread-templates.json']);
+});
+
+// ── upsertMarkerBlock (text-migration primitive) ───────────────
+
+const DOCS_URL = 'https://fangxm233.github.io/cortex-agent/';
+const BLOCK = `<!-- cortex:docs v1 -->\n# Cortex documentation\nsee ${DOCS_URL}\n<!-- /cortex:docs -->`;
+
+test('upsertMarkerBlock - appends block when absent (preserves original + trailing newline)', () => {
+  const out = upsertMarkerBlock('Hello world.\n', BLOCK);
+  assert.ok(out.startsWith('Hello world.'), 'original content preserved');
+  assert.ok(out.includes(BLOCK), 'block appended');
+  assert.ok(out.endsWith('\n'), 'ends with newline');
+  // Exactly one block
+  assert.equal((out.match(/<!-- cortex:docs/g) || []).length, 1);
+});
+
+test('upsertMarkerBlock - idempotent: re-running on output is a no-op', () => {
+  const once = upsertMarkerBlock('Body.\n', BLOCK);
+  const twice = upsertMarkerBlock(once, BLOCK);
+  assert.equal(twice, once);
+  assert.equal((twice.match(/<!-- cortex:docs/g) || []).length, 1, 'no duplicate block');
+});
+
+test('upsertMarkerBlock - replaces an existing block in place, preserving surrounding text', () => {
+  const stale = 'Intro.\n\n<!-- cortex:docs v0 -->\nOLD URL\n<!-- /cortex:docs -->\n\nOutro.\n';
+  const out = upsertMarkerBlock(stale, BLOCK);
+  assert.ok(out.includes('Intro.'), 'leading user text kept');
+  assert.ok(out.includes('Outro.'), 'trailing user text kept');
+  assert.ok(out.includes(DOCS_URL), 'new URL present');
+  assert.ok(!out.includes('OLD URL'), 'old block content gone');
+  assert.equal((out.match(/<!-- cortex:docs/g) || []).length, 1, 'exactly one block');
+});
+
+// ── M4: docs-block text migration via runMigrations ────────────
+
+test('runMigrations - text: injects docs block into CORTEX.md and tracks version', async () => {
+  const idx = _testIdx++;
+  const { dataDir, storeDir, defaultsDir } = setupDirs(idx);
+
+  await writeText(path.join(dataDir, 'CORTEX.md'), '# My customized CORTEX.md\n\nUser notes here.\n');
+
+  await runMigrations({ dataDir, defaultsDir, storeDir });
+
+  const out = await readText(path.join(dataDir, 'CORTEX.md'));
+  assert.ok(out.includes('# My customized CORTEX.md'), 'user content preserved');
+  assert.ok(out.includes('User notes here.'), 'user content preserved');
+  assert.ok(out.includes('https://fangxm233.github.io/cortex-agent/'), 'docs URL injected');
+  assert.ok(out.includes('<!-- cortex:docs'), 'marker present');
+
+  const versions = await readJson(path.join(storeDir, 'versions.json')) as any;
+  assert.equal(versions['CORTEX.md'], '2026.6.22');
+});
+
+test('runMigrations - text: injects docs block into system prompt files', async () => {
+  const idx = _testIdx++;
+  const { dataDir, storeDir, defaultsDir } = setupDirs(idx);
+
+  await writeText(path.join(dataDir, 'prompts', 'systemPrompts', 'direct.md'), 'You are Cortex.\n');
+
+  await runMigrations({ dataDir, defaultsDir, storeDir });
+
+  const out = await readText(path.join(dataDir, 'prompts', 'systemPrompts', 'direct.md'));
+  assert.ok(out.startsWith('You are Cortex.'), 'original prompt preserved');
+  assert.ok(out.includes('https://fangxm233.github.io/cortex-agent/'), 'docs URL injected');
+});
+
+test('runMigrations - text: idempotent (second run does not duplicate block)', async () => {
+  const idx = _testIdx++;
+  const { dataDir, storeDir, defaultsDir } = setupDirs(idx);
+
+  const target = path.join(dataDir, 'CORTEX.md');
+  await writeText(target, 'Base.\n');
+
+  await runMigrations({ dataDir, defaultsDir, storeDir });
+  const first = await readText(target);
+  await runMigrations({ dataDir, defaultsDir, storeDir });
+  const second = await readText(target);
+
+  assert.equal(second, first);
+  assert.equal((second.match(/<!-- cortex:docs/g) || []).length, 1, 'exactly one block after two runs');
+});
+
+test('runMigrations - text: skips gracefully when target file does not exist', async () => {
+  const idx = _testIdx++;
+  const { dataDir, storeDir, defaultsDir } = setupDirs(idx);
+
+  // No CORTEX.md / system prompts created at all
+  await runMigrations({ dataDir, defaultsDir, storeDir });
+
+  // Missing text files must not be tracked (migration skipped, not falsely applied)
+  try {
+    const versions = await readJson(path.join(storeDir, 'versions.json')) as any;
+    assert.equal(versions['CORTEX.md'], undefined);
+    assert.equal(versions['prompts/systemPrompts/direct.md'], undefined);
+  } catch (e: any) {
+    if (e.code !== 'ENOENT') throw e;
+  }
 });
 
 // ── migrateAistatusConfigLocation ──────────────────────────────
