@@ -32,6 +32,7 @@ import { closeSessionsByPrefix } from '../agents/index.js';
 import * as executionRegistry from '../executions/registry.js';
 import { sessionStore } from '@store/session-registry-repo.js';
 import { formatDurationCompact } from '@core/utils.js';
+import { buildThreadStatusMessage } from '@core/status-format.js';
 import type { OutputStream } from '@platform/index.js';
 import { runningExecutions } from '../../core/running-executions.js';
 import type { RunningExecution } from '../../core/running-executions.js';
@@ -155,7 +156,15 @@ async function resolveAndNotifyStep(
   // Update status message (multi-agent thread format; skip if caller provides onProgress)
   if (ctx.stream && multiAgent && !opts.onProgress) {
     const elapsed = (Date.now() - opts.startTime) / 1000;
-    const statusText = `${Icons.processing} Thread ${threadRecord.id.substring(0, 12)} | Step ${threadRecord.currentStepIndex + 1}: *${label}* | ${Icons.stopwatch} ${formatDurationCompact(elapsed)}`;
+    const statusText = buildThreadStatusMessage({
+      threadId: threadRecord.id,
+      stepNumber: threadRecord.currentStepIndex + 1,
+      label,
+      elapsedS: elapsed,
+      taskProject: threadRecord.metadata?.taskProject ?? null,
+      taskId: threadRecord.metadata?.taskId ?? null,
+      taskText: threadRecord.metadata?.taskText ?? null,
+    });
     try {
       if (opts.statusMsg) {
         await opts.adapter.updateMessage(opts.statusMsg, { text: statusText });
@@ -257,7 +266,16 @@ function setupStepCallbacks(
           const elapsed = (Date.now() - opts.startTime) / 1000;
           if (opts.statusMsg) {
             opts.adapter.updateMessage(opts.statusMsg, {
-              text: `${Icons.processing} Thread ${threadRecord.id.substring(0, 12)} | Step ${threadRecord.currentStepIndex + 1}: *${label}* (${progress?.num_turns || '?'} turns) | ${Icons.stopwatch} ${formatDurationCompact(elapsed)}`,
+              text: buildThreadStatusMessage({
+                threadId: threadRecord.id,
+                stepNumber: threadRecord.currentStepIndex + 1,
+                label,
+                elapsedS: elapsed,
+                numTurns: progress?.num_turns ?? null,
+                taskProject: threadRecord.metadata?.taskProject ?? null,
+                taskId: threadRecord.metadata?.taskId ?? null,
+                taskText: threadRecord.metadata?.taskText ?? null,
+              }),
             }).catch(() => {});
           }
         }

@@ -323,6 +323,9 @@ export interface ThreadMetadata {
    *  onEnd task-status-check hook on re-entry (extraHooks are not persisted). */
   taskId?: string | null;
   taskProject?: string | null;
+  /** Task text (TASKS.yaml `text`) at dispatch time, for the thread step status line so a glance
+   *  shows what is running. Persisted because status updates outlive the in-memory selected task. */
+  taskText?: string | null;
   /** Set when the thread was paused (status==='rate_limited') by an API rate limit, so the
    *  resume path and startup recovery can tell a rate-limit pause apart from a real failure. */
   interruptedByRateLimit?: boolean;

@@ -1,5 +1,5 @@
 // input:  formatDurationCompact (core/utils)
-// output: 4 pure formatting functions: computeElapsed / formatMetricsSuffix / buildSessionTag / buildUserProcessingMessage
+// output: 5 pure formatting functions: computeElapsed / formatMetricsSuffix / buildSessionTag / buildUserProcessingMessage / buildThreadStatusMessage
 // pos:    zero-dependency pure functions in the core layer; the subset imported by domain-layer status-helpers
 // >>> If I am updated, update my header comment and the parent folder's CORTEX.md <<<
 
@@ -32,4 +32,37 @@ export function buildUserProcessingMessage({ startTime, elapsed_s = null, num_tu
   const sessionTag = buildSessionTag(sessionName, sessionId);
   const turnsStr = num_turns != null ? ` | ${Icons.repeat} ${num_turns} turns` : '';
   return `${Icons.processing} ${t('status.processing')} | ${sessionTag}${profileName || 'default'} | ${Icons.stopwatch} ${formatDurationCompact(elapsed || 0)}${turnsStr}`;
+}
+
+const THREAD_STATUS_TASK_TEXT_MAX = 60;
+const THREAD_STATUS_THREAD_ID_LEN = 12;
+
+/** Build the multi-agent thread step status line. When task info is present (task-dispatch
+ *  threads carry taskProject/taskId/taskText in metadata) the line leads with the task identity
+ *  — "[proj] <text…> · `id`" — so a glance tells you what is running; the short thread id is kept
+ *  at the tail for thread-op debugging. Without task info it falls back to the thread-only form. */
+export function buildThreadStatusMessage({ threadId, stepNumber, label, elapsedS, numTurns = null, taskProject = null, taskId = null, taskText = null }: {
+  threadId: string;
+  stepNumber: number;
+  label: string;
+  elapsedS: number;
+  numTurns?: number | null;
+  taskProject?: string | null;
+  taskId?: string | null;
+  taskText?: string | null;
+}): string {
+  const shortId = threadId.substring(0, THREAD_STATUS_THREAD_ID_LEN);
+  const turnsPart = numTurns != null ? ` (${numTurns} turns)` : '';
+  const stepPart = `Step ${stepNumber}: *${label}*${turnsPart}`;
+  const timePart = `${Icons.stopwatch} ${formatDurationCompact(elapsedS)}`;
+  if (taskId) {
+    const projPart = taskProject ? `[${taskProject}] ` : '';
+    const raw = (taskText ?? '').trim();
+    const text = raw.length > THREAD_STATUS_TASK_TEXT_MAX
+      ? raw.slice(0, THREAD_STATUS_TASK_TEXT_MAX).trimEnd() + '…'
+      : raw;
+    const textPart = text ? `${text} ` : '';
+    return `${Icons.processing} ${projPart}${textPart}· \`${taskId}\` | ${stepPart} | ${shortId} | ${timePart}`;
+  }
+  return `${Icons.processing} Thread ${shortId} | ${stepPart} | ${timePart}`;
 }

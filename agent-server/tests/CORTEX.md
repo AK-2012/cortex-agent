@@ -52,6 +52,7 @@ How to run tests without tripping it:
 | `command-handlers.test.ts` | Test | !cancel/!cost/!status/!schedule/!nvtop |
 | `cortex-run-cli-dispatch.test.ts` | Test | cortex-run.ts CLI dispatch (sendCommand pathway) |
 | `daemon.test.ts` | Test | Import has no side effects |
+| `core/status-format.test.ts` | Test | buildThreadStatusMessage: task-info lead format / thread-only fallback / text+thread-id truncation / turn count |
 | `core/singleton-lock.test.ts` | Test | tryAcquireSingletonLock/releaseSingletonLock/isProcessAlive against a temp pidfile (fresh/live-holder/stale/corrupt) |
 | `core/auth.test.ts` | Test | core/auth.ts: timingSafeEqualStr (fail-closed) + ensureAuthTokens generation/idempotency/partial/append-to-.env |
 | `webhook-auth.test.ts` | Test | webhook bearer-token gate: 401 without/with-wrong token, pass with token, /webhook/github exempt (HMAC) |

@@ -142,6 +142,7 @@ async function executeDispatchTask({ selected, selectedTask, channel, scheduleTa
       // DR-0014: persisted so a suspended parent's re-entry can rebuild the
       // task-status-check onEnd hook (extraHooks are not persisted on ThreadRecord).
       taskId: selectedTask.id ?? null, taskProject: selectedTask.project ?? null,
+      taskText: selectedTask.text ?? null,
       resumeDest: 'project-report',
     },
   });
