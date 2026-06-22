@@ -1,6 +1,7 @@
-// input:  REPO_ROOT, fs, thread record
+// input:  CONTEXT_DIR, fs
 // output: loadUserContext()
-// pos:    user profile injection — reads USER.md and injects in direct conversation threads
+// pos:    user profile injection — reads USER.md and injects into thread-free conversation
+//         turns only (buildConversationPrompt). Thread steps never carry the user profile.
 // >>> If I am updated, update my header comment and the parent folder's CORTEX.md <<<
 
 import { readFileSync, statSync } from 'fs';
@@ -8,8 +9,6 @@ import * as path from 'path';
 import { CONTEXT_DIR } from '@core/utils.js';
 
 const USER_MD_PATH = path.join(CONTEXT_DIR, 'user', 'USER.md');
-
-const DIRECT_TEMPLATES = new Set(['direct', 'direct-web', 'direct-review']);
 
 let cachedContent: string | null = null;
 let cachedMtimeMs = 0;
@@ -26,15 +25,13 @@ function readUserMd(): string | null {
   }
 }
 
-interface ThreadLike {
-  templateName: string | null;
-}
-
-export function loadUserContext(thread: ThreadLike): string | null {
-  // Injected by default; set CORTEX_DISABLE_USER_CONTEXT=1 to opt out.
+/**
+ * The user profile for plain, thread-free conversation turns. Injected by default;
+ * set CORTEX_DISABLE_USER_CONTEXT=1 to opt out. Multi-agent thread steps deliberately
+ * do NOT inject this — only the direct conversation path calls it.
+ */
+export function loadUserContext(): string | null {
   if (process.env.CORTEX_DISABLE_USER_CONTEXT === '1') return null;
-
-  if (thread.templateName && !DIRECT_TEMPLATES.has(thread.templateName)) return null;
 
   const content = readUserMd();
   if (!content) return null;

@@ -191,8 +191,8 @@ export function buildStepPrompt(threadId: string, agentConfig: AgentSlotConfig, 
 
   if (!resumingPersistentSession) {
     const prefixes: string[] = [];
-    const userCtx = loadUserContext(thread);
-    if (userCtx) prefixes.push(userCtx);
+    // Thread steps never carry the user profile — only thread-free conversation turns do
+    // (see buildConversationPrompt). This keeps multi-agent pipelines profile-agnostic.
     if (agentConfig.directive) prefixes.push(resolveSystemVars(agentConfig.directive));
     if (thread.artifactPath) prefixes.push(THREAD_PROTOCOL_PREAMBLE);
     if (prefixes.length > 0) prompt = prefixes.join('\n\n') + '\n\n' + prompt;
@@ -228,9 +228,9 @@ export function buildStepPrompt(threadId: string, agentConfig: AgentSlotConfig, 
  * Fidelity with the legacy default-thread path (templateName='default', isUserInitiated=true):
  *  - applies the default agent's promptTemplate (typically `{{input}}`) with empty thread vars;
  *  - prepends the agent directive (resolved for {{systemVar}});
- *  - prepends user context ONLY under the same gate the default thread used —
- *    loadUserContext({templateName:'default'}) returns null because 'default' is not a
- *    direct-* template (user context is injected by default unless CORTEX_DISABLE_USER_CONTEXT=1);
+ *  - prepends the user profile (loadUserContext) — plain conversation is the ONLY path that
+ *    injects USER.md; it is on by default unless CORTEX_DISABLE_USER_CONTEXT=1. Thread steps
+ *    (buildStepPrompt) never inject it;
  *  - NEVER injects THREAD_PROTOCOL_PREAMBLE (no artifact, no [ABORT] protocol for conversations).
  */
 export function buildConversationPrompt(agentConfig: AgentSlotConfig, input: string): string {
@@ -246,7 +246,7 @@ export function buildConversationPrompt(agentConfig: AgentSlotConfig, input: str
   let prompt = applyPromptTemplate(templateStr, vars);
 
   const prefixes: string[] = [];
-  const userCtx = loadUserContext({ templateName: 'default' });
+  const userCtx = loadUserContext();
   if (userCtx) prefixes.push(userCtx);
   if (agentConfig.directive) prefixes.push(resolveSystemVars(agentConfig.directive));
   if (prefixes.length > 0) prompt = prefixes.join('\n\n') + '\n\n' + prompt;

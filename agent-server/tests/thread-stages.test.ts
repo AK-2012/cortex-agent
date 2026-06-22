@@ -7,7 +7,7 @@ import test, { before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { DATA_DIR } from '../src/core/utils.js';
+import { DATA_DIR, CONTEXT_DIR } from '../src/core/utils.js';
 import { threadStore } from '../src/store/thread-repo.js';
 import {
   parseTarget,
@@ -306,6 +306,34 @@ test('buildStepPrompt stage=null (legacy single-template agent) unchanged behavi
   assert.match(prompt, /LEGACY template: the-user-input/);
   assert.match(prompt, /coder-directive/);
   assert.match(prompt, /Cortex Thread Protocol/);
+});
+
+test('buildStepPrompt never injects [User Context], even for a direct-template thread with USER.md present', () => {
+  // Thread steps must NOT carry the user profile — only thread-free conversation turns do.
+  // Regression for the user-context split: a `direct` template previously leaked USER.md into
+  // every thread step via loadUserContext's template allow-list.
+  const userDir = path.join(CONTEXT_DIR, 'user');
+  const userMd = path.join(userDir, 'USER.md');
+  let restore: string | null = null;
+  try { restore = fs.readFileSync(userMd, 'utf8'); } catch {}
+  fs.mkdirSync(userDir, { recursive: true });
+  fs.writeFileSync(userMd, '# User Profile\n- Name: Leak Canary\n');
+  try {
+    const id = uniqueThreadId('direct-no-userctx');
+    const thread = makeThreadRecord({
+      id, slotId: 'coder', sessionId: null, artifactPath: '/tmp/fake/artifact.md',
+      templateName: 'direct',
+    });
+    registerTestThread(thread);
+    const cfg = makeSlotConfig();
+
+    const prompt = buildStepPrompt(id, cfg, 'plan');
+    assert.doesNotMatch(prompt, /\[User Context\]/);
+    assert.doesNotMatch(prompt, /Leak Canary/);
+  } finally {
+    if (restore != null) fs.writeFileSync(userMd, restore);
+    else { try { fs.unlinkSync(userMd); } catch {} }
+  }
 });
 
 test('buildStepPrompt stage=implement + ad-hoc thread (templateName=null) + incremental mode suppresses auto previousOutput injection', () => {

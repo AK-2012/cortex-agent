@@ -126,7 +126,7 @@ $CORTEX_HOME/
 | `DEBUG` | — | 启用调试级日志输出 |
 | `CORTEX_EVENT_LOG` | `on` | 设置为 `off` 以禁用事件总线日志 |
 | `CORTEX_SHOW_TOOL_CALLS` | — | 在 VirtualMessage 尾部内联渲染工具调用 |
-| `CORTEX_DISABLE_USER_CONTEXT` | — | 设置为 `1` 以禁用将 `USER.md` 上下文注入 direct 线程（默认注入） |
+| `CORTEX_DISABLE_USER_CONTEXT` | — | 设置为 `1` 以禁用将 `USER.md` 上下文注入普通直接对话轮次（默认注入；多 agent thread 步骤不会收到） |
 | `CORTEX_GPU_MONITOR_MOCK` | — | 用于测试的模拟 GPU 数据 JSON（覆盖真实的 nvidia-smi 查询） |
 | `CORTEX_SERVER_UPDATE_DISABLE` | — | 设置为 `1` 以禁用服务器自动更新检查（默认开启） |
 | `CORTEX_NOTIFY_COMPACTION` | — | 设置为 `1`，在 agent 的上下文被压缩（compaction）时向会话发送一条提示。覆盖 Claude Code（print 模式）与 pi 两个后端；提示会注明触发原因，Claude Code 还会附上压缩前的 token 数 |

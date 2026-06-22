@@ -73,6 +73,7 @@ How to run tests without tripping it:
 | `thread-manager.test.ts` | Test | resolveSystemVars/evaluateTransitions |
 | `thread-runner.test.ts` | Test | buildThreadSummary/initThreadContext |
 | `conversation-runner.test.ts` | Test | buildConversationPrompt golden-prompt fidelity vs legacy default-thread prompt |
+| `user-context.test.ts` | Test | loadUserContext env-gate/file-present/absent + USER.md injected into buildConversationPrompt, never into thread steps |
 | `thread-abort.test.ts` | Test | DR-0015 control plane: peekPendingControl/clearPendingControl(abort)/abortThread + THREAD_PROTOCOL_PREAMBLE (tool-based) + regression (artifact "[ABORT]" prose must NOT trigger) |
 | `thread-tree.test.ts` | Test | DR-0014 tree: getRootThreadId/getTreeThreads/summarizeTree/checkSpawnGuards/buildThreadTree/registerChildSpawn |
 | `thread-wait-children.test.ts` | Test | DR-0014/0015 suspend: pendingControl(wait)/tryEnterWaiting/detectSplitFromControl + restart/cleanup semantics |
