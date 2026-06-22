@@ -132,6 +132,7 @@ $CORTEX_HOME/
 | `CORTEX_NOTIFY_COMPACTION` | — | 设置为 `1`，在 agent 的上下文被压缩（compaction）时向会话发送一条提示。覆盖 Claude Code（print 模式）与 pi 两个后端；提示会注明触发原因，Claude Code 还会附上压缩前的 token 数 |
 | `CORTEX_TURN_NOTIFY` | `on` | 当一个耗时较长的回合结束时，Cortex 向会话发送一条新消息，让你收到推送通知（内联状态是以编辑方式封口为「✓ 完成」，而 Slack 与飞书都不会对消息编辑推送）。成功和失败都会提醒。设置为 `0`/`false`/`off`/`no` 以关闭 |
 | `CORTEX_TURN_NOTIFY_THRESHOLD_S` | `60` | 触发完成提醒所需的最短回合时长（秒）。更短的回合保持静默 |
+| `CORTEX_AUTO_RESUME` | `on` | 当用量限制窗口重置后，Cortex 自动继续被该限制中断的对话与线程，并注入一条提示让其从中断处接着做。设置为 `0`/`false` 可让被中断的工作保持暂停、由人工继续 |
 
 ### 任务派发
 

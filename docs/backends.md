@@ -140,6 +140,33 @@ Example:
 }
 ```
 
+## Usage-limit throttling and auto-resume
+
+The fallback chain handles individual failed calls. A separate mechanism
+handles the rolling usage limit that providers enforce over a multi-hour
+window. When a backend reports that the five-hour usage window is exhausted
+and every configured fallback has also been spent, Cortex stops sending new
+work against that limit until the window resets, and records each piece of
+work that was interrupted — both direct conversations and threads.
+
+Cortex reads the reset time the provider reports and lifts the throttle a few
+seconds after the window opens again. At that point it reopens each
+interrupted unit of work and injects a short note telling the agent the limit
+has cleared and to continue where it left off. A direct conversation resumes
+in its own channel with the prior context intact; a thread continues from its
+last step. Resumes are staggered a few seconds apart so they do not
+immediately exhaust the freshly reset window.
+
+The throttle state and the list of interrupted work persist in
+`schedules.json`, so a restart during the window loses nothing: on startup
+Cortex re-arms the timer, or resumes immediately if the window already passed
+while it was down. Work that has gone stale (recorded more than six hours
+earlier), a channel that already has a live agent, or a thread that has since
+finished are skipped rather than resumed.
+
+Auto-resume is on by default. Set `CORTEX_AUTO_RESUME=0` in the `.env` file to
+leave interrupted work paused for manual continuation instead.
+
 ## Cost reporting
 
 Cost reporting differs by backend:

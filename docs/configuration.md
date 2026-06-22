@@ -148,6 +148,7 @@ channel.
 | `CORTEX_NOTIFY_COMPACTION` | — | Set to `1` to post a chat notice when an agent's context is compacted. Covers the Claude Code (print mode) and pi backends; the notice names the trigger and, for Claude Code, the pre-compaction token count |
 | `CORTEX_TURN_NOTIFY` | `on` | When a long-running turn finishes, Cortex posts a fresh message to the conversation so you get a push notification (the inline status seals to "✓ Done" with an edit, which Slack and Feishu do not notify on). Both success and failure are announced. Set to `0`/`false`/`off`/`no` to disable |
 | `CORTEX_TURN_NOTIFY_THRESHOLD_S` | `60` | Minimum turn duration, in seconds, before a completion notification is posted. Shorter turns stay quiet |
+| `CORTEX_AUTO_RESUME` | `on` | When a usage-limit window resets, Cortex automatically continues the conversations and threads that the limit interrupted, injecting a note to pick up where they left off. Set to `0`/`false` to leave interrupted work paused for manual continuation |
 
 ### Task dispatch
 
