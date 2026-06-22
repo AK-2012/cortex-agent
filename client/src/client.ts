@@ -12,6 +12,7 @@ import { scanCortexMDChain, type CortexMDEntry } from './cortex-md-scanner.js';
 import { createLogger } from './log.js';
 import { CONFIG_DIR } from './paths.js';
 import { resolveClientToken, buildClientHeaders } from './auth-headers.js';
+import { resolveServerUrl } from './server-url.js';
 import {
   handleCortexRunLaunch,
   handleCortexRunCancel,
@@ -63,6 +64,7 @@ if (process.argv.slice(2).some((a) => a === '--help' || a === '-h')) {
 interface ClientConfig {
   serverHost: string;
   serverPort: number;
+  serverUrl: string;
   deviceName: string;
   clientToken: string;
 }
@@ -72,24 +74,29 @@ function loadConfig(): ClientConfig {
   try {
     const raw = fs.readFileSync(configPath, 'utf8');
     const cfg = JSON.parse(raw);
-    if (!cfg.serverHost) throw new Error('Missing serverHost');
+    // serverHost is optional when a full serverUrl (or CORTEX_SERVER_URL) is given —
+    // the tunnel route (wss://...) carries host implicitly.
+    if (!cfg.serverHost && !cfg.serverUrl && !process.env.CORTEX_SERVER_URL) {
+      throw new Error('Missing serverHost (or provide serverUrl / CORTEX_SERVER_URL)');
+    }
     return {
       serverHost: cfg.serverHost,
       serverPort: cfg.serverPort || 3002,
+      // Full WS URL (tunnel route). env CORTEX_SERVER_URL > config serverUrl > ws://host:port.
+      serverUrl: resolveServerUrl(cfg, process.env),
       deviceName: cfg.deviceName || os.hostname(),
       // WS bearer token required by the agent-server gate; env overrides config (see auth-headers.ts).
       clientToken: resolveClientToken(cfg, process.env),
     };
   } catch (err) {
     log.error(`Failed to load config from ${configPath}: ${(err as Error).message}`);
-    log.error('Expected format: {"serverHost":"...","serverPort":3002,"deviceName":"..."}');
+    log.error('Expected format: {"serverHost":"...","serverPort":3002,"deviceName":"..."} or {"serverUrl":"wss://...","deviceName":"..."}');
     process.exit(1);
   }
 }
 
 const CONFIG = loadConfig();
-const SERVER_HOST = CONFIG.serverHost;
-const SERVER_PORT = CONFIG.serverPort;
+const SERVER_URL = CONFIG.serverUrl;
 const DEVICE_NAME = CONFIG.deviceName;
 const CLIENT_TOKEN = CONFIG.clientToken;
 const PLATFORM = process.platform;
@@ -711,7 +718,7 @@ let reconnectDelay = 1000;
 const MAX_RECONNECT_DELAY = 30000;
 
 function connect() {
-  const url = `ws://${SERVER_HOST}:${SERVER_PORT}`;
+  const url = SERVER_URL;
   const headers = buildClientHeaders(CLIENT_TOKEN);
   log.info(`Connecting to ${url} as "${DEVICE_NAME}" (${PLATFORM})${headers ? ' [token]' : ' [no-token]'}...`);
 
@@ -842,5 +849,5 @@ process.on('SIGTERM', shutdown);
 
 // --- Start ---
 
-log.info(`Starting: device="${DEVICE_NAME}", platform="${PLATFORM}", server=${SERVER_HOST}:${SERVER_PORT}`);
+log.info(`Starting: device="${DEVICE_NAME}", platform="${PLATFORM}", server=${SERVER_URL}`);
 connect();
