@@ -9,6 +9,7 @@ import * as path from 'path';
 import * as os from 'os';
 import { execFileSync, spawn } from 'child_process';
 import { scanCortexMDChain, type CortexMDEntry } from '../memory/cortex-md-scanner.js';
+import { resolveServerUrl, buildAccessHeaders } from './cortex-client-config.js';
 import { createLogger } from '@core/log.js';
 
 const log = createLogger('cortex-client');
@@ -16,7 +17,6 @@ const log = createLogger('cortex-client');
 // --- Config ---
 
 const SERVER_HOST = process.env.CORTEX_SERVER_HOST;
-const SERVER_PORT = process.env.CORTEX_SERVER_PORT || '3002';
 const DEVICE_NAME = process.env.CORTEX_DEVICE_NAME || os.hostname();
 const PLATFORM = process.platform;
 const HEARTBEAT_INTERVAL_MS = 5000;
@@ -26,8 +26,8 @@ const GIT_BASH_PATHS = [
   'C:\\Program Files (x86)\\Git\\bin\\bash.exe',
 ];
 
-if (!SERVER_HOST) {
-  log.error('CORTEX_SERVER_HOST is required');
+if (!SERVER_HOST && !process.env.CORTEX_SERVER_URL) {
+  log.error('Either CORTEX_SERVER_URL (full ws/wss URL) or CORTEX_SERVER_HOST is required');
   process.exit(1);
 }
 
@@ -663,10 +663,11 @@ let reconnectDelay = 1000;
 const MAX_RECONNECT_DELAY = 30000;
 
 function connect() {
-  const url = `ws://${SERVER_HOST}:${SERVER_PORT}`;
-  log.info(`Connecting to ${url} as "${DEVICE_NAME}" (${PLATFORM})...`);
+  const url = resolveServerUrl(process.env);
+  const headers = buildAccessHeaders(process.env);
+  log.info(`Connecting to ${url} as "${DEVICE_NAME}" (${PLATFORM})${headers ? ' [CF Access]' : ''}...`);
 
-  ws = new WebSocket(url);
+  ws = headers ? new WebSocket(url, { headers }) : new WebSocket(url);
 
   ws.on('open', () => {
     log.info(`Connected to server`);
@@ -773,5 +774,5 @@ process.on('SIGTERM', shutdown);
 
 // --- Start ---
 
-log.info(`Starting: device="${DEVICE_NAME}", platform="${PLATFORM}", server=${SERVER_HOST}:${SERVER_PORT}`);
+log.info(`Starting: device="${DEVICE_NAME}", platform="${PLATFORM}", server=${resolveServerUrl(process.env)}`);
 connect();
