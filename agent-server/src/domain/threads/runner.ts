@@ -1,5 +1,5 @@
 // input:  domain/threads, mode-manager, hook-runner, handles
-// output: runThread / continueThread / resumeThread / buildThreadSummary
+// output: runThread / continueThread / resumeThread / resumeRateLimitedThread / buildThreadSummary
 // pos:    runtime execution engine for the Thread system
 // >>> If I am updated, update my header comment and the parent folder's CORTEX.md <<<
 
@@ -11,6 +11,7 @@ import {
   evaluateTransitions,
   completeThread,
   failThread,
+  markThreadRateLimited,
   abortThread,
   peekPendingControl,
   clearPendingControl,
@@ -23,6 +24,9 @@ import {
   resolveSystemVars,
 } from './index.js';
 import { runAgent, getClaudeMode, getActiveBackend, getActiveProfile } from '../agents/index.js';
+import { isApiRateLimitError } from '../agents/config.js';
+import { isThrottled } from '../costs/rate-limit-throttle.js';
+import { recordResume } from '../costs/resume-registry.js';
 import { Icons } from '../../core/icons.js';
 import { closeSessionsByPrefix } from '../agents/index.js';
 import * as executionRegistry from '../executions/registry.js';
@@ -67,6 +71,9 @@ interface ThreadContext {
   stream: OutputStream;
   lastAgentResult: any;
   totalNumTurns: number;
+  /** Set when a step was interrupted by an API rate limit while the throttle is active.
+   *  Pauses the thread (status='rate_limited') instead of completing/failing it. */
+  rateLimited?: boolean;
 }
 
 /** Per-step config built once by buildStepConfig — fully populated, no placeholders. */
@@ -350,6 +357,20 @@ async function recordStepOutcome(
   const stepEndTime = new Date().toISOString();
   const stepDurationS = (new Date(stepEndTime).getTime() - new Date(stepStartTime).getTime()) / 1000;
 
+  // Rate-limit interruption (graceful path): the API window is exhausted and the throttle is
+  // active. Do NOT record the step result — leaving currentStepIndex unadvanced so resume
+  // re-runs THIS step (matches the thrown path). Tear down the execution as failed and pause the
+  // thread for auto-resume. Gate on isThrottled() so a stray rateLimited without an active
+  // throttle (no onResume will ever fire) falls through to the normal terminal path below.
+  if (result?.rateLimited && isThrottled()) {
+    executionRegistry.teardownExecution({
+      executionId: execution.id, status: 'failed', durationS: stepDurationS,
+      error: { message: 'Rate limited' },
+    });
+    await handleRateLimitInterruption(threadId, ctx, opts);
+    return;
+  }
+
   await recordStepResult(threadId, agentSlotId, {
     sessionId: result?.sessionId || null,
     sessionName,
@@ -390,6 +411,23 @@ async function recordStepOutcome(
       executionId: execution.id, status: 'completed', durationS: stepDurationS, result,
     });
   }
+}
+
+/** Pause the thread for auto-resume after an API rate limit interrupted a step. Records the
+ *  thread in the resume registry (drained by resume-dispatcher when the window resets) and
+ *  flips it to the non-terminal 'rate_limited' status. Sets ctx.rateLimited so the loop breaks
+ *  and skips completeThread / onEnd. Shared by the graceful (recordStepOutcome) and thrown
+ *  (runThread catch) paths. */
+async function handleRateLimitInterruption(threadId: string, ctx: ThreadContext, opts: RunThreadOptions): Promise<void> {
+  ctx.rateLimited = true;
+  await markThreadRateLimited(threadId);
+  recordResume({
+    kind: 'thread',
+    threadId,
+    channel: opts.channel,
+    userMessage: threadStore.get(threadId)?.userMessage ?? '',
+    recordedAt: Date.now(),
+  });
 }
 
 /** Decide whether the loop continues; run onTransition hook when transitioning.
@@ -493,6 +531,10 @@ async function runThread(threadId: string, opts: RunThreadOptions): Promise<Thre
       const result = await executeAndAwaitAgent(threadId, stepCtx, callbacks, ctx, opts);
       await recordStepOutcome(threadId, stepCtx, result, ctx, opts);
 
+      // Rate-limit pause (graceful path): recordStepOutcome paused the thread. Break out so the
+      // thread is NOT completed; resume-dispatcher re-enters it when the window resets.
+      if (ctx.rateLimited) break;
+
       // Out-of-band control plane (DR-0015 problem 1): the agent signals abort / split / wait by
       // calling the thread_abort / thread_split / thread_wait MCP tools, which write a typed
       // metadata.pendingControl on this thread. Read it here at the step boundary — never scan the
@@ -562,14 +604,17 @@ async function runThread(threadId: string, opts: RunThreadOptions): Promise<Thre
     // Skipped on suspension: onEnd semantics are "thread truly finished" (e.g. the dispatch
     // task-status-check hook must not nag while children are still working). The re-entry
     // path re-runs runThread, so onEnd still fires exactly once at final termination.
-    if (!enteredWaiting) {
+    // Also skipped on rate-limit pause (like suspension): the dispatch task-status-check onEnd
+    // hook must not fire and release the still-claimed task while the thread is only paused.
+    if (!enteredWaiting && !ctx.rateLimited) {
       const threadForEnd = threadStore.get(threadId)!;
       const lastStep = threadForEnd.steps[threadForEnd.steps.length - 1];
       await executeLifecycleHook(threadId, 'end', ctx.template?.hooks?.onEnd, opts, lastStep?.agentSlotId);
       await executeLifecycleHook(threadId, 'end', opts.extraHooks?.onEnd, opts, lastStep?.agentSlotId);
     }
 
-    // Only complete if not already in a terminal state (e.g. cancelled during loop)
+    // Only complete if not already in a terminal state (e.g. cancelled during loop). A
+    // rate-limit pause leaves status='rate_limited', so this guard also skips it.
     const threadBeforeComplete = threadStore.get(threadId);
     if (threadBeforeComplete && threadBeforeComplete.status === 'running') {
       await completeThread(threadId);
@@ -577,10 +622,17 @@ async function runThread(threadId: string, opts: RunThreadOptions): Promise<Thre
 
   } catch (error: any) {
     const t = threadStore.get(threadId);
-    if (t && t.status === 'running') {
-      await failThread(threadId, error.message || 'Unknown error');
+    // Thrown rate-limit path: the agent threw a rate-limit error while the throttle is active.
+    // Pause for auto-resume instead of failing, and do NOT rethrow — the thread is left in
+    // 'rate_limited' and finalizeThread returns normally so wrappers see thread.status, not a throw.
+    if (t && t.status === 'running' && isApiRateLimitError(error?.message) && isThrottled()) {
+      await handleRateLimitInterruption(threadId, ctx, opts);
+    } else {
+      if (t && t.status === 'running') {
+        await failThread(threadId, error.message || 'Unknown error');
+      }
+      throw error;
     }
-    throw error;
   } finally {
     // Defensive: the per-step path finalizes each execution on success (recordStepOutcome) and on
     // error (executeAndAwaitAgent). If the loop threw AFTER an agent result but BEFORE the step was
@@ -610,7 +662,7 @@ async function runThread(threadId: string, opts: RunThreadOptions): Promise<Thre
 async function continueThread(threadId: string, userMessage: string, opts: RunThreadOptions): Promise<ThreadRunResult> {
   const thread = threadStore.get(threadId);
   if (!thread) throw new Error(`Thread not found: ${threadId}`);
-  if (thread.status !== 'running' && thread.status !== 'waiting') {
+  if (thread.status !== 'running' && thread.status !== 'waiting' && thread.status !== 'rate_limited') {
     throw new Error(`Thread ${threadId} is ${thread.status}, cannot continue`);
   }
 
@@ -618,8 +670,27 @@ async function continueThread(threadId: string, userMessage: string, opts: RunTh
   await threadStore.mutate(threadId, (t) => {
     t.userMessage = userMessage;
     t.status = 'running';
+    if (t.metadata) t.metadata.interruptedByRateLimit = false;
   });
 
+  return runThread(threadId, opts);
+}
+
+// --- Resume a rate-limit-paused thread (auto-resume) ---
+
+/** Re-enter a thread paused by an API rate limit (status==='rate_limited'). Like resumeThread,
+ *  the userMessage is NOT overwritten — the thread re-runs its interrupted step from the original
+ *  prompt/contract. Called by resume-dispatcher when the rate-limit window resets. */
+async function resumeRateLimitedThread(threadId: string, opts: RunThreadOptions): Promise<ThreadRunResult> {
+  const thread = threadStore.get(threadId);
+  if (!thread) throw new Error(`Thread not found: ${threadId}`);
+  if (thread.status !== 'rate_limited') {
+    throw new Error(`Thread ${threadId} is ${thread.status}, cannot resume (expected rate_limited)`);
+  }
+  await threadStore.mutate(threadId, (t) => {
+    t.status = 'running';
+    if (t.metadata) t.metadata.interruptedByRateLimit = false;
+  });
   return runThread(threadId, opts);
 }
 
@@ -653,10 +724,13 @@ function buildThreadSummary(result: ThreadRunResult): string {
     : thread.status === 'cancelled' ? Icons.blocked
     : thread.status === 'aborted' ? Icons.stopped
     : thread.status === 'waiting' ? Icons.processing
+    : thread.status === 'rate_limited' ? Icons.warning
     : Icons.error;
 
   const headline = thread.status === 'waiting'
     ? `${statusEmoji} Thread suspended — waiting on ${(thread.metadata?.waitingOn?.length ?? 0) + (thread.metadata?.waitingOnTasks?.length ?? 0)} child(ren) | ${steps.length} steps | $${totalCostUsd.toFixed(4)}`
+    : thread.status === 'rate_limited'
+    ? `${statusEmoji} Thread paused — rate limited, will auto-resume | ${steps.length} steps | $${totalCostUsd.toFixed(4)}`
     : `${statusEmoji} Thread complete | ${steps.length} steps | $${totalCostUsd.toFixed(4)} | ${formatDurationCompact(elapsed)}`;
   const lines = [headline];
 
@@ -695,6 +769,7 @@ export {
   runThread,
   continueThread,
   resumeThread,
+  resumeRateLimitedThread,
   buildThreadSummary,
   cancelActiveThread,
   getActiveHandle,

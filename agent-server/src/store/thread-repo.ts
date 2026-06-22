@@ -172,6 +172,9 @@ class ThreadRepo {
           && !!(record.metadata?.waitingOn?.length || record.metadata?.childThreadIds?.length
             || record.metadata?.waitingOnTasks?.length);
         if (isSuspendedParent) continue;
+        // Rate-limit-paused threads survive restarts: the throttle re-arms its resume timer (or
+        // fires immediately if the window already passed) and resume-dispatcher re-enters them.
+        if (record.status === 'rate_limited') continue;
         if (record.status === 'running' || record.status === 'waiting') {
           record.status = 'failed';
           record.error = 'Interrupted by server restart';
@@ -209,6 +212,16 @@ class ThreadRepo {
           if (this.hasLiveTaskChildren(record)) continue;
           record.status = 'failed';
           record.error = 'stale waiting parent — children never completed';
+          record.endedAt = new Date().toISOString();
+          record.updatedAt = new Date().toISOString();
+          staleWaiting++;
+        }
+        // Limbo safety net: a rate-limit-paused thread that never got resumed (auto-resume
+        // disabled, or the window-reset resume was dropped) is failed once past maxAge so it
+        // does not linger forever.
+        if (record.status === 'rate_limited' && record.updatedAt < cutoff) {
+          record.status = 'failed';
+          record.error = 'rate-limit-paused thread never resumed';
           record.endedAt = new Date().toISOString();
           record.updatedAt = new Date().toISOString();
           staleWaiting++;

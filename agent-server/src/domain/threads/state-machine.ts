@@ -562,3 +562,20 @@ export async function failThread(threadId: string, error: string): Promise<boole
   log.info(`Failed thread ${threadId}: ${error}`);
   return true;
 }
+
+/** Pause a thread that was interrupted mid-run by an API rate limit. Non-terminal: the
+ *  thread keeps its currentStepIndex/agents and is re-entered (from the interrupted step)
+ *  by the resume-dispatcher when the rate-limit window resets. Does NOT set endedAt.
+ *  Idempotent. */
+export async function markThreadRateLimited(threadId: string, note?: string): Promise<boolean> {
+  const thread = threadStore.get(threadId);
+  if (!thread) return false;
+
+  await threadStore.mutate(threadId, (t) => {
+    t.status = 'rate_limited';
+    t.error = note ?? 'Paused — interrupted by API rate limit';
+    (t.metadata ??= {}).interruptedByRateLimit = true;
+  });
+  log.info(`Rate-limit paused thread ${threadId}`);
+  return true;
+}

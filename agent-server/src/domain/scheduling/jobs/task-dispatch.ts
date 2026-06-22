@@ -241,7 +241,25 @@ async function executeDispatchTask({ selected, selectedTask, channel, scheduleTa
     return { success: true, skipped: false, note: `[${selectedTask.project}] ${splitOutcome.note}` };
   }
 
+  // Rate-limit pause: the runner left the thread in 'rate_limited' and recorded it for
+  // auto-resume. Keep the task CLAIMED (do not unclaim → no fresh re-dispatch that would race
+  // the thread resume), don't publish task.completed, don't finalize. resume-dispatcher re-enters
+  // the same thread when the window resets, and its rebuilt onEnd task-status-check hook closes
+  // the task loop at true termination — mirrors the DR-0014 suspended-parent branch above.
+  if (threadResult.thread?.status === 'rate_limited') {
+    if (statusMsg) {
+      // Persist the live status message so the post-resume settle can refresh it.
+      await threadStore.mutate(thread.id, (t) => { (t.metadata ??= {}).statusMsgRef = statusMsg; });
+      const text = `${Icons.warning} [${selectedTask.project}] ${selectedTask.text.substring(0, 80)} | paused — rate limited, will auto-resume`;
+      const queue = getOutboundQueue();
+      if (queue) { await durableUpdate(queue, adapter, statusMsg, { text }); }
+      else { await adapter.updateMessage(statusMsg, { text }).catch(() => {}); }
+    }
+    return { success: true, skipped: false, note: `Paused [${selectedTask.project}] — rate limited, will auto-resume` };
+  }
+
   if (result?.rateLimited) {
+    // Fallback: rate-limited but no active throttle, so the runner did not pause the thread.
     const { elapsedStr } = computeElapsed(startTime);
     await taskMutator.unclaim(selectedTask.id);
     if (statusMsg) {

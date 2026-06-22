@@ -1,5 +1,5 @@
 // input:  Node test runner + resume-dispatcher (deps injected)
-// output: direct/thread dispatch + guard (stale/busy/missing/terminal) + flag/drain tests
+// output: direct/thread dispatch + guard (stale/busy/missing/non-paused) + flag/drain tests
 // pos:    Validate orchestration/resume-dispatcher.ts auto-resume behavior
 // >>> If I am updated, update my require first <<<
 import '../_test-home.js'; // MUST be first — isolates store singletons
@@ -12,12 +12,16 @@ import type { ResumeEntry } from '../../src/domain/costs/resume-registry.js';
 const NOW = 1_000_000_000_000;
 
 function baseDeps(entries: ResumeEntry[], overrides: any = {}) {
-  const calls = { route: [] as any[], continue: [] as any[], taken: 0 };
+  const calls = { route: [] as any[], resume: [] as any[], built: [] as any[], taken: 0 };
   const deps = {
     takeAll: () => { calls.taken++; return entries; },
     route: async (ctx: any) => { calls.route.push(ctx); },
-    continueThread: async (threadId: string, msg: string, opts: any) => { calls.continue.push({ threadId, msg, opts }); },
-    getThread: (_id: string) => ({ id: _id, status: 'running', channel: 'C1', projectId: 'proj' }) as any,
+    resumeThread: async (threadId: string, opts: any) => { calls.resume.push({ threadId, opts }); },
+    buildResumeOptions: (thread: any) => {
+      calls.built.push(thread);
+      return { adapter: {}, channel: thread.channel, destination: { type: 'project-report', projectId: thread.projectId, trigger: 'rate-limit-resume', sessionId: '' }, threadAnchorId: null, statusMsg: null, startTime: 0 };
+    },
+    getThread: (_id: string) => ({ id: _id, status: 'rate_limited', channel: 'C1', projectId: 'proj' }) as any,
     channelBusy: (_c: string) => false,
     now: () => NOW,
     delay: async (_ms: number) => {},
@@ -63,19 +67,19 @@ test('direct entry routes a synthetic system-reminder message', async () => {
   assert.equal(ctx.message.ref.conduit, 'C1');
 });
 
-test('thread entry continues the thread with project-report destination', async () => {
+test('thread entry resumes a rate_limited thread with rebuilt options', async () => {
   const adapter = new MockAdapter({ adminChannel: 'admin' });
   const { deps, calls } = baseDeps([
     { kind: 'thread', threadId: 'thr_a', channel: 'C2', userMessage: 'go', recordedAt: NOW },
   ]);
   await dispatchPendingResumes(adapter as any, deps);
 
-  assert.equal(calls.continue.length, 1);
-  assert.equal(calls.continue[0].threadId, 'thr_a');
-  assert.ok(calls.continue[0].msg.includes('<system-reminder>'));
-  assert.equal(calls.continue[0].opts.channel, 'C2');
-  assert.equal(calls.continue[0].opts.destination.type, 'project-report');
-  assert.equal(calls.continue[0].opts.destination.projectId, 'proj');
+  assert.equal(calls.resume.length, 1);
+  assert.equal(calls.resume[0].threadId, 'thr_a');
+  assert.equal(calls.resume[0].opts.destination.type, 'project-report');
+  assert.equal(calls.built.length, 1, 'options rebuilt from the thread record');
+  // Threads re-run their interrupted step from the original prompt — no reminder injected.
+  assert.equal(calls.route.length, 0);
 });
 
 test('stale entry is dropped (older than max age)', async () => {
@@ -105,17 +109,17 @@ test('thread entry dropped when thread no longer exists', async () => {
     { getThread: (_id: string) => null },
   );
   await dispatchPendingResumes(adapter as any, deps);
-  assert.equal(calls.continue.length, 0);
+  assert.equal(calls.resume.length, 0);
 });
 
-test('thread entry dropped when thread is terminal', async () => {
+test('thread entry dropped when thread is no longer paused', async () => {
   const adapter = new MockAdapter({ adminChannel: 'admin' });
   const { deps, calls } = baseDeps(
     [{ kind: 'thread', threadId: 'thr_a', channel: 'C2', userMessage: 'go', recordedAt: NOW }],
     { getThread: (_id: string) => ({ id: _id, status: 'completed', channel: 'C2', projectId: 'proj' }) as any },
   );
   await dispatchPendingResumes(adapter as any, deps);
-  assert.equal(calls.continue.length, 0);
+  assert.equal(calls.resume.length, 0);
 });
 
 test('disabled flag drains the queue without dispatching', async () => {
@@ -140,5 +144,5 @@ test('takeAll is invoked exactly once per dispatch', async () => {
   await dispatchPendingResumes(adapter as any, deps);
   assert.equal(calls.taken, 1);
   assert.equal(calls.route.length, 1);
-  assert.equal(calls.continue.length, 1);
+  assert.equal(calls.resume.length, 1);
 });

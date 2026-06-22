@@ -30,6 +30,7 @@ import { buildContinuationSink } from './bg-continuation.js';
 import { recordCost } from '@domain/costs/cost-tracker.js';
 import type { ContinuationSink } from '../agent-adapter/types.js';
 import { maybeNotifyCodexLowUsage } from '@domain/costs/codex-usage-monitor.js';
+import { recordResume } from '@domain/costs/resume-registry.js';
 import { normalizeSkillCommandPrefix } from '@domain/memory/skill-scanner.js';
 import { getOutboundQueue } from '@store/outbound-queue.js';
 import { buildDurableHooks, durablePost } from './durable-helpers.js';
@@ -335,6 +336,8 @@ async function runRetryAgent({ channel, text, adapter, statusMsg, startTime, ses
     await maybeNotifyCodexLowUsage({ adapter, result });
 
     if (result?.rateLimited) {
+      // Record the interrupted edit-retry conversation for auto-resume when the window resets.
+      recordResume({ kind: 'direct', channel, userMessage: text, recordedAt: Date.now() });
       const { elapsedStr } = computeElapsed(startTime);
       const rateLimitText = `${Icons.warning} ${buildSessionTag(sessionName, sessionId)}${t('status.rateLimitedExhausted')} (${elapsedStr})`;
       await sealStatus(adapter, statusMsg, rateLimitText, buildSealedStatusActionBlocks(rateLimitText, { channel, sessionName, isDm: true }));

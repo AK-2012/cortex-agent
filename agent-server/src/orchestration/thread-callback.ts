@@ -93,7 +93,7 @@ async function postProjectNotice(t: ThreadRecord, text: string): Promise<void> {
 /** Rebuild RunThreadOptions for re-entering a suspended parent. extraHooks are not
  *  persisted on ThreadRecord, so the dispatch task-status-check hook is reconstructed
  *  from metadata.taskId/taskProject (the reason dispatch threads must store them). */
-function buildResumeOptions(parent: ThreadRecord): RunThreadOptions | null {
+export function buildResumeOptions(parent: ThreadRecord): RunThreadOptions | null {
   const adapter = jobCtx.adapter;
   if (!adapter) return null;
   const m = parent.metadata;

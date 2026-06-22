@@ -20,7 +20,6 @@ import { allConfigsRateLimited } from '../../agents/facade.js';
 import { createThread } from '../../threads/index.js';
 import { runThread as runThreadExec, continueThread } from '../../threads/runner.js';
 import { maybeNotifyCodexLowUsage } from '../../costs/codex-usage-monitor.js';
-import { recordResume } from '../../costs/resume-registry.js';
 import { buildUserProcessingMessage, computeElapsed, buildSessionTag } from '@core/status-format.js';
 import { finalizeThreadSuccess, buildProgressUpdater } from './_shared.js';
 import { planScheduledDispatch, type DispatchPlan } from './target-dispatch.js';
@@ -131,13 +130,18 @@ async function runScheduledTaskAsync({ normalizedMessage, message, projectId, sc
     const result = threadResult.lastAgentResult as any;
     await maybeNotifyCodexLowUsage({ adapter, result });
 
-    if (result?.rateLimited) {
-      // Record the interrupted thread so it auto-resumes when the rate-limit window resets.
-      // Only continue-thread plans have a durable thread to resume; fresh/project plans
-      // re-fire on their own cadence.
-      if (plan.kind === 'continue-thread') {
-        recordResume({ kind: 'thread', threadId: plan.threadId, channel: plan.channel, userMessage: normalizedMessage, recordedAt: Date.now() });
+    // Rate-limit pause: the runner already recorded the thread for auto-resume and left it in
+    // 'rate_limited'. Don't treat it as a failure — just reflect the paused state.
+    if (threadResult.thread?.status === 'rate_limited') {
+      const { elapsedStr } = computeElapsed(startTime);
+      if (statusMsg) {
+        const text = `${Icons.warning} ${buildSessionTag(sessionName, result?.sessionId)}Paused — rate limited, will auto-resume (${elapsedStr})`;
+        const queue = getOutboundQueue();
+        if (queue) { await durableUpdate(queue, adapter, statusMsg, { text }); }
+        else { await adapter.updateMessage(statusMsg, { text }); }
       }
+    } else if (result?.rateLimited) {
+      // Fallback: rate-limited but no active throttle, so the runner did not pause the thread.
       const { elapsedStr } = computeElapsed(startTime);
       if (statusMsg) {
         const text = `${Icons.warning} ${buildSessionTag(sessionName, result?.sessionId)}Rate limited — all fallbacks exhausted (${elapsedStr})`;

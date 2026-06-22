@@ -1,14 +1,17 @@
-// input:  rate-limit-throttle onResume → resume-registry (takeAllResumes) + agentRunner/continueThread
+// input:  rate-limit-throttle onResume → resume-registry (takeAllResumes) + agentRunner / resumeRateLimitedThread
 // output: dispatchPendingResumes — wakes sessions/threads interrupted by a rate limit
-// pos:    orch/ — runs when the rate-limit window resets. Injects a <system-reminder>
-//         continuation into each interrupted target. All deps injectable for tests.
+// pos:    orch/ — runs when the rate-limit window resets. Direct sessions are re-entered with a
+//         <system-reminder>; threads (status 'rate_limited') are re-run from the interrupted step
+//         via resumeRateLimitedThread with options rebuilt by buildResumeOptions (dispatch onEnd
+//         hook + destination). All deps injectable for tests.
 // >>> If I am updated, update my header comment and the parent folder's CORTEX.md <<<
 
-import type { PlatformAdapter, IncomingMessage, Destination, MessageRef } from '@platform/index.js';
-import type { ThreadRecord } from '@core/types/thread-types.js';
+import type { PlatformAdapter, IncomingMessage } from '@platform/index.js';
+import type { ThreadRecord, RunThreadOptions } from '@core/types/thread-types.js';
 import { takeAllResumes, type ResumeEntry } from '@domain/costs/resume-registry.js';
 import { agentRunner } from './agent-runner.js';
-import { continueThread } from '@domain/threads/runner.js';
+import { resumeRateLimitedThread } from '@domain/threads/runner.js';
+import { buildResumeOptions } from './thread-callback.js';
 import { threadStore } from '@store/thread-repo.js';
 import { runningExecutions } from '@core/running-executions.js';
 import { createLogger } from '@core/log.js';
@@ -43,7 +46,8 @@ export function buildResumeReminder(): string {
 export interface ResumeDeps {
   takeAll: () => ResumeEntry[];
   route: (ctx: Parameters<typeof agentRunner.route>[0]) => Promise<void>;
-  continueThread: (threadId: string, msg: string, opts: Parameters<typeof continueThread>[2]) => Promise<unknown>;
+  resumeThread: (threadId: string, opts: RunThreadOptions) => Promise<unknown>;
+  buildResumeOptions: (thread: ThreadRecord) => RunThreadOptions | null;
   getThread: (threadId: string) => ThreadRecord | null;
   channelBusy: (channel: string) => boolean;
   now: () => number;
@@ -54,7 +58,8 @@ function defaultDeps(): ResumeDeps {
   return {
     takeAll: takeAllResumes,
     route: (ctx) => agentRunner.route(ctx),
-    continueThread: (id, msg, opts) => continueThread(id, msg, opts),
+    resumeThread: (id, opts) => resumeRateLimitedThread(id, opts),
+    buildResumeOptions: (thread) => buildResumeOptions(thread),
     getThread: (id) => threadStore.get(id),
     channelBusy: (ch) => runningExecutions.hasChannel(ch),
     now: () => Date.now(),
@@ -104,7 +109,7 @@ function guardSkipReason(entry: ResumeEntry, deps: ResumeDeps): string | null {
   if (entry.kind === 'thread') {
     const thread = deps.getThread(entry.threadId);
     if (!thread) return 'thread no longer exists';
-    if (thread.status !== 'running' && thread.status !== 'waiting') return `thread is ${thread.status}`;
+    if (thread.status !== 'rate_limited') return `thread is ${thread.status}`;
   }
   return null;
 }
@@ -123,25 +128,16 @@ async function resumeDirect(entry: Extract<ResumeEntry, { kind: 'direct' }>, ada
   await deps.route({ message, channel: entry.channel, adapter, threadAnchorId: null, hasFiles: false, userMessage: notice, agentMessage: notice });
 }
 
-async function resumeThread(entry: Extract<ResumeEntry, { kind: 'thread' }>, thread: ThreadRecord, adapter: PlatformAdapter, deps: ResumeDeps): Promise<void> {
-  const notice = buildResumeReminder();
-  const dest: Destination = { type: 'project-report', projectId: thread.projectId, trigger: 'rate-limit-resume', sessionId: '' };
-  let statusMsg: MessageRef | null = null;
-  try {
-    statusMsg = await adapter.postMessage(dest, { text: notice });
-  } catch (e) {
-    log.error(`Resume status post failed for thread ${entry.threadId}: ${(e as Error).message}`);
+async function resumeThread(entry: Extract<ResumeEntry, { kind: 'thread' }>, thread: ThreadRecord, _adapter: PlatformAdapter, deps: ResumeDeps): Promise<void> {
+  // Rebuild RunThreadOptions (destination + dispatch task-status-check onEnd hook) from the
+  // thread's persisted metadata — same machinery DR-0014 uses to re-enter suspended parents.
+  // Unlike a direct session, a thread re-runs its interrupted step from the original prompt, so
+  // no <system-reminder> / userMessage overwrite is injected.
+  const opts = deps.buildResumeOptions(thread);
+  if (!opts) {
+    log.error(`Resume skip (thread ${entry.threadId}): could not rebuild run options (no adapter?)`);
+    return;
   }
   log.info(`Resuming thread ${entry.threadId} on ${entry.channel}`);
-  await deps.continueThread(entry.threadId, notice, {
-    adapter,
-    channel: entry.channel,
-    threadAnchorId: statusMsg?.messageId ?? null,
-    statusMsg,
-    startTime: deps.now(),
-    destination: dest,
-    onToolUse: null,
-    onPlanWritten: null,
-    onAskUserQuestion: null,
-  });
+  await deps.resumeThread(entry.threadId, opts);
 }

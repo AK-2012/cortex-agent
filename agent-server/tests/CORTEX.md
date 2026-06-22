@@ -140,4 +140,5 @@ How to run tests without tripping it:
 | `template-resolver.test.ts` | Test | Template variables/block/conditional |
 | `threads/domain-threads-smoke.test.ts` | Test | domain/threads/ import smoke: parseTarget / resolveStageName / resolveSystemVars / THREAD_PROTOCOL_PREAMBLE |
 | `threads/resolve-template-profiles.test.ts` | Test | resolveTemplateProfiles: hardcoded profiles, `__active__` mapping, dedup, unknown template fail-open |
+| `threads/thread-rate-limit-resume.test.ts` | Test | rate-limit thread pause/resume contract: recordStepOutcome records resume + pauses (rate_limited) without advancing the step; markThreadRateLimited; buildThreadSummary paused headline; markRunningAsFailedOnStartup/cleanup treatment of rate_limited |
 | `module-loader.ts` | Utility | ESM fresh import + root path helper |

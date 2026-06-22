@@ -13,6 +13,7 @@ export type AgentSlotId = string;    // "planner", "reviewer", "coder", "qa", "m
 export type ThreadStatus =
   | 'running'      // an agent step is in progress
   | 'waiting'      // waiting for user input
+  | 'rate_limited' // paused mid-run by an API rate limit; non-terminal, auto-resumes when the window resets
   | 'completed'    // all steps done, terminal
   | 'failed'       // unrecoverable error, terminal
   | 'cancelled'    // user cancelled, terminal
@@ -318,6 +319,9 @@ export interface ThreadMetadata {
    *  onEnd task-status-check hook on re-entry (extraHooks are not persisted). */
   taskId?: string | null;
   taskProject?: string | null;
+  /** Set when the thread was paused (status==='rate_limited') by an API rate limit, so the
+   *  resume path and startup recovery can tell a rate-limit pause apart from a real failure. */
+  interruptedByRateLimit?: boolean;
   /** Destination kind decided at spawn time, so re-entry can rebuild RunThreadOptions. */
   resumeDest?: 'interactive-reply' | 'project-report' | null;
   /** Live status message persisted at suspension so the post-resume settle can refresh it
