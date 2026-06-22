@@ -1,6 +1,8 @@
-// input:  rate_limit_event + persistence + slack client
+// input:  rate_limit_event + persistence + slack client + optional onResume hook
 // output: init/handleRateLimitEvent/isThrottled/isModeRateLimited/getThrottleState
 // pos:    Pure state tracker — no scheduler coupling. Mode-level rate limit tracking.
+//         onResume (injected) fires when the window clears (timer path + expired-on-restart),
+//         decoupling the resume dispatch (orchestration) from this domain module.
 // >>> If I am updated, update my header comment and the parent folder's CORTEX.md <<<
 
 import type { PlatformAdapter } from '@platform/index.js';
@@ -15,6 +17,7 @@ const RESUME_BUFFER_MS = 5_000;
 // --- Module state ---
 let _adapter: PlatformAdapter | null = null;
 let _persistence: ThrottlePersistence | null = null;
+let _onResume: (() => void) | null = null;
 let _isThrottled = false;
 let _resetsAt: number | null = null; // Unix seconds
 let _resumeTimer: ReturnType<typeof setTimeout> | null = null;
@@ -61,6 +64,18 @@ function clearThrottle(): void {
   _persistence?.save(null).catch(e => {
     log.error(`Failed to persist cleared throttle: ${(e as Error).message}`);
   });
+  fireResume();
+}
+
+/** Notify the (optional) resume hook that the rate-limit window has ended. Errors are
+ *  swallowed so a faulty resume path can never break the throttle state machine. */
+function fireResume(): void {
+  if (!_onResume) return;
+  try {
+    _onResume();
+  } catch (e) {
+    log.error(`onResume hook failed: ${(e as Error).message}`);
+  }
 }
 
 function scheduleResumeTimer(): void {
@@ -74,9 +89,10 @@ function scheduleResumeTimer(): void {
 
 // --- Public API ---
 
-async function initRateLimitThrottle(adapter: PlatformAdapter, persistence: ThrottlePersistence): Promise<void> {
+async function initRateLimitThrottle(adapter: PlatformAdapter, persistence: ThrottlePersistence, onResume?: () => void): Promise<void> {
   _adapter = adapter;
   _persistence = persistence;
+  _onResume = onResume ?? null;
 
   // Recover throttle state from disk (survives restart)
   const persisted = await persistence.load();
@@ -93,6 +109,9 @@ async function initRateLimitThrottle(adapter: PlatformAdapter, persistence: Thro
     } else {
       log.info(`Throttle expired during downtime (resetsAt was ${new Date(persisted.resetsAt * 1000).toISOString()}). Clearing.`);
       await persistence.save(null);
+      // The window already reset while the process was down — resume anything that was
+      // recorded before the restart.
+      fireResume();
     }
   }
 
@@ -160,6 +179,7 @@ function _testReset(): void {
   _rateLimitedModes.clear();
   _adapter = null;
   _persistence = null;
+  _onResume = null;
 }
 
 export { initRateLimitThrottle, handleRateLimitEvent, isThrottled, isModeRateLimited, getThrottleState, _testReset };

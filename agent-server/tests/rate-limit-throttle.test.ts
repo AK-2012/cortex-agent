@@ -221,6 +221,67 @@ test('handleRateLimitEvent without mode activates throttle but no mode tracking'
   assert.equal(mod.isModeRateLimited('anything'), false);
 });
 
+test('onResume fires once when the resume timer clears the throttle', async (t) => {
+  const mod = await freshModuleWithCleanup(t);
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  let resumeCount = 0;
+  const persistence = makePersistenceStub();
+  const adapter = makeAdapterStub();
+  await mod.initRateLimitThrottle(adapter, persistence as any, () => { resumeCount++; });
+
+  const resetSec = Math.floor(Date.now() / 1000) + 1;
+  await mod.handleRateLimitEvent({ rateLimitType: 'five_hour', utilization: 0.96, resetsAt: resetSec });
+  assert.equal(mod.isThrottled(), true);
+  assert.equal(resumeCount, 0);
+
+  // Advance past resetsAt + RESUME_BUFFER_MS so the resume timer fires.
+  t.mock.timers.tick(60_000);
+  assert.equal(resumeCount, 1);
+  assert.equal(mod.isThrottled(), false);
+});
+
+test('onResume fires when an expired throttle is recovered on restart', async (t) => {
+  const mod = await freshModuleWithCleanup(t);
+  let resumeCount = 0;
+  const persistence = makePersistenceStub({ resetsAt: Math.floor(Date.now() / 1000) - 600, activatedAt: Date.now() - 3600000, modes: ['plan'] });
+  const adapter = makeAdapterStub();
+
+  await mod.initRateLimitThrottle(adapter, persistence as any, () => { resumeCount++; });
+
+  assert.equal(mod.isThrottled(), false);
+  assert.equal(resumeCount, 1);
+});
+
+test('onResume does NOT fire immediately when an active throttle is recovered', async (t) => {
+  const mod = await freshModuleWithCleanup(t);
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  let resumeCount = 0;
+  const futureReset = Math.floor(Date.now() / 1000) + 600;
+  const persistence = makePersistenceStub({ resetsAt: futureReset, activatedAt: Date.now() - 60000, modes: ['plan'] });
+  const adapter = makeAdapterStub();
+
+  await mod.initRateLimitThrottle(adapter, persistence as any, () => { resumeCount++; });
+
+  assert.equal(mod.isThrottled(), true);
+  assert.equal(resumeCount, 0);
+});
+
+test('initRateLimitThrottle is backward-compatible without onResume', async (t) => {
+  const mod = await freshModuleWithCleanup(t);
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const persistence = makePersistenceStub();
+  const adapter = makeAdapterStub();
+  await mod.initRateLimitThrottle(adapter, persistence as any);
+
+  const resetSec = Math.floor(Date.now() / 1000) + 1;
+  await mod.handleRateLimitEvent({ rateLimitType: 'five_hour', utilization: 0.96, resetsAt: resetSec });
+  assert.equal(mod.isThrottled(), true);
+
+  // Timer clearing without an onResume callback must not throw.
+  t.mock.timers.tick(60_000);
+  assert.equal(mod.isThrottled(), false);
+});
+
 test('persistence roundtrip with modes', async (t) => {
   const mod = await freshModuleWithCleanup(t);
   const persistence = makePersistenceStub();

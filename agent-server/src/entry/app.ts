@@ -55,6 +55,8 @@ import { CommandActionRouter } from '@orch/interactions/command-action-router.js
 import { createUpdatePrompt } from '@orch/interactions/update-prompt.js';
 import { registerMessageHandler } from '@orch/routing/message-router.js';
 import { initRateLimitThrottle } from '@domain/costs/rate-limit-throttle.js';
+import { initResumeRegistry } from '@domain/costs/resume-registry.js';
+import { dispatchPendingResumes } from '../orchestration/resume-dispatcher.js';
 import { scheduleRepo } from '@store/schedule-repo.js';
 import { runMigrations, migrateAistatusConfigLocation } from '@store/version-migrations.js';
 import { syncManagedHooks } from '@store/hook-sync.js';
@@ -196,10 +198,18 @@ setInteractiveCallbacksFactory(buildInteractiveCallbacks);
 const scheduler = createScheduler();
 scheduler.setAdminNotifier(notifyAdmin);
 setSchedulerRef(scheduler);
-initRateLimitThrottle(adapter, {
-  save: (state) => scheduleRepo.setRateLimitThrottle(state),
-  load: () => scheduleRepo.getRateLimitThrottle(),
-}).catch(e => log.error(`initRateLimitThrottle failed: ${e.message}`));
+// Resume registry must hydrate BEFORE the throttle: the throttle's restart-recovery path
+// may synchronously fire onResume → dispatchPendingResumes → takeAllResumes. Chain the two
+// inits so the registry is ready before any resume can fire (avoids a load race on restart).
+initResumeRegistry({
+  save: (entries) => scheduleRepo.setResumeQueue(entries),
+  load: () => scheduleRepo.getResumeQueue(),
+}).catch(e => log.error(`initResumeRegistry failed: ${e.message}`)).finally(() => {
+  initRateLimitThrottle(adapter, {
+    save: (state) => scheduleRepo.setRateLimitThrottle(state),
+    load: () => scheduleRepo.getRateLimitThrottle(),
+  }, () => { void dispatchPendingResumes(adapter); }).catch(e => log.error(`initRateLimitThrottle failed: ${e.message}`));
+});
 initDiskMonitor(adapter);
 
 const commandRouter = new CommandActionRouter();

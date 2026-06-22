@@ -132,7 +132,9 @@ How to run tests without tripping it:
 | `store/session-registry-repo.test.ts` | Test | SessionRegistryRepo concurrent mutate, flush ordering, cache consistency (Pattern A) |
 | `gateway-manager.test.ts` | Test | Gateway port conflict reuse |
 | `disk-monitor.test.ts` | Test | shouldAlert decision coverage |
-| `rate-limit-throttle.test.ts` | Test | Throttle activation/cross-restart/beforeRun |
+| `rate-limit-throttle.test.ts` | Test | Throttle activation/cross-restart/beforeRun + onResume hook (timer-clear / expired-recovery / active-recovery / backward-compat) |
+| `resume-registry.test.ts` | Test | Rate-limit resume registry: dedupe (direct→channel, thread→threadId), drain, persistence roundtrip/hydrate |
+| `orch/resume-dispatcher.test.ts` | Test | Auto-resume dispatch: direct→route / thread→continueThread + guards (stale/busy/missing/terminal) + CORTEX_AUTO_RESUME flag/drain |
 | `scheduler-precheck.test.ts` | Test | preCheck exit code and env |
 | `cli-utils.test.ts` | Test | formatHelp/formatError |
 | `template-resolver.test.ts` | Test | Template variables/block/conditional |

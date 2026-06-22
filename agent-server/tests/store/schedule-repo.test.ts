@@ -185,6 +185,43 @@ test('ScheduleRepo - rateLimitThrottle persists alongside tasks', async () => {
   assert.equal(data.rateLimitThrottle?.resetsAt, 999);
 });
 
+// ── Resume queue get/set roundtrip ────────────────────────────
+
+test('ScheduleRepo - getResumeQueue defaults to empty array', async () => {
+  const repo = createRepo();
+  assert.deepEqual(await repo.getResumeQueue(), []);
+});
+
+test('ScheduleRepo - resumeQueue get/set roundtrip', async () => {
+  const repo = createRepo();
+  const entries = [
+    { kind: 'direct' as const, channel: 'C1', userMessage: 'hi', recordedAt: 100 },
+    { kind: 'thread' as const, threadId: 'thr_a', channel: 'C2', userMessage: 'go', recordedAt: 200 },
+  ];
+  await repo.setResumeQueue(entries);
+
+  const got = await repo.getResumeQueue();
+  assert.equal(got.length, 2);
+  assert.equal(got[0].channel, 'C1');
+  assert.equal((got[1] as { threadId: string }).threadId, 'thr_a');
+
+  // Clear
+  await repo.setResumeQueue([]);
+  assert.deepEqual(await repo.getResumeQueue(), []);
+});
+
+test('ScheduleRepo - resumeQueue persists alongside tasks and throttle', async () => {
+  const repo = createRepo();
+  await repo.addTask(makeTask({ id: 't1', message: 'task 1' }));
+  await repo.setRateLimitThrottle({ resetsAt: 999, activatedAt: 888 });
+  await repo.setResumeQueue([{ kind: 'direct', channel: 'C1', userMessage: 'hi', recordedAt: 100 }]);
+
+  const data = await repo.read();
+  assert.equal(data.tasks.length, 1);
+  assert.equal(data.rateLimitThrottle?.resetsAt, 999);
+  assert.equal(data.resumeQueue?.length, 1);
+});
+
 // ── On-disk schema matches SchedulesData ──────────────────────
 
 test('ScheduleRepo - on-disk schema matches SchedulesData format', async () => {

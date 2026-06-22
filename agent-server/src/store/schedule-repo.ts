@@ -1,5 +1,5 @@
 // input:  schedules.json + channel-registry.json + JsonRepository
-// output: ScheduleRepo (read / addTask / removeTask / updateTask / rateLimitThrottle) + migration helpers
+// output: ScheduleRepo (read / addTask / removeTask / updateTask / rateLimitThrottle / resumeQueue) + migration helpers
 // pos:    Schedule persistence layer. Based on JsonRepository abstraction (Pattern A), AsyncMutex serializes reads/writes of schedules.json.
 //         Migration from channel→projectId reads channel-registry.json synchronously for reverse lookup.
 // >>> If I am updated, update my header comment and the parent folder's CORTEX.md <<<
@@ -8,6 +8,7 @@ import * as path from 'path';
 import * as fs from 'fs';
 import { JsonRepository } from '@core/json-repository.js';
 import { STORE_DIR } from '@core/paths.js';
+import type { ResumeEntry } from '@domain/costs/resume-registry.js';
 
 export const SCHEDULES_FILE = path.join(STORE_DIR, 'schedules.json');
 export const CHANNEL_REGISTRY_FILE = path.join(STORE_DIR, 'channel-registry.json');
@@ -56,6 +57,9 @@ export interface ScheduleTask {
 export interface SchedulesData {
   tasks: ScheduleTask[];
   rateLimitThrottle?: { resetsAt: number; activatedAt: number; modes?: string[] } | null;
+  /** Sessions/threads interrupted by a rate limit, awaiting auto-resume when the
+   *  window resets. Owned by domain/costs/resume-registry.ts. */
+  resumeQueue?: ResumeEntry[] | null;
 }
 
 function defaultData(): SchedulesData {
@@ -173,6 +177,18 @@ export class ScheduleRepo {
   async getRateLimitThrottle(): Promise<{ resetsAt: number; activatedAt: number; modes?: string[] } | null> {
     const data = await this._repo.read();
     return data.rateLimitThrottle || null;
+  }
+
+  async setResumeQueue(entries: ResumeEntry[] | null): Promise<void> {
+    await this._repo.mutate((data) => {
+      data.resumeQueue = entries;
+      return { next: data, result: undefined };
+    });
+  }
+
+  async getResumeQueue(): Promise<ResumeEntry[]> {
+    const data = await this._repo.read();
+    return data.resumeQueue ?? [];
   }
 
   /** Generic mutate passthrough for composite operations. */

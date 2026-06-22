@@ -26,6 +26,7 @@ const log = createLogger('agent-runner');
 import { createToolTrace } from '@platform/index.js';
 import { setStreamingCallback, clearStreamingCallback, publishPlanSubmitted, publishAskUserRequested } from './routing/hook-bridge.js';
 import { maybeNotifyCodexLowUsage } from '@domain/costs/codex-usage-monitor.js';
+import { recordResume } from '@domain/costs/resume-registry.js';
 import { getAgent } from '@domain/threads/index.js';
 import { runConversation } from './conversation-runner.js';
 import { isBgContinuationEnabled, isInteractiveChannel } from './bg-continuation.js';
@@ -211,6 +212,9 @@ async function handleDefaultAgentResult({ result, channel, adapter, statusMsg, s
   registerContinuationSink?: ((sink: ContinuationSink) => void) | null;
 }): Promise<void> {
   if (result?.rateLimited) {
+    // Record the interrupted conversation so it auto-resumes when the rate-limit window
+    // resets (rate-limit-throttle onResume → resume-dispatcher).
+    recordResume({ kind: 'direct', channel, userMessage, recordedAt: Date.now() });
     const { elapsedStr } = computeElapsed(startTime);
     const fallbackText = `${Icons.warning} ${buildSessionTag(sessionName, sessionId)}Rate limited — all fallbacks exhausted (${elapsedStr})`;
     await sealStatus(adapter, statusMsg, fallbackText, buildSealedStatusActionBlocks(fallbackText, { channel, sessionName, isDm: true }));

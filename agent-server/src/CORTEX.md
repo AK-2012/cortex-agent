@@ -28,7 +28,7 @@ Project→conduit mapping (formerly `channel-repo.ts`) has moved into `platform/
 | `sessions/` | `session.ts` `session-registry.ts` `session-backup.ts` `session-hooks.ts` (unified onNew/onMessageEnd hook pipeline — spawn + OutputStream display + optional agent injection) |
 | `tasks/` | `parser.ts` `lint.ts` `archiver.ts` `dispatcher.ts` `dispatch-utils.ts` `pending-tracker.ts` `store.ts` `recommendation/` `system/` |
 | `executions/` | `registry.ts` |
-| `costs/` | `cost-tracker.ts` `gateway-manager.ts` `rate-limit-parser.ts` `rate-limit-throttle.ts` `codex-usage-monitor.ts` `codex-event-format.ts` |
+| `costs/` | `cost-tracker.ts` `gateway-manager.ts` `rate-limit-parser.ts` `rate-limit-throttle.ts` `resume-registry.ts` (records sessions/threads interrupted by a rate limit, for auto-resume) `codex-usage-monitor.ts` `codex-event-format.ts` |
 | `scheduling/` | `scheduler.ts` `runner.ts` `job-registry.ts` `schedule-command.ts` `schedule-cli.ts` `jobs/` (includes `target-dispatch.ts` 4-way fresh/channel/session/thread decision) |
 | `memory/` | `index-regen.ts` `consolidate.ts` `watcher.ts` `skill-scanner.ts` `claude-md-scanner.ts` `claude-md-injector.ts` |
 | `monitor/` | `gpu-monitor.ts` `disk-monitor.ts` |
@@ -48,6 +48,7 @@ Project→conduit mapping (formerly `channel-repo.ts`) has moved into `platform/
 | `agent-runner.ts` | runAgent + lifecycle wrapper |
 | `thread-executor.ts` | Thread routing wrapper |
 | `lifecycle.ts` | Agent success/failure/recovery/retry |
+| `resume-dispatcher.ts` | rate-limit auto-resume: drains resume-registry on throttle clear, re-enters interrupted direct sessions (agentRunner.route) / threads (continueThread) with a `<system-reminder>` |
 | `dispatch-reconciler.ts` | stale dispatch cleanup timer (S13: extracted from app.ts) |
 | `routing/message-router.ts` | Slack message entry thin layer |
 | `routing/webhook.ts` | GitHub/task-op/hook webhook |

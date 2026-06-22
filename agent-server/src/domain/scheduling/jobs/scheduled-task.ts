@@ -20,6 +20,7 @@ import { allConfigsRateLimited } from '../../agents/facade.js';
 import { createThread } from '../../threads/index.js';
 import { runThread as runThreadExec, continueThread } from '../../threads/runner.js';
 import { maybeNotifyCodexLowUsage } from '../../costs/codex-usage-monitor.js';
+import { recordResume } from '../../costs/resume-registry.js';
 import { buildUserProcessingMessage, computeElapsed, buildSessionTag } from '@core/status-format.js';
 import { finalizeThreadSuccess, buildProgressUpdater } from './_shared.js';
 import { planScheduledDispatch, type DispatchPlan } from './target-dispatch.js';
@@ -131,6 +132,12 @@ async function runScheduledTaskAsync({ normalizedMessage, message, projectId, sc
     await maybeNotifyCodexLowUsage({ adapter, result });
 
     if (result?.rateLimited) {
+      // Record the interrupted thread so it auto-resumes when the rate-limit window resets.
+      // Only continue-thread plans have a durable thread to resume; fresh/project plans
+      // re-fire on their own cadence.
+      if (plan.kind === 'continue-thread') {
+        recordResume({ kind: 'thread', threadId: plan.threadId, channel: plan.channel, userMessage: normalizedMessage, recordedAt: Date.now() });
+      }
       const { elapsedStr } = computeElapsed(startTime);
       if (statusMsg) {
         const text = `${Icons.warning} ${buildSessionTag(sessionName, result?.sessionId)}Rate limited — all fallbacks exhausted (${elapsedStr})`;
