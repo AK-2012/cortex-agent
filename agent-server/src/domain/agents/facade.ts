@@ -13,6 +13,7 @@ import { isModeRateLimited, isThrottled } from '../costs/rate-limit-throttle.js'
 import { GATEWAY_URL } from '../costs/gateway-manager.js';
 import { createLogger } from '@core/log.js';
 import { loadCortexRules } from '../memory/rules-loader.js';
+import { t } from '../../core/i18n.js';
 
 const log = createLogger('facade');
 
@@ -207,8 +208,10 @@ export function runWithAdapter(
             // CORTEX_NOTIFY_COMPACTION=1. Reuses onAssistantMessage so the notice reaches the
             // user through the same channel as normal assistant output.
             if (process.env.CORTEX_NOTIFY_COMPACTION === '1') {
-              const tokens = event.preTokens ? `，压缩前 ~${event.preTokens} tokens` : '';
-              options.onAssistantMessage?.(`🗜️ 上下文已自动压缩（${event.trigger}${tokens}）。早期对话历史已被摘要，如有需要请重述关键信息。`);
+              const tokens = event.preTokens
+                ? t('notify.contextCompactedTokens', { preTokens: event.preTokens })
+                : '';
+              options.onAssistantMessage?.(`🗜️ ${t('notify.contextCompacted', { trigger: event.trigger, tokens })}`);
             }
             break;
           case 'plan_written':

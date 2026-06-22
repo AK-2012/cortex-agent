@@ -79,6 +79,24 @@ describe('i18n', () => {
     assert.equal(t('totally.unknown.key' as any), 'totally.unknown.key');
   });
 
+  it('context-compaction notice renders in the active locale, not hardcoded zh', () => {
+    setLocale('en');
+    const enMsg = t('notify.contextCompacted', { trigger: 'auto', tokens: '' });
+    assert.match(enMsg, /Context auto-compacted/);
+    assert.ok(!/[一-鿿]/.test(enMsg), 'English locale must not contain Chinese characters');
+    assert.ok(!enMsg.includes('${'), 'no unresolved placeholders');
+
+    setLocale('zh');
+    const zhMsg = t('notify.contextCompacted', { trigger: 'auto', tokens: '' });
+    assert.ok(/[一-鿿]/.test(zhMsg), 'zh locale renders Chinese');
+
+    // Token suffix interpolates preTokens in both locales.
+    setLocale('en');
+    const suffix = t('notify.contextCompactedTokens', { preTokens: 1234 });
+    assert.match(suffix, /1234/);
+    assert.ok(!suffix.includes('${'), 'no unresolved placeholders');
+  });
+
   it('en and zh expose the exact same key set (parity)', () => {
     const enKeys = Object.keys(en).sort();
     const zhKeys = Object.keys(zh).sort();

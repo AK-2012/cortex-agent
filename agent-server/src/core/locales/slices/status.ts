@@ -21,6 +21,9 @@ export const statusEn = {
   // --- Turn-completion notification ---
   'notify.turnComplete': 'Turn complete',
   'notify.turnFailed': 'Turn failed',
+  // --- Context compaction notification ---
+  'notify.contextCompacted': 'Context auto-compacted (${trigger}${tokens}). Earlier conversation history has been summarized; please restate key information if needed.',
+  'notify.contextCompactedTokens': ', ~${preTokens} tokens before compaction',
   // --- Execution report ---
   'status.noRunningExecutions': 'No running executions.',
   'status.runningExecutions': 'Running executions: ${count}',
@@ -49,6 +52,9 @@ export const statusZh: Record<keyof typeof statusEn, string> = {
   // --- Turn-completion notification ---
   'notify.turnComplete': '回合完成',
   'notify.turnFailed': '回合失败',
+  // --- Context compaction notification ---
+  'notify.contextCompacted': '上下文已自动压缩（${trigger}${tokens}）。早期对话历史已被摘要，如有需要请重述关键信息。',
+  'notify.contextCompactedTokens': '，压缩前 ~${preTokens} tokens',
   // --- Execution report ---
   'status.noRunningExecutions': '没有正在运行的执行。',
   'status.runningExecutions': '正在运行的执行：${count}',
