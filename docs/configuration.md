@@ -146,6 +146,8 @@ channel.
 | `CORTEX_GPU_MONITOR_MOCK` | — | Mock GPU data JSON for testing (overrides real nvidia-smi queries) |
 | `CORTEX_SERVER_UPDATE_DISABLE` | — | Set to `1` to disable the server auto-update check (enabled by default) |
 | `CORTEX_NOTIFY_COMPACTION` | — | Set to `1` to post a chat notice when an agent's context is compacted. Covers the Claude Code (print mode) and pi backends; the notice names the trigger and, for Claude Code, the pre-compaction token count |
+| `CORTEX_TURN_NOTIFY` | `on` | When a long-running turn finishes, Cortex posts a fresh message to the conversation so you get a push notification (the inline status seals to "✓ Done" with an edit, which Slack and Feishu do not notify on). Both success and failure are announced. Set to `0`/`false`/`off`/`no` to disable |
+| `CORTEX_TURN_NOTIFY_THRESHOLD_S` | `60` | Minimum turn duration, in seconds, before a completion notification is posted. Shorter turns stay quiet |
 
 ### Task dispatch
 

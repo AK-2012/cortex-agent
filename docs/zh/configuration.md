@@ -130,6 +130,8 @@ $CORTEX_HOME/
 | `CORTEX_GPU_MONITOR_MOCK` | — | 用于测试的模拟 GPU 数据 JSON（覆盖真实的 nvidia-smi 查询） |
 | `CORTEX_SERVER_UPDATE_DISABLE` | — | 设置为 `1` 以禁用服务器自动更新检查（默认开启） |
 | `CORTEX_NOTIFY_COMPACTION` | — | 设置为 `1`，在 agent 的上下文被压缩（compaction）时向会话发送一条提示。覆盖 Claude Code（print 模式）与 pi 两个后端；提示会注明触发原因，Claude Code 还会附上压缩前的 token 数 |
+| `CORTEX_TURN_NOTIFY` | `on` | 当一个耗时较长的回合结束时，Cortex 向会话发送一条新消息，让你收到推送通知（内联状态是以编辑方式封口为「✓ 完成」，而 Slack 与飞书都不会对消息编辑推送）。成功和失败都会提醒。设置为 `0`/`false`/`off`/`no` 以关闭 |
+| `CORTEX_TURN_NOTIFY_THRESHOLD_S` | `60` | 触发完成提醒所需的最短回合时长（秒）。更短的回合保持静默 |
 
 ### 任务派发
 
