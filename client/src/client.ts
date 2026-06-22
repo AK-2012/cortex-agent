@@ -11,6 +11,7 @@ import { execFileSync, spawn } from 'child_process';
 import { scanCortexMDChain, type CortexMDEntry } from './cortex-md-scanner.js';
 import { createLogger } from './log.js';
 import { CONFIG_DIR } from './paths.js';
+import { resolveClientToken, buildClientHeaders } from './auth-headers.js';
 import {
   handleCortexRunLaunch,
   handleCortexRunCancel,
@@ -63,6 +64,7 @@ interface ClientConfig {
   serverHost: string;
   serverPort: number;
   deviceName: string;
+  clientToken: string;
 }
 
 function loadConfig(): ClientConfig {
@@ -75,6 +77,8 @@ function loadConfig(): ClientConfig {
       serverHost: cfg.serverHost,
       serverPort: cfg.serverPort || 3002,
       deviceName: cfg.deviceName || os.hostname(),
+      // WS bearer token required by the agent-server gate; env overrides config (see auth-headers.ts).
+      clientToken: resolveClientToken(cfg, process.env),
     };
   } catch (err) {
     log.error(`Failed to load config from ${configPath}: ${(err as Error).message}`);
@@ -87,6 +91,7 @@ const CONFIG = loadConfig();
 const SERVER_HOST = CONFIG.serverHost;
 const SERVER_PORT = CONFIG.serverPort;
 const DEVICE_NAME = CONFIG.deviceName;
+const CLIENT_TOKEN = CONFIG.clientToken;
 const PLATFORM = process.platform;
 const HEARTBEAT_INTERVAL_MS = 5000;
 
@@ -707,9 +712,10 @@ const MAX_RECONNECT_DELAY = 30000;
 
 function connect() {
   const url = `ws://${SERVER_HOST}:${SERVER_PORT}`;
-  log.info(`Connecting to ${url} as "${DEVICE_NAME}" (${PLATFORM})...`);
+  const headers = buildClientHeaders(CLIENT_TOKEN);
+  log.info(`Connecting to ${url} as "${DEVICE_NAME}" (${PLATFORM})${headers ? ' [token]' : ' [no-token]'}...`);
 
-  ws = new WebSocket(url);
+  ws = headers ? new WebSocket(url, { headers }) : new WebSocket(url);
 
   ws.on('open', () => {
     log.info(`Connected to server`);

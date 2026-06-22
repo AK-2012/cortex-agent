@@ -5,6 +5,7 @@
 | File | Purpose |
 |------|---------|
 | `client.ts` | WebSocket client — receives commands from agent-server, executes locally, returns results |
+| `auth-headers.ts` | `resolveClientToken`/`buildClientHeaders` — WS bearer token (`x-cortex-token`) from cortex-client.json `clientToken` or `CORTEX_CLIENT_TOKEN` env |
 | `cortex-run-watcher.ts` | Standalone watchdog — spawns user command, detects stalls, writes state/output/result, touches callback.pending |
 | `cortex-run-launch.ts` | Launch handler + callback scanning + orphan detection + ack handling — see DR-0011 §4.5 + §4.7 |
 | `cortex-md-scanner.ts` | Scans CORTEX.md chain for a given path |
