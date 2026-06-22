@@ -18,6 +18,9 @@ export const statusEn = {
   'status.supersededSeeNewReply': 'see new reply',
   'status.processingAskResponse': 'Processing AskUserQuestion response...',
   'status.errorBody': 'Error: ${message}',
+  // --- Turn-completion notification ---
+  'notify.turnComplete': 'Turn complete',
+  'notify.turnFailed': 'Turn failed',
   // --- Execution report ---
   'status.noRunningExecutions': 'No running executions.',
   'status.runningExecutions': 'Running executions: ${count}',
@@ -43,6 +46,9 @@ export const statusZh: Record<keyof typeof statusEn, string> = {
   'status.supersededSeeNewReply': '查看新回复',
   'status.processingAskResponse': '正在处理 AskUserQuestion 回复……',
   'status.errorBody': '错误：${message}',
+  // --- Turn-completion notification ---
+  'notify.turnComplete': '回合完成',
+  'notify.turnFailed': '回合失败',
   // --- Execution report ---
   'status.noRunningExecutions': '没有正在运行的执行。',
   'status.runningExecutions': '正在运行的执行：${count}',

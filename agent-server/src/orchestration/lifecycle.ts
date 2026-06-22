@@ -1,4 +1,4 @@
-// input:  orch/busy-tracker(trackPendingTask), orch/channel-queue, orch/superseded-edits, orch/active-agents, orch/interactions/plan-approvals, status-helpers
+// input:  orch/busy-tracker(trackPendingTask), orch/channel-queue, orch/superseded-edits, orch/active-agents, orch/interactions/plan-approvals, orch/turn-notify, status-helpers
 // output: handleAgentSuccess/Error, reprocessMessage
 // pos:    Agent runtime lifecycle handling (success/failure/approval/resume)
 // >>> If I am updated, update my header comment and the parent folder's CORTEX.md <<<
@@ -25,6 +25,7 @@ import { runAgent, getClaudeMode, getActiveProfile, resolveBackendForChannel } f
 import { projectStore } from '@domain/projects/index.js';
 
 import { setStreamingCallback, clearStreamingCallback } from './routing/hook-bridge.js';
+import { maybeNotifyTurnComplete } from './turn-notify.js';
 import { buildContinuationSink } from './bg-continuation.js';
 import { recordCost } from '@domain/costs/cost-tracker.js';
 import type { ContinuationSink } from '../agent-adapter/types.js';
@@ -83,6 +84,13 @@ export async function handleAgentSuccess({ result, channel, adapter, statusMsg, 
     : `${Icons.ok} ${t('status.done')} | ${sessionTag}(${elapsedStr}${metrics})`;
   await sealStatus(adapter, statusMsg, statusText, buildSealedStatusActionBlocks(statusText, { channel, sessionName, isDm: true }));
 
+  // Push a NEW message when a long-running user turn finishes (the sealed status above is an
+  // edit, which does not notify on Slack/Feishu). Only fires when no ask-user questions are
+  // pending — those already prompt the user.
+  if (askCount === 0) {
+    await maybeNotifyTurnComplete({ adapter, channel, threadAnchorId, sessionName, sessionId: result?.sessionId ?? null, elapsedS, elapsedStr, status: 'completed', metricsSuffix: metrics });
+  }
+
   if (userMessageTs) {
     await conversationLedger.completeTurn(channel, userMessageTs, { executionId });
   }
@@ -134,6 +142,7 @@ async function finalizeBackgroundContinuation({ adapter, statusMsg, channel, ses
   const sessionTag = buildSessionTag(sessionName, sessionId);
   const statusText = `${Icons.ok} ${t('status.done')} | ${sessionTag}(${elapsedStr}${metrics})`;
   await sealStatus(adapter, statusMsg, statusText, buildSealedStatusActionBlocks(statusText, { channel, sessionName, isDm: true }));
+  await maybeNotifyTurnComplete({ adapter, channel, threadAnchorId: null, sessionName, sessionId, elapsedS: computeElapsed(startTime).elapsedS, elapsedStr, status: 'completed', metricsSuffix: metrics });
   if (userMessageTs) {
     await conversationLedger.completeTurn(channel, userMessageTs, { executionId }).catch((e) => log.error('completeTurn failed:', (e as Error).message));
   }
@@ -207,6 +216,7 @@ export async function handleAgentError({ error, channel, adapter, statusMsg, sta
   finalizeLocalExecution({ executionId, status: 'failed', error, durationS: elapsedS });
   const errorText = `${Icons.error} ${sessionTag}${t('status.error')} (${elapsedStr})`;
   await sealStatus(adapter, statusMsg, errorText, buildSealedStatusActionBlocks(errorText, { channel, sessionName, isDm: true }));
+  await maybeNotifyTurnComplete({ adapter, channel, threadAnchorId, sessionName, sessionId: resolvedSessionId, elapsedS, elapsedStr, status: 'failed' });
   const errorDest: Destination = { type: 'interactive-reply', conduit: channel, sessionId: resolvedSessionId ?? '' };
   const queue = getOutboundQueue();
   if (queue) {
