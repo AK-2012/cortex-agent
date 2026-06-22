@@ -1,5 +1,5 @@
 // input:  Node test runner + createUpdatePrompt + MockAdapter + CommandActionRouter
-// output: tests for update-prompt.ts — 3-button registration, click paths, stale, re-prompt, timeout
+// output: tests for update-prompt.ts — 4-button registration, click paths, stale, re-prompt, timeout
 // >>> If I am updated, update my header comment and the parent folder's CORTEX.md <<<
 
 import test from 'node:test';
@@ -16,7 +16,7 @@ const flush = () => setImmediate();
 // Registration
 // ============================================================
 
-test('createUpdatePrompt registers three actionIds on router', () => {
+test('createUpdatePrompt registers four actionIds on router', () => {
   const adapter = new MockAdapter({ adminChannel: 'C-admin' } as any);
   const router = new CommandActionRouter();
   createUpdatePrompt(adapter, router);
@@ -25,6 +25,9 @@ test('createUpdatePrompt registers three actionIds on router', () => {
   // Each should not throw — handler is registered
   assert.doesNotThrow(async () => {
     await adapter.simulateAction('cmd:update:apply', '2026.5.30');
+  });
+  assert.doesNotThrow(async () => {
+    await adapter.simulateAction('cmd:update:release-note', '2026.5.30');
   });
   assert.doesNotThrow(async () => {
     await adapter.simulateAction('cmd:update:skip', '2026.5.30');
@@ -38,7 +41,7 @@ test('createUpdatePrompt registers three actionIds on router', () => {
 // ask() posts interactive message
 // ============================================================
 
-test('ask() posts interactive message to system-notice with three buttons', async () => {
+test('ask() posts interactive message to system-notice with four buttons', async () => {
   const adapter = new MockAdapter({ adminChannel: 'C-admin' } as any);
   const router = new CommandActionRouter();
   const prompt = createUpdatePrompt(adapter, router);
@@ -52,22 +55,26 @@ test('ask() posts interactive message to system-notice with three buttons', asyn
   // Check actions array on the posted object
   const actions = noticePost.actions;
   assert.ok(actions, 'expected actions on posted message');
-  assert.equal(actions.length, 3);
+  assert.equal(actions.length, 4);
 
   // Verify button metadata
   const applyBtn = actions.find(a => a.actionId === 'cmd:update:apply');
+  const releaseNoteBtn = actions.find(a => a.actionId === 'cmd:update:release-note');
   const skipBtn = actions.find(a => a.actionId === 'cmd:update:skip');
   const cancelBtn = actions.find(a => a.actionId === 'cmd:update:cancel');
   assert.ok(applyBtn);
+  assert.ok(releaseNoteBtn);
   assert.ok(skipBtn);
   assert.ok(cancelBtn);
 
   assert.equal(applyBtn!.style, 'primary');
+  assert.equal(releaseNoteBtn!.style, undefined);
   assert.equal(skipBtn!.style, undefined);
   assert.equal(cancelBtn!.style, 'danger');
 
   // Value carries latestVersion
   assert.equal(applyBtn!.value, '2026.5.30');
+  assert.equal(releaseNoteBtn!.value, '2026.5.30');
   assert.equal(skipBtn!.value, '2026.5.30');
   assert.equal(cancelBtn!.value, '2026.5.30');
 });
