@@ -48,7 +48,7 @@ Project→conduit mapping (formerly `channel-repo.ts`) has moved into `platform/
 | `agent-runner.ts` | runAgent + lifecycle wrapper |
 | `thread-executor.ts` | Thread routing wrapper |
 | `lifecycle.ts` | Agent success/failure/recovery/retry |
-| `resume-dispatcher.ts` | rate-limit auto-resume: drains resume-registry on throttle clear, re-enters interrupted direct sessions (agentRunner.route) / threads (continueThread) with a `<system-reminder>` |
+| `resume-dispatcher.ts` | rate-limit auto-resume: drains resume-registry on throttle clear (or on startup if orphans remain with no active throttle), re-enters interrupted direct sessions (agentRunner.route, serial per channel) / threads (resumeRateLimitedThread, fired concurrently — channel-parallel-safe, only skipped when a live direct session holds the channel) |
 | `dispatch-reconciler.ts` | stale dispatch cleanup timer (S13: extracted from app.ts) |
 | `routing/message-router.ts` | Slack message entry thin layer |
 | `routing/webhook.ts` | GitHub/task-op/hook webhook |

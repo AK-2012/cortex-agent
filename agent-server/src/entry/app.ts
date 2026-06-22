@@ -54,8 +54,8 @@ import { registerInteractionHandlers, initInteractionHandlers } from '@orch/inte
 import { CommandActionRouter } from '@orch/interactions/command-action-router.js';
 import { createUpdatePrompt } from '@orch/interactions/update-prompt.js';
 import { registerMessageHandler } from '@orch/routing/message-router.js';
-import { initRateLimitThrottle } from '@domain/costs/rate-limit-throttle.js';
-import { initResumeRegistry } from '@domain/costs/resume-registry.js';
+import { initRateLimitThrottle, isThrottled } from '@domain/costs/rate-limit-throttle.js';
+import { initResumeRegistry, getResumeCount, recordResume } from '@domain/costs/resume-registry.js';
 import { dispatchPendingResumes } from '../orchestration/resume-dispatcher.js';
 import { scheduleRepo } from '@store/schedule-repo.js';
 import { runMigrations, migrateAistatusConfigLocation } from '@store/version-migrations.js';
@@ -198,18 +198,9 @@ setInteractiveCallbacksFactory(buildInteractiveCallbacks);
 const scheduler = createScheduler();
 scheduler.setAdminNotifier(notifyAdmin);
 setSchedulerRef(scheduler);
-// Resume registry must hydrate BEFORE the throttle: the throttle's restart-recovery path
-// may synchronously fire onResume → dispatchPendingResumes → takeAllResumes. Chain the two
-// inits so the registry is ready before any resume can fire (avoids a load race on restart).
-initResumeRegistry({
-  save: (entries) => scheduleRepo.setResumeQueue(entries),
-  load: () => scheduleRepo.getResumeQueue(),
-}).catch(e => log.error(`initResumeRegistry failed: ${e.message}`)).finally(() => {
-  initRateLimitThrottle(adapter, {
-    save: (state) => scheduleRepo.setRateLimitThrottle(state),
-    load: () => scheduleRepo.getRateLimitThrottle(),
-  }, () => { void dispatchPendingResumes(adapter); }).catch(e => log.error(`initRateLimitThrottle failed: ${e.message}`));
-});
+// Rate-limit resume registry + throttle are initialized later, inside main(), as one ordered
+// awaited sequence (initRateLimitRecovery) — it must run AFTER threadStore.load() so it can
+// reconcile orphaned rate-limited threads back into the resume queue.
 initDiskMonitor(adapter);
 
 const commandRouter = new CommandActionRouter();
@@ -346,6 +337,34 @@ process.on('SIGTERM', async () => {
   threadStore.load();
   await threadStore.markRunningAsFailedOnStartup();
   await threadStore.cleanup();
+
+  // --- Rate-limit recovery (ordered; must run after threadStore.load) ---
+  // 1) hydrate the persisted resume queue. 2) Reconcile orphaned rate-limited threads: any thread
+  //    left in 'rate_limited' (markRunningAsFailedOnStartup deliberately spares them) that is not
+  //    represented in the queue — dropped by a prior dispatcher skip, or a queue/throttle desync
+  //    across restart — is re-queued (idempotent, dedupe by threadId). 3) Arm the throttle; its
+  //    restart-recovery may fire onResume synchronously, draining the (already-reconciled) queue.
+  //    4) If nothing is throttled and entries remain, drain now so a clean window resumes them.
+  await initResumeRegistry({
+    save: (entries) => scheduleRepo.setResumeQueue(entries),
+    load: () => scheduleRepo.getResumeQueue(),
+  });
+  let reQueuedRateLimited = 0;
+  for (const t of threadStore.getAll()) {
+    if (t.status === 'rate_limited') {
+      recordResume({ kind: 'thread', threadId: t.id, channel: t.channel, userMessage: t.userMessage ?? '', recordedAt: Date.now() });
+      reQueuedRateLimited++;
+    }
+  }
+  if (reQueuedRateLimited > 0) log.info(`Reconciled ${reQueuedRateLimited} rate-limited thread(s) into the resume queue`);
+  await initRateLimitThrottle(adapter, {
+    save: (state) => scheduleRepo.setRateLimitThrottle(state),
+    load: () => scheduleRepo.getRateLimitThrottle(),
+  }, () => { void dispatchPendingResumes(adapter); });
+  if (!isThrottled() && getResumeCount() > 0) {
+    log.info(`Startup: ${getResumeCount()} pending resume(s), no active throttle — draining`);
+    void dispatchPendingResumes(adapter);
+  }
 
   // GC: prune stale sessions (older than 7 days, unreferenced by running executions or active threads)
   sessionStore.setOnPruneSession(cleanupAllBackups);

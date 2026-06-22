@@ -1,9 +1,11 @@
 // input:  rate-limit-throttle onResume → resume-registry (takeAllResumes) + agentRunner / resumeRateLimitedThread
 // output: dispatchPendingResumes — wakes sessions/threads interrupted by a rate limit
-// pos:    orch/ — runs when the rate-limit window resets. Direct sessions are re-entered with a
-//         <system-reminder>; threads (status 'rate_limited') are re-run from the interrupted step
-//         via resumeRateLimitedThread with options rebuilt by buildResumeOptions (dispatch onEnd
-//         hook + destination). All deps injectable for tests.
+// pos:    orch/ — runs when the rate-limit window resets (or on startup if the queue has orphans
+//         and no throttle is active). Direct sessions are re-entered with a <system-reminder> and
+//         serialized per channel; threads (status 'rate_limited') are re-run from the interrupted
+//         step via resumeRateLimitedThread, fired concurrently (channel-parallel-safe) and only
+//         skipped if a live direct session holds the channel. Options rebuilt by buildResumeOptions
+//         (dispatch onEnd hook + destination). All deps injectable for tests.
 // >>> If I am updated, update my header comment and the parent folder's CORTEX.md <<<
 
 import type { PlatformAdapter, IncomingMessage } from '@platform/index.js';
@@ -50,6 +52,11 @@ export interface ResumeDeps {
   buildResumeOptions: (thread: ThreadRecord) => RunThreadOptions | null;
   getThread: (threadId: string) => ThreadRecord | null;
   channelBusy: (channel: string) => boolean;
+  /** True if a DIRECT (interactive) session is live on the channel — i.e. an execution with no
+   *  threadId. Only direct sessions force a channel to serialize (a Slack conversation cannot
+   *  interleave two assistant turns). Threads are channel-parallel-safe, so a rate-limited thread
+   *  only needs to avoid a live direct session, not other threads. */
+  directSessionBusy: (channel: string) => boolean;
   now: () => number;
   delay: (ms: number) => Promise<void>;
 }
@@ -62,6 +69,7 @@ function defaultDeps(): ResumeDeps {
     buildResumeOptions: (thread) => buildResumeOptions(thread),
     getThread: (id) => threadStore.get(id),
     channelBusy: (ch) => runningExecutions.hasChannel(ch),
+    directSessionBusy: (ch) => runningExecutions.getByChannel(ch).some(e => !e.threadId),
     now: () => Date.now(),
     delay: (ms) => new Promise((r) => setTimeout(r, ms)),
   };
@@ -91,9 +99,16 @@ export async function dispatchPendingResumes(adapter: PlatformAdapter, overrides
     const skip = guardSkipReason(entry, deps);
     if (skip) { log.info(`Resume skip (${entryKey(entry)}): ${skip}`); continue; }
     try {
-      if (dispatched > 0) await deps.delay(RESUME_STAGGER_MS); // stagger between actual dispatches
-      if (entry.kind === 'direct') await resumeDirect(entry, adapter, deps);
-      else await resumeThread(entry, deps.getThread(entry.threadId)!, adapter, deps);
+      if (dispatched > 0) await deps.delay(RESUME_STAGGER_MS); // stagger START times, not completion
+      if (entry.kind === 'direct') {
+        // Direct sessions are serial per channel — await so the next dispatch sees it as busy.
+        await resumeDirect(entry, adapter, deps);
+      } else {
+        // Threads are channel-parallel-safe: fire-and-forget so multiple rate-limited threads on
+        // the same channel resume concurrently instead of serializing behind the first one.
+        void resumeThread(entry, deps.getThread(entry.threadId)!, adapter, deps)
+          .catch(e => log.error(`Resume failed (${entryKey(entry)}): ${(e as Error).message}`));
+      }
       dispatched++;
     } catch (e) {
       log.error(`Resume failed (${entryKey(entry)}): ${(e as Error).message}`);
@@ -105,12 +120,17 @@ export async function dispatchPendingResumes(adapter: PlatformAdapter, overrides
 /** Returns a human reason to skip, or null to proceed. */
 function guardSkipReason(entry: ResumeEntry, deps: ResumeDeps): string | null {
   if (deps.now() - entry.recordedAt > MAX_RESUME_AGE_MS) return 'stale';
-  if (deps.channelBusy(entry.channel)) return 'channel already has a running execution';
-  if (entry.kind === 'thread') {
-    const thread = deps.getThread(entry.threadId);
-    if (!thread) return 'thread no longer exists';
-    if (thread.status !== 'rate_limited') return `thread is ${thread.status}`;
+  if (entry.kind === 'direct') {
+    // A direct session is a live conversation — serialize per channel (no interleaved turns).
+    if (deps.channelBusy(entry.channel)) return 'channel already has a running execution';
+    return null;
   }
+  // Thread: channel-parallel-safe. Only avoid a live direct session (interactive turn) on the
+  // channel; concurrent threads on the same channel are fine and must not skip each other.
+  if (deps.directSessionBusy(entry.channel)) return 'direct session active on channel';
+  const thread = deps.getThread(entry.threadId);
+  if (!thread) return 'thread no longer exists';
+  if (thread.status !== 'rate_limited') return `thread is ${thread.status}`;
   return null;
 }
 

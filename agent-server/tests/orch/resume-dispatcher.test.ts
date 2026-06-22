@@ -23,6 +23,7 @@ function baseDeps(entries: ResumeEntry[], overrides: any = {}) {
     },
     getThread: (_id: string) => ({ id: _id, status: 'rate_limited', channel: 'C1', projectId: 'proj' }) as any,
     channelBusy: (_c: string) => false,
+    directSessionBusy: (_c: string) => false,
     now: () => NOW,
     delay: async (_ms: number) => {},
     ...overrides,
@@ -92,7 +93,7 @@ test('stale entry is dropped (older than max age)', async () => {
   assert.equal(calls.route.length, 0);
 });
 
-test('entry on a busy channel is dropped', async () => {
+test('direct entry on a busy channel is dropped', async () => {
   const adapter = new MockAdapter({ adminChannel: 'admin' });
   const { deps, calls } = baseDeps(
     [{ kind: 'direct', channel: 'C1', userMessage: 'orig', recordedAt: NOW }],
@@ -100,6 +101,38 @@ test('entry on a busy channel is dropped', async () => {
   );
   await dispatchPendingResumes(adapter as any, deps);
   assert.equal(calls.route.length, 0);
+});
+
+test('thread entry is NOT skipped when only other threads hold the channel (channelBusy true, no direct session)', async () => {
+  const adapter = new MockAdapter({ adminChannel: 'admin' });
+  const { deps, calls } = baseDeps(
+    [{ kind: 'thread', threadId: 'thr_a', channel: 'C2', userMessage: 'go', recordedAt: NOW }],
+    { channelBusy: (_c: string) => true, directSessionBusy: (_c: string) => false },
+  );
+  await dispatchPendingResumes(adapter as any, deps);
+  assert.equal(calls.resume.length, 1, 'thread resumes despite a concurrent thread on the channel');
+});
+
+test('thread entry IS skipped when a live direct session holds the channel', async () => {
+  const adapter = new MockAdapter({ adminChannel: 'admin' });
+  const { deps, calls } = baseDeps(
+    [{ kind: 'thread', threadId: 'thr_a', channel: 'C2', userMessage: 'go', recordedAt: NOW }],
+    { directSessionBusy: (_c: string) => true },
+  );
+  await dispatchPendingResumes(adapter as any, deps);
+  assert.equal(calls.resume.length, 0, 'thread avoids interleaving with an interactive turn');
+});
+
+test('multiple rate-limited threads on the SAME channel all resume (no self-skip)', async () => {
+  const adapter = new MockAdapter({ adminChannel: 'admin' });
+  const { deps, calls } = baseDeps([
+    { kind: 'thread', threadId: 'thr_a', channel: 'C1', userMessage: 'a', recordedAt: NOW },
+    { kind: 'thread', threadId: 'thr_b', channel: 'C1', userMessage: 'b', recordedAt: NOW },
+    { kind: 'thread', threadId: 'thr_c', channel: 'C1', userMessage: 'c', recordedAt: NOW },
+  ]);
+  await dispatchPendingResumes(adapter as any, deps);
+  assert.equal(calls.resume.length, 3, 'all three threads on one channel resume concurrently');
+  assert.deepEqual(calls.resume.map((r: any) => r.threadId).sort(), ['thr_a', 'thr_b', 'thr_c']);
 });
 
 test('thread entry dropped when thread no longer exists', async () => {
