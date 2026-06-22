@@ -1,11 +1,11 @@
 // input:  node:test, status-helpers, MockAdapter
-// output: writeStatus/sealStatus serialization and final-state sealing tests
+// output: writeStatus/sealStatus serialization, final-state sealing, and status button (cancel/newq) tests
 // pos:    status-message serializer regression test
 // >>> If I am updated, update my header comment and the parent folder's CORTEX.md <<<
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { writeStatus, sealStatus, buildStatusActionBlocks } from '../src/orchestration/status-helpers.js';
+import { writeStatus, sealStatus, buildStatusActionBlocks, isStatusNewqButtonEnabled } from '../src/orchestration/status-helpers.js';
 import { MockAdapter } from '../src/platform/testing.js';
 import type { RichBlock, ActionElement } from '../src/platform/index.js';
 
@@ -13,6 +13,11 @@ function cancelButtonValue(blocks: RichBlock[]): any {
   const actions = blocks.find((b: any) => b.type === 'actions') as any;
   const cancel = (actions?.elements as ActionElement[] | undefined)?.find((e: any) => e.actionId === 'status_cancel') as any;
   return cancel ? JSON.parse(cancel.value) : null;
+}
+
+function findButton(blocks: RichBlock[], actionId: string): any {
+  const actions = blocks.find((b: any) => b.type === 'actions') as any;
+  return (actions?.elements as ActionElement[] | undefined)?.find((e: any) => e.actionId === actionId) ?? null;
 }
 
 // --- Cancel button payload ---
@@ -30,6 +35,46 @@ test('buildStatusActionBlocks: Cancel button carries threadId (thread path), exe
   const value = cancelButtonValue(blocks);
   assert.equal(value.threadId, 'thr_x');
   assert.equal(value.executionId, null);
+});
+
+// --- New (quiet) button (=!newq), env-gated, default off ---
+
+function withNewqEnv<T>(value: string | undefined, fn: () => T): T {
+  const prev = process.env.CORTEX_STATUS_NEWQ_BUTTON;
+  if (value === undefined) delete process.env.CORTEX_STATUS_NEWQ_BUTTON;
+  else process.env.CORTEX_STATUS_NEWQ_BUTTON = value;
+  try {
+    return fn();
+  } finally {
+    if (prev === undefined) delete process.env.CORTEX_STATUS_NEWQ_BUTTON;
+    else process.env.CORTEX_STATUS_NEWQ_BUTTON = prev;
+  }
+}
+
+test('newq button: hidden by default (env unset), New button still present', () => {
+  withNewqEnv(undefined, () => {
+    const blocks = buildStatusActionBlocks('Processing', { channel: 'C1', sessionName: null, isDm: true });
+    assert.equal(isStatusNewqButtonEnabled(), false);
+    assert.ok(findButton(blocks, 'status_new'), 'New button present in DM');
+    assert.equal(findButton(blocks, 'status_newq'), null, 'newq button absent by default');
+  });
+});
+
+test('newq button: shown in DM when CORTEX_STATUS_NEWQ_BUTTON enabled, carries channel', () => {
+  withNewqEnv('1', () => {
+    const blocks = buildStatusActionBlocks('Processing', { channel: 'C1', sessionName: null, isDm: true });
+    assert.equal(isStatusNewqButtonEnabled(), true);
+    const newq = findButton(blocks, 'status_newq');
+    assert.ok(newq, 'newq button present when enabled');
+    assert.equal(newq.value, 'C1');
+  });
+});
+
+test('newq button: DM-only — absent in a non-DM thread even when enabled', () => {
+  withNewqEnv('on', () => {
+    const blocks = buildStatusActionBlocks('Processing', { channel: 'C1', sessionName: null, isDm: false, threadId: 'thr_x' });
+    assert.equal(findButton(blocks, 'status_newq'), null, 'newq button absent outside DM');
+  });
 });
 
 // --- Basic serialization ---

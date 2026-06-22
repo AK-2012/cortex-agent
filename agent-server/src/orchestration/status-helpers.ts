@@ -19,6 +19,14 @@ export { computeElapsed, formatMetricsSuffix, buildSessionTag, buildUserProcessi
 
 const log = createLogger('status-helpers');
 
+/** Feature gate: the "New (quiet)" status button (=!newq, skips the pre-close hook)
+ *  is OFF by default. Opt in with CORTEX_STATUS_NEWQ_BUTTON = 1/true/on/yes. */
+export function isStatusNewqButtonEnabled(): boolean {
+  const v = process.env.CORTEX_STATUS_NEWQ_BUTTON;
+  if (v === undefined) return false;
+  return ['1', 'true', 'on', 'yes'].includes(v.trim().toLowerCase());
+}
+
 export function resolveExecutionProject({ execution, fallbackMessage }: { execution: ExecutionRecord | null; fallbackMessage: string }): string {
   return execution?.project || (projectStore.resolveFromMessage(fallbackMessage || '')?.id ?? 'general');
 }
@@ -153,6 +161,14 @@ function buildActionElements({ channel, sessionName, isDm, includeCancel, thread
       type: 'button',
       text: t('btn.new'),
       actionId: 'status_new',
+      value: channel,
+    });
+  }
+  if (isDm && isStatusNewqButtonEnabled()) {
+    elements.push({
+      type: 'button',
+      text: t('btn.newq'),
+      actionId: 'status_newq',
       value: channel,
     });
   }

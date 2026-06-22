@@ -238,6 +238,7 @@ function registerStatusActionHandlers(adapter: PlatformAdapter): void {
   adapter.onAction('status_cancel', handleStatusCancel);
   adapter.onAction('status_resume', handleStatusResume);
   adapter.onAction('status_new', handleStatusNew);
+  adapter.onAction('status_newq', handleStatusNewq);
 }
 
 async function handleStatusCancel(ctx: ActionContext): Promise<void> {
@@ -316,15 +317,26 @@ async function handleStatusResume(ctx: ActionContext): Promise<void> {
   }).catch(() => {});
 }
 
+// "New" button (=!new): close the session and run the pre-close hook.
 async function handleStatusNew(ctx: ActionContext): Promise<void> {
+  await resetChannelFromStatusButton(ctx, { skipHook: false });
+}
+
+// "New (quiet)" button (=!newq): close the session WITHOUT running the pre-close hook.
+async function handleStatusNewq(ctx: ActionContext): Promise<void> {
+  await resetChannelFromStatusButton(ctx, { skipHook: true });
+}
+
+async function resetChannelFromStatusButton(ctx: ActionContext, opts: { skipHook: boolean }): Promise<void> {
   if (!_adapter) return;
   const channel = ctx.value;
   // Status message IS the thread parent (no thread_ts on it) — use its messageId
   // as the thread context so hook messages land in the session's thread.
   const threadAnchorId = ctx.messageRef?.threadId || ctx.messageRef?.messageId;
 
-  // Fire-and-forget: hook starts, session closes immediately without waiting
-  void fireAndForgetPreCloseHook(channel, _adapter, threadAnchorId);
+  // Fire-and-forget: hook starts, session closes immediately without waiting.
+  // The quiet variant (!newq) skips the hook entirely.
+  if (!opts.skipHook) void fireAndForgetPreCloseHook(channel, _adapter, threadAnchorId);
 
   closeSession(channel);
   const conv = await conversationLedger.getConversation(channel);

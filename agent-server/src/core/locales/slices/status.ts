@@ -25,6 +25,7 @@ export const statusEn = {
   'btn.cancel': 'Cancel',
   'btn.resume': 'Resume',
   'btn.new': 'New',
+  'btn.newq': 'New (quiet)',
 } as const;
 
 export const statusZh: Record<keyof typeof statusEn, string> = {
@@ -49,4 +50,5 @@ export const statusZh: Record<keyof typeof statusEn, string> = {
   'btn.cancel': '取消',
   'btn.resume': '恢复',
   'btn.new': '新建',
+  'btn.newq': '新建(静默)',
 };

@@ -118,7 +118,7 @@ How to run tests without tripping it:
 | `schedule-cli.test.ts` | Test | scheduler API + schedule CLI |
 | `slack-message.test.ts` | Test | mergeSubstantialOutput merging |
 | `slack-adapter-throttle.test.ts` | Test | SlackAdapter.updateMessage per-message throttle + 429 retry-after |
-| `status-helpers.test.ts` | Test | writeStatus/sealStatus serialization |
+| `status-helpers.test.ts` | Test | writeStatus/sealStatus serialization + status button payloads (cancel/newq env-gate) |
 | `tool-trace.test.ts` | Test | Tool lines merge via OutputStream mutable region |
 | `update-prompt.test.ts` | Test | 8-path coverage: 3-button registration, click paths, stale, re-prompt, timeout ([DR-0013]) |
 | `update-state.test.ts` | Test | update-state.ts round-trip / missing-file / malformed-json coverage ([DR-0013]) |
