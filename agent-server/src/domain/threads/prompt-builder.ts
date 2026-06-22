@@ -229,8 +229,8 @@ export function buildStepPrompt(threadId: string, agentConfig: AgentSlotConfig, 
  *  - applies the default agent's promptTemplate (typically `{{input}}`) with empty thread vars;
  *  - prepends the agent directive (resolved for {{systemVar}});
  *  - prepends user context ONLY under the same gate the default thread used —
- *    loadUserContext({templateName:'default'}) returns null unless CORTEX_INJECT_USER_CONTEXT=1
- *    AND the template is a direct-* template, so 'default' yields null today (behavior preserved);
+ *    loadUserContext({templateName:'default'}) returns null because 'default' is not a
+ *    direct-* template (user context is injected by default unless CORTEX_DISABLE_USER_CONTEXT=1);
  *  - NEVER injects THREAD_PROTOCOL_PREAMBLE (no artifact, no [ABORT] protocol for conversations).
  */
 export function buildConversationPrompt(agentConfig: AgentSlotConfig, input: string): string {

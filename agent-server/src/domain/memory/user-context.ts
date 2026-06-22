@@ -31,7 +31,8 @@ interface ThreadLike {
 }
 
 export function loadUserContext(thread: ThreadLike): string | null {
-  if (process.env.CORTEX_INJECT_USER_CONTEXT !== '1') return null;
+  // Injected by default; set CORTEX_DISABLE_USER_CONTEXT=1 to opt out.
+  if (process.env.CORTEX_DISABLE_USER_CONTEXT === '1') return null;
 
   if (thread.templateName && !DIRECT_TEMPLATES.has(thread.templateName)) return null;
 
