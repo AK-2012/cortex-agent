@@ -11,7 +11,11 @@ import { threadStore } from '../src/store/thread-repo.js';
 import { createWebhookHandler } from '../src/orchestration/routing/webhook.js';
 import type { ThreadRecord, ThreadStatus } from '../src/core/types/thread-types.js';
 
-const handler = createWebhookHandler({ secret: 'unused-for-control' });
+// The webhook now enforces a bearer token on all routes (except /webhook/github). Set one
+// for these control-plane tests and send it on every request.
+const WEBHOOK_TOKEN = 'test-thread-control-token';
+process.env.CORTEX_WEBHOOK_TOKEN = WEBHOOK_TOKEN;
+const handler = createWebhookHandler();
 const createdThreadIds = new Set<string>();
 let seq = 0;
 
@@ -43,6 +47,7 @@ function postThreadOp(body: any): Promise<{ statusCode: number; json: any }> {
     const req = new EventEmitter() as any;
     req.method = 'POST';
     req.url = '/webhook/thread-op';
+    req.headers = { 'x-cortex-token': WEBHOOK_TOKEN };
     let statusCode = 200;
     let payload = '';
     const res: any = {

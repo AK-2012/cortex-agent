@@ -35,6 +35,12 @@ cortex-agent-server ──SSH──► starts cortex-client on remote device
 
 **Critical:** The WebSocket connection is initiated FROM the remote device TO the server. The `serverHost` in the config MUST be an IP the remote device can reach. The server's SSH access to the device is separate — it's used for lifecycle management (start/kill/update) but not for the real-time command channel.
 
+## Authentication (WS bearer token)
+
+The server's WebSocket gate is fail-closed: every client must present `CORTEX_CLIENT_TOKEN` (sent as the `x-cortex-token` upgrade header) or the upgrade is rejected with `401`. The server auto-generates the token into its `.env` (`CORTEX_CLIENT_TOKEN`) on first start; read it from the server with `grep CORTEX_CLIENT_TOKEN ~/.cortex/config/.env`.
+
+A remote client gets the token automatically when the server spawns it over SSH (the token is injected into the launch command). For systemd-managed clients (the bootstrap path), pass `--client-token <token>` to `client-bootstrap` so it is written into the unit's `Environment=`. If you start a client by hand, export `CORTEX_CLIENT_TOKEN=<token>` in its environment first. Rotating the token means updating the server `.env` and every remote client, then restarting.
+
 ## Config File
 
 `~/.cortex/config/cortex-client.json`:
@@ -195,5 +201,6 @@ ssh user@host "pkill -f 'node.*cortex-client'"
 | Client exits on start | Config missing or bad serverHost | Check `~/.cortex/config/cortex-client.json` exists and serverHost is reachable |
 | "Device already connected" | Stale process | `ssh user@host "pkill -f cortex-client"`, server will restart |
 | WebSocket connect EHOSTUNREACH | Wrong serverHost | Verify with `/dev/tcp` test, fix the IP |
+| `Unexpected server response: 401` | Missing/mismatched `CORTEX_CLIENT_TOKEN` | Ensure the client's env has the server's token (see Authentication); restart the client |
 | Exit code 127 | cortex-client binary not on PATH | `ssh user@host "which cortex-client"`, reinstall with `npm i -g` |
 | Server can't SSH to device | SSH key or tunnel issue | `ssh user@host hostname` from server |

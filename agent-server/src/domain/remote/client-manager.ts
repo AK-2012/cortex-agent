@@ -11,6 +11,7 @@ import * as path from 'path';
 import { execFile, spawn } from 'child_process';
 import { getMachineRegistry, type MachineEntry, type MachineRegistry } from '../tasks/dispatch-utils.js';
 import { STORE_DIR, CONFIG_DIR } from '@core/utils.js';
+import { AUTH_HEADER, getClientToken, timingSafeEqualStr } from '@core/auth.js';
 import { createLogger } from '@core/log.js';
 import { readTasks, findTask } from '../tasks/system/task-lifecycle-edit.js';
 import { taskMutator } from '../tasks/mutator.js';
@@ -60,7 +61,23 @@ function startClientManager(port: number): void {
     return;
   }
 
-  wss = new WebSocketServer({ port });
+  // Authenticate at the HTTP upgrade (before the WS is established): the client must send a
+  // valid bearer token in the `x-cortex-token` header. Fail-closed — an unset server token or
+  // a missing/mismatched header rejects the upgrade with 401. This is the no-Cloudflare gate.
+  wss = new WebSocketServer({
+    port,
+    verifyClient: (info, cb) => {
+      const provided = info.req.headers[AUTH_HEADER];
+      const headerVal = Array.isArray(provided) ? provided[0] : provided;
+      if (timingSafeEqualStr(getClientToken(), headerVal)) {
+        cb(true);
+      } else {
+        const from = info.req.socket?.remoteAddress || 'unknown';
+        log.warn(`WS auth rejected from ${from}: ${headerVal ? 'invalid token' : 'missing token'}`);
+        cb(false, 401, 'Unauthorized');
+      }
+    },
+  });
   log.info(`WebSocket server started on port ${port}`);
 
   wss.on('connection', (ws) => {
@@ -324,11 +341,19 @@ let _getRegistryImpl: () => MachineRegistry = getMachineRegistry;
  * Linux note: the shell handles PATH lookup; `nohup` detaches and `echo $!`
  * returns the child PID on stdout.
  */
-function buildRemoteSpawnCommand(reg: MachineEntry): string {
+function buildRemoteSpawnCommand(reg: MachineEntry, clientToken?: string): string {
+  const token = clientToken?.trim();
   if (reg.win) {
-    return `powershell -Command "(Invoke-WmiMethod -Class Win32_Process -Name Create -ArgumentList 'cmd.exe /c cortex-client').ProcessId"`;
+    // Inject the token via `cmd.exe /c set ... && cortex-client` so the WMI-spawned process
+    // sees CORTEX_CLIENT_TOKEN. Tokens are hex (no shell metacharacters), so no escaping needed.
+    const inner = token
+      ? `cmd.exe /c set CORTEX_CLIENT_TOKEN=${token} && cortex-client`
+      : `cmd.exe /c cortex-client`;
+    return `powershell -Command "(Invoke-WmiMethod -Class Win32_Process -Name Create -ArgumentList '${inner}').ProcessId"`;
   }
-  return `nohup cortex-client > /dev/null 2>&1 & echo $!`;
+  // Single-quote the token for the remote shell (hex value has no quotes to escape).
+  const envPrefix = token ? `CORTEX_CLIENT_TOKEN='${token}' ` : '';
+  return `${envPrefix}nohup cortex-client > /dev/null 2>&1 & echo $!`;
 }
 
 async function isRemotePidAlive(device: string): Promise<boolean> {
@@ -392,7 +417,7 @@ async function startRemoteClient(device: string): Promise<void> {
   // restart, because scheduleRestart() is otherwise only triggered by disconnect or
   // heartbeat-timeout of an already-connected device.
   try {
-    const pidStr = await _sshExecImpl(reg.ssh, buildRemoteSpawnCommand(reg), 30000);
+    const pidStr = await _sshExecImpl(reg.ssh, buildRemoteSpawnCommand(reg, getClientToken()), 30000);
     const pid = parseInt(pidStr);
     if (!isNaN(pid) && pid > 0) {
       clientPids.set(device, pid);

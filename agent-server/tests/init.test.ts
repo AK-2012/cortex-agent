@@ -211,6 +211,15 @@ test('generateDotEnvContent includes CORTEX_MACHINE', () => {
   assert.match(content, /^CORTEX_MACHINE=test-host/m);
 });
 
+test('generateDotEnvContent seeds unique CORTEX_CLIENT_TOKEN and CORTEX_WEBHOOK_TOKEN', () => {
+  const content = generateDotEnvContent(MINIMAL_ANSWERS);
+  const client = content.match(/^CORTEX_CLIENT_TOKEN=([0-9a-f]{64})$/m);
+  const webhook = content.match(/^CORTEX_WEBHOOK_TOKEN=([0-9a-f]{64})$/m);
+  assert.ok(client, 'CORTEX_CLIENT_TOKEN should be a 64-hex token');
+  assert.ok(webhook, 'CORTEX_WEBHOOK_TOKEN should be a 64-hex token');
+  assert.notEqual(client![1], webhook![1]);
+});
+
 test('generateDotEnvContent does not include Slack keys when platform=none', () => {
   const content = generateDotEnvContent(MINIMAL_ANSWERS);
   assert.doesNotMatch(content, /SLACK_BOT_TOKEN/);

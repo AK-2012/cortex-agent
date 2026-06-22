@@ -26,7 +26,8 @@ const webhookBaseUrl = `http://127.0.0.1:${webhookPort}`;
 async function defaultHttpPost(url: string, body: any): Promise<{ status: number; body: any }> {
   const r = await fetch(url, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    // Bearer token for the webhook auth gate. Inherited from the session's env (see core/auth.ts).
+    headers: { 'Content-Type': 'application/json', 'x-cortex-token': process.env.CORTEX_WEBHOOK_TOKEN || '' },
     body: JSON.stringify(body),
   });
   let parsed: any = null;

@@ -9,6 +9,7 @@ export interface ClientConnectEnv {
   CORTEX_SERVER_PORT?: string;
   CF_ACCESS_CLIENT_ID?: string;
   CF_ACCESS_CLIENT_SECRET?: string;
+  CORTEX_CLIENT_TOKEN?: string;
   // Index signature so Node's process.env (NodeJS.ProcessEnv) is assignable.
   [key: string]: string | undefined;
 }
@@ -46,4 +47,19 @@ export function buildAccessHeaders(
     };
   }
   return undefined;
+}
+
+/**
+ * Connection headers the cortex-client sends on the WebSocket upgrade. Combines the
+ * optional Cloudflare Access service-token headers with the Cortex bearer token
+ * (``x-cortex-token`` from ``CORTEX_CLIENT_TOKEN``) that the agent-server's WebSocket
+ * gate requires. Returns undefined when neither is configured.
+ */
+export function buildAuthHeaders(
+  env: ClientConnectEnv,
+): Record<string, string> | undefined {
+  const headers: Record<string, string> = { ...(buildAccessHeaders(env) ?? {}) };
+  const token = env.CORTEX_CLIENT_TOKEN?.trim();
+  if (token) headers['x-cortex-token'] = token;
+  return Object.keys(headers).length > 0 ? headers : undefined;
 }

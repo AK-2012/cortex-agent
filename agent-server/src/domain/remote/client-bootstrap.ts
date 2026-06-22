@@ -22,6 +22,10 @@ if (!serverHost) {
   process.exit(1);
 }
 const serverPort = getArg('--server-port') || '3002';
+// The WS auth token the remote client must present. Falls back to the server's own env so a
+// bootstrap run on the server host picks it up automatically. Empty means the client cannot
+// authenticate — we warn loudly below.
+const clientToken = getArg('--client-token') || process.env.CORTEX_CLIENT_TOKEN || '';
 
 if (!sshHost) {
   log.error(`Usage: node --import tsx src/client-bootstrap.ts --host user@host --device-name NAME [options]
@@ -31,6 +35,7 @@ Options:
   --device-name <name>      Device name for cortex-client (required)
   --server-host <host>      Cortex server IP (required)
   --server-port <port>      Cortex server WS port (default: 3002)
+  --client-token <token>    WS auth token (default: \$CORTEX_CLIENT_TOKEN from server env)
 `);
   process.exit(1);
 }
@@ -108,8 +113,14 @@ async function main() {
 
   // Step 5: Create systemd service
   console.log('[5/5] Setting up auto-start...');
+  if (!clientToken) {
+    log.warn('No client token available (pass --client-token or set CORTEX_CLIENT_TOKEN). The');
+    log.warn('client will be REJECTED by the server WS auth gate until a token is configured.');
+  }
   const platform = await sshExec('uname -s').catch(() => 'unknown');
 
+  // Token is hex (no systemd-special chars), so it is safe to embed directly.
+  const tokenEnvLine = clientToken ? `Environment=CORTEX_CLIENT_TOKEN=${clientToken}\n` : '';
   if (platform === 'Linux') {
     const serviceContent = `[Unit]
 Description=Cortex Client (${deviceName})
@@ -117,7 +128,7 @@ After=network.target
 
 [Service]
 Type=simple
-ExecStart=/usr/bin/env cortex-client
+${tokenEnvLine}ExecStart=/usr/bin/env cortex-client
 Restart=always
 RestartSec=5
 
@@ -133,7 +144,8 @@ WantedBy=default.target
     console.log('  Check status: ssh ' + sshHost + ' "systemctl --user status cortex-client"');
   } else {
     // Non-Linux: just create a wrapper script
-    const startScript = '#!/bin/bash\nexec cortex-client\n';
+    const tokenExport = clientToken ? `export CORTEX_CLIENT_TOKEN=${clientToken}\n` : '';
+    const startScript = `#!/bin/bash\n${tokenExport}exec cortex-client\n`;
     await sshExec(`mkdir -p ~/.cortex/bin`);
     await sshExec(`cat > ~/.cortex/bin/start-client.sh << 'SHEOF'\n${startScript}\nSHEOF`);
     await sshExec(`chmod +x ~/.cortex/bin/start-client.sh`);

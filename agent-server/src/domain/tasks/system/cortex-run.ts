@@ -25,10 +25,12 @@ import { isMainModule } from '@core/utils.js';
 
 const WEBHOOK_PORT = parseInt(process.env.WEBHOOK_PORT || '3001', 10);
 const WEBHOOK_BASE = `http://127.0.0.1:${WEBHOOK_PORT}`;
+// Bearer token for the webhook auth gate. Inherited from the daemon/dispatcher env (see core/auth.ts).
+const webhookAuthHeader = (): Record<string, string> => ({ 'x-cortex-token': process.env.CORTEX_WEBHOOK_TOKEN || '' });
 
 async function httpIsDeviceOnline(device: string): Promise<boolean> {
   try {
-    const res = await fetch(`${WEBHOOK_BASE}/webhook/devices`);
+    const res = await fetch(`${WEBHOOK_BASE}/webhook/devices`, { headers: webhookAuthHeader() });
     if (!res.ok) return false;
     const data = (await res.json()) as { devices?: string[] };
     return data.devices?.includes(device) ?? false;
@@ -56,7 +58,7 @@ async function httpSendCommand(
   try {
     const res = await fetch(`${WEBHOOK_BASE}/webhook/remote-command`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...webhookAuthHeader() },
       body: JSON.stringify({
         device,
         action: command.action,

@@ -15,9 +15,11 @@ import { cortexMDContentBlocks, type CortexMDEntry } from './cortex-md.js';
 
 // Remote device commands proxied through app.ts webhook (separate process, no shared memory with client-manager)
 const WEBHOOK_BASE = `http://127.0.0.1:${process.env.WEBHOOK_PORT || '3001'}`;
+// Bearer token for the webhook auth gate. Inherited from the daemon's env (see core/auth.ts).
+const webhookAuthHeader = (): Record<string, string> => ({ 'x-cortex-token': process.env.CORTEX_WEBHOOK_TOKEN || '' });
 
 async function proxyGetOnlineDevices(): Promise<string[]> {
-  const res = await fetch(`${WEBHOOK_BASE}/webhook/devices`);
+  const res = await fetch(`${WEBHOOK_BASE}/webhook/devices`, { headers: webhookAuthHeader() });
   const data = await res.json() as any;
   return data.devices || [];
 }
@@ -25,7 +27,7 @@ async function proxyGetOnlineDevices(): Promise<string[]> {
 async function proxySendCommand(device: string, action: string, params: Record<string, any>, timeout?: number): Promise<any> {
   const res = await fetch(`${WEBHOOK_BASE}/webhook/remote-command`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...webhookAuthHeader() },
     body: JSON.stringify({ device, action, params, timeout }),
   });
   const data = await res.json() as any;

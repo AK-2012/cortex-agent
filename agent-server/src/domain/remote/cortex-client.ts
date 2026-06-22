@@ -9,7 +9,7 @@ import * as path from 'path';
 import * as os from 'os';
 import { execFileSync, spawn } from 'child_process';
 import { scanCortexMDChain, type CortexMDEntry } from '../memory/cortex-md-scanner.js';
-import { resolveServerUrl, buildAccessHeaders } from './cortex-client-config.js';
+import { resolveServerUrl, buildAuthHeaders } from './cortex-client-config.js';
 import { createLogger } from '@core/log.js';
 
 const log = createLogger('cortex-client');
@@ -664,8 +664,11 @@ const MAX_RECONNECT_DELAY = 30000;
 
 function connect() {
   const url = resolveServerUrl(process.env);
-  const headers = buildAccessHeaders(process.env);
-  log.info(`Connecting to ${url} as "${DEVICE_NAME}" (${PLATFORM})${headers ? ' [CF Access]' : ''}...`);
+  const headers = buildAuthHeaders(process.env);
+  const hasToken = !!process.env.CORTEX_CLIENT_TOKEN?.trim();
+  const hasCf = !!(process.env.CF_ACCESS_CLIENT_ID && process.env.CF_ACCESS_CLIENT_SECRET);
+  const authTag = hasCf ? (hasToken ? ' [token+CF]' : ' [CF Access]') : (hasToken ? ' [token]' : '');
+  log.info(`Connecting to ${url} as "${DEVICE_NAME}" (${PLATFORM})${authTag}...`);
 
   ws = headers ? new WebSocket(url, { headers }) : new WebSocket(url);
 

@@ -4,6 +4,7 @@
 // >>> If I am updated, update my header comment and the parent folder's CORTEX.md <<<
 
 import { createLogger } from '@core/log.js';
+import { AUTH_HEADER, getWebhookToken, timingSafeEqualStr } from '@core/auth.js';
 import * as http from 'http';
 import * as crypto from 'crypto';
 import { readFileSync } from 'fs';
@@ -39,14 +40,16 @@ function verifySignature(body, signature) {
   }
 }
 
-function hasValidSecret(secret, providedSecret) {
-  const secretBuf = Buffer.from(secret || '');
-  const providedBuf = Buffer.from(providedSecret || '');
-  return !(
-    secretBuf.length === 0
-    || providedBuf.length !== secretBuf.length
-    || !crypto.timingSafeEqual(providedBuf, secretBuf)
-  );
+/**
+ * Bearer-token gate for every webhook route EXCEPT /webhook/github (which authenticates
+ * via its own HMAC signature). Reads the call-time CORTEX_WEBHOOK_TOKEN and compares it
+ * timing-safely against the `x-cortex-token` request header. Fail-closed: an unset token
+ * or a missing/mismatched header is rejected.
+ */
+function isWebhookAuthorized(req): boolean {
+  const provided = (req.headers || {})[AUTH_HEADER];
+  const headerVal = Array.isArray(provided) ? provided[0] : provided;
+  return timingSafeEqualStr(getWebhookToken(), headerVal);
 }
 
 function readJsonBody(req, callback) {
@@ -75,12 +78,21 @@ const TASK_OP_HANDLERS = {
   resume: (data) => taskMutator.resume(data.task_id),
 };
 
-function createWebhookHandler({
-  secret = getSecret(),
-}: {
+function createWebhookHandler(_options: {
+  // `secret` (GitHub HMAC) is read at call time via getSecret(); kept in the type for
+  // backward-compatible option passing from startWebhookServer.
   secret?: string;
 } = {}) {
   return (req, res) => {
+    // --- Auth gate: every route requires the webhook bearer token, except /webhook/github
+    //     which authenticates via its own HMAC signature (GitHub cannot send our header). ---
+    if (req.url !== '/webhook/github' && !isWebhookAuthorized(req)) {
+      log.warn(`webhook auth rejected: ${req.method} ${req.url}`);
+      res.writeHead(401);
+      res.end('Unauthorized');
+      return;
+    }
+
     // --- Device list query (from MCP sidecar) ---
     if (req.method === 'GET' && req.url === '/webhook/devices') {
       const devices = getOnlineDevices().map(d => d.device);
@@ -124,10 +136,7 @@ function createWebhookHandler({
         if (error) {
           res.writeHead(400); res.end('Bad JSON'); return;
         }
-        if (!hasValidSecret(secret, data.secret)) {
-          res.writeHead(401); res.end('Unauthorized'); return;
-        }
-
+        // Auth handled by the global token gate above (was: body-secret check).
         const handler = TASK_OP_HANDLERS[data.op];
         if (!handler) {
           res.writeHead(400); res.end(JSON.stringify({ success: false, message: `Unknown op: ${data.op}` }));

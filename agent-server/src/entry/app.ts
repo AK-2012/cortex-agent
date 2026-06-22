@@ -40,6 +40,7 @@ import { loadLang } from '@domain/system/preferences.js';
 // Extracted modules
 import { cleanupLogs, ensureMcpConfig } from './startup-helpers.js';
 import { createLogger } from '@core/log.js';
+import { ensureAuthTokens } from '@core/auth.js';
 import { runningExecutions } from '@core/running-executions.js';
 import { planApprovals } from '@orch/interactions/plan-approvals.js';
 import { busyTracker } from '@orch/busy-tracker.js';
@@ -74,6 +75,11 @@ import { enqueue, conduitQueues } from '@orch/conduit-queue.js';
 import { getCostSummary } from '@domain/costs/cost-tracker.js';
 
 dotenv.config({ path: path.join(CONFIG_DIR, '.env') });
+
+// Ensure the WebSocket + webhook bearer tokens exist before either server starts. Generates
+// and persists them to .env on first run (fail-closed auth — see core/auth.ts). Must run after
+// dotenv.config() so pre-existing tokens are honored, and before startClientManager/startWebhookServer.
+ensureAuthTokens();
 
 // Apply the persisted mode to env now that .env is loaded. This used to be an import-time
 // side effect inside domain/agents/config.ts; it is explicit here so that CLI processes

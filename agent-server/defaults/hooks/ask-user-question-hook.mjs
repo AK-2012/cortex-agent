@@ -30,7 +30,12 @@ async function main() {
       port,
       path: '/hook/ask-user-question',
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) },
+      headers: {
+        'Content-Type': 'application/json',
+        'Content-Length': Buffer.byteLength(body),
+        // Bearer token for the webhook auth gate (inherited from the session env).
+        'x-cortex-token': process.env.CORTEX_WEBHOOK_TOKEN || '',
+      },
       timeout: 60 * 60 * 1000, // 60 minutes — user may take time to respond
     }, (res) => {
       let data = '';

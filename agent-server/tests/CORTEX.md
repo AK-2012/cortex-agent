@@ -53,6 +53,8 @@ How to run tests without tripping it:
 | `cortex-run-cli-dispatch.test.ts` | Test | cortex-run.ts CLI dispatch (sendCommand pathway) |
 | `daemon.test.ts` | Test | Import has no side effects |
 | `core/singleton-lock.test.ts` | Test | tryAcquireSingletonLock/releaseSingletonLock/isProcessAlive against a temp pidfile (fresh/live-holder/stale/corrupt) |
+| `core/auth.test.ts` | Test | core/auth.ts: timingSafeEqualStr (fail-closed) + ensureAuthTokens generation/idempotency/partial/append-to-.env |
+| `webhook-auth.test.ts` | Test | webhook bearer-token gate: 401 without/with-wrong token, pass with token, /webhook/github exempt (HMAC) |
 | `project-store.test.ts` | Test | ProjectStore list/get/exists/getDefault/resolveFromMessage + scaffolding + cache refresh |
 | `dispatch-utils.test.ts` | Test | Task dispatch commands and env injection |
 | `execution-lock-release.test.ts` | Test | Auto lock-release on terminal execution transitions (complete/fail/cancel/stale) |
@@ -98,7 +100,7 @@ How to run tests without tripping it:
 | `message-router.test.ts` | Test | Message routing branches |
 | `session.test.ts` | Test | session.ts backend:channel CRUD |
 | `session-hooks-profile-resolution.test.ts` | Test | resolveOnNewProfileName priority (registry > ledger) — regression for "Invalid signature in thinking block" caused by thread vs user session profile mismatch |
-| `client-manager.test.ts` | Test | client-manager handshake/sendCommand + `buildRemoteSpawnCommand` cmd.exe-wrap regression + retry-on-spawn-failure regression |
+| `client-manager.test.ts` | Test | client-manager handshake/sendCommand + WS bearer-token verifyClient (reject no/wrong token, accept valid) + `buildRemoteSpawnCommand` cmd.exe-wrap + token-injection + retry-on-spawn-failure regressions |
 | `cortex-run-callback-handler.test.ts` | Test | task-callback handler (DR-0011 §4.4): idempotency, skipVerify, ghost callback, blockTask note |
 | `mcp-server.test.ts` | Test | Import safety and startup hints |
 | `domain/mcp/tools-registration.test.ts` | Test | All MCP tool names registered (ext: 9; core: 6 remote_* + current_time + thread_abort/split/wait + task_status/result/list) |

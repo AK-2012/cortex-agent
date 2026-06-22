@@ -18,7 +18,8 @@ const WEBHOOK_BASE = `http://127.0.0.1:${process.env.WEBHOOK_PORT || '3001'}`;
 async function proxyThreadOp(action: string, payload: Record<string, any>): Promise<any> {
   const res = await fetch(`${WEBHOOK_BASE}/webhook/thread-op`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    // Bearer token for the webhook auth gate. Inherited from the daemon's env (see core/auth.ts).
+    headers: { 'Content-Type': 'application/json', 'x-cortex-token': process.env.CORTEX_WEBHOOK_TOKEN || '' },
     body: JSON.stringify({ action, ...payload }),
   });
   const data = await res.json() as any;

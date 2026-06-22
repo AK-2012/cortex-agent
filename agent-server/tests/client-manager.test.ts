@@ -20,6 +20,12 @@ import {
   _testReset,
 } from '../src/domain/remote/client-manager.js';
 
+// The WS server now enforces a bearer token on the upgrade handshake. Set one for the
+// whole test file; clients must send it via the `x-cortex-token` header.
+const WS_TOKEN = 'test-ws-token';
+process.env.CORTEX_CLIENT_TOKEN = WS_TOKEN;
+const authHeaders = { 'x-cortex-token': WS_TOKEN };
+
 // Allocate an ephemeral port by listening on 0 once, capturing the port, then closing.
 async function findEphemeralPort(): Promise<number> {
   return new Promise<number>((resolve, reject) => {
@@ -78,7 +84,7 @@ test('start + hello handshake populates devices; stopClientManager tears everyth
   t.after(() => stopClientManager());
 
   // Connect a fake client and send a hello frame.
-  const ws = new WebSocket(`ws://127.0.0.1:${port}`);
+  const ws = new WebSocket(`ws://127.0.0.1:${port}`, { headers: authHeaders });
   await new Promise<void>((resolve, reject) => {
     ws.once('open', () => resolve());
     ws.once('error', reject);
@@ -104,6 +110,77 @@ test('start + hello handshake populates devices; stopClientManager tears everyth
 //     Without the wrapper, WMI returns ReturnValue=9 (Path Not Found) and an empty
 //     ProcessId, which serializes to "" over SSH and the server logs
 //     `Failed to parse PID for <device>: ""`. Observed live on my-pc 2026-05-14 → 17.
+// --- WS upgrade auth: the server rejects connections without a valid bearer token ---
+
+test('WS handshake rejects a connection with no x-cortex-token header', async (t) => {
+  const port = await findEphemeralPort();
+  startClientManager(port);
+  t.after(() => stopClientManager());
+
+  const ws = new WebSocket(`ws://127.0.0.1:${port}`); // no auth header
+  const outcome = await new Promise<'open' | 'rejected'>((resolve) => {
+    ws.once('open', () => resolve('open'));
+    ws.once('error', () => resolve('rejected'));
+    ws.once('unexpected-response', () => resolve('rejected'));
+  });
+  assert.equal(outcome, 'rejected');
+  assert.equal(isDeviceOnline('should-never-register'), false);
+  try { ws.close(); } catch {}
+});
+
+test('WS handshake rejects a connection with a wrong token', async (t) => {
+  const port = await findEphemeralPort();
+  startClientManager(port);
+  t.after(() => stopClientManager());
+
+  const ws = new WebSocket(`ws://127.0.0.1:${port}`, { headers: { 'x-cortex-token': 'wrong-token' } });
+  const outcome = await new Promise<'open' | 'rejected'>((resolve) => {
+    ws.once('open', () => resolve('open'));
+    ws.once('error', () => resolve('rejected'));
+    ws.once('unexpected-response', () => resolve('rejected'));
+  });
+  assert.equal(outcome, 'rejected');
+  try { ws.close(); } catch {}
+});
+
+test('WS handshake accepts a connection carrying the correct token', async (t) => {
+  const port = await findEphemeralPort();
+  startClientManager(port);
+  t.after(() => stopClientManager());
+
+  const ws = new WebSocket(`ws://127.0.0.1:${port}`, { headers: authHeaders });
+  await new Promise<void>((resolve, reject) => {
+    ws.once('open', () => resolve());
+    ws.once('error', reject);
+  });
+  ws.send(JSON.stringify({ type: 'hello', device: 'mock-auth-ok', platform: 'linux', capabilities: [] }));
+  await waitFor(() => isDeviceOnline('mock-auth-ok'));
+  ws.close();
+  await waitFor(() => !isDeviceOnline('mock-auth-ok'));
+});
+
+// --- Remote spawn injects the client token so SSH-launched clients can authenticate ---
+
+test('buildRemoteSpawnCommand injects CORTEX_CLIENT_TOKEN on Linux remotes when given a token', () => {
+  const cmd = buildRemoteSpawnCommand({ cortexPath: '/home/x', gpuCount: 0, ssh: 'user@host' }, 'sektok123');
+  assert.match(cmd, /CORTEX_CLIENT_TOKEN='sektok123'/);
+  assert.match(cmd, /nohup cortex-client/);
+  assert.match(cmd, /echo \$!/);
+});
+
+test('buildRemoteSpawnCommand injects CORTEX_CLIENT_TOKEN on Windows remotes when given a token', () => {
+  const cmd = buildRemoteSpawnCommand({ cortexPath: 'D:\\x', gpuCount: 0, ssh: 'user@host', win: true }, 'sektok123');
+  assert.match(cmd, /CORTEX_CLIENT_TOKEN=sektok123/);
+  assert.match(cmd, /cmd\.exe \/c/);
+  assert.match(cmd, /cortex-client/);
+});
+
+test('buildRemoteSpawnCommand omits the token env when none is provided (back-compat)', () => {
+  const cmd = buildRemoteSpawnCommand({ cortexPath: '/home/x', gpuCount: 0, ssh: 'user@host' });
+  assert.doesNotMatch(cmd, /CORTEX_CLIENT_TOKEN/);
+  assert.match(cmd, /^nohup cortex-client/);
+});
+
 test('buildRemoteSpawnCommand wraps Windows cortex-client invocation with cmd.exe /c', () => {
   const cmd = buildRemoteSpawnCommand({ cortexPath: 'D:\\x', gpuCount: 0, ssh: 'user@host', win: true });
   // Must include the cmd.exe wrapper so PATH lookup resolves cortex-client.cmd.
@@ -157,7 +234,7 @@ test('sendCommand rejects pending commands when stopClientManager is called mid-
   startClientManager(port);
   t.after(() => stopClientManager());
 
-  const ws = new WebSocket(`ws://127.0.0.1:${port}`);
+  const ws = new WebSocket(`ws://127.0.0.1:${port}`, { headers: authHeaders });
   await new Promise<void>((resolve, reject) => {
     ws.once('open', () => resolve());
     ws.once('error', reject);

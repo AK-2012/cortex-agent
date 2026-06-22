@@ -17,6 +17,11 @@ import {
 
 // ── Helpers ──
 
+// The client-manager WS now enforces a bearer token on the upgrade handshake.
+const WS_TOKEN = 'test-ws-token';
+process.env.CORTEX_CLIENT_TOKEN = WS_TOKEN;
+const authHeaders = { 'x-cortex-token': WS_TOKEN };
+
 function findEphemeralPort(): Promise<number> {
   return new Promise<number>((resolve, reject) => {
     const probe = new WebSocketServer({ port: 0 });
@@ -73,7 +78,7 @@ test('no task linkage — sends ack ok:true when taskProject is null', async (t)
   startClientManager(port);
   t.after(() => stopClientManager());
 
-  const ws = new WebSocket(`ws://127.0.0.1:${port}`);
+  const ws = new WebSocket(`ws://127.0.0.1:${port}`, { headers: authHeaders });
   await new Promise<void>((resolve, reject) => {
     ws.once('open', () => resolve());
     ws.once('error', reject);
@@ -106,7 +111,7 @@ test('ghost callback — sends ack ok:true with ghost message for nonexistent ta
   startClientManager(port);
   t.after(() => stopClientManager());
 
-  const ws = new WebSocket(`ws://127.0.0.1:${port}`);
+  const ws = new WebSocket(`ws://127.0.0.1:${port}`, { headers: authHeaders });
   await new Promise<void>((resolve, reject) => {
     ws.once('open', () => resolve());
     ws.once('error', reject);
@@ -149,7 +154,7 @@ test('task already done — sends ack idempotent when task already done', async 
   startClientManager(port);
   t.after(() => stopClientManager());
 
-  const ws = new WebSocket(`ws://127.0.0.1:${port}`);
+  const ws = new WebSocket(`ws://127.0.0.1:${port}`, { headers: authHeaders });
   await new Promise<void>((resolve, reject) => {
     ws.once('open', () => resolve());
     ws.once('error', reject);
@@ -188,7 +193,7 @@ test('success path — completeTask with skipVerify=true, verify_warning contain
   startClientManager(port);
   t.after(() => stopClientManager());
 
-  const ws = new WebSocket(`ws://127.0.0.1:${port}`);
+  const ws = new WebSocket(`ws://127.0.0.1:${port}`, { headers: authHeaders });
   await new Promise<void>((resolve, reject) => {
     ws.once('open', () => resolve());
     ws.once('error', reject);
@@ -239,7 +244,7 @@ test('failure path — blockTask with note containing termination and logTail', 
   startClientManager(port);
   t.after(() => stopClientManager());
 
-  const ws = new WebSocket(`ws://127.0.0.1:${port}`);
+  const ws = new WebSocket(`ws://127.0.0.1:${port}`, { headers: authHeaders });
   await new Promise<void>((resolve, reject) => {
     ws.once('open', () => resolve());
     ws.once('error', reject);
@@ -292,7 +297,7 @@ test('duplicate callback — first completes, second ack idempotent', async (t) 
   startClientManager(port);
   t.after(() => stopClientManager());
 
-  const ws = new WebSocket(`ws://127.0.0.1:${port}`);
+  const ws = new WebSocket(`ws://127.0.0.1:${port}`, { headers: authHeaders });
   await new Promise<void>((resolve, reject) => {
     ws.once('open', () => resolve());
     ws.once('error', reject);
