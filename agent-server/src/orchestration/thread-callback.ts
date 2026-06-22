@@ -156,6 +156,22 @@ const defaultResume: ResumeFn = (parentId) => {
   });
 };
 
+/** Resume a suspended manager thread to answer a subtask's question (ask_manager / DR-0016).
+ *  Unlike maybeResumeParent, this does NOT require the manager's child sets to be empty — the
+ *  manager is woken to answer, not because its children finished. It answers via answer_subtask,
+ *  whose handler sets pendingControl='wait', so the manager re-suspends on its still-live children
+ *  at the next step boundary. Shares the `resuming` guard so it never collides with a concurrent
+ *  completion-driven resume (whichever wins, the question + any child results both sit in
+ *  pendingMessages). No-op unless the manager is currently 'waiting'. */
+export function resumeManagerForQuestion(managerThreadId: string, resume?: ResumeFn): void {
+  if (resuming.has(managerThreadId)) return;
+  const mgr = threadStore.get(managerThreadId);
+  if (!mgr || mgr.status !== 'waiting') return;
+  resuming.add(managerThreadId);
+  log.info(`resuming manager ${managerThreadId} to answer a subtask question`);
+  (resume ?? defaultResume)(managerThreadId);
+}
+
 /** Resume `parentId` if (and only if) it is suspended with nothing left to wait on —
  *  both thread children (waitingOn) and task children (waitingOnTasks, DR-0014 §8). */
 function maybeResumeParent(parentId: string, resume?: ResumeFn): void {

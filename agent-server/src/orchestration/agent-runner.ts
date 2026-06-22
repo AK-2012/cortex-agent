@@ -29,6 +29,7 @@ import { maybeNotifyCodexLowUsage } from '@domain/costs/codex-usage-monitor.js';
 import { recordResume } from '@domain/costs/resume-registry.js';
 import { getAgent } from '@domain/threads/index.js';
 import { runConversation } from './conversation-runner.js';
+import { tryAnswerFromHuman } from './manager-qa.js';
 import { isBgContinuationEnabled, isInteractiveChannel } from './bg-continuation.js';
 import type { ContinuationSink } from '../agent-adapter/types.js';
 import { downloadFiles as downloadPlatformFiles } from './routing/file-handler.js';
@@ -82,6 +83,14 @@ export class AgentRunner {
 
   async route(ctx: AgentRunnerCtx): Promise<void> {
     const { message, channel, adapter } = ctx;
+    // DR-0016 top-level fallback: if this channel has a pending human-escalated subtask question,
+    // consume this message as the answer and short-circuit normal turn handling. Scope is narrow —
+    // tryAnswerFromHuman returns false unless this exact channel is awaiting a human reply.
+    if (tryAnswerFromHuman(channel, ctx.userMessage || '')) {
+      const dest: Destination = { type: 'interactive-reply', conduit: channel, sessionId: '' };
+      await adapter.postMessage(dest, { text: `${Icons.ok} 已把你的回复作为答复返回给提问的子任务。` }).catch(() => {});
+      return;
+    }
     if (conduitQueues.has(channel)) {
       await adapter.markQueued({ conduit: channel, messageId: message.ref.messageId }).catch(() => {});
     }

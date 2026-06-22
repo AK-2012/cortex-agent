@@ -311,6 +311,10 @@ export interface ThreadMetadata {
   /** Children whose results were already queued into pendingMessages — persistent
    *  idempotency for completion callbacks (survives restarts, unlike the in-memory fired set). */
   deliveredChildResults?: string[];
+  /** Open questions a subtask asked this manager via ask_manager (DR-0016), for visibility /
+   *  debugging. The authoritative pending-question state lives in orchestration/manager-qa's
+   *  in-memory store; this is the manager-side mirror, cleared by answer_subtask. */
+  pendingQuestions?: Array<{ questionId: string; fromTaskId: string | null; question: string }>;
   /** Delegation contract this thread was spawned with (child side). */
   contract?: ThreadContract | null;
   /** Ancestor goal chain, root-first — injected into the child prompt to prevent drift. */

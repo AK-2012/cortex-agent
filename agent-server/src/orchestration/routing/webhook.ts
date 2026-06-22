@@ -1,6 +1,6 @@
-// input:  GitHub push, task-op, thread-op, remote cmd, hook HTTP events
+// input:  GitHub push, task-op, thread-op, manager-qa, remote cmd, hook HTTP events
 // output: startWebhookServer
-// pos:    GitHub/task-op/thread-op/hook webhook HTTP entry point
+// pos:    GitHub/task-op/thread-op/manager-qa/hook webhook HTTP entry point
 // >>> If I am updated, update my header comment and the parent folder's CORTEX.md <<<
 
 import { createLogger } from '@core/log.js';
@@ -20,6 +20,7 @@ import { Icons } from '@core/icons.js';
 import { buildStatusActionBlocks, buildSealedStatusActionBlocks, initStatusBlocks } from '../status-helpers.js';
 import { threadStore } from '@store/thread-repo.js';
 import { fireThreadCallback } from '../thread-callback.js';
+import { askManager, getAnswer, submitAnswer } from '../manager-qa.js';
 import type { Destination, MessageRef } from '@platform/index.js';
 import type { RunThreadOptions } from '@core/types/thread-types.js';
 
@@ -400,6 +401,49 @@ function createWebhookHandler(_options: {
           return reply({ success: false, error: `unknown action: ${action}` });
         } catch (e) {
           log.error(`thread-op error: ${(e as Error).message}`);
+          reply({ success: false, error: (e as Error).message });
+        }
+      });
+      return;
+    }
+
+    // --- Manager Q&A (DR-0016 up-ask channel, from cortex-core MCP sidecar) ---
+    // ask:   a subtask registers a clarifying question → routed to its manager (woken) or a human.
+    // poll:  the ask_manager tool polls this until the answer is present (synchronous block).
+    // answer: the manager's answer_subtask tool (or a human reply) records the answer.
+    if (req.method === 'POST' && req.url === '/webhook/manager-qa') {
+      readJsonBody(req, async (error, _body, data) => {
+        if (error) { res.writeHead(400); res.end('Bad JSON'); return; }
+        const reply = (obj: any) => {
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify(obj));
+        };
+        try {
+          const action = data.action;
+          if (action === 'ask') {
+            if (!data.threadId || !data.question) {
+              return reply({ success: false, error: 'ask requires threadId and question' });
+            }
+            const result = await askManager(String(data.threadId), String(data.question));
+            if (result.ok === false) return reply({ success: false, error: result.error });
+            const { ok: _ok, ...payload } = result;
+            return reply({ success: true, data: payload });
+          }
+          if (action === 'poll') {
+            if (!data.questionId) return reply({ success: false, error: 'poll requires questionId' });
+            const r = getAnswer(String(data.questionId));
+            return reply({ success: true, data: { answered: r.answered, answer: r.answer } });
+          }
+          if (action === 'answer') {
+            const questionId = data.question_id ?? data.questionId;
+            if (!questionId) return reply({ success: false, error: 'answer requires question_id' });
+            const r = await submitAnswer(String(questionId), String(data.answer ?? ''));
+            if (!r.ok) return reply({ success: false, error: r.error });
+            return reply({ success: true, data: { answered: true } });
+          }
+          return reply({ success: false, error: `unknown action: ${action}` });
+        } catch (e) {
+          log.error(`manager-qa error: ${(e as Error).message}`);
           reply({ success: false, error: (e as Error).message });
         }
       });

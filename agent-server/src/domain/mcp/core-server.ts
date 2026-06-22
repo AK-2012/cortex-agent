@@ -12,6 +12,7 @@ import { registerTaskOpsTools } from './tools/task-ops.js';
 import { registerTimeTools } from './tools/time.js';
 import { registerThreadTools } from './tools/thread-ops.js';
 import { registerTaskMonitorTools } from './tools/task-monitor.js';
+import { registerManagerQaTools } from './tools/manager-qa.js';
 import { isMainModule } from '@core/utils.js';
 import { createLogger } from '@core/log.js';
 import { CORTEX_VERSION } from '@core/version.js';
@@ -26,6 +27,7 @@ registerTaskOpsTools(server);
 registerTimeTools(server);
 registerThreadTools(server);
 registerTaskMonitorTools(server);
+registerManagerQaTools(server);
 
 // --- Exported tool name list (for verification) ---
 
@@ -45,6 +47,9 @@ export const TOOL_NAMES: readonly string[] = [
   'task_status',
   'task_result',
   'task_list',
+  // DR-0016 up-ask channel: a subtask asks its manager (or a human) a clarifying question.
+  'ask_manager',
+  'answer_subtask',
 ];
 
 // --- Start (called by barrel when run as standalone) ---

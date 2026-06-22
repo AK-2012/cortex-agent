@@ -35,7 +35,7 @@ Project→conduit mapping (formerly `channel-repo.ts`) has moved into `platform/
 | `remote/` | `client-manager.ts` `client-bootstrap.ts` `client-hot-reload.ts` `cortex-client.ts` |
 | `system/` | `update-state.ts` (DR-0013 update-state I/O) `preferences.ts` (config/preferences.json — operator UI language `loadLang`/`setLang`) |
 | `threads/` | `index.ts` `utils.ts` `artifact-io.ts` `template-loader.ts` `prompt-builder.ts` `state-machine.ts` `runner.ts` `hook-runner.ts` `auto-thread.ts` `template-resolver.ts` |
-| `mcp/` | `server.ts` + `tools/slack.ts` `cost.ts` `executions.ts` `task-ops.ts` `context.ts` `schedule.ts` (16 tools total) |
+| `mcp/` | `server.ts` (ext) + `core-server.ts` (core: registers thread/task-monitor/time/manager-qa tools) + `tools/slack.ts` `cost.ts` `executions.ts` `task-ops.ts` `context.ts` `schedule.ts` `thread-ops.ts` `task-monitor.ts` `time.ts` `manager-qa.ts` (DR-0016 ask_manager/answer_subtask) |
 
 ### L4: orchestration/
 | Path | Function |
