@@ -248,15 +248,21 @@ function setupStepCallbacks(
   const slotPrefix = multiAgent ? `*[${label}]*` : null;
   const baseAssistantMessage = (text: string) => { stream.emitText(slotPrefix ? `${slotPrefix} ${text}` : text); };
 
-  // Tool trace (env-gated): caller-supplied onToolUse takes precedence. Otherwise build one bound
-  // to the runner's own stream.
+  // Tool trace (env-gated): emit a compact per-tool line to the runner's stream when
+  // CORTEX_SHOW_TOOL_CALLS is on, while STILL firing any caller-supplied onToolUse
+  // (interactive plan/ask capture). Both must run — compose, don't choose — so dispatch /
+  // scheduled / webhook threads stream tool calls like a direct session. The trace fires
+  // first; the caller (interactive) fires after, preserving the onToolUse-before-ask ordering.
   const callerOnToolUse = opts.onToolUse ?? null;
-  const toolTrace = callerOnToolUse ? null : createToolTrace(stream, { slotPrefix });
+  const toolTrace = createToolTrace(stream, { slotPrefix });
   const onAssistantMessage = toolTrace
     ? (text: string) => { toolTrace.flush(); baseAssistantMessage(text); }
     : baseAssistantMessage;
-  const onToolUse = callerOnToolUse
-    ?? (toolTrace ? (name: string, input: any) => toolTrace.onToolUse(name, input) : null);
+  const traceToolUse = toolTrace ? (name: string, input: any) => toolTrace.onToolUse(name, input) : null;
+  const onToolUse: ((name: string, input: any) => void) | null =
+    traceToolUse && callerOnToolUse
+      ? (name: string, input: any) => { traceToolUse(name, input); callerOnToolUse(name, input); }
+      : (traceToolUse ?? callerOnToolUse);
 
   // onProgress: caller override (e.g. scheduler's buildUserProcessingMessage) takes precedence;
   // fallback to thread-specific status format for multi-agent pipelines
