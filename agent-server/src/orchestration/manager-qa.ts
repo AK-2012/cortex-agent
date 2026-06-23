@@ -15,6 +15,7 @@ import { resumeManagerForQuestion } from './thread-callback.js';
 import { ctx as jobCtx } from '@domain/scheduling/job-registry.js';
 import { getOutboundQueue, durablePost } from '@store/outbound-queue.js';
 import { createLogger } from '@core/log.js';
+import { t } from '@core/i18n.js';
 import type { ThreadRecord } from '@core/types/thread-types.js';
 import type { Destination } from '@platform/index.js';
 
@@ -73,29 +74,33 @@ async function defaultPostToChannel(channel: string, text: string): Promise<void
   else await adapter.postMessage(dest, { text });
 }
 
-/** Notice injected into the manager's pendingMessages (and, lightly adapted, posted to a human).
- *  Mirrors buildChildResultNotice's shape: states what is asked and how to respond. */
+/** Notice injected into the manager's pendingMessages — an AGENT-facing prompt (English, not i18n;
+ *  mirrors the directives, which are not localized). Mirrors buildChildResultNotice's shape: states
+ *  what is asked and how to respond. */
 export function buildQuestionNotice(q: { questionId: string; fromTaskId: string | null; question: string }): string {
-  const from = q.fromTaskId ? `子任务 #${q.fromTaskId}` : '一个子任务';
+  const from = q.fromTaskId ? `subtask #${q.fromTaskId}` : 'a subtask';
   return [
-    `[子任务提问] ${from} 在执行中遇到不清楚/矛盾之处，向你（manager）确认规划意图：`,
+    `[Subtask question] ${from} hit something unclear/contradictory while executing and is checking your planning intent (you are its manager):`,
     '',
-    `问题: ${q.question}`,
+    `Question: ${q.question}`,
     '',
-    '请用 answer_subtask 工具回答（回答后你会自动回到等待子任务的状态）:',
-    `    answer_subtask(question_id="${q.questionId}", answer="<你的答复>")`,
-    '若你自己也不确定（属于更上层的规划意图），可调用 ask_manager 向你的上级继续提问，拿到答复后再回答这个子任务。',
+    'Answer with the answer_subtask tool (after answering you automatically return to waiting on your subtasks):',
+    `    answer_subtask(question_id="${q.questionId}", answer="<your answer>")`,
+    'If you are also unsure (it concerns a higher-level planning intent), call ask_manager to ask your own manager, then answer this subtask once you have their reply.',
   ].join('\n');
 }
 
+/** Notice posted to a human's chat channel when a subtask escalates to the top of the tree — a
+ *  USER-facing platform message, so it is localized via i18n.t() (CORTEX_LANG). The ❓ icon stays
+ *  in code per the locales convention (icons never live in the message tables). */
 function buildHumanEscalationNotice(q: PendingQuestion): string {
-  const from = q.fromTaskId ? `子任务 #${q.fromTaskId}` : '一个子任务';
+  const from = q.fromTaskId ? t('subtask.fromTask', { taskId: q.fromTaskId }) : t('subtask.fromUnknown');
   return [
-    `${'❓'} [子任务提问 — 已升级到你] ${from} 在执行中遇到不清楚/矛盾之处，没有上级 manager，转而向你确认：`,
+    `❓ ${t('subtask.escalateHeader', { from })}`,
     '',
-    `问题: ${q.question}`,
+    t('subtask.questionLabel', { question: q.question }),
     '',
-    '直接在本频道回复即可——你的下一条消息会作为答复返回给该子任务。',
+    t('subtask.escalateReply'),
   ].join('\n');
 }
 
