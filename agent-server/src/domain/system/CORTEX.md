@@ -11,3 +11,4 @@ orchestration/interactions/.
 | `server-update-check.ts` | checker | compareCalVer, isUpdateDevMode, checkServerUpdate — core update-check flow |
 | `github-release.ts` | client | fetchReleaseNote(version) — GitHub API client with 24h TTL cache for release notes |
 | `install-cli.ts` | CLI | cortex install latest — fetch latest version from npm and run npm install -g |
+| `doctor.ts` | engine | Pure health-check engine for `cortex doctor` — runDiagnostics/applySafeFixes + default real-env deps (runtime, backend/login, platform, gateway) |

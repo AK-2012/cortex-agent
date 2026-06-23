@@ -142,6 +142,8 @@ How to run tests without tripping it:
 | `orch/resume-dispatcher.test.ts` | Test | Auto-resume dispatch: direct→route (serial, channelBusy skip) / thread→continueThread (concurrent, only skip on live direct session; multiple threads same channel all resume) + guards (stale/missing/terminal) + CORTEX_AUTO_RESUME flag/drain |
 | `scheduler-precheck.test.ts` | Test | preCheck exit code and env |
 | `cli-utils.test.ts` | Test | formatHelp/formatError |
+| `domain/system/doctor.test.ts` | Test | doctor engine: runDiagnostics section/check statuses + gateway in-use-vs-idle logic + applySafeFixes idempotent actuation |
+| `entry/doctor-cli.test.ts` | Test | `cortex doctor` CLI: help/text/json output, exit-code mapping, --fix re-run |
 | `template-resolver.test.ts` | Test | Template variables/block/conditional |
 | `threads/domain-threads-smoke.test.ts` | Test | domain/threads/ import smoke: parseTarget / resolveStageName / resolveSystemVars / THREAD_PROTOCOL_PREAMBLE |
 | `threads/resolve-template-profiles.test.ts` | Test | resolveTemplateProfiles: hardcoded profiles, `__active__` mapping, dedup, unknown template fail-open |

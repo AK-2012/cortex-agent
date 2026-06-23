@@ -35,6 +35,7 @@ import {
 } from './init.js';
 import type { ConfigStatus } from './init.js';
 import { cmdFeishu } from './feishu-login.js';
+import { cmdDoctor, getDoctorHelp } from './doctor-cli.js';
 import { discoverEndpoints, writeMergedGatewayYaml, validateProfilesAgainstGateway, dryRunGatewayYaml } from '@core/gateway-generator.js';
 import { generateProfiles, writeProfilesJson } from '@core/profile-generator.js';
 import { CORTEX_VERSION } from '@core/version.js';
@@ -193,6 +194,7 @@ export function getCliHelp(): string {
       { name: 'task', description: 'Task system CLI (delegate to cortex-task)' },
       { name: 'install latest', description: 'Install the latest version of Cortex from npm' },
       { name: 'config', description: 'Show resolved paths and initialization status' },
+      { name: 'doctor', description: 'Health-check the install (runtime, login, platform, gateway); --fix to repair' },
       { name: 'feishu', description: 'Manage Feishu user-identity login (login / status / logout)' },
       { name: 'setup-gateway', description: 'Auto-detect Claude/PI configs and generate gateway.yaml + profiles.json' },
       { name: 'tui', description: 'Start the Terminal UI (TUI) client for local interaction' },
@@ -204,6 +206,8 @@ export function getCliHelp(): string {
       { description: 'Interactive init', command: 'cortex init' },
       { description: 'Init to custom directory', command: 'cortex init --home /tmp/my-cortex' },
       { description: 'Show resolved paths', command: 'cortex config' },
+      { description: 'Health-check the install', command: 'cortex doctor' },
+      { description: 'Diagnose and auto-repair', command: 'cortex doctor --fix' },
       { description: 'Re-generate gateway config', command: 'cortex setup-gateway' },
       { description: 'Start the server', command: 'cortex start' },
       { description: 'Stop the daemon', command: 'cortex daemon stop' },
@@ -559,6 +563,13 @@ export async function runCli(argv: string[]): Promise<CliResult> {
 
     case 'config':
       return { exitCode: 0, stdout: getConfigOutput(), stderr: '' };
+
+    case 'doctor': {
+      if (rest.includes('--help') || rest.includes('-h')) {
+        return { exitCode: 0, stdout: getDoctorHelp(), stderr: '' };
+      }
+      return cmdDoctor(rest);
+    }
 
     case 'feishu':
       return cmdFeishu(rest);

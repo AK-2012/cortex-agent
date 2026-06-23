@@ -65,6 +65,36 @@ Print resolved paths and initialization status. Shows `INSTALL_ROOT`,
 all data directories, and whether `.env`, `mcp-config.json`, and
 `mode.json` exist.
 
+**`cortex doctor [--fix] [--json]`**
+
+Health-check the whole installation in one pass and report what is wrong.
+The default run is read-only and safe at any time. It inspects four areas:
+
+- Runtime & process — Node version, `git` on PATH, the configured backend
+  binary (`claude` / `pi` / `codex`), and whether the daemon is running.
+- Backend install / login — data directories exist and are writable, `.env`
+  is present, the WebSocket/webhook auth tokens are set, `ANTHROPIC_API_KEY`
+  status, and that `mode.json`, `profiles.json`, and `mcp-config.json` are
+  present and valid.
+- Messaging platform — resolves `CORTEX_PLATFORM` and validates the
+  credentials for each enabled platform (Slack `xoxb-`/signing/`xapp-`,
+  Feishu app id/secret).
+- Gateway — `~/.aistatus/gateway.yaml` presence and a health probe of
+  `http://127.0.0.1:9880/status`. The probe is reported as a failure only
+  when the gateway is actually in use; otherwise it is skipped.
+
+Each check prints `[OK]`, `[WARN]`, `[FAIL]`, or `[--]` (skipped) with a
+short detail and, for problems, a fix hint. The command exits `1` when any
+check fails, else `0`.
+
+Options:
+- `--fix` — apply safe, idempotent repairs only: create missing data
+  directories, generate missing auth tokens, and rebuild `mcp-config.json`.
+  It never deletes configuration or overwrites existing credentials. After
+  fixing, diagnostics re-run so the summary reflects the repaired state.
+- `--json` — emit the full report (sections, checks, counts) as JSON for
+  scripting.
+
 **`cortex setup-gateway [--dry-run] [--output-dir <path>]`**
 
 Auto-detect Claude Code and PI configurations from their local config
