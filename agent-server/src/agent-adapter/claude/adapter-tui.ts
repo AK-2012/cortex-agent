@@ -4,6 +4,7 @@
 // >>> If I am updated, update my header comment and the parent folder's CORTEX.md <<<
 
 import { EventEmitter } from 'node:events';
+import { existsSync } from 'node:fs';
 import * as path from 'path';
 import { createLogger } from '@core/log.js';
 import { TmuxControl } from './tmux-control.js';
@@ -596,6 +597,25 @@ export class ClaudeTuiSession {
 export function computeJsonlPath(cwd: string, sessionId: string): string {
   const encoded = cwd.replace(/[/.]/g, '-');
   return path.join(TUI_JSONL_BASE, encoded, `${sessionId}.jsonl`);
+}
+
+/**
+ * Decide whether a TUI session should spawn with `--resume <id>` (vs `--session-id <id>`).
+ *
+ * `--resume` only succeeds when a Claude transcript already exists for that id. A *fresh* TUI
+ * session pre-registers its channel→sessionId mapping BEFORE the first Claude turn (so transcript
+ * replay / session naming work), which makes the orchestrator's generic "a session mapping exists
+ * ⇒ resume" heuristic ask to resume an id that has no transcript yet — Claude then exits with
+ * "No conversation found with session ID: <id>". Gating the resume request on the transcript
+ * actually existing keeps the first turn on `--session-id` (create) and lets only later turns /
+ * reconnects use `--resume`. Self-healing: a deleted transcript also correctly falls back to create.
+ */
+export function resolveTuiResume(
+  requestedResume: boolean,
+  jsonlPath: string,
+  exists: (p: string) => boolean = existsSync,
+): boolean {
+  return requestedResume && exists(jsonlPath);
 }
 
 /**

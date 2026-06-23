@@ -28,7 +28,7 @@ import {
 } from './defaults.js';
 import { buildHooksSettings } from './hooks-builder.js';
 import { buildClaudeEnv, buildSpawnArgs, ClaudeSpawnOptions, CortexAgentContext } from './spawn-args.js';
-import { ClaudeTuiSession, defaultTailFactory, type ClaudeTuiSessionConfig } from './adapter-tui.js';
+import { ClaudeTuiSession, defaultTailFactory, computeJsonlPath, resolveTuiResume, type ClaudeTuiSessionConfig } from './adapter-tui.js';
 import { TmuxControl, type TmuxExec } from './tmux-control.js';
 import { TUI_TMUX_NAME_PREFIX } from './defaults.js';
 import {
@@ -680,12 +680,16 @@ function getOrCreateTuiSession(config: AgentSpawnConfig, sessionIdEffective: str
     const channel = config.channel ?? config.env?.SLACK_CHANNEL ?? config.sessionKey;
     const cwd = config.cwd || DATA_DIR;
     const opts = sessionOptionsFromSpawnConfig({ ...config, sessionId: sessionIdEffective });
+    // `--resume` only works once a transcript exists. A fresh TUI session pre-registers its
+    // sessionId before the first turn, so config.resume can be true with no transcript yet —
+    // gate it on the jsonl actually existing, else the first turn fails "No conversation found".
+    const needsResume = resolveTuiResume(config.resume, computeJsonlPath(cwd, sessionIdEffective));
     const sessionConfig: ClaudeTuiSessionConfig = {
       channel,
       sessionId: sessionIdEffective,
       sessionKey: key,
       cwd,
-      needsResume: config.resume,
+      needsResume,
       tools: opts.tools,
       systemPrompt: opts.systemPrompt,
       appendSystemPrompt: opts.appendSystemPrompt,
