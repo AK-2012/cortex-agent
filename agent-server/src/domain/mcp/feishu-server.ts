@@ -1,5 +1,6 @@
 // input:  MCP SDK, feishu/ tool registration, lark client builder
-// output: cortex-feishu MCP stdio server — Feishu tools (docx/wiki/bitable/sheets + drive sharing)
+// output: cortex-feishu MCP stdio server — Feishu file sending (feishu_send_file).
+//         Document/table/wiki tooling moved to the official lark-cli (see feishu-doc skill).
 // pos:    Standalone MCP server (peer of core-server.ts & server.ts); loaded only for Feishu-originated
 //         sessions (channel carries the `feishu:` prefix) — Claude via mcp-config-feishu.json layering,
 //         PI via the mcp-bridge feishu handle. Not loaded for thread/core sessions.
@@ -29,7 +30,7 @@ export const TOOL_NAMES = FEISHU_TOOL_NAMES;
 export async function startServer(): Promise<void> {
   if (!client) {
     log.warn(
-      'FEISHU_APP_ID / FEISHU_APP_SECRET not set — Feishu document tools will return a not-configured error',
+      'FEISHU_APP_ID / FEISHU_APP_SECRET not set — feishu_send_file will return a not-configured error',
     );
   }
   const transport = new StdioServerTransport();
