@@ -230,10 +230,16 @@ export function buildStepPrompt(threadId: string, agentConfig: AgentSlotConfig, 
  *  - prepends the agent directive (resolved for {{systemVar}});
  *  - prepends the user profile (loadUserContext) — plain conversation is the ONLY path that
  *    injects USER.md; it is on by default unless CORTEX_DISABLE_USER_CONTEXT=1. Thread steps
- *    (buildStepPrompt) never inject it;
+ *    (buildStepPrompt) never inject it. The caller gates it via opts.includeUserContext so the
+ *    profile is sent only on a session's FIRST turn (session resume keeps it in history thereafter);
  *  - NEVER injects THREAD_PROTOCOL_PREAMBLE (no artifact, no [ABORT] protocol for conversations).
  */
-export function buildConversationPrompt(agentConfig: AgentSlotConfig, input: string): string {
+export function buildConversationPrompt(
+  agentConfig: AgentSlotConfig,
+  input: string,
+  opts: { includeUserContext?: boolean } = {},
+): string {
+  const { includeUserContext = true } = opts;
   const { template: templateStr } = pickStepTemplate(agentConfig, null);
   const vars: Record<string, string> = {
     input,
@@ -246,7 +252,7 @@ export function buildConversationPrompt(agentConfig: AgentSlotConfig, input: str
   let prompt = applyPromptTemplate(templateStr, vars);
 
   const prefixes: string[] = [];
-  const userCtx = loadUserContext();
+  const userCtx = includeUserContext ? loadUserContext() : null;
   if (userCtx) prefixes.push(userCtx);
   if (agentConfig.directive) prefixes.push(resolveSystemVars(agentConfig.directive));
   if (prefixes.length > 0) prompt = prefixes.join('\n\n') + '\n\n' + prompt;

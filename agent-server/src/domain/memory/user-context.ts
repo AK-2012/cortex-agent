@@ -1,7 +1,9 @@
 // input:  CONTEXT_DIR, fs
 // output: loadUserContext()
 // pos:    user profile injection — reads USER.md and injects into thread-free conversation
-//         turns only (buildConversationPrompt). Thread steps never carry the user profile.
+//         turns only (buildConversationPrompt), and only on a session's FIRST turn (the caller
+//         gates via includeUserContext; session resume keeps it in history thereafter).
+//         Thread steps never carry the user profile.
 // >>> If I am updated, update my header comment and the parent folder's CORTEX.md <<<
 
 import { readFileSync, statSync } from 'fs';

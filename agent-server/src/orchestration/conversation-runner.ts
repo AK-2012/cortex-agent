@@ -73,7 +73,10 @@ export async function runConversation(opts: RunConversationOptions): Promise<Con
   const agentConfig = resolveAgentSlotConfigByName(defaultAgentName);
   if (!agentConfig) throw new Error(`Unknown default agent: ${defaultAgentName}`);
 
-  const prompt = buildConversationPrompt(agentConfig, opts.userMessage);
+  // USER.md profile is injected only on a session's FIRST turn (existingSessionId === null).
+  // Session resume keeps it in history thereafter, so re-sending it every turn just wastes tokens.
+  const isFreshSession = opts.existingSessionId === null;
+  const prompt = buildConversationPrompt(agentConfig, opts.userMessage, { includeUserContext: isFreshSession });
   const project = projectStore.resolveFromMessage(opts.userMessage)?.id ?? 'general';
 
   // Resolve profile: hardcoded agent profiles win; __active__ honors the optional override
