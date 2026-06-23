@@ -19,6 +19,7 @@ import { buildSessionTag, buildUserProcessingMessage, makeFallbackNotifier, make
 import { readFileSync } from 'fs';
 import { createLogger } from '@core/log.js';
 import { Icons } from '../core/icons.js';
+import { t } from '../core/i18n.js';
 import { getOutboundQueue } from '@store/outbound-queue.js';
 import { buildDurableHooks } from './durable-helpers.js';
 
@@ -88,7 +89,7 @@ export class AgentRunner {
     // tryAnswerFromHuman returns false unless this exact channel is awaiting a human reply.
     if (tryAnswerFromHuman(channel, ctx.userMessage || '')) {
       const dest: Destination = { type: 'interactive-reply', conduit: channel, sessionId: '' };
-      await adapter.postMessage(dest, { text: `${Icons.ok} 已把你的回复作为答复返回给提问的子任务。` }).catch(() => {});
+      await adapter.postMessage(dest, { text: `${Icons.ok} ${t('subtask.replyDelivered')}` }).catch(() => {});
       return;
     }
     if (conduitQueues.has(channel)) {

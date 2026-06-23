@@ -39,10 +39,10 @@ function buildNotice(threadId: string): string {
   const t = threadStore.get(threadId)!;
   const cost = `$${(t.totalCostUsd || 0).toFixed(4)}`;
   const last = t.steps.length ? t.steps[t.steps.length - 1].output : null;
-  const tail = t.abortReason || t.error || last || '(无输出)';
+  const tail = t.abortReason || t.error || last || '(no output)';
   const summary = tail.length > 200 ? tail.slice(0, 200) + '…' : tail;
   const label = t.templateName || t.activeAgent || 'thread';
-  return `[后台线程完成] 你启动的线程 ${threadId} (${label}) 状态=${t.status} | ${cost}\n摘要: ${summary}\n调用 thread_result("${threadId}") 查看完整产出。`;
+  return `[Background thread done] Your thread ${threadId} (${label}) status=${t.status} | ${cost}\nSummary: ${summary}\nCall thread_result("${threadId}") to see the full output.`;
 }
 
 /** Child-result notice delivered into a suspended parent's pendingMessages. Echoes the
@@ -57,23 +57,23 @@ export function buildChildResultNotice(child: ThreadRecord): string {
   const maxChildren = parseInt(process.env.CORTEX_THREAD_MAX_CHILDREN || '8', 10) || 8;
 
   const lines = [
-    `[子线程完成] ${child.id} (${label}) 状态=${child.status} | ${cost}`,
+    `[Child thread done] ${child.id} (${label}) status=${child.status} | ${cost}`,
   ];
-  if (child.abortReason) lines.push(`子线程升级/中止原因: ${child.abortReason}`);
-  if (child.error) lines.push(`子线程错误: ${child.error}`);
+  if (child.abortReason) lines.push(`Child escalation/abort reason: ${child.abortReason}`);
+  if (child.error) lines.push(`Child error: ${child.error}`);
   if (contract) {
-    lines.push(`契约: ${contract.goal}`);
+    lines.push(`Contract: ${contract.goal}`);
     if (contract.doneWhen) lines.push(`Done when: ${contract.doneWhen}`);
     if (contract.deliverablePath) lines.push(`Deliverable: ${contract.deliverablePath}`);
   }
-  lines.push(`完整产出: thread_result("${child.id}")${child.artifactPath ? `；artifact: ${child.artifactPath}` : ''}`);
+  lines.push(`Full output: thread_result("${child.id}")${child.artifactPath ? `; artifact: ${child.artifactPath}` : ''}`);
   lines.push('');
-  lines.push('验收要求（必须执行，不得凭子线程的汇报文本直接采信）:');
-  lines.push('1. 读取 deliverable 实物，逐条核对 done_when；涉及代码的跑测试验证。');
-  lines.push('2. 达标 → 蒸馏关键结论进你的 artifact，继续你的计划。');
-  lines.push('3. 未达标 → 写出 expected/actual 差异与失败假设，用修订后的契约重新 thread_start' +
-    `（你已使用 ${childCount}/${maxChildren} 个子线程额度；额度耗尽时 thread_start 会被拒绝）。`);
-  lines.push('4. 无法判断或方向性问题 → 调用 thread_abort 工具（附一行诊断）升级到你的上层。');
+  lines.push('Acceptance (mandatory — do NOT trust the child\'s self-reported summary):');
+  lines.push('1. Read the actual deliverable; check it against done_when item by item; for code, run the tests.');
+  lines.push('2. Passes → distill the key conclusions into your artifact and continue your plan.');
+  lines.push('3. Fails → write out the expected/actual gap and your failure hypothesis, then thread_start again with a revised contract' +
+    ` (you have used ${childCount}/${maxChildren} child-thread slots; thread_start is rejected once the quota is exhausted).`);
+  lines.push('4. Cannot judge, or a directional question → call the thread_abort tool (with a one-line diagnosis) to escalate to your manager.');
   return lines.join('\n');
 }
 
@@ -236,23 +236,23 @@ export async function notifyThreadParent(childId: string, deps: { resume?: Resum
 export function buildTaskResultNotice(task: Task, kind: 'completed' | 'blocked'): string {
   const lines: string[] = [];
   if (kind === 'completed') {
-    lines.push(`[子任务完成] #${task.id} ${task.text}`);
+    lines.push(`[Subtask done] #${task.id} ${task.text}`);
     if (task.done_when) lines.push(`Done when: ${task.done_when}`);
-    if (task.completed_note) lines.push(`完成备注: ${task.completed_note}`);
+    if (task.completed_note) lines.push(`Completion note: ${task.completed_note}`);
     lines.push('');
-    lines.push('验收要求（必须执行，不得凭完成备注直接采信）:');
-    lines.push('1. 读取实际产出（代码/文档/实验记录），逐条核对 done_when；涉及代码的跑测试验证。');
-    lines.push('2. 达标 → 蒸馏关键结论进你的 artifact，继续你的计划。');
-    lines.push(`3. 未达标 → cortex-task uncomplete 后修订该任务，或用 decompose --keep-parent 增加修订子任务，再调用 thread_wait。`);
-    lines.push('4. 方向性问题 → 调用 thread_abort 工具（附一行诊断）升级。');
+    lines.push('Acceptance (mandatory — do NOT trust the completion note at face value):');
+    lines.push('1. Read the actual output (code/docs/experiment records); check it against done_when item by item; for code, run the tests.');
+    lines.push('2. Passes → distill the key conclusions into your artifact and continue your plan.');
+    lines.push(`3. Fails → cortex-task uncomplete then revise the task, or add a revision subtask with decompose --keep-parent, then call thread_wait.`);
+    lines.push('4. Directional question → call the thread_abort tool (with a one-line diagnosis) to escalate.');
   } else {
-    lines.push(`[子任务被阻塞 — 升级信号] #${task.id} ${task.text}`);
-    lines.push(`阻塞原因: ${task.blocked_by || '(未记录)'}`);
+    lines.push(`[Subtask blocked — escalation signal] #${task.id} ${task.text}`);
+    lines.push(`Blocked by: ${task.blocked_by || '(unrecorded)'}`);
     lines.push('');
-    lines.push('这是子任务的升级：它无法自行完成。你必须处理:');
-    lines.push('1. 诊断原因（读它的产出/日志；too-big 类原因 = 你当初的分解需要修订）。');
-    lines.push('2. 可修复 → cortex-task unblock 并修订任务描述/done_when，或重建修订后的子任务（decompose --keep-parent），再调用 thread_wait。');
-    lines.push('3. 超出你的职权或方向性问题 → 调用 thread_abort 工具（附一行诊断）向上升级。');
+    lines.push('This is the subtask escalating: it cannot finish on its own. You must handle it:');
+    lines.push('1. Diagnose the cause (read its output/logs; a too-big cause = your original decomposition needs revising).');
+    lines.push('2. Fixable → cortex-task unblock and revise the task description/done_when, or rebuild a revised subtask (decompose --keep-parent), then call thread_wait.');
+    lines.push('3. Beyond your authority or a directional question → call the thread_abort tool (with a one-line diagnosis) to escalate upward.');
   }
   return lines.join('\n');
 }
@@ -345,10 +345,10 @@ async function wakeSession(channel: string, notice: string, tag: string): Promis
  *  no manager-style verification ceremony (the recipient is the requester, not a join node). */
 function buildTaskOriginNotice(task: Task, kind: 'completed' | 'blocked'): string {
   if (kind === 'completed') {
-    const note = task.completed_note ? `\n备注: ${task.completed_note}` : '';
-    return `[任务完成] 你布置的任务 #${task.id} (${task.project})「${task.text}」已完成。${note}\n用 cortex-task show --task-id ${task.id} 查看详情。`;
+    const note = task.completed_note ? `\nNote: ${task.completed_note}` : '';
+    return `[Task done] The task you dispatched #${task.id} (${task.project}) "${task.text}" is complete.${note}\nRun cortex-task show --task-id ${task.id} for details.`;
   }
-  return `[任务受阻] 你布置的任务 #${task.id} (${task.project})「${task.text}」被阻塞。\n阻塞原因: ${task.blocked_by || '(未记录)'}\n用 cortex-task show --task-id ${task.id} 查看详情，处理后可 cortex-task unblock。`;
+  return `[Task blocked] The task you dispatched #${task.id} (${task.project}) "${task.text}" is blocked.\nBlocked by: ${task.blocked_by || '(unrecorded)'}\nRun cortex-task show --task-id ${task.id} for details; once handled, cortex-task unblock.`;
 }
 
 /** Session→task wake (Problem 1): when a task created by an interactive session/agent turns
@@ -393,7 +393,7 @@ export async function reconcileWaitingTasks(threadId: string, deps: { resume?: R
         const m = t.metadata!;
         m.waitingOnTasks = (m.waitingOnTasks ?? []).filter((id) => id !== taskId);
         if (!Array.isArray(m.pendingMessages)) m.pendingMessages = [];
-        m.pendingMessages.push(`[子任务丢失] #${taskId} 已不在 TASKS.yaml（可能被归档或删除），按失败处理。`);
+        m.pendingMessages.push(`[Subtask lost] #${taskId} is no longer in TASKS.yaml (likely archived or deleted); treating as failed.`);
       });
       log.warn(`reconcile: dropped missing task ${taskId} from waiting thread ${threadId}`);
     } else if (task.status === 'done') {
@@ -440,7 +440,7 @@ export async function recoverWaitingThreads(deps: { resume?: ResumeFn } = {}): P
           const meta = t.metadata!;
           meta.waitingOn = (meta.waitingOn ?? []).filter((id) => id !== childId);
           if (!Array.isArray(meta.pendingMessages)) meta.pendingMessages = [];
-          meta.pendingMessages.push(`[子线程丢失] ${childId} 的记录已不存在（可能被清理），按失败处理。`);
+          meta.pendingMessages.push(`[Child thread lost] the record for ${childId} no longer exists (likely cleaned up); treating as failed.`);
         });
         log.warn(`recover: dropped missing child ${childId} from waiting parent ${parent.id}`);
       } else if (isTerminalStatus(child.status)) {

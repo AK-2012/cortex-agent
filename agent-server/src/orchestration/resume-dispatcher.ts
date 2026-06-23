@@ -38,10 +38,10 @@ export function isAutoResumeEnabled(): boolean {
 export function buildResumeReminder(): string {
   return [
     '<system-reminder>',
-    '上一轮因命中 API 限流(五小时窗口)被中断。该窗口现已重置,你可以继续。',
-    '请从中断处接着做:回顾上方最近的对话上下文,判断还有什么没完成并完成它。',
-    '不要从头重启任务、也不要重复询问用户已提供的信息。若上一轮其实已经完成,简短确认后停止。',
-    '本条消息仅为恢复信号,不应改变你原本的任务。',
+    'The previous turn was interrupted by an API rate limit (the 5-hour window). That window has now reset; you may continue.',
+    'Resume from where you left off: review the recent conversation context above, work out what is still unfinished, and finish it.',
+    'Do not restart the task from scratch, and do not re-ask for information the user already provided. If the previous turn was in fact already complete, briefly confirm and stop.',
+    'This message is only a resume signal; it should not change your original task.',
     '</system-reminder>',
   ].join('\n');
 }
