@@ -188,6 +188,13 @@ Resume a paused task.
 
 Mark a task as pending (waiting for a `cortex-run` process to complete).
 
+**`reopen --project <name> (--task-id <id> | --task <text>)`**
+
+Restore a stuck `pending` task back to `open` so the dispatcher can pick it up
+again. Use this to rescue a task that stayed `pending` after a lost `cortex-run`
+callback. It is idempotent on an already-open task and refuses a completed task
+(use `uncomplete` for those).
+
 **`complete --project <name> (--task-id <id> | --task <text>) [--note <text>] [--skip-verify] [--skip-verify-reason <text>]`**
 
 Mark a task as complete. Requires a `--note` describing what was done. By
@@ -306,12 +313,16 @@ daemon webhook.
 ```
 open → claimed → done
   ↓        ↓
-paused   pending
+paused   pending → open (reopen)
   ↓
 blocked → open (unblock)
 
 approval states: request-approval → approve → clear-approval
 ```
+
+Both `block`/`unblock` and `reopen` normalize a task's status back to `open`, so a
+task that failed mid-`cortex-run` (left as `pending`) returns to a dispatchable
+state rather than staying invisible to the dispatcher.
 
 ### Exit codes
 

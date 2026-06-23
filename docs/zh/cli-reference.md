@@ -133,6 +133,12 @@ cortex-task <command> [options]
 
 将任务标记为 pending（等待 `cortex-run` 进程完成）。
 
+**`reopen --project <name> (--task-id <id> | --task <text>)`**
+
+将卡住的 `pending` 任务还原为 `open`，使调度器可以重新派发。用于挽救因 `cortex-run`
+回调丢失而停留在 `pending` 的任务。对已是 open 的任务幂等，对已完成的任务则拒绝（请改用
+`uncomplete`）。
+
 **`complete --project <name> (--task-id <id> | --task <text>) [--note <text>] [--skip-verify] [--skip-verify-reason <text>]`**
 
 将任务标记为完成。需要 `--note` 描述完成了什么。默认情况下，Cortex 验证 `done-when` 条件是否满足。使用 `--skip-verify` 和 `--skip-verify-reason` 绕过验证。
@@ -235,12 +241,15 @@ cortex-task <command> [options]
 ```
 open → claimed → done
   ↓        ↓
-paused   pending
+paused   pending → open (reopen)
   ↓
 blocked → open (unblock)
 
 approval states: request-approval → approve → clear-approval
 ```
+
+`block`/`unblock` 与 `reopen` 都会把任务状态归一回 `open`，因此在 `cortex-run` 中途失败
+（停留在 `pending`）的任务会回到可派发状态，而不会对调度器永久隐形。
 
 ### 退出码
 

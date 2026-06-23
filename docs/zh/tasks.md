@@ -105,7 +105,9 @@ open ──claim──→ in-progress ──complete──→ done
  │
  ├──request-approval──→ approval-needed ──approve──→ open（approved_at 已设置）
  │
- └──pending──→ pending ──(cortex-run 结果)──→ done / blocked
+ └──pending──→ pending ──(cortex-run 结果)──→ done / open+blocked
+                  │
+                  └──reopen──→ open
 ```
 
 **守卫规则：**
@@ -113,9 +115,11 @@ open ──claim──→ in-progress ──complete──→ done
 - 不能认领已被认领的任务（409 错误）
 - 不能认领已阻塞或已完成的任务
 - 不能完成已阻塞或已暂停的任务
-- 设置 `blocked_by` 自动清除 `claimed_by`、`claimed_at` 和 `pending_at`
+- 设置 `blocked_by` 自动清除 `claimed_by`、`claimed_at` 和 `pending_at`，并把 `pending` 状态归一回 `open`（这样解阻后任务可重新派发——阻塞期间真正拦截派发的是 `blocked_by` 而非状态）
 - 暂停任务清除 `claimed_by` 和 `claimed_at`
 - `pending` 清除 `claimed_by` 和 `blocked_by`，设置 `pending_at`
+- `unblock` 清除 `blocked_by`，并把遗留的 `pending` 状态还原为 `open`
+- `reopen` 把卡住的 `pending` 任务还原为 `open`（cortex-run 回调丢失时的挽救路径）；拒绝 `done` 任务
 
 ## Done-When 纪律
 
@@ -242,6 +246,7 @@ cortex-client（到服务器的 WebSocket 连接）
 | `pause --task-id <id>` | 暂停任务（清除认领） |
 | `resume --task-id <id>` | 恢复暂停的任务 |
 | `pending --task-id <id>` | 标记为 pending（等待 cortex-run 结果） |
+| `reopen --task-id <id>` | 把卡住的 `pending` 任务还原为 `open`（挽救丢失的 cortex-run 回调） |
 | `complete --task-id <id>` | 标记完成（`--note`、`--skip-verify` 绕过验证） |
 | `uncomplete --task-id <id>` | 撤销已完成的任务回到 open |
 

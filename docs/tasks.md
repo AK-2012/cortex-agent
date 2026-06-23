@@ -104,7 +104,9 @@ open ──claim──→ in-progress ──complete──→ done
  │
  ├──request-approval──→ approval-needed ──approve──→ open (approved_at set)
  │
- └──pending──→ pending ──(cortex-run result)──→ done / blocked
+ └──pending──→ pending ──(cortex-run result)──→ done / open+blocked
+                  │
+                  └──reopen──→ open
 ```
 
 **Guard rules:**
@@ -112,9 +114,11 @@ open ──claim──→ in-progress ──complete──→ done
 - Cannot claim an already-claimed task (409 error)
 - Cannot claim a blocked or done task
 - Cannot complete a blocked or paused task
-- Setting `blocked_by` auto-clears `claimed_by`, `claimed_at`, and `pending_at`
+- Setting `blocked_by` auto-clears `claimed_by`, `claimed_at`, and `pending_at`, and normalizes a `pending` status back to `open` (so an unblocked task is dispatchable again — `blocked_by` is what gates dispatch while blocked, not the status)
 - Pausing a task clears `claimed_by` and `claimed_at`
 - `pending` clears `claimed_by` and `blocked_by`, sets `pending_at`
+- `unblock` clears `blocked_by` and restores a legacy `pending` status to `open`
+- `reopen` restores a stuck `pending` task to `open` (rescue path for a lost cortex-run callback); refuses a `done` task
 
 ## Done-When Discipline
 
@@ -246,6 +250,7 @@ CLI reference including every subcommand and flag, see
 | `pause --task-id <id>` | Pause a task (clears claim) |
 | `resume --task-id <id>` | Resume a paused task |
 | `pending --task-id <id>` | Mark as pending (waiting for cortex-run result) |
+| `reopen --task-id <id>` | Restore a stuck `pending` task back to `open` (rescue a lost cortex-run callback) |
 | `complete --task-id <id>` | Mark complete (`--note`, `--skip-verify` to bypass verification) |
 | `uncomplete --task-id <id>` | Reverse a completed task back to open |
 

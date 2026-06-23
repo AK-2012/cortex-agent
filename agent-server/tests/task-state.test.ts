@@ -15,11 +15,14 @@ import {
   claimTask,
   clearApprovalTask,
   pauseTask,
+  pendingTask,
+  reopenTask,
   requestApprovalTask,
   resumeTask,
   unblockTask,
   unclaimTask,
 } from '../src/domain/tasks/system/task-state.js';
+import { isActionable, parseTasksFile } from '../src/core/task-parser.js';
 
 function readFile(filePath: string): string {
   return fs.readFileSync(filePath, 'utf8');
@@ -247,5 +250,106 @@ test('resolveTaskLine via state APIs: unknown task id returns not found', () => 
     const result = claimTask(null, proj, 'agent', 'dead');
     assert.equal(result.success, false);
     assert.match(result.message, /Task not found/);
+  } finally { cleanup(); }
+});
+
+// --- pending/blocked recovery (ISS: pending-status dispatch deadlock) ---
+
+// Raw fixture allowing an explicit status line (yamlTask hardcodes status: open).
+function rawTask(id: string, fields: string): string {
+  return `tasks:\n  - id: ${id}\n    text: "Task"\n    why: ""\n    done-when: ""\n    priority: medium\n${fields}    template: coder-review\n    plan: ""\n`;
+}
+
+function loadTask(tasksPath: string, project: string, id: string) {
+  const tasks = parseTasksFile(readFile(tasksPath), project);
+  const t = tasks.find((x) => x.id === id);
+  assert.ok(t, `task ${id} not found in parsed fixture`);
+  return t;
+}
+
+// (b) blockTask must normalize status pending -> open. The status field alone is an
+// independent dispatch-exclusion gate (task-parser isActionable), so a task left at
+// status=pending after a failed run stays invisible to the dispatcher forever.
+test('blockTask normalizes status pending -> open while setting blocked-by', () => {
+  const proj = nextProject();
+  const { tasksPath, cleanup } = makeRepo(proj, yamlTask('a111'));
+  try {
+    assert.equal(pendingTask(null, proj, 'a111').success, true);
+    assert.equal(loadTask(tasksPath, proj, 'a111').status, 'pending');
+
+    const res = blockTask(null, proj, 'run failed', 'a111');
+    assert.equal(res.success, true);
+    const task = loadTask(tasksPath, proj, 'a111');
+    assert.equal(task.status, 'open');
+    assert.equal(task.blocked_by, 'run failed');
+  } finally { cleanup(); }
+});
+
+test('blockTask does not resurrect a done task', () => {
+  const proj = nextProject();
+  const { tasksPath, cleanup } = makeRepo(proj, rawTask('a111', '    status: done\n'));
+  try {
+    blockTask(null, proj, 'reason', 'a111');
+    assert.equal(loadTask(tasksPath, proj, 'a111').status, 'done');
+  } finally { cleanup(); }
+});
+
+// (a) unblockTask must restore a legacy stuck task (status=pending + blocked-by) to open.
+test('unblockTask restores status pending -> open (legacy stuck state)', () => {
+  const proj = nextProject();
+  const { tasksPath, cleanup } = makeRepo(proj, rawTask('a111', '    status: pending\n    blocked-by: run failed\n'));
+  try {
+    const res = unblockTask(null, proj, 'a111');
+    assert.equal(res.success, true);
+    const task = loadTask(tasksPath, proj, 'a111');
+    assert.equal(task.status, 'open');
+    assert.equal(task.blocked_by, null);
+    assert.equal(isActionable(task), true);
+  } finally { cleanup(); }
+});
+
+// (c) reopenTask rescues an orphan pending task (lost cortex-run callback: status=pending, no blocked-by).
+test('reopenTask transitions an orphan pending task back to open + actionable', () => {
+  const proj = nextProject();
+  const { tasksPath, cleanup } = makeRepo(proj, rawTask('a111', '    status: pending\n    pending-at: "2026-01-01"\n'));
+  try {
+    const res = reopenTask(null, proj, 'a111');
+    assert.equal(res.success, true);
+    assert.equal(res.task_id, 'a111');
+    const task = loadTask(tasksPath, proj, 'a111');
+    assert.equal(task.status, 'open');
+    assert.equal(isActionable(task), true);
+  } finally { cleanup(); }
+});
+
+test('reopenTask refuses a completed task and is idempotent on an open task', () => {
+  const projDone = nextProject();
+  const rDone = makeRepo(projDone, rawTask('a111', '    status: done\n'));
+  try {
+    const res = reopenTask(null, projDone, 'a111');
+    assert.equal(res.success, false);
+    assert.match(res.message, /complete/i);
+  } finally { rDone.cleanup(); }
+
+  const projOpen = nextProject();
+  const rOpen = makeRepo(projOpen, yamlTask('a111'));
+  try {
+    const res = reopenTask(null, projOpen, 'a111');
+    assert.equal(res.success, true);
+    assert.equal(loadTask(rOpen.tasksPath, projOpen, 'a111').status, 'open');
+  } finally { rOpen.cleanup(); }
+});
+
+// End-to-end repro of the dispatch deadlock: pending -> failed run (block) -> manual unblock
+// must leave the task actionable again.
+test('pending -> block -> unblock leaves the task actionable (deadlock regression)', () => {
+  const proj = nextProject();
+  const { tasksPath, cleanup } = makeRepo(proj, yamlTask('a111'));
+  try {
+    assert.equal(pendingTask(null, proj, 'a111').success, true);
+    assert.equal(blockTask(null, proj, 'run failed', 'a111').success, true);
+    assert.equal(unblockTask(null, proj, 'a111').success, true);
+    const task = loadTask(tasksPath, proj, 'a111');
+    assert.equal(isActionable(task), true);
   } finally { cleanup(); }
 });

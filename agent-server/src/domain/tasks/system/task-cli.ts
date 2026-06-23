@@ -28,6 +28,7 @@ import {
   clearApprovalTask,
   pauseTask,
   pendingTask,
+  reopenTask,
   requestApprovalTask,
   resumeTask,
   unblockTask,
@@ -81,7 +82,7 @@ interface ParsedValues {
 const READ_COMMANDS = new Set(['list', 'all', 'query', 'show', 'deps', 'lint', 'stats', 'tree']);
 
 const WRITE_COMMANDS = new Set([
-  'claim', 'unclaim', 'pause', 'resume', 'pending', 'complete', 'uncomplete',
+  'claim', 'unclaim', 'pause', 'resume', 'pending', 'reopen', 'complete', 'uncomplete',
   'request-approval', 'approve', 'clear-approval',
   'block', 'unblock',
   'add', 'spawn', 'edit', 'batch-edit', 'bulk-add', 'decompose',
@@ -92,7 +93,7 @@ const WRITE_COMMANDS = new Set([
 const ALL_COMMANDS = new Set([...READ_COMMANDS, ...WRITE_COMMANDS]);
 
 const COMMANDS_NEEDING_TASK = new Set([
-  'claim', 'unclaim', 'pause', 'resume', 'pending', 'complete', 'uncomplete',
+  'claim', 'unclaim', 'pause', 'resume', 'pending', 'reopen', 'complete', 'uncomplete',
   'request-approval', 'approve', 'clear-approval',
   'block', 'unblock',
   'edit', 'decompose',
@@ -100,7 +101,7 @@ const COMMANDS_NEEDING_TASK = new Set([
 
 const COMMANDS_NEEDING_REASON = new Set(['block']);
 const COMMANDS_NEEDING_PROJECT = new Set([
-  'claim', 'unclaim', 'pause', 'resume', 'pending', 'complete', 'uncomplete',
+  'claim', 'unclaim', 'pause', 'resume', 'pending', 'reopen', 'complete', 'uncomplete',
   'request-approval', 'approve', 'clear-approval',
   'block', 'unblock',
   'add', 'spawn', 'edit', 'batch-edit', 'bulk-add', 'decompose',
@@ -125,6 +126,7 @@ const COMMAND_FLAG_ALLOWLIST: Record<string, Set<string>> = {
   pause: new Set([...COMMON_FLAGS, '--task']),
   resume: new Set([...COMMON_FLAGS, '--task']),
   pending: new Set([...COMMON_FLAGS, '--task']),
+  reopen: new Set([...COMMON_FLAGS, '--task']),
   complete: new Set([...COMMON_FLAGS, '--task', '--note', '--skip-verify', '--skip-verify-reason']),
   uncomplete: new Set([...COMMON_FLAGS, '--task']),
   'request-approval': new Set([...COMMON_FLAGS, '--task']),
@@ -176,6 +178,7 @@ const HELP_CONFIG = {
         { name: 'pause', description: 'Pause' },
         { name: 'resume', description: 'Resume a paused task' },
         { name: 'pending', description: 'Mark pending (waiting for cortex-run)' },
+        { name: 'reopen', description: 'Restore a stuck pending task back to open (e.g. after a lost cortex-run callback)' },
         { name: 'complete', description: 'Mark complete (--note)' },
         { name: 'uncomplete', description: 'Reverse a completed task' },
       ],
@@ -866,6 +869,7 @@ const WRITE_HANDLERS: Record<string, WriteHandler> = {
   pause: (v) => pauseTask(v.task, v.project!, v.taskId),
   resume: (v) => resumeTask(v.task, v.project!, v.taskId),
   pending: (v) => pendingTask(v.task, v.project!, v.taskId),
+  reopen: (v) => reopenTask(v.task, v.project!, v.taskId),
   complete: (v) => completeTask(v.task, v.project!, v.note, v.taskId, v.skipVerify, v.skipVerifyReason),
   uncomplete: (v) => uncompleteTask(v.task, v.project!, v.taskId),
   'request-approval': (v) => requestApprovalTask(v.task, v.project!, v.taskId),
