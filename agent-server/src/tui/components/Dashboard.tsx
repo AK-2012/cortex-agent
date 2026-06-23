@@ -67,6 +67,22 @@ function TabContent({
 }): React.JSX.Element {
   const initialQuerySent = useRef(false);
 
+  // The parent (App) hands us fresh callback / sendFrame identities on every render.
+  // Holding them in refs lets the query/subscribe effect depend only on
+  // [tab, projectId], so it never re-fires (and re-subscribes) merely because the
+  // parent re-rendered. Without this the effect cleaned up + re-ran every render,
+  // each run calling onMarkPending → setState → re-render → infinite loop (the
+  // Ctrl+D render storm that pegged a CPU core at ~95% with "Maximum update depth
+  // exceeded").
+  const sendFrameRef = useRef(sendFrame);
+  sendFrameRef.current = sendFrame;
+  const onMarkPendingRef = useRef(onMarkPending);
+  onMarkPendingRef.current = onMarkPending;
+  const onRegisterSubscriptionRef = useRef(onRegisterSubscription);
+  onRegisterSubscriptionRef.current = onRegisterSubscription;
+  const onUnregisterSubscriptionRef = useRef(onUnregisterSubscription);
+  onUnregisterSubscriptionRef.current = onUnregisterSubscription;
+
   // Initial query + subscribe (runs once per tab mount)
   React.useEffect(() => {
     const scope = TAB_SCOPES[tab];
@@ -78,21 +94,21 @@ function TabContent({
       initialQuerySent.current = true;
 
       // Send query for initial data
-      sendFrame({ type: 'ui.query', id: queryId, scope: tab === 'cost' ? 'cost.summary' : `${tab}.list`, params: projectId ? { projectId } : {} });
-      onMarkPending(tab);
+      sendFrameRef.current({ type: 'ui.query', id: queryId, scope: tab === 'cost' ? 'cost.summary' : `${tab}.list`, params: projectId ? { projectId } : {} });
+      onMarkPendingRef.current(tab);
 
       // Subscribe to events
-      sendFrame({ type: 'ui.subscribe', id: queryId, filter: { events: scope.events, projectId } });
-      onRegisterSubscription(queryId, tab);
+      sendFrameRef.current({ type: 'ui.subscribe', id: queryId, filter: { events: scope.events, projectId } });
+      onRegisterSubscriptionRef.current(queryId, tab);
     }
 
     // Cleanup on unmount
     return () => {
-      sendFrame({ type: 'ui.unsubscribe', id: queryId });
-      onUnregisterSubscription(queryId);
+      sendFrameRef.current({ type: 'ui.unsubscribe', id: queryId });
+      onUnregisterSubscriptionRef.current(queryId);
       initialQuerySent.current = false;
     };
-  }, [tab, projectId, sendFrame, onMarkPending, onRegisterSubscription, onUnregisterSubscription]);
+  }, [tab, projectId]);
 
   // Re-fetch when loading is triggered by a subscription event
   React.useEffect(() => {
@@ -100,10 +116,10 @@ function TabContent({
     if (!scope || !initialQuerySent.current) return;
 
     if (dashState.tabs[tab].loading) {
-      sendFrame({ type: 'ui.query', id: scope.queryId, scope: tab === 'cost' ? 'cost.summary' : `${tab}.list`, params: projectId ? { projectId } : {} });
-      onMarkPending(tab);
+      sendFrameRef.current({ type: 'ui.query', id: scope.queryId, scope: tab === 'cost' ? 'cost.summary' : `${tab}.list`, params: projectId ? { projectId } : {} });
+      onMarkPendingRef.current(tab);
     }
-  }, [dashState.tabs[tab].loading, tab, projectId, sendFrame, onMarkPending]);
+  }, [dashState.tabs[tab].loading, tab, projectId]);
 
   switch (tab) {
     case 'threads':
@@ -145,12 +161,15 @@ export function Dashboard({
 
   return (
     <Box flexDirection="column" width="100%">
-      {/* Tab bar */}
+      {/* Tab bar — single compact line. Per-tab borders overflowed the 40-wide
+          side panel and wrapped labels into unreadable fragments ("Execu/tions");
+          render plain labels separated by spaces, active tab in reverse video. */}
       <Box>
-        {DASHBOARD_TABS.map(t => (
-          <Box key={t.key} paddingX={1} borderStyle={t.key === activeTab ? 'bold' : 'single'} borderDimColor={t.key !== activeTab}>
-            <Text bold={t.key === activeTab}>{t.label}</Text>
-          </Box>
+        {DASHBOARD_TABS.map((t, i) => (
+          <React.Fragment key={t.key}>
+            {i > 0 ? <Text dimColor> </Text> : null}
+            <Text bold={t.key === activeTab} inverse={t.key === activeTab}>{t.label}</Text>
+          </React.Fragment>
         ))}
       </Box>
 
