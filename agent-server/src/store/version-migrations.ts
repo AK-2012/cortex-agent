@@ -88,6 +88,82 @@ export function upsertMarkerBlock(content: string, block: string): string {
   return `${trimmed}\n\n${block}\n`;
 }
 
+/** Apply an ordered list of literal `[from, to]` replacements, each only when `from`
+ *  is present in the content. Used by text migrations that neutralize opinionated or
+ *  project-specific phrasing in shipped default prompts (e.g. a hard TDD mandate, a
+ *  hardcoded `npm test`, a named lint tool) on existing installs whose prompt copies
+ *  predate the edit. Idempotent provided no `to` re-introduces another rule's `from`:
+ *  once replaced the `from` is gone, so re-runs are no-ops. A prompt the user has
+ *  customized away from the shipped wording simply won't match and is left untouched,
+ *  preserving their edits. */
+export function applyReplacements(content: string, pairs: ReadonlyArray<readonly [string, string]>): string {
+  let out = content;
+  for (const [from, to] of pairs) {
+    if (out.includes(from)) out = out.split(from).join(to);
+  }
+  return out;
+}
+
+// ── Directive-prompt neutralization tables (text migrations) ───
+// The shipped coder / coder-reviewer directives baked in three non-portable
+// assumptions that leaked Cortex's own toolchain into every install: a hard
+// "TDD is non-negotiable" mandate, `npm test` as THE test command, and the
+// dependency-cruiser linter named by brand. These tables rewrite that wording
+// to be project-agnostic (test only if the project has a suite; use the project's
+// own command; speak of lint/architecture checks generically). git-commit
+// discipline is intentionally left in place — it is core to the Coder role's
+// deliverable contract, not a personal preference.
+
+const CODER_DIRECTIVE_REPLACEMENTS: ReadonlyArray<readonly [string, string]> = [
+  [
+    'TDD, reading before editing, and not improvising on ambiguous specs are cheaper than a re-run.',
+    'Testing, reading before editing, and not improvising on ambiguous specs are cheaper than a re-run.',
+  ],
+  [
+    '### TDD via `/develop`\n- Before implementing non-trivial logic, write a failing test.\n- Run the test, confirm it fails, implement, confirm it passes.\n- Trivial glue code and obvious one-liners are exempt; use judgment but bias toward tests.\n- Code that governs correctness (computation, data handling, seed handling) **requires** a test regardless.',
+    '### Testing\n- Follow the project\'s existing testing practice. If the project has a test setup, add or update tests covering the logic you change. If the project practices test-driven development, write the failing test first, confirm it fails, implement, then confirm it passes.\n- Code that governs correctness (computation, data handling, seed handling) should be tested whenever the project provides a way to test it. Trivial glue code and obvious one-liners are exempt.\n- If the project has no test harness, verify by the means it already uses; do not scaffold a test framework unless the spec asks for it.',
+  ],
+  [
+    '### Full-suite pass (non-negotiable)\n- After implementing and committing, run the project\'s full test suite (`npm test` or equivalent).\n- The full suite includes unit tests, architecture linters (e.g. dependency-cruiser), integration tests, and regression suites. Every stage must pass.\n- Do NOT commit or hand off until the full suite is green. A single red test or architecture violation means you are not done.\n- If the test suite had pre-existing failures before your invocation, note them explicitly in the implementation summary; you must still verify that no NEW failures were introduced by your changes.',
+    '### Full-suite pass\n- If the project has a test suite, run it after implementing and committing, using whatever command the project defines (e.g. `npm test`, `pytest`, `make test`).\n- Run every stage the project configures — unit tests, linters or architecture checks, integration tests, regression suites. Every configured stage must pass.\n- Do NOT commit or hand off until the suite is green. A single red test or lint violation means you are not done.\n- If the suite had pre-existing failures before your invocation, note them explicitly in the implementation summary; you must still verify that no NEW failures were introduced by your changes.',
+  ],
+  [
+    '3. Implement per spec. Use `/develop` for TDD on non-trivial logic.',
+    '3. Implement per spec. If the project practices TDD, use `/develop` to drive it on non-trivial logic.',
+  ],
+  [
+    '4. Run the **full test suite** (`npm test` or equivalent) locally; confirm every stage passes (architecture linter, unit tests, integration tests, regression suite). If it fails, fix before committing.',
+    '4. If the project has a test suite, run it locally with the project\'s own command; confirm every configured stage passes (linters or architecture checks, unit tests, integration tests, regression suite). If it fails, fix before committing.',
+  ],
+  [
+    '6. Run the full test suite one more time after committing to confirm the SHA is green.',
+    '6. If the project has a test suite, run it once more after committing to confirm the SHA is green.',
+  ],
+  [
+    '- **Partial test pass**: running only unit tests for the changed module while skipping integration tests, regression suites, or architecture linters. The full suite (`npm test`) must pass.',
+    '- **Partial test pass**: running only unit tests for the changed module while skipping integration tests, regression suites, or lint/architecture checks the project configures. The project\'s full suite must pass when one exists.',
+  ],
+];
+
+const CODER_REVIEWER_DIRECTIVE_REPLACEMENTS: ReadonlyArray<readonly [string, string]> = [
+  [
+    '### TDD discipline\nCoder must land tests alongside (or before) the implementation, with coverage over the spec\'s happy path **and** edge cases (boundaries, empty/null inputs, error paths, concurrency hazards relevant to the diff); missing tests, tests that don\'t exercise the new control-flow paths, or untested edge cases called out by the spec are **Blockers**.',
+    '### Test discipline\nWhen the project has a test setup, Coder must land tests alongside (or before) the implementation, with coverage over the spec\'s happy path **and** edge cases (boundaries, empty/null inputs, error paths, concurrency hazards relevant to the diff); missing tests, tests that don\'t exercise the new control-flow paths, or untested edge cases called out by the spec are **Blockers**. If the project has no test harness, verify correctness by the means the project already uses and do not treat the absence of tests as a Blocker.',
+  ],
+  [
+    '### Full-suite pass (non-negotiable)\nRun the project\'s full test suite (`npm test` or equivalent). This includes not just unit tests but also architecture linters, integration tests, and regression suites. **Any test failure or architecture violation (e.g. dependency-cruiser error) is a Blocker.** Do not rely on Coder\'s claim that tests passed — run them yourself. If the suite had pre-existing failures before this invocation, verify that no NEW failures were introduced; new failures are Blockers regardless of pre-existing state.',
+    '### Full-suite pass\nIf the project has a test suite, run it using the project\'s own command (e.g. `npm test`, `pytest`, `make test`). This includes not just unit tests but also any linters or architecture checks, integration tests, and regression suites the project configures. **Any test failure or lint/architecture violation is a Blocker.** Do not rely on Coder\'s claim that tests passed — run them yourself. If the suite had pre-existing failures before this invocation, verify that no NEW failures were introduced; new failures are Blockers regardless of pre-existing state.',
+  ],
+  [
+    '4. **Run the full test suite** (`npm test` or equivalent). Confirm that every stage passes: architecture linter, unit tests, integration tests, regression suite. If any test or lint stage fails, it is a Blocker — do not proceed to code review until Coder fixes it (or mark it as a pre-existing failure with evidence).',
+    '4. **If the project has a test suite, run it** with the project\'s own command. Confirm that every configured stage passes: linters or architecture checks, unit tests, integration tests, regression suite. If any test or lint stage fails, it is a Blocker — do not proceed to code review until Coder fixes it (or mark it as a pre-existing failure with evidence).',
+  ],
+  [
+    '- **Test run omission**: signing off on an implementation without running the full test suite yourself. Coder\'s claim that tests pass is not evidence. Run `npm test` and check every stage. A dependency-cruiser error or a test regression that Coder missed is as much your failure as theirs.',
+    '- **Test run omission**: signing off on an implementation without running the project\'s test suite yourself when one exists. Coder\'s claim that tests pass is not evidence. Run the suite and check every stage. A lint/architecture error or a test regression that Coder missed is as much your failure as theirs.',
+  ],
+];
+
 // ── Registry ───────────────────────────────────────────────────
 // Add new migrations here. The runner groups them by filePath and applies
 // pending ones in version-ascending order.
@@ -237,6 +313,31 @@ const migrations: Migration[] = [
       return upsertMarkerBlock(data, DOCS_BLOCK);
     },
   })),
+  // M5: De-personalize the coder / coder-reviewer directives. The shipped wording
+  // hardcoded Cortex's own toolchain (a non-negotiable TDD mandate, `npm test` as THE
+  // test command, the dependency-cruiser linter by name) — fine for this repo, wrong as
+  // a default for every install. These two text migrations rewrite the user-owned prompt
+  // copies under DATA_DIR/prompts/directives to project-agnostic phrasing. Idempotent via
+  // applyReplacements (already-rewritten or user-customized copies don't match → no-op),
+  // and missing files skip gracefully via ENOENT in the runner.
+  {
+    filePath: 'prompts/directives/coder.md',
+    version: '2026.6.22-2',
+    format: 'text',
+    migrate(data: unknown): unknown {
+      if (typeof data !== 'string') return data;
+      return applyReplacements(data, CODER_DIRECTIVE_REPLACEMENTS);
+    },
+  },
+  {
+    filePath: 'prompts/directives/coder-reviewer.md',
+    version: '2026.6.22-2',
+    format: 'text',
+    migrate(data: unknown): unknown {
+      if (typeof data !== 'string') return data;
+      return applyReplacements(data, CODER_REVIEWER_DIRECTIVE_REPLACEMENTS);
+    },
+  },
 ];
 
 // ── Versions file I/O ──────────────────────────────────────────
