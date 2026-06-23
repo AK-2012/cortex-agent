@@ -90,21 +90,22 @@ The server implementation is at `agent-server/src/domain/mcp/slack-server.ts`.
 ### cortex-feishu
 
 Platform-specific MCP server for Feishu/Lark. Loaded only when the session
-originates from Feishu, providing comprehensive document and file operations.
+originates from Feishu. It exposes a single tool — sending files to a chat.
 
 | Tool | Parameters | Description |
 |---|---|---|
-| `feishu_send_file` | `file_path`, `file_name?`, `title?`, `comment?`, `channel?` | Upload a local file to Feishu |
-| `feishu_create_doc` | `title`, `content?`, `folder_token?` | Create a new Feishu document |
-| `feishu_read_doc` | `doc_token` | Read content from a Feishu document |
-| `feishu_update_doc` | `doc_token`, `content` | Update a Feishu document's content |
-| `feishu_delete_doc` | `doc_token` | Delete a Feishu document |
-| `feishu_wiki_create` | `space_id`, `title`, `content?` | Create a new wiki page in Feishu |
-| `feishu_wiki_read` | `node_token` | Read content from a Feishu wiki page |
-| *(and more bitable/sheets/drive tools)* | — | Full list in `agent-server/src/domain/mcp/feishu/index.ts` |
+| `feishu_send_file` | `file_path`, `file_name?`, `title?`, `channel?` | Upload a local file to a Feishu chat |
+
+Document, table, spreadsheet, and knowledge-base operations are **not** MCP
+tools. They run through the official Lark/Feishu CLI (`@larksuite/cli`), driven
+by the `feishu-doc` skill. The CLI handles native tables and block-level edits
+reliably (the previous `feishu_docx_*` MCP tools degraded tables into text
+blocks and were removed). See the `feishu-doc` skill for the install/auth
+preflight and how to delegate to the CLI's embedded `lark-doc` / `lark-sheets`
+/ `lark-base` skill guides.
 
 The server implementation is at `agent-server/src/domain/mcp/feishu-server.ts`.
-Individual tools are in `agent-server/src/domain/mcp/feishu/`.
+The tool is in `agent-server/src/domain/mcp/feishu/file.ts`.
 
 ### cortex-tui-bridge
 
