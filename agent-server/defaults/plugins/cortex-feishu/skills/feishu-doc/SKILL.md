@@ -38,7 +38,7 @@ Run the bundled preflight (idempotent: installs only if missing, configures the 
 from Cortex's `FEISHU_APP_ID` / `FEISHU_APP_SECRET`, prints auth status):
 
 ```bash
-bash plugins/cortex-system/skills/feishu-doc/scripts/ensure-lark-cli.sh
+bash plugins/cortex-feishu/skills/feishu-doc/scripts/ensure-lark-cli.sh
 ```
 
 If the script path is unavailable, the essential check inline:
