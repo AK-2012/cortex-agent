@@ -273,18 +273,22 @@ export function App({
     allowReconnect: connectionState !== 'connected',
   });
 
-  // Dashboard subscription management callbacks
+  // Dashboard subscription management callbacks. Depend on the stable inner
+  // functions (each a useCallback in useDashboardData), NOT the whole `dashboard`
+  // object — that object is recreated every render, which previously made these
+  // wrappers (and thus the Dashboard effect deps) change identity on every render.
+  const { markPending, registerSubscription, unregisterSubscription } = dashboard;
   const handleMarkPending = useCallback((tab: string) => {
-    dashboard.markPending(tab as any);
-  }, [dashboard]);
+    markPending(tab as any);
+  }, [markPending]);
 
   const handleRegisterSubscription = useCallback((queryId: string, tab: string) => {
-    dashboard.registerSubscription(queryId, tab as any);
-  }, [dashboard]);
+    registerSubscription(queryId, tab as any);
+  }, [registerSubscription]);
 
   const handleUnregisterSubscription = useCallback((queryId: string) => {
-    dashboard.unregisterSubscription(queryId);
-  }, [dashboard]);
+    unregisterSubscription(queryId);
+  }, [unregisterSubscription]);
 
   // If resume mode with sessions to pick, show picker instead of main layout
   if (resumableSessions && resumableSessions.length > 0 && onResumeSelect && onResumeCancel) {

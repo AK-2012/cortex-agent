@@ -39,7 +39,7 @@ export function SidePanel({
   if (!visible) return null;
 
   return (
-    <Box width={40} borderStyle="single" borderDimColor marginLeft={1} flexShrink={0}>
+    <Box width={44} borderStyle="single" borderDimColor marginLeft={1} flexShrink={0}>
       <Dashboard
         active={active}
         sendFrame={sendFrame}
