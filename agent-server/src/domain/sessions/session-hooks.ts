@@ -1,5 +1,6 @@
 // input:  agent-server/session-hooks.json (lazy-read), spawn() subprocess, OutputStream
 // output: runSessionHook() unified pipeline + fireAndForgetPreCloseHook (onNew) + onMessageEnd helpers
+//         + runHookInjection / onNewInjectSessionKey (isolated pool key for the onNew pre-close turn)
 // pos:    session-level hook subsystem — config loading, subprocess spawn, unified Slack-display pipeline
 //         (parallel to thread-hook system, scoped to channel/session rather than thread)
 // >>> If I am updated, update my header comment and the parent folder's CORTEX.md <<<
@@ -12,6 +13,9 @@ import { createLogger } from '@core/log.js';
 import { Icons } from '../../core/icons.js';
 import type { PlatformAdapter, OutputStream } from '@platform/index.js';
 import { runAgent, resolveBackendForChannel } from '@domain/agents/index.js';
+import { getAdapter } from '../../agent-adapter/index.js';
+import type { Backend } from '../../agent-adapter/index.js';
+import type { AgentHandle } from '@core/types/agent-types.js';
 import { getSessionAsync } from '@domain/sessions/session.js';
 import { sessionStore } from '@store/session-registry-repo.js';
 import { conversationLedger } from '@store/conversation-ledger-repo.js';
@@ -170,8 +174,82 @@ export interface SessionHookFormat {
 export interface SessionHookInject {
   targetSessionId: string;
   profileName: string | null;
+  /** Session-pool key for the injected turn.
+   *  - onNew: an ISOLATED key (onNewInjectSessionKey(channel)) so resuming the old session for
+   *    the pre-close turn never collides with the channel's live pool slot — see the race below.
+   *  - onMessageEnd: the channel itself, because the injection continues the live conversation. */
+  sessionKey: string;
   /** Forwarded to runAgent as `trigger`, useful for telemetry / cost grouping. */
   trigger?: string;
+}
+
+/** Pool key for the onNew hook's injected "pre-close" turn.
+ *
+ *  MUST be distinct from the channel's live session-pool slot (which is keyed by the channel
+ *  itself, see ClaudeAdapter / facade `sessionKey: options.channel`). Race it guards against:
+ *  `!new` fires this hook fire-and-forget, then synchronously closeSession(channel) +
+ *  resetChannelSession(channel). The hook's memory-write subprocess finishes LATER and injects
+ *  its stdout as a final turn that RESUMES the old session. If that turn used `channel` as its
+ *  pool key it would re-create (resurrect) a live session under the channel slot AFTER the reset
+ *  — so the next message of the brand-new conversation (also keyed by channel) would reuse the
+ *  resurrected OLD session instead of starting fresh. Routing the pre-close turn to a dedicated
+ *  key keeps it off the live slot; we close that key once the turn is done. */
+export function onNewInjectSessionKey(channel: string): string {
+  return `${channel}::onnew-hook`;
+}
+
+/** Injected-turn dependencies — seam for unit tests (default binds the real runAgent + a
+ *  backend-aware session close). */
+export interface InjectDeps {
+  runAgent: typeof runAgent;
+  /** Close the pooled session created for the injected turn (by sessionKey). */
+  closeInjectedSession: (channel: string, sessionKey: string) => void | Promise<void>;
+}
+
+const defaultInjectDeps: InjectDeps = {
+  runAgent,
+  closeInjectedSession: async (channel: string, sessionKey: string) => {
+    try {
+      await getAdapter(resolveBackendForChannel(channel) as Backend).close(sessionKey);
+    } catch (e: any) {
+      log.warn(`closeInjectedSession failed (${sessionKey}): ${e?.message || e}`);
+    }
+  },
+};
+
+/** Inject hook stdout as a fresh agent turn against `inject.targetSessionId`, routed through
+ *  `stream`. Runs on `inject.sessionKey`; for onNew that is an isolated key which we close
+ *  afterwards (the resurrected old session must not linger on / collide with the channel slot).
+ *  For onMessageEnd the key IS the channel (live conversation) and is left open. */
+export async function runHookInjection(
+  output: string,
+  spec: SessionHookSpec,
+  stream: OutputStream,
+  deps: InjectDeps = defaultInjectDeps,
+): Promise<void> {
+  const inject = spec.inject;
+  if (!inject) return;
+  try {
+    const handle: AgentHandle = deps.runAgent(output, {
+      channel: spec.ctx.channel,
+      sessionId: inject.targetSessionId,
+      sessionKey: inject.sessionKey,
+      isUserInitiated: false,
+      profileName: inject.profileName,
+      trigger: inject.trigger ?? `hook:${spec.name}`,
+      onAssistantMessage: (text: string) => stream.emitText(text),
+    });
+    await handle.promise;
+  } catch (err: any) {
+    const msg = err?.message || String(err);
+    log.error(`hook ${spec.name} injected agent failed: ${msg}`);
+    stream.emitText(`${Icons.warning} ${spec.name} hook follow-up failed: ${msg}`);
+  } finally {
+    // Only the isolated (onNew) key is torn down; the channel live slot (onMessageEnd) stays.
+    if (inject.sessionKey !== spec.ctx.channel) {
+      await deps.closeInjectedSession(spec.ctx.channel, inject.sessionKey);
+    }
+  }
 }
 
 export interface SessionHookSpec {
@@ -217,6 +295,7 @@ function buildHookStdin(name: HookName, ctx: SessionHookContext): string {
 export async function runSessionHook(
   spec: SessionHookSpec,
   stream: OutputStream,
+  deps: InjectDeps = defaultInjectDeps,
 ): Promise<void> {
   const cfg = loadHookConfig(spec.name);
   if (!cfg) return;
@@ -253,20 +332,7 @@ export async function runSessionHook(
   }
 
   try {
-    const handle = runAgent(result.stdout, {
-      channel: spec.ctx.channel,
-      sessionId: spec.inject.targetSessionId,
-      sessionKey: spec.ctx.channel,
-      isUserInitiated: false,
-      profileName: spec.inject.profileName,
-      trigger: spec.inject.trigger ?? `hook:${spec.name}`,
-      onAssistantMessage: (text: string) => stream.emitText(text),
-    });
-    await handle.promise;
-  } catch (err: any) {
-    const msg = err?.message || String(err);
-    log.error(`hook ${spec.name} injected agent failed: ${msg}`);
-    stream.emitText(`${Icons.warning} ${spec.name} hook follow-up failed: ${msg}`);
+    await runHookInjection(result.stdout, spec, stream, deps);
   } finally {
     await stream.flush().catch((e: any) => log.warn(`stream.flush after inject failed (${label}): ${e?.message || e}`));
   }
@@ -386,7 +452,12 @@ async function prepareOnNewRun(
     name: 'onNew',
     ctx: { channel, sessionId, sessionName, profile: profileName },
     format: ONNEW_FORMAT,
-    inject: { targetSessionId: sessionId, profileName, trigger: 'hook:onNew' },
+    inject: {
+      targetSessionId: sessionId,
+      profileName,
+      sessionKey: onNewInjectSessionKey(channel),
+      trigger: 'hook:onNew',
+    },
   };
 
   return { spec, stream };
@@ -451,6 +522,8 @@ export async function runMessageEndSessionHook(args: OnMessageEndArgs): Promise<
     inject: {
       targetSessionId: args.sessionId,
       profileName: args.profile ?? null,
+      // onMessageEnd continues the live conversation — keep it on the channel pool slot.
+      sessionKey: args.channel,
       trigger: 'hook:onMessageEnd',
     },
   };

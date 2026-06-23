@@ -104,6 +104,7 @@ How to run tests without tripping it:
 | `message-router.test.ts` | Test | Message routing branches |
 | `session.test.ts` | Test | session.ts backend:channel CRUD |
 | `session-hooks-profile-resolution.test.ts` | Test | resolveOnNewProfileName priority (registry > ledger) — regression for "Invalid signature in thinking block" caused by thread vs user session profile mismatch |
+| `session-hooks-inject-isolation.test.ts` | Test | onNewInjectSessionKey isolation + runHookInjection: onNew pre-close turn runs on an isolated pool key (≠ channel) and is closed after (incl. on failure); onMessageEnd stays on the channel live slot — regression for the `!new` + onNew memory-hook session-resurrection race |
 | `client-manager.test.ts` | Test | client-manager handshake/sendCommand + WS bearer-token verifyClient (reject no/wrong token, accept valid) + `buildRemoteSpawnCommand` cmd.exe-wrap + token-injection + retry-on-spawn-failure regressions |
 | `cortex-run-callback-handler.test.ts` | Test | task-callback handler (DR-0011 §4.4): idempotency, skipVerify, ghost callback, blockTask note |
 | `mcp-server.test.ts` | Test | Import safety and startup hints |
