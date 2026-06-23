@@ -12,6 +12,7 @@ Covers API and event publication contracts for running-executions, channel-queue
 | `busy-tracker.test.ts` | Test | BusyTracker +1/-1 publish+IPC, multi-publisher aggregate, re-entrant safety (S6-C) |
 | `orchestrator.test.ts` | Test | Orchestrator two-branch decision tree: threadAddMatch / isActiveThread / threadStartMatch -> threadExecutor; no match -> agentRunner (S8-A) |
 | `agent-runner.test.ts` | Test | AgentRunner hourglass reaction, +1/-1 trackPendingTask, enqueue channel, resolveDefaultAgent pure function, singleton contract (S8-A) |
+| `lifecycle-rate-limit.test.ts` | Test | handleAgentError thrown-rate-limit pause branch: throttled + rate-limit error + userMessage → recordResume(direct) + seal, no error post; normal error path otherwise (not throttled / no userMessage / non-rate-limit) |
 | `bg-continuation.test.ts` | Test | buildContinuationSink dispatch (merge text / waiting vs complete by pendingBackgroundTasks) + isBgContinuationEnabled / isInteractiveChannel gating |
 | `turn-notify.test.ts` | Test | isTurnNotifyEnabled / getTurnNotifyThresholdS gating + maybeNotifyTurnComplete dispatch (threshold/scope/disable gates, success metrics vs failure, threadId forwarding, never-throws) |
 | `thread-executor.test.ts` | Test | ThreadExecutor +1/-1 trackPendingTask, enqueue channel, hourglass reaction, singleton contract (S8-A) |

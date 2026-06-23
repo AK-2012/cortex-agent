@@ -140,6 +140,7 @@ How to run tests without tripping it:
 | `rate-limit-throttle.test.ts` | Test | Throttle activation/cross-restart/beforeRun + onResume hook (timer-clear / expired-recovery / active-recovery / backward-compat) |
 | `resume-registry.test.ts` | Test | Rate-limit resume registry: dedupe (direct→channel, thread→threadId), drain, persistence roundtrip/hydrate |
 | `orch/resume-dispatcher.test.ts` | Test | Auto-resume dispatch: direct→route (serial, channelBusy skip) / thread→continueThread (concurrent, only skip on live direct session; multiple threads same channel all resume) + guards (stale/missing/terminal) + CORTEX_AUTO_RESUME flag/drain |
+| `orch/lifecycle-rate-limit.test.ts` | Test | handleAgentError thrown-rate-limit pause branch: throttled + rate-limit error + userMessage → recordResume(direct) + seal, no error post; falls through to normal error path when not throttled / no userMessage / non-rate-limit error |
 | `scheduler-precheck.test.ts` | Test | preCheck exit code and env |
 | `cli-utils.test.ts` | Test | formatHelp/formatError |
 | `domain/system/doctor.test.ts` | Test | doctor engine: runDiagnostics section/check statuses + gateway in-use-vs-idle logic + applySafeFixes idempotent actuation |

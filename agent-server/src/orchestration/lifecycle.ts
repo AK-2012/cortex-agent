@@ -31,6 +31,8 @@ import { recordCost } from '@domain/costs/cost-tracker.js';
 import type { ContinuationSink } from '../agent-adapter/types.js';
 import { maybeNotifyCodexLowUsage } from '@domain/costs/codex-usage-monitor.js';
 import { recordResume } from '@domain/costs/resume-registry.js';
+import { isApiRateLimitError } from '@domain/agents/config.js';
+import { isThrottled } from '@domain/costs/rate-limit-throttle.js';
 import { normalizeSkillCommandPrefix } from '@domain/memory/skill-scanner.js';
 import { getOutboundQueue } from '@store/outbound-queue.js';
 import { buildDurableHooks, durablePost } from './durable-helpers.js';
@@ -189,7 +191,7 @@ async function backfillLedgerSessionId(result: { sessionId?: string | null }, ch
 
 // --- Agent error handler ---
 
-export async function handleAgentError({ error, channel, adapter, statusMsg, startTime, executionId, sessionName = null, sessionId = null, effectiveSessionId = null, threadAnchorId = null, userMessageTs = null }: { error: { message: string; cancelled?: boolean }; channel: string; adapter: PlatformAdapter; statusMsg: MessageRef; startTime: number; executionId: string | null; sessionName?: string | null; sessionId?: string | null; effectiveSessionId?: string | null; threadAnchorId?: string | null; userMessageTs?: string | null }): Promise<void> {
+export async function handleAgentError({ error, channel, adapter, statusMsg, startTime, executionId, sessionName = null, sessionId = null, effectiveSessionId = null, threadAnchorId = null, userMessageTs = null, userMessage = null }: { error: { message: string; cancelled?: boolean }; channel: string; adapter: PlatformAdapter; statusMsg: MessageRef; startTime: number; executionId: string | null; sessionName?: string | null; sessionId?: string | null; effectiveSessionId?: string | null; threadAnchorId?: string | null; userMessageTs?: string | null; userMessage?: string | null }): Promise<void> {
   if (executionId) runningExecutions.fail(executionId, error.message);
   const resolvedSessionId = effectiveSessionId || sessionId;
   const sessionTag = buildSessionTag(sessionName, resolvedSessionId);
@@ -210,6 +212,19 @@ export async function handleAgentError({ error, channel, adapter, statusMsg, sta
     finalizeLocalExecution({ executionId, status: 'failed', error, durationS: elapsedS });
     const cancelledText = `${Icons.stopped} ${sessionTag}${t('status.cancelled')} (${elapsedStr})`;
     await sealStatus(adapter, statusMsg, cancelledText, buildSealedStatusActionBlocks(cancelledText, { channel, sessionName, isDm: true }));
+    return;
+  }
+
+  // Thrown rate-limit error while the five-hour throttle is active: pause-and-resume instead of
+  // failing, mirroring the thread thrown path (domain/threads/runner.ts) and the graceful direct
+  // path (agent-runner handleDefaultAgentResult / edit-retry below). runningExecutions.fail already
+  // ran at the top. Only when a userMessage is available (direct/TUI turns) — manager-qa / edit
+  // callers without it fall through to the normal error path.
+  if (userMessage && isApiRateLimitError(error.message) && isThrottled()) {
+    finalizeLocalExecution({ executionId, status: 'failed', error: { message: 'Rate limited' }, durationS: elapsedS });
+    recordResume({ kind: 'direct', channel, userMessage, recordedAt: Date.now() });
+    const rateLimitText = `${Icons.warning} ${sessionTag}${t('status.rateLimitedExhausted')} (${elapsedStr})`;
+    await sealStatus(adapter, statusMsg, rateLimitText, buildSealedStatusActionBlocks(rateLimitText, { channel, sessionName, isDm: true }));
     return;
   }
 

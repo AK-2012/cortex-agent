@@ -183,7 +183,7 @@ export class AgentRunner {
         error: error as { message: string; cancelled?: boolean },
         channel, adapter, statusMsg, startTime,
         executionId: capturedExecutionId,
-        sessionName, sessionId, threadAnchorId, userMessageTs: messageTs,
+        sessionName, sessionId, threadAnchorId, userMessageTs: messageTs, userMessage,
       });
     }
   }
