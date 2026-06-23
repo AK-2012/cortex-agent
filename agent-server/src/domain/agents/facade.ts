@@ -85,6 +85,32 @@ export function buildPiGatewaySubPath(mode: string | null, provider: string): st
   return `/m/${mode}/${provider}`;
 }
 
+// --- Channel-scoped plugin gating ---
+
+/** Plugins that load only for sessions originating from a specific platform channel.
+ *  Mirrors the channel-gated MCP loading (loadFeishuMcp = channel.startsWith('feishu:')):
+ *  the cortex-feishu skill bundle is only relevant when the user is working inside Feishu,
+ *  so it is stripped from non-Feishu sessions even when listed in an agent's pluginDirs. */
+export const CHANNEL_SCOPED_PLUGINS: ReadonlyArray<{ plugin: string; channelPrefix: string }> = [
+  { plugin: 'cortex-feishu', channelPrefix: 'feishu:' },
+];
+
+/** Drop channel-scoped plugin dirs whose channel prefix the current session does not match.
+ *  Non-scoped plugins always pass through. Matched by the plugin dir's final path segment
+ *  (basename) so substrings like `cortex-feishu-x` are not affected. */
+export function filterChannelScopedPlugins(
+  dirs: string[] | undefined,
+  channel: string | undefined,
+): string[] | undefined {
+  if (!dirs) return dirs;
+  return dirs.filter((dir) => {
+    const base = dir.split('/').filter(Boolean).pop();
+    const rule = CHANNEL_SCOPED_PLUGINS.find((r) => r.plugin === base);
+    if (!rule) return true;
+    return !!channel && channel.startsWith(rule.channelPrefix);
+  });
+}
+
 // --- Adapter execution ---
 
 function buildSpawnConfig(
@@ -121,7 +147,10 @@ function buildSpawnConfig(
     model: config.model,
     systemPrompt: typeof options.systemPrompt === 'string' ? options.systemPrompt : undefined,
     outputStyle: typeof options.outputStyle === 'string' ? options.outputStyle : undefined,
-    pluginDirs: Array.isArray(options.pluginDirs) ? options.pluginDirs : undefined,
+    pluginDirs: filterChannelScopedPlugins(
+      Array.isArray(options.pluginDirs) ? options.pluginDirs : undefined,
+      options.channel,
+    ),
     env: config.extraEnv && Object.keys(config.extraEnv).length > 0 ? config.extraEnv : undefined,
     extraOption: config.extraOption && Object.keys(config.extraOption).length > 0 ? config.extraOption : undefined,
     claudeBackend: config.claudeBackend,
@@ -378,6 +407,7 @@ export function allConfigsRateLimited(profileName: string | null): boolean {
 export const _test = {
   runWithAdapter,
   buildSpawnConfig,
+  filterChannelScopedPlugins,
 };
 
 // --- Bridge helper re-exports (replacing claude-bridge.ts / codex-bridge.ts) ---
