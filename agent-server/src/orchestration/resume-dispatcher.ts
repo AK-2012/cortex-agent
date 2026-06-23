@@ -23,8 +23,9 @@ const log = createLogger('resume-dispatcher');
 /** Entries older than this are considered obsolete (user moved on / thread finished).
  *  6h = the 5-hour window plus restart slack. */
 const MAX_RESUME_AGE_MS = 6 * 60 * 60 * 1000;
-/** Gap between consecutive resumes so we don't instantly re-trip the limit. */
-const RESUME_STAGGER_MS = 3_000;
+/** Gap between consecutive resume starts so we don't re-trip the limit / overload the API right
+ *  after a window reset. Resumes begin one every 30s. */
+const RESUME_STAGGER_MS = 30_000;
 
 /** Auto-resume is on by default; disable with CORTEX_AUTO_RESUME=0 (or "false"). */
 export function isAutoResumeEnabled(): boolean {
