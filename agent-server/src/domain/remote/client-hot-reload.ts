@@ -1,11 +1,13 @@
 // Client hot-reload — two modes:
 //   Dev mode  (CORTEX_REPO set):    build client from source, check tgz mtime,
 //                                   SCP to remotes + npm install -g + restart.
-//   Release mode (CORTEX_REPO unset): check npm registry vs remote installed
-//                                   version, npm update -g + restart.
+//   Release mode (CORTEX_REPO unset): check npm registry vs installed version,
+//                                   npm update -g + restart. Covers remote devices
+//                                   (over SSH) AND the local same-machine client
+//                                   (local npm + process.kill + detached respawn).
 import * as fs from 'fs';
 import * as path from 'path';
-import { execSync, execFile } from 'child_process';
+import { execSync, execFile, spawn } from 'child_process';
 import { getMachineRegistry, type MachineEntry } from '../tasks/dispatch-utils.js';
 import { sshExec, clientPids, buildRemoteSpawnCommand } from './client-manager.js';
 import { STORE_DIR } from '@core/utils.js';
@@ -178,6 +180,29 @@ function getNpmRegistryVersion(): string | null {
   }
 }
 
+function getLocalInstalledVersion(): string | null {
+  try {
+    const result = execSync('npm ls -g @cortex-agent/client --json 2>/dev/null || true', {
+      encoding: 'utf8',
+      timeout: 15000,
+      stdio: 'pipe',
+    }).trim();
+    const parsed = JSON.parse(result);
+    return parsed?.dependencies?.['@cortex-agent/client']?.version || null;
+  } catch {
+    return null;
+  }
+}
+
+function npmUpdateLocal(): Promise<string> {
+  return new Promise((resolve, reject) => {
+    execFile('npm', ['update', '-g', '@cortex-agent/client'], { timeout: 120000 }, (err, stdout, stderr) => {
+      if (err) reject(new Error(`npm update error: ${err.message}\n${stderr}`));
+      else resolve(stdout.trim());
+    });
+  });
+}
+
 async function getRemoteInstalledVersion(host: string): Promise<string | null> {
   try {
     const cmd = 'npm ls -g @cortex-agent/client --json 2>/dev/null || true';
@@ -216,6 +241,22 @@ async function killClientOnDevice(device: string, reg: MachineEntry): Promise<bo
 
 async function restartClientOnDevice(device: string, reg: MachineEntry): Promise<boolean> {
   try {
+    if (!reg.ssh) {
+      // Local device: spawn a detached cortex-client (mirrors client-manager
+      // startRemoteClient local branch). PATH now resolves to the just-updated
+      // global binary. Env (incl. CORTEX_CLIENT_TOKEN) is inherited from the server.
+      const child = spawn('cortex-client', [], { detached: true, stdio: 'ignore' });
+      child.on('error', (err) => {
+        log.warn(`Local client respawn error on ${device}: ${(err as Error).message}`);
+      });
+      child.unref();
+      if (child.pid) {
+        clientPids.set(device, child.pid);
+        log.info(`Restarted local client on ${device} (PID ${child.pid})`);
+        return true;
+      }
+      return false;
+    }
     if (reg.win) {
       const wmiArg = 'cmd.exe /c cortex-client';
       await sshExec(reg.ssh,
@@ -277,6 +318,51 @@ async function updateClientDev(
   return res;
 }
 
+// --- Release mode: local (same-machine) update ---
+
+// Injectable operations so the local-update flow is unit-testable without
+// touching npm / processes.
+interface LocalUpdateDeps {
+  getInstalledVersion: () => string | null;
+  kill: () => Promise<boolean>;
+  npmUpdate: () => Promise<string>;
+  restart: () => Promise<boolean>;
+}
+
+async function updateClientReleaseLocal(
+  device: string,
+  latestVersion: string,
+  deps: LocalUpdateDeps,
+): Promise<DeviceResult> {
+  const res: DeviceResult = { device, updated: false, restarted: false, oldVersion: '?', newVersion: latestVersion };
+
+  try {
+    const localVer = deps.getInstalledVersion();
+    res.oldVersion = localVer || '?';
+
+    if (localVer === latestVersion) {
+      log.info(`  ${device}: already at latest (${latestVersion})`);
+      return res;
+    }
+
+    // 1. Kill the running local client (frees the device name for reconnect)
+    await deps.kill();
+
+    // 2. npm update -g locally
+    const updateOutput = await deps.npmUpdate();
+    res.updated = true;
+    log.info(`  ${device}: local npm update output: ${updateOutput.slice(0, 200)}`);
+
+    // 3. Respawn the local client on the new binary
+    res.restarted = await deps.restart();
+  } catch (err) {
+    res.error = (err as Error).message;
+    log.warn(`  ${device}: local release update failed — ${res.error}`);
+  }
+
+  return res;
+}
+
 // --- Release mode: full per-device update ---
 
 async function updateClientRelease(
@@ -287,8 +373,13 @@ async function updateClientRelease(
   const res: DeviceResult = { device, updated: false, restarted: false, oldVersion: '?', newVersion: latestVersion };
 
   if (!reg.ssh) {
-    res.error = 'Local client update not yet supported (use npm update -g @cortex-agent/client manually)';
-    return res;
+    // Local same-machine client: update via local npm + process.kill + detached respawn.
+    return updateClientReleaseLocal(device, latestVersion, {
+      getInstalledVersion: getLocalInstalledVersion,
+      kill: () => killClientOnDevice(device, reg),
+      npmUpdate: npmUpdateLocal,
+      restart: () => restartClientOnDevice(device, reg),
+    });
   }
 
   try {
@@ -459,5 +550,5 @@ function formatUpdateSlackMessage(result: ClientUpdateResult): string {
   return lines.join('\n');
 }
 
-export { checkAndUpdateClients, formatUpdateSlackMessage };
-export type { ClientUpdateResult, DeviceResult };
+export { checkAndUpdateClients, formatUpdateSlackMessage, updateClientReleaseLocal };
+export type { ClientUpdateResult, DeviceResult, LocalUpdateDeps };
