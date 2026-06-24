@@ -1,18 +1,20 @@
 # Quickstart
 
-From zero to a Cortex agent answering you in Slack in about 5 minutes,
-most of which is waiting for `npm` and clicking through Slack's app
-creation page.
+From zero to a Cortex agent answering you in chat in about 5 minutes,
+most of which is waiting for `npm` and clicking through your chat
+platform's app creation page.
 
-`cortex init` does almost everything. You will not edit a single config
-file by hand. This guide tells you what to expect at each prompt — and
-shows you exactly where to click in Slack.
+Cortex talks to you through Slack or Feishu (飞书/Lark) — pick either, or
+run both at once. `cortex init` does almost everything. You will not edit
+a single config file by hand. This guide tells you what to expect at each
+prompt and shows you exactly where to click.
 
 ## Prerequisites
 
 - **Node.js ≥ 20** (Cortex itself targets 20+; the bundled coding-agent
   backends prefer 22).
-- **A Slack workspace** where you can create an app.
+- **A Slack workspace or a Feishu (Lark) organization** where you can
+  create an app.
 - **About 2 GB of free disk** for backends, plugins, and logs.
 
 You do **not** need to install `claude` (Claude Code) or `pi`
@@ -100,7 +102,21 @@ cortex init
 The wizard walks through the following prompts. Defaults are sensible;
 hit Enter to accept. Here is what each prompt does and how to answer.
 
-### 2.1 Which backends?
+### 2.1 Which language?
+
+```
+Select language / 选择语言
+❯ English
+  中文 (Simplified Chinese)
+```
+
+The first prompt picks the language Cortex uses for its
+system-generated messages and for the rest of this wizard. It defaults
+to your system locale, so a Chinese system pre-selects 中文. The choice
+is saved to `config/preferences.json` and you can change it later with
+the `!lang` command.
+
+### 2.2 Which backends?
 
 ```
 ? Which coding-agent backends would you like to use?
@@ -115,19 +131,28 @@ hit Enter to accept. Here is what each prompt does and how to answer.
 You can pick both. Cortex runs `npm install -g` for whichever you
 select on the next step.
 
-### 2.2 Which interaction platform?
+### 2.3 Which interaction platform(s)?
 
 ```
-? Which interaction platform?
-❯ ● Slack (recommended)
-  ○ Skip (configure later)
+? Which interaction platform(s) would you like to use? (space to toggle,
+  enter to confirm, leave empty to skip)
+❯ ◯ Slack (recommended)
+  ◯ Feishu (飞书)
 ```
 
-Pick **Slack**. This triggers the token-collection steps below. If you
-pick Skip, you can set up the platform later with `cortex init --force`
-or by editing `$CORTEX_HOME/config/.env`.
+This is a multi-select. Toggle with space, confirm with Enter. Pick
+**Slack**, **Feishu**, or both — Cortex composes the platforms you
+choose and connects to all of them at once. Each platform you select
+triggers its own credential-collection steps below (Slack first, then
+Feishu).
 
-### 2.3 Slack app setup (step by step in the browser)
+Leaving the selection empty skips platform setup. You can configure a
+platform later with `cortex init --force` or by editing
+`$CORTEX_HOME/config/.env`.
+
+### 2.4 Slack app setup (step by step in the browser)
+
+Skip this section if you did not select Slack.
 
 Cortex first prints a complete **Slack App Manifest** and asks if you
 want it copied to your clipboard. Press **c** — the manifest JSON
@@ -224,23 +249,79 @@ channel name → View channel details → copy the Channel ID from the
 bottom of the dialog — and set `CORTEX_ADMIN_CHANNEL` in
 `$CORTEX_HOME/config/.env`.
 
-### 2.4 Machine name
+### 2.5 Feishu app setup (step by step in the browser)
+
+Skip this section if you did not select Feishu. Cortex prints a setup
+guide and then collects your app credentials.
+
+#### a) Create a Feishu app
+
+Go to **[https://open.feishu.cn/app](https://open.feishu.cn/app)** and
+click **Create Agentic App**（创建 agentic 应用）. Enter an agent name
+(e.g. `CortexAgent`), pick an avatar, and click **Create**.
+
+#### b) Copy the App ID and App Secret
+
+After creation, the app page displays the **App ID** and **App Secret**.
+Copy them.
+
+Back in your terminal, paste them at the `FEISHU_APP_ID` and
+`FEISHU_APP_SECRET` prompts.
+
+#### c) Subscribe to message events
+
+In the app's event configuration, enable bot events and subscribe to
+**`im.message.receive_v1`**. Without this subscription the bot never
+receives your messages.
+
+#### d) Domain (optional)
+
+```
+? FEISHU_DOMAIN (optional, "feishu" or "lark"):
+  feishu (leave blank to use default)
+```
+
+Enter `feishu` for the Feishu (mainland China) domain or `lark` for the
+international Lark domain. Leave it blank to use the default.
+
+#### e) Identity for document operations
+
+```
+? Identity for MCP document operations:
+  bot   — documents owned by the app
+❯ user (Recommended) — documents owned by your Feishu account
+```
+
+Cortex's MCP tools can create and edit Feishu documents (docx, wiki,
+bitable, sheets, drive). This prompt decides who owns those documents.
+Choosing **bot** makes the app the owner. Choosing **user** makes your
+own Feishu account the owner, which keeps documents in your personal
+space — this is the recommended choice.
+
+If you pick **user**, `cortex init` immediately runs the Feishu user
+login (an OAuth device flow) so you authorize in one sitting. It prints
+a URL — open it in any browser, approve access, and Cortex polls for the
+token automatically. No redirect URI is needed. If you skip or abandon
+the login, your credentials are still saved and you can authorize later
+with `cortex feishu login`.
+
+### 2.6 Machine name
 
 Defaults to your hostname. Hit Enter unless you want a custom label.
 
-### 2.5 GPU detection
+### 2.7 GPU detection
 
 Cortex runs `nvidia-smi` and prints the count. Nothing to type. If you
 don't have an NVIDIA GPU, it prints 0 — perfectly fine for most usage.
 
-### 2.6 aistatus token-usage reporting?
+### 2.8 aistatus token-usage reporting?
 
 Optional opt-in to share anonymous token counts on the public
 leaderboard at [aistatus.cc](https://aistatus.cc). If you answer yes,
 provide a name, org, and email (email is identity only, never
 displayed).
 
-### 2.7 Register as a system service?
+### 2.9 Register as a system service?
 
 - **macOS** — creates a `launchd` plist at
   `~/Library/LaunchAgents/com.cortex.daemon.plist`. The daemon starts
@@ -249,7 +330,7 @@ displayed).
   daemon starts automatically on login.
 - **Windows** — not supported. Start manually with `cortex start`.
 
-### 2.8 Auto-detect backends for gateway/profiles?
+### 2.10 Auto-detect backends for gateway/profiles?
 
 Answer **Yes** if you already ran `claude login` and/or `pi login` in
 another shell. Cortex scans your `~/.claude/.credentials.json` and
@@ -277,7 +358,9 @@ Everything lives under `CORTEX_HOME` (default `~/.cortex/`):
 ├── .git/                       # auto git-init'd, all state is committed
 ├── CORTEX.md                   # root agent context (seeded from defaults)
 ├── config/
-│   ├── .env                    # platform tokens + CORTEX_MACHINE
+│   ├── .env                    # CORTEX_PLATFORM list + platform tokens + CORTEX_MACHINE
+│   ├── feishu-user-token.json  # Feishu user-identity token (only when FEISHU_AUTH_MODE=user)
+│   ├── preferences.json        # operator UI language
 │   ├── budget.json             # daily/monthly budget limits
 │   ├── machines.json           # this machine's capabilities (gpuCount, path)
 │   ├── mcp-config.json         # main MCP server entry
@@ -320,7 +403,7 @@ cortex start          # foreground, Ctrl-C to stop
 cortex daemon         # supervised, restarts on crash + hot-reload
 ```
 
-If you chose to register a system service in Step 2.7, the daemon is
+If you chose to register a system service in Step 2.9, the daemon is
 already running and you can skip this. Check with:
 
 ```bash
@@ -334,8 +417,8 @@ Slack connection status and active profiles.
 
 ## Step 4 — Send your first messages
 
-Now the fun part. Open Slack, find the Cortex bot you just installed,
-and start a DM.
+Now the fun part. Open Slack or Feishu, find the Cortex bot you just
+installed, and start a direct message with it.
 
 ### 4.1 Say hello
 
