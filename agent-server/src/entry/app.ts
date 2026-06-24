@@ -60,6 +60,7 @@ import { dispatchPendingResumes } from '../orchestration/resume-dispatcher.js';
 import { scheduleRepo } from '@store/schedule-repo.js';
 import { runMigrations, migrateAistatusConfigLocation } from '@store/version-migrations.js';
 import { syncManagedHooks } from '@store/hook-sync.js';
+import { syncManagedPlugins } from '@store/plugin-sync.js';
 import { costRepo } from '@store/cost-repo.js';
 import { profileRepo, startProfileWatcher, setAdminNotifier as setProfileNotifier } from '@store/profile-repo.js';
 import { sessionStore } from '@store/session-registry-repo.js';
@@ -269,6 +270,10 @@ process.on('SIGTERM', async () => {
   // Refresh version-stamped hooks in DATA_DIR/hooks from the shipped defaults. init's deployHooks
   // only copies-if-missing, so without this an existing install never picks up hook code fixes.
   await syncManagedHooks();
+  // Deploy new plugins and refresh updated skills in DATA_DIR/plugins from the shipped defaults.
+  // init's copyDefaults (copy-if-missing, only on `cortex init`) never reaches an existing install,
+  // so without this a new plugin or an updated skill never propagates on upgrade.
+  await syncManagedPlugins();
   // DR-0012 §3.6: clean up orphan TUI tmux sessions from a previous agent-server lifetime.
   // We can't re-adopt them (sessionKey↔tmux mapping was never persisted) so the honest move
   // is to kill any leftovers — otherwise a later session that reuses the same sessionId will

@@ -63,6 +63,7 @@ How to run tests without tripping it:
 | `task-dispatcher.test.ts` | Test | Pre-filter + schedule guard + dispatch gate (incl. per-task template-profile rate-limit filtering) |
 | `task-store.test.ts` | Test | runExclusive serialization and error propagation (verified through re-export path) |
 | `store/task-repo.test.ts` | Test | TaskRepo concurrent add, state serialization, flush draining |
+| `store/plugin-sync.test.ts` | Test | syncManagedPlugins/parsePluginVersion: new-plugin deploy / version-newer skill refresh / legacy-unversioned adoption / same-version no-write / no-downgrade / unversioned-default skip / user-added-file preservation |
 | `gpu-slot-scheduling.test.ts` | Test | Per-GPU slot scheduling |
 | `task-parser.test.ts` | Test | Task CLI read path query/lint/health |
 | `task-lint.test.ts` | Test | lintTasks unknown-template error unit coverage |
