@@ -90,6 +90,7 @@ How to run tests without tripping it:
 | `task-origin-wake.test.ts` | Test | Problem 1: notifyTaskOriginSession wakes the origin channel on task complete/blocked; defers to thread-parent path; single-fire |
 | `task-abort-outcome.test.ts` | Test | DR-0014 §8: processAbortOutcome worker escalation (aborted thread → block task; fixes aborted-as-success bug) |
 | `thread-statusmsg-seal.test.ts` | Test | DR-0014 §8: sealSuspendedStatusMsg refreshes the stale "suspended" status message after resume |
+| `thread-resume-statusmsg.test.ts` | Test | buildResumeOptions restores statusMsg from metadata.statusMsgRef (2026-06-23 fix: rate-limit/suspended resume kept updating the live status message instead of freezing at "Paused — rate limited") |
 | `thread-stages.test.ts` | Test | Thread step stage progression |
 | `thread-coder-review.e2e.test.ts` | Test | coder/reviewer two-stage e2e |
 | `thread-extra-hooks.test.ts` | Test | per-call extraHooks serial injection |

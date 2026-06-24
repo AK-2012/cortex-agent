@@ -90,9 +90,13 @@ async function postProjectNotice(t: ThreadRecord, text: string): Promise<void> {
   }
 }
 
-/** Rebuild RunThreadOptions for re-entering a suspended parent. extraHooks are not
- *  persisted on ThreadRecord, so the dispatch task-status-check hook is reconstructed
- *  from metadata.taskId/taskProject (the reason dispatch threads must store them). */
+/** Rebuild RunThreadOptions for re-entering a suspended parent OR a rate-limit-paused thread.
+ *  extraHooks are not persisted on ThreadRecord, so the dispatch task-status-check hook is
+ *  reconstructed from metadata.taskId/taskProject (the reason dispatch threads must store them).
+ *  statusMsg is restored from metadata.statusMsgRef (persisted at dispatch by task-dispatch /
+ *  webhook) so the resumed run keeps updating the SAME live status message — without it the run
+ *  carries statusMsg=null and the message freezes at "Paused — rate limited" forever even though
+ *  the thread runs to completion (2026-06-23 finding: rate-limit resume status-message freeze). */
 export function buildResumeOptions(parent: ThreadRecord): RunThreadOptions | null {
   const adapter = jobCtx.adapter;
   if (!adapter) return null;
@@ -108,7 +112,7 @@ export function buildResumeOptions(parent: ThreadRecord): RunThreadOptions | nul
     channel: parent.channel,
     destination: dest,
     threadAnchorId: parent.platformThreadId ?? null,
-    statusMsg: null,
+    statusMsg: m?.statusMsgRef ?? null,
     startTime: Date.now(),
     onProgress: null,
     onToolUse: null,
