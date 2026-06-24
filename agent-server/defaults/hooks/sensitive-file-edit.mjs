@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// @cortex-hook-version 2026.6.22-2
 // input:  stdin Claude Code PreToolUse event, node:fs
 // output: Direct-write target file + deny to prevent Claude from re-running built-in Edit/Write
 // pos:    PreToolUse hook: bypass Claude Code's hardcoded protection on .claude/ paths

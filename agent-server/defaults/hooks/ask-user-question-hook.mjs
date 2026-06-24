@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// @cortex-hook-version 2026.6.22-2
 // input:  stdin Claude Code PreToolUse event, node:http
 // output: stdout updatedInput containing user answers received from Slack
 // pos:    PreToolUse hook: intercept AskUserQuestion and forward to Slack to collect answers

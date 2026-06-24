@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// @cortex-hook-version 2026.6.22-2
 // input:  stdin JSON — Claude Code PreToolUse event payload
 // output: stdout JSON — { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision, permissionDecisionReason } }
 // pos:    PreToolUse hook — intercepts Edit/Write on **/TASKS.yaml, checks project lock

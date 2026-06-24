@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// @cortex-hook-version 2026.6.22-2
 // input:  stdin Claude Code PreToolUse event, node:http
 // output: stdout permissionDecision (plan injected back after Slack approval)
 // pos:    PreToolUse hook: intercept ExitPlanMode and forward plan to Slack for approval

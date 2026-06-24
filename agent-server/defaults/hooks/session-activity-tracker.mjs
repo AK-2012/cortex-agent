@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// @cortex-hook-version 2026.6.22-2
 // input:  stdin Claude Code PostToolUse event, node:fs
 // output: Appends records to logs/session-activity/<session_id>.jsonl
 // pos:    PostToolUse hook: track Read/Edit/Write/Skill for diff reconstruction

@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// @cortex-hook-version 2026.6.22-2
 // input:  stdin JSON from Claude PostToolUse hook
 // output: appends to _meta/access-log.jsonl per project
 // pos:    Read/Grep memory access tracking hook

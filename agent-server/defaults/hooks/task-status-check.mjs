@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// @cortex-hook-version 2026.6.22-2
 // input:  stdin HookContext, argv [project, taskId]
 // output: HookResult — checks TASKS.yaml task status after thread ends
 // pos:    task-dispatch thread onEnd status check hook

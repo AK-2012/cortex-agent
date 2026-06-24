@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// @cortex-hook-version 2026.6.22-2
 // input:  stdin HookContext, argv [targetAgent]
 // output: HookResult — compound + git commit prompt to targetAgent
 // pos:    scheduler and *-review template onEnd compound/commit hook
