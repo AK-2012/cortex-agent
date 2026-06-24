@@ -12,6 +12,14 @@
  *   - completion: { type:'system', subtype:'task_updated',      task_id, patch:{status:'completed'} }
  *                 { type:'system', subtype:'task_notification', task_id, status:'completed', summary }
  *
+ * IMPORTANT: task_updated{completed} and task_notification are TWO separate events, and the
+ * CLI emits task_updated FIRST — sometimes seconds before the matching task_notification
+ * (gaps up to ~24s observed when several run_in_background tasks finish close together).
+ * task_notification is the one that actually re-invokes the model (the continuation turn).
+ * So pending is keyed off task_notification ONLY; clearing on task_updated would let the
+ * count hit 0 while continuation turns are still undelivered, sealing a turn "done"
+ * prematurely (a continuation result resolving in that gap snapshots pendingCount==0).
+ *
  * When a background task completes the CLI spontaneously re-invokes the model and
  * emits a fresh turn whose terminating `result` carries `origin.kind:'task-notification'`
  * (see isContinuationResult). The adapter uses pendingCount to decide whether a turn's
@@ -34,14 +42,19 @@ export class BgTaskTracker {
         this.pending.add(id);
         break;
       case 'task_updated':
-        if (data.patch?.status === 'completed') {
-          this.pending.delete(id);
-          this.continuationArmed = true;
-        }
+        // Intentionally a no-op for pending/arming, even on status 'completed'.
+        // task_updated marks the task's WORK as finished, but the CLI emits the
+        // matching task_notification LATER (observed gaps up to ~24s with several
+        // parallel tasks). task_notification is the event that actually re-invokes
+        // the model (the continuation turn). If we cleared pending here, the count
+        // could reach 0 while notifications are still undelivered, and a continuation
+        // turn resolving in that gap would seal the turn "done" prematurely. Pending
+        // is therefore keyed off task_notification only (see below).
         break;
       case 'task_notification':
         // Emitted when a background task finishes (status 'completed' or error);
-        // this is the event that re-invokes the model.
+        // this is the event that re-invokes the model. It is the authoritative
+        // completion-delivery signal, so it (and only it) clears pending + arms.
         this.pending.delete(id);
         this.continuationArmed = true;
         break;
