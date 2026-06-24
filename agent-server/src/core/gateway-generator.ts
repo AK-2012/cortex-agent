@@ -93,7 +93,16 @@ export interface DiscoveredEndpoint {
 
 // ─── Anthropic models (default tier) ─────────────────────────────
 
-const ANTHROPIC_MODELS = ['claude-fable-5', 'claude-4-8', 'claude-sonnet-4-6', 'claude-haiku-4-5'];
+// Each 1M-capable model also exposes a "[1m]" variant — Claude Code's context-window suffix that
+// opts the session into the 1M-token window. Haiku 4.5 is 200K-only, so it has no [1m] variant.
+const ANTHROPIC_MODELS = [
+  'claude-fable-5', 'claude-fable-5[1m]',
+  'claude-opus-4-8', 'claude-opus-4-8[1m]',
+  'claude-opus-4-7', 'claude-opus-4-7[1m]',
+  'claude-opus-4-6', 'claude-opus-4-6[1m]',
+  'claude-sonnet-4-6', 'claude-sonnet-4-6[1m]',
+  'claude-haiku-4-5',
+];
 
 // ─── PI provider → upstream URL lookup (manually maintained) ────────────────
 
