@@ -10,7 +10,8 @@ task-repo.ts responsibilities are limited to I/O + lock + git sync, does not car
 | `outbound-queue.ts` | persistence | WAL-based outbound message queue, prevents message loss on restart. Provides durablePost/durableUpdate helper functions |
 | `thread-repo.ts` | persistence | Thread state persistence |
 | `session-repo.ts` | persistence | Session persistence |
-| `conversation-ledger-repo.ts` | persistence | Conversation ledger persistence |
+| `conversation-ledger-repo.ts` | persistence | Conversation ledger persistence (per-channel turn→message-ts mapping for edit/rollback) |
+| `conversation-history-repo.ts` | persistence | Cortex's backend-independent conversation history, keyed by **sessionId** (persistent across reconnects). Records the full event stream — user inputs, every assistant message, every tool call — via `appendUser`/`appendAssistant`(streaming-growth dedup)/`appendTool`. The TUI transcript-replay source. |
 | `session-registry-repo.ts` | persistence | Session registry persistence |
 | `execution-repo.ts` | persistence | Execution registry persistence |
 | `project-dir-repo.ts` | persistence | Project → external code directory mapping |

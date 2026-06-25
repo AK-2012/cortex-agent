@@ -11,13 +11,22 @@ import type { RenderedMessage } from '../hooks/useTranscript.js';
 
 interface MessageRowProps {
   message: RenderedMessage;
+  /** Truncate long text/stream to this many characters (so one entry can't overflow). */
+  maxChars?: number;
 }
 
-export function MessageRow({ message }: MessageRowProps): React.JSX.Element {
+/** Clamp text to maxChars, appending an ellipsis marker when cut. */
+function clamp(text: string, maxChars?: number): string {
+  if (!maxChars || text.length <= maxChars) return text;
+  return text.slice(0, maxChars).replace(/\s+\S*$/, '') + ' … (truncated)';
+}
+
+export function MessageRow({ message, maxChars }: MessageRowProps): React.JSX.Element {
   // Concatenate all stream segments + mutable regions into a single flowing
   // string instead of one Text per chunk (chunks don't align to line breaks).
-  const streamText = message.streams.size > 0 ? collectStreamText(message.streams) : '';
+  const streamText = message.streams.size > 0 ? clamp(collectStreamText(message.streams), maxChars) : '';
   const hasRichBlocks = !!(message.richBlocks && message.richBlocks.length > 0);
+  const text = message.text ? clamp(message.text, maxChars) : '';
 
   return (
     <Box flexDirection="column" marginBottom={1}>
@@ -26,7 +35,7 @@ export function MessageRow({ message }: MessageRowProps): React.JSX.Element {
           carries its text in both `text` and a section block, so rendering both here printed
           the status line twice. Render `text` only when there are no richBlocks. */}
       <Box flexDirection="column">
-        {message.text && !hasRichBlocks ? <InlineMarkdown text={message.text} /> : null}
+        {text && !hasRichBlocks ? <InlineMarkdown text={text} /> : null}
         {hasRichBlocks ? <RichBlocks blocks={message.richBlocks!} /> : null}
       </Box>
 

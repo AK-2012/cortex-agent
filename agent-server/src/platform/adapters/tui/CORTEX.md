@@ -10,6 +10,6 @@ Bridges WS connections (M4 protocol) to the PlatformAdapter interface.
 | `tui-connection.ts` | connection | Per-WS connection — conduitId, activeSessionId, activeProjectId, send/close |
 | `tui-conduit-state.ts` | store | In-memory Map<conduitId, TuiConduitState> with helpers |
 | `tui-output-stream.ts` | output stream | TuiOutputStream — no coalescing, emits stream.* WS frames |
-| `tui-transcript.ts` | transcript | Pure synchronous transcript replay formatter (no @store deps) — TranscriptData → TranscriptReplay | null |
+| `tui-transcript.ts` | transcript | Pure synchronous transcript replay formatter (no @store deps) — message-based TranscriptData → TranscriptReplay. Renders user (`**You:** …`), assistant (real text), and tool (dim `🔧` context) messages. |
 | `tui-notifications.ts` | notifications | Project-report / system-notice fan-out routing |
-| `ports.ts` | port types | Pure structural boundary types — TranscriptTurn, TranscriptData, ConduitQueuePort (zero layer imports) |
+| `ports.ts` | port types | Pure structural boundary types — TranscriptMessage (role: user/assistant/tool), TranscriptData (message list), ConduitQueuePort (zero layer imports) |

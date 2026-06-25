@@ -6,5 +6,5 @@ No transport coupling (no ws imports). Consumed by M1 TUI gateway in a later tas
 | filename | role | function |
 |---|---|---|
 | `types.ts` | types | HandshakeResolution, SwitchResolution, TuiSessionDeps, TuiSessionService interface |
-| `tui-session-service.ts` | service | createTuiSessionService(deps) — resolveHandshake, switchSession, internal createFresh, assembleTranscript |
+| `tui-session-service.ts` | service | createTuiSessionService(deps) — resolveHandshake, switchSession, internal createFresh, assembleTranscript (reads the sessionId-keyed `conversationHistory` → message-based TranscriptData; no longer the per-channel ledger) |
 | `index.ts` | barrel | re-exports createTuiSessionService and public types |

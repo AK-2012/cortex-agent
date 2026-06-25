@@ -10,13 +10,14 @@ import { TuiGatewayAdapter } from '../../src/platform/adapters/tui/tui-gateway.j
 import { sendProjectReport, sendSystemNotice } from '../../src/platform/adapters/tui/tui-notifications.js';
 import { sessionStore } from '../../src/store/session-registry-repo.js';
 import { conversationLedger } from '../../src/store/conversation-ledger-repo.js';
+import { conversationHistory } from '../../src/store/conversation-history-repo.js';
 import { createTuiSessionService } from '../../src/domain/tui-session/index.js';
 import { enqueue, conduitQueues } from '../../src/orchestration/conduit-queue.js';
 import type { TuiFrame } from '../../src/platform/tui/protocol.js';
 
 /** Inject the real session service + conduit-queue port into a gateway (post-B4 DI). */
 function wireTestDeps(adapter: TuiGatewayAdapter): void {
-  adapter.setSessionService(createTuiSessionService({ sessionStore, conversationLedger }));
+  adapter.setSessionService(createTuiSessionService({ sessionStore, conversationLedger, conversationHistory }));
   adapter.setConduitQueue({ enqueue, remove: (id) => conduitQueues.delete(id) });
 }
 

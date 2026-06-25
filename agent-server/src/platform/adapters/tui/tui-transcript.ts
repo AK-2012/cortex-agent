@@ -21,43 +21,27 @@ import type { TranscriptData } from './ports.js';
 export function buildTranscriptReplay(
   data: TranscriptData,
 ): TranscriptReplay | null {
-  const { sessionId, channel, turns } = data;
+  const { sessionId, messages } = data;
 
   const items: Array<ChatPost | ChatUpdate | InteractivePost> = [];
   let seq = 0;
 
-  for (const turn of turns) {
-    // Skip processing turns
-    if (turn.status === 'processing') continue;
-
-    // The user message turn: render as a ChatPost
-    const userRef: MessageRef = {
-      conduit: channel,
-      messageId: turn.userMessageTs,
+  messages.forEach((msg, i) => {
+    const ref: MessageRef = {
+      conduit: sessionId,
+      messageId: `${sessionId}-${i}`,
       threadId: null,
     };
-    items.push({
-      type: 'chat.post',
-      ref: userRef,
-      content: { text: `**You:** ${turn.userMessageText}` },
-      seq: ++seq,
-    });
-
-    // Response messages
-    for (const responseTs of turn.responseMessageTimestamps) {
-      const responseRef: MessageRef = {
-        conduit: channel,
-        messageId: responseTs,
-        threadId: null,
-      };
-      items.push({
-        type: 'chat.post',
-        ref: responseRef,
-        content: { text: `*(response)*` },
-        seq: ++seq,
-      });
+    if (msg.role === 'tool') {
+      // Tool calls render as a dim context line, mirroring the live display.
+      const label = msg.toolName ? `🔧 ${msg.toolName}${msg.toolInput ? `  ${msg.toolInput}` : ''}` : '🔧 tool';
+      items.push({ type: 'chat.post', ref, content: { text: '', richBlocks: [{ type: 'context', text: label }] as any }, seq: ++seq });
+    } else if (msg.role === 'user') {
+      items.push({ type: 'chat.post', ref, content: { text: `**You:** ${msg.text}` }, seq: ++seq });
+    } else {
+      items.push({ type: 'chat.post', ref, content: { text: msg.text }, seq: ++seq });
     }
-  }
+  });
 
   if (items.length === 0) return null;
 

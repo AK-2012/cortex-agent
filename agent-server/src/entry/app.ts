@@ -29,6 +29,7 @@ import { checkServerUpdate } from '@domain/system/server-update-check.js';
 import { threadStore } from '@store/thread-repo.js';
 import { sessionRepo, registerConduitProvider } from '@store/session-repo.js';
 import { conversationLedger } from '@store/conversation-ledger-repo.js';
+import { conversationHistory } from '@store/conversation-history-repo.js';
 import { executionRepo } from '@store/execution-repo.js';
 import { loadConfig as loadThreadConfig, startConfigWatcher as startThreadConfigWatcher, setAdminNotifier as setConfigNotifier } from '@domain/threads/index.js';
 import { startMemoryWatcher } from '@domain/memory/watcher.js';
@@ -172,7 +173,7 @@ const tuiGateway = extractTuiAdapter(adapter);
 if (tuiGateway) {
   tuiGateway.setBus(bus);
   // Session lifecycle service (transport-agnostic; gateway delegates handshake/switch to it).
-  tuiGateway.setSessionService(createTuiSessionService({ sessionStore, conversationLedger }));
+  tuiGateway.setSessionService(createTuiSessionService({ sessionStore, conversationLedger, conversationHistory }));
   // Conduit-queue port — MUST wrap the shared @orch/conduit-queue singletons so TUI message
   // work serializes with the rest of the pipeline on the same conduit key.
   tuiGateway.setConduitQueue({ enqueue, remove: (id) => conduitQueues.delete(id) });
@@ -255,7 +256,7 @@ process.on('SIGTERM', async () => {
   // `writeFile(tmp)` and `rename(tmp, target)` in atomic-write.ts leaves orphan .tmp.* siblings.
   // Daemon gives 5s before SIGKILL — well over the time needed to flush a few MB of JSON.
   try {
-    await Promise.allSettled([bus.close(), oq.flush(), threadStore.flush(), sessionRepo.flush(), conversationLedger.flush(), taskStore.flush(), executionRepo.flush(), projectDirRepo.flush(), scheduleRepo.flush(), costRepo.flush(), profileRepo.flush(), sessionStore.flush()]);
+    await Promise.allSettled([bus.close(), oq.flush(), threadStore.flush(), sessionRepo.flush(), conversationLedger.flush(), conversationHistory.flush(), taskStore.flush(), executionRepo.flush(), projectDirRepo.flush(), scheduleRepo.flush(), costRepo.flush(), profileRepo.flush(), sessionStore.flush()]);
   } catch {}
   await stopGateway(); process.exit(0);
 });

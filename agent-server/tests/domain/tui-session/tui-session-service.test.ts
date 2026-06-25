@@ -47,11 +47,18 @@ function makeFakeDeps(overrides?: Partial<TuiSessionDeps>): TuiSessionDeps & { _
         return null;
       },
     },
+    conversationHistory: {
+      getHistory: async (sessionId: string) => {
+        calls.push(`getHistory(${sessionId})`);
+        return null;
+      },
+    },
   };
 
   return {
     sessionStore: { ...defaults.sessionStore, ...overrides?.sessionStore },
     conversationLedger: { ...defaults.conversationLedger, ...overrides?.conversationLedger },
+    conversationHistory: { ...defaults.conversationHistory, ...overrides?.conversationHistory },
     // Expose call log for test assertions
     _calls: calls,
   } as TuiSessionDeps & { _calls: string[] };
@@ -159,12 +166,9 @@ test('switchSession: found', async () => {
   assert.equal(result.projectId, 'proj-y', 'projectId from session registry');
   assert.equal(result.transcript, null, 'transcript null when no turns');
 
-  // switchSession must be called BEFORE assembleTranscript
-  const switchCallIdx = deps._calls.findIndex(c => c.startsWith('switchSession'));
-  assert.ok(switchCallIdx >= 0, 'switchSession must have been called');
-  const getConvCallIdx = deps._calls.findIndex(c => c.startsWith('getConversation'));
-  assert.ok(getConvCallIdx >= 0, 'getConversation must have been called');
-  assert.ok(switchCallIdx < getConvCallIdx, 'switchSession must be called BEFORE getConversation (assembleTranscript)');
+  // switchSession is called, and assembleTranscript reads the session-keyed history.
+  assert.ok(deps._calls.some(c => c.startsWith('switchSession')), 'switchSession must have been called');
+  assert.ok(deps._calls.some(c => c.startsWith('getHistory')), 'assembleTranscript must read conversationHistory');
 
   // Ensure no emitNotFoundError on result
   assert.equal((result as any).emitNotFoundError, undefined, 'emitNotFoundError must not be present on SwitchResolution');
@@ -208,32 +212,20 @@ test('switchSession: no sessionId (fresh fallback)', async () => {
   assert.equal((result as any).emitNotFoundError, undefined);
 });
 
-test('resolveHandshake: resume-found with transcript assembly', async () => {
+test('resolveHandshake: resume-found assembles transcript from conversation history', async () => {
   const deps = makeFakeDeps({
-    conversationLedger: {
-      initConversation: async () => {},
-      switchSession: async () => {},
-      getConversation: async (_channel: string) => {
-        return {
-          turns: [
-            {
-              userMessageTs: 'ts-1',
-              userMessageText: 'hello',
-              responseMessageTimestamps: ['ts-1a'],
-              status: 'completed' as const,
-            },
-            {
-              userMessageTs: 'ts-2',
-              userMessageText: 'world',
-              responseMessageTimestamps: ['ts-2a', 'ts-2b'],
-              status: 'completed' as const,
-            },
-          ],
-        };
-      },
+    conversationHistory: {
+      getHistory: async (_sessionId: string) => ({
+        events: [
+          { type: 'user' as const, text: 'hello' },
+          { type: 'tool' as const, toolName: 'Read', toolInput: 'foo.ts' },
+          { type: 'assistant' as const, text: 'an answer' },
+          { type: 'user' as const, text: 'world' },
+          { type: 'assistant' as const, text: 'a reply' },
+        ],
+      }),
     },
   });
-  // Register session
   await deps.sessionStore.registerSession('cortex-resume', {
     sessionId: 'resume-session-2',
     channel: 'tui-conduit',
@@ -251,14 +243,11 @@ test('resolveHandshake: resume-found with transcript assembly', async () => {
 
   assert.equal(result.isFresh, false);
   assert.equal(result.sessionId, 'resume-session-2');
-  assert.equal(result.sessionName, 'cortex-resume');
 
-  assert.ok(result.transcript !== null, 'transcript must be populated');
+  assert.ok(result.transcript !== null, 'transcript must be populated from history');
   assert.equal(result.transcript!.sessionId, 'resume-session-2');
-  assert.equal(result.transcript!.channel, 'tui-conduit');
-  assert.equal(result.transcript!.turns.length, 2);
-  assert.equal(result.transcript!.turns[0].userMessageText, 'hello');
-  assert.equal(result.transcript!.turns[1].userMessageText, 'world');
-  assert.deepEqual(result.transcript!.turns[0].responseMessageTimestamps, ['ts-1a']);
-  assert.equal(result.transcript!.turns[0].status, 'completed');
+  assert.equal(result.transcript!.messages.length, 5);
+  assert.deepEqual(result.transcript!.messages[0], { role: 'user', text: 'hello' });
+  assert.deepEqual(result.transcript!.messages[1], { role: 'tool', text: '', toolName: 'Read', toolInput: 'foo.ts' });
+  assert.deepEqual(result.transcript!.messages[2], { role: 'assistant', text: 'an answer' });
 });

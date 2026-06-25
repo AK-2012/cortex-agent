@@ -12,6 +12,7 @@ import { trackPendingTask } from './busy-tracker.js';
 import { getSessionAsync } from '@domain/sessions/session.js';
 import { sessionStore } from '@store/session-registry-repo.js';
 import { conversationLedger } from '@store/conversation-ledger-repo.js';
+import { conversationHistory } from '@store/conversation-history-repo.js';
 import { getActiveProfile, getDefaultAgent, resolveBackendForChannel } from '@domain/agents/index.js';
 import { registerNamedSession } from '@domain/sessions/session-lifecycle.js';
 import { handleAgentSuccess, handleAgentError, initTurnTracking } from './lifecycle.js';
@@ -125,6 +126,11 @@ export class AgentRunner {
     }, threadAnchorId ? { threadId: threadAnchorId } : undefined);
     const messageTs = message.ref.messageId;
     await initTurnTracking(channel, sessionId, sessionName, messageTs, userMessage || '', statusMsg.messageId);
+    // Backend-independent conversation history (keyed by sessionId, the TUI display source).
+    // Record the user message now; assistant messages + tool calls are appended via the
+    // callbacks below as they stream. Only when we have a sessionId to key by.
+    const histMeta = { sessionName, backend: resolveBackendForChannel(channel) };
+    if (sessionId) recordHistory(conversationHistory.appendUser(sessionId, { ...histMeta, text: userMessage || '' }));
     const onMessagePosted = (ref: MessageRef) => void conversationLedger.addResponseTs(channel, messageTs, ref.messageId).catch((e) => log.error(e));
     // 2. Build agent callbacks (streaming, fallback, progress)
     const callbacks = buildAgentCallbacks(adapter, dest, statusMsg, threadAnchorId, startTime, sessionName, sessionId, onMessagePosted);
@@ -154,10 +160,16 @@ export class AgentRunner {
           }).catch(() => {});
           initStatusBlocks(statusMsg, blocksTemplateWithExec);
         },
-        onAssistantMessage: callbacks.onAssistantMsg,
+        onAssistantMessage: (text: string) => {
+          callbacks.onAssistantMsg(text);
+          if (sessionId && text) recordHistory(conversationHistory.appendAssistant(sessionId, { ...histMeta, text }));
+        },
         onProgress: callbacks.onProgress,
         onFallback: callbacks.onFallback,
-        onToolUse: composeToolUse(callbacks.onToolUse, interactiveCallbacks.onToolUse),
+        onToolUse: composeToolUse(
+          composeToolUse(callbacks.onToolUse, interactiveCallbacks.onToolUse),
+          sessionId ? (name: string, input: any) => recordHistory(conversationHistory.appendTool(sessionId, { ...histMeta, toolName: name, toolInput: summarizeToolInputForHistory(input) })) : null,
+        ),
         onPlanWritten: interactiveCallbacks.onPlanWritten,
         onAskUserQuestion: interactiveCallbacks.onAskUserQuestion,
       });
@@ -280,6 +292,24 @@ function buildAgentCallbacks(adapter: PlatformAdapter, destination: Destination,
 async function downloadFiles(files: PlatformFileRef[] | undefined, hasFiles: boolean, adapter: PlatformAdapter): Promise<DownloadedFile[]> {
   if (!hasFiles || !files) return [];
   return downloadPlatformFiles(files, adapter, TEMP_DIR);
+}
+
+/** Compact, backend-agnostic one-line summary of a tool call's input for the history. */
+export function summarizeToolInputForHistory(input: any): string {
+  if (input == null || typeof input !== 'object') return '';
+  const pick = (k: string) => (typeof input[k] === 'string' ? input[k] : undefined);
+  const primary = pick('command') ?? pick('file_path') ?? pick('path') ?? pick('pattern') ?? pick('url') ?? pick('prompt') ?? pick('description') ?? pick('query');
+  let s = primary ?? '';
+  if (!s) {
+    try { s = JSON.stringify(input); } catch { s = ''; }
+  }
+  s = s.replace(/\s+/g, ' ').trim();
+  return s.length > 120 ? s.slice(0, 117) + '…' : s;
+}
+
+/** Fire-and-forget history append; never let a logging write break the turn. */
+function recordHistory(p: Promise<unknown>): void {
+  void p.catch((e) => log.error('conversation-history write failed:', (e as Error).message));
 }
 
 /** Compose two optional onToolUse callbacks so both fire on each tool_use event. */

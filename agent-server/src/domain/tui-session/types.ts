@@ -79,4 +79,16 @@ export interface TuiSessionDeps {
       }>;
     } | null>;
   };
+  /** Cortex's backend-independent conversation history, keyed by sessionId — the TUI
+   *  transcript-replay source (full user / assistant / tool event stream). */
+  conversationHistory: {
+    getHistory(sessionId: string): Promise<{
+      events: Array<{
+        type: 'user' | 'assistant' | 'tool';
+        text?: string;
+        toolName?: string;
+        toolInput?: string;
+      }>;
+    } | null>;
+  };
 }

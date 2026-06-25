@@ -11,7 +11,45 @@ import {
   collectStreamText,
   computeVisibleWindow,
   computeFocusWindow,
+  estimateLines,
+  computeLineWindow,
 } from '../../src/tui/logic.js';
+
+// ── estimateLines ──
+
+test('estimateLines: wraps by width and counts newlines', () => {
+  assert.equal(estimateLines('', 80), 0);
+  assert.equal(estimateLines('short', 80), 1);
+  assert.equal(estimateLines('a'.repeat(81), 80), 2);
+  assert.equal(estimateLines('line1\nline2', 80), 2);
+  assert.equal(estimateLines('a'.repeat(160) + '\nx', 80), 3);
+});
+
+// ── computeLineWindow ──
+
+test('computeLineWindow: fits as many bottom rows as the budget allows', () => {
+  // five rows, 2 lines each = 10 lines; budget 5 → last 2 rows (4 lines), 3rd would overflow
+  const counts = [2, 2, 2, 2, 2];
+  const w = computeLineWindow(counts, 5, 0);
+  assert.equal(w.end, 5);
+  assert.equal(w.start, 3); // rows 3,4 fit (4 lines); row 2 would make 6 > 5
+});
+
+test('computeLineWindow: always includes at least the last row even if taller than budget', () => {
+  const w = computeLineWindow([3, 20], 5, 0);
+  assert.deepEqual(w, { start: 1, end: 2 });
+});
+
+test('computeLineWindow: scrollOffset hides rows from the bottom', () => {
+  const counts = [1, 1, 1, 1, 1];
+  const w = computeLineWindow(counts, 2, 2); // offset 2 → end=3
+  assert.equal(w.end, 3);
+  assert.equal(w.start, 1);
+});
+
+test('computeLineWindow: empty list', () => {
+  assert.deepEqual(computeLineWindow([], 10, 0), { start: 0, end: 0 });
+});
 
 // ── computeFocusWindow ──
 

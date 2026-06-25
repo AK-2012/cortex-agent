@@ -5,7 +5,7 @@
 import * as crypto from 'node:crypto';
 import type { TuiSessionDeps, TuiSessionService, HandshakeResolution, SwitchResolution } from './types.js';
 import { registerNamedSession } from '@domain/sessions/session-lifecycle.js';
-import type { TranscriptData, TranscriptTurn } from '@platform/adapters/tui/ports.js';
+import type { TranscriptData, TranscriptMessage } from '@platform/adapters/tui/ports.js';
 
 // ── Internal helpers ─────────────────────────────────────────────
 
@@ -33,24 +33,19 @@ async function assembleTranscript(
   deps: TuiSessionDeps,
   sessionId: string,
 ): Promise<TranscriptData | null> {
-  const sessionName = await deps.sessionStore.lookupBySessionId(sessionId);
-  if (!sessionName) return null;
+  // Read from Cortex's backend-independent, session-keyed conversation history (the full
+  // user / assistant / tool event stream). This replaces the old per-channel ledger read,
+  // which only had user text + response timestamps and was cleared on session switch.
+  const hist = await deps.conversationHistory.getHistory(sessionId);
+  if (!hist || hist.events.length === 0) return null;
 
-  const session = await deps.sessionStore.getById(sessionId);
-  if (!session) return null;
+  const messages: TranscriptMessage[] = hist.events.map((e) =>
+    e.type === 'tool'
+      ? { role: 'tool' as const, text: '', toolName: e.toolName ?? '', toolInput: e.toolInput ?? '' }
+      : { role: e.type, text: e.text ?? '' },
+  );
 
-  const channel = session.channel;
-  const conv = await deps.conversationLedger.getConversation(channel);
-  if (!conv || conv.turns.length === 0) return null;
-
-  const turns: TranscriptTurn[] = conv.turns.map((turn) => ({
-    userMessageTs: turn.userMessageTs,
-    userMessageText: turn.userMessageText,
-    responseMessageTimestamps: turn.responseMessageTimestamps,
-    status: turn.status,
-  }));
-
-  return { sessionId, channel, turns };
+  return { sessionId, messages };
 }
 
 // ── Factory ──────────────────────────────────────────────────────
