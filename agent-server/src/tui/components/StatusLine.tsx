@@ -1,28 +1,63 @@
-// input:  Connection state + optional error
-// output: Bottom line — hotkey hints always; a connection status only when abnormal
-// pos:    Status line for M5 Ink client. The normal "● Connected" text is intentionally
-//         hidden — connection only surfaces while connecting/reconnecting/disconnected/error.
+// input:  Connection state + active project / queued / notification counts + shortcuts flag
+// output: Bottom line — left: "? for shortcuts" hint (or the full key list); right: project ·
+//         queued · notifications. A connection status is prefixed only when abnormal.
+// pos:    Status line for M5 Ink client. The header was removed (DR: TUI header-removal), so the
+//         project / queued / notification badges live here on the bottom-right. The normal
+//         "● Connected" dot/text is intentionally never rendered — connection only surfaces while
+//         connecting / reconnecting / disconnected / error.
 
 import React from 'react';
-import { Text } from 'ink';
+import { Box, Text } from 'ink';
 import type { WsState } from '../ws-client.js';
 
 interface StatusLineProps {
   connectionState: WsState;
   errorMessage?: string | null;
+  projectId?: string | null;
+  queuedCount?: number;
+  notificationCount?: number;
+  /** When true the whole bottom line shows the full shortcut list instead of the hint + badges. */
+  showShortcuts?: boolean;
 }
 
-const HINTS = 'Ctrl+D Dashboard | Ctrl+N Notifications | Ctrl+P Projects';
+/** Full keyboard-shortcut list, revealed by typing '?' on an empty input. */
+const SHORTCUTS =
+  'Ctrl+D Dashboard · Ctrl+N Notifications · Ctrl+P Projects · Ctrl+L Clear · '
+  + '↑/↓ History · PgUp/PgDn Scroll · Ctrl+C Cancel (×2 Exit) · / Commands';
 
-export function StatusLine({ connectionState, errorMessage }: StatusLineProps): React.JSX.Element {
+export function StatusLine({
+  connectionState,
+  errorMessage,
+  projectId,
+  queuedCount = 0,
+  notificationCount = 0,
+  showShortcuts = false,
+}: StatusLineProps): React.JSX.Element {
   const status = getConnectionStatus(connectionState, errorMessage);
   const color = getStatusColor(connectionState, errorMessage);
 
+  // Shortcuts overlay: the whole bottom line becomes the key list. Any key dismisses it.
+  if (showShortcuts) {
+    return (
+      <Text>
+        {status ? <Text color={color}>{status}{' — '}</Text> : null}
+        <Text dimColor>{SHORTCUTS}</Text>
+      </Text>
+    );
+  }
+
   return (
-    <Text>
-      {status ? <Text color={color}>{status}{' — '}</Text> : null}
-      <Text dimColor>{HINTS}</Text>
-    </Text>
+    <Box justifyContent="space-between" width="100%">
+      <Box>
+        {status ? <Text color={color}>{status}{' — '}</Text> : null}
+        <Text dimColor>? for shortcuts</Text>
+      </Box>
+      <Box>
+        {projectId ? <Text dimColor>{projectId}</Text> : null}
+        {queuedCount > 0 ? <Text color="yellow"> · ⏳ {queuedCount}</Text> : null}
+        {notificationCount > 0 ? <Text color="yellow"> · 🔔 {notificationCount}</Text> : null}
+      </Box>
+    </Box>
   );
 }
 

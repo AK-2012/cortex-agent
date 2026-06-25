@@ -89,15 +89,8 @@ export function useKeybindings(handlers: KeybindingHandlers, isActive = true, op
       return;
     }
 
-    // ↑/↓: scroll (only when this zone owns navigation)
-    if (key.upArrow) {
-      if (allowScroll) h.onScrollUp();
-      return;
-    }
-    if (key.downArrow) {
-      if (allowScroll) h.onScrollDown();
-      return;
-    }
+    // ↑/↓ are NOT scroll keys here — the input box owns them for history recall.
+    // Transcript scrolling is on PgUp/PgDn (below).
 
     // PgUp/PgDn: paginated scroll
     if (key.pageUp) {

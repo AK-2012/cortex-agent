@@ -33,6 +33,77 @@ test('InputBox submits typed text when not awaiting', async (t) => {
   instance.cleanup();
 });
 
+test('InputBox recalls the previous message on Up arrow', async (t) => {
+  const submitted: string[] = [];
+  const app = React.createElement(InputBox, {
+    onSubmit: (txt: string) => submitted.push(txt),
+    awaitingResponse: false,
+    focus: true,
+  });
+  const instance = render(app);
+  await delay(150);
+
+  instance.stdin.write('first message');
+  await delay(60);
+  instance.stdin.write('\r'); // submit → pushed to history, input cleared
+  await delay(120);
+  assert.deepEqual(submitted, ['first message']);
+  assert.doesNotMatch(instance.lastFrame() ?? '', /first message/, 'input cleared after submit');
+
+  instance.stdin.write('\x1b[A'); // Up arrow → recall
+  await delay(120);
+  assert.match(instance.lastFrame() ?? '', /first message/, 'Up arrow recalls the last message');
+
+  instance.unmount();
+  instance.cleanup();
+});
+
+test('InputBox "?" on empty input toggles shortcuts instead of typing', async (t) => {
+  let toggles = 0;
+  const app = React.createElement(InputBox, {
+    onSubmit: () => {},
+    onToggleShortcuts: () => { toggles += 1; },
+    showShortcuts: false,
+    awaitingResponse: false,
+    focus: true,
+  });
+  const instance = render(app);
+  await delay(150);
+
+  instance.stdin.write('?');
+  await delay(120);
+
+  assert.equal(toggles, 1, 'pressing ? toggled the shortcuts overlay');
+  // '?' must not leak into the message buffer (input still shows the placeholder).
+  assert.match(instance.lastFrame() ?? '', /Type a message/);
+
+  instance.unmount();
+  instance.cleanup();
+});
+
+test('InputBox dismisses shortcuts on any key when shown', async (t) => {
+  let dismissed = 0;
+  const app = React.createElement(InputBox, {
+    onSubmit: () => {},
+    onDismissShortcuts: () => { dismissed += 1; },
+    showShortcuts: true,
+    awaitingResponse: false,
+    focus: true,
+  });
+  const instance = render(app);
+  await delay(150);
+
+  instance.stdin.write('x'); // any key
+  await delay(120);
+
+  assert.equal(dismissed, 1, 'any key dismisses the shortcuts overlay');
+  // The key that dismissed must not be inserted into the buffer.
+  assert.doesNotMatch(instance.lastFrame() ?? '', /x/);
+
+  instance.unmount();
+  instance.cleanup();
+});
+
 test('InputBox does NOT submit while awaiting a response', async (t) => {
   const submitted: string[] = [];
   const app = React.createElement(InputBox, {

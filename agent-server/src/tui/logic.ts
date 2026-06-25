@@ -142,3 +142,52 @@ export function computeFocusWindow(
   const end = start + cap;
   return { start, end, hiddenAbove: start, hiddenBelow: total - end };
 }
+
+// ── Input history navigation ──
+// Up/Down arrows in the input box cycle previously submitted messages (shell-style).
+// `index` is the position inside the history array currently shown (null = the user's
+// live draft, not navigating). `draft` preserves the in-progress text entered before
+// navigation started, so stepping back past the newest entry restores it.
+
+export interface InputHistoryState {
+  /** Index into the history array currently displayed, or null when showing the live draft. */
+  index: number | null;
+  /** The in-progress text saved when navigation began (restored on exit). */
+  draft: string;
+}
+
+/** Step to an OLDER history entry (Up arrow). Returns the value to show + the next state. */
+export function historyPrev(
+  history: string[],
+  state: InputHistoryState,
+  current: string,
+): { value: string; state: InputHistoryState } {
+  if (history.length === 0) return { value: current, state };
+  if (state.index === null) {
+    const index = history.length - 1;
+    return { value: history[index], state: { index, draft: current } };
+  }
+  const index = Math.max(0, state.index - 1);
+  return { value: history[index], state: { index, draft: state.draft } };
+}
+
+/** Step to a NEWER history entry (Down arrow). Past the newest entry, restores the draft. */
+export function historyNext(
+  history: string[],
+  state: InputHistoryState,
+  current: string,
+): { value: string; state: InputHistoryState } {
+  if (state.index === null) return { value: current, state };
+  if (state.index >= history.length - 1) {
+    return { value: state.draft, state: { index: null, draft: '' } };
+  }
+  const index = state.index + 1;
+  return { value: history[index], state: { index, draft: state.draft } };
+}
+
+/** Append a submitted entry to history, collapsing consecutive duplicates. */
+export function pushHistory(history: string[], entry: string): string[] {
+  if (entry.trim().length === 0) return history;
+  if (history[history.length - 1] === entry) return history;
+  return [...history, entry];
+}

@@ -13,6 +13,9 @@ import {
   computeFocusWindow,
   estimateLines,
   computeLineWindow,
+  historyPrev,
+  historyNext,
+  pushHistory,
 } from '../../src/tui/logic.js';
 
 // ── estimateLines ──
@@ -158,4 +161,58 @@ test('computeVisibleWindow: scroll up reveals earlier messages', () => {
 
 test('computeVisibleWindow: offset clamped so window never goes past top', () => {
   assert.deepEqual(computeVisibleWindow(5, 3, 99), { start: 0, end: 1 });
+});
+
+// ── input history navigation ──
+
+test('historyPrev: empty history is a no-op', () => {
+  const r = historyPrev([], { index: null, draft: '' }, 'typing');
+  assert.deepEqual(r, { value: 'typing', state: { index: null, draft: '' } });
+});
+
+test('historyPrev: first Up shows newest entry and saves the live draft', () => {
+  const r = historyPrev(['a', 'b', 'c'], { index: null, draft: '' }, 'half-typed');
+  assert.equal(r.value, 'c');
+  assert.deepEqual(r.state, { index: 2, draft: 'half-typed' });
+});
+
+test('historyPrev: successive Up steps to older entries and stops at the oldest', () => {
+  const hist = ['a', 'b', 'c'];
+  let s = historyPrev(hist, { index: null, draft: '' }, 'd');
+  assert.equal(s.value, 'c');
+  s = historyPrev(hist, s.state, s.value);
+  assert.equal(s.value, 'b');
+  s = historyPrev(hist, s.state, s.value);
+  assert.equal(s.value, 'a');
+  s = historyPrev(hist, s.state, s.value); // clamps at oldest
+  assert.equal(s.value, 'a');
+  assert.equal(s.state.index, 0);
+  assert.equal(s.state.draft, 'd'); // draft preserved through navigation
+});
+
+test('historyNext: not navigating is a no-op', () => {
+  const r = historyNext(['a', 'b'], { index: null, draft: '' }, 'typing');
+  assert.deepEqual(r, { value: 'typing', state: { index: null, draft: '' } });
+});
+
+test('historyNext: Down steps to newer entries then restores the draft past the newest', () => {
+  const hist = ['a', 'b', 'c'];
+  // navigate up to 'a' (index 0) with draft 'd'
+  let s = { value: 'a', state: { index: 0, draft: 'd' } as { index: number | null; draft: string } };
+  s = historyNext(hist, s.state, s.value);
+  assert.equal(s.value, 'b');
+  s = historyNext(hist, s.state, s.value);
+  assert.equal(s.value, 'c');
+  s = historyNext(hist, s.state, s.value); // past newest → restore draft, exit nav
+  assert.equal(s.value, 'd');
+  assert.equal(s.state.index, null);
+  assert.equal(s.state.draft, '');
+});
+
+test('pushHistory: appends, skips blanks and consecutive duplicates', () => {
+  assert.deepEqual(pushHistory([], 'a'), ['a']);
+  assert.deepEqual(pushHistory(['a'], 'a'), ['a']); // dup collapsed
+  assert.deepEqual(pushHistory(['a'], 'b'), ['a', 'b']);
+  assert.deepEqual(pushHistory(['a'], '   '), ['a']); // blank ignored
+  assert.deepEqual(pushHistory(['a', 'b'], 'a'), ['a', 'b', 'a']); // non-consecutive dup kept
 });

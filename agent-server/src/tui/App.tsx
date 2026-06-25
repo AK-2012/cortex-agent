@@ -4,12 +4,11 @@
 
 import React, { useCallback, useRef, useState, useEffect } from 'react';
 import { Box, Text, useStdout } from 'ink';
-import { Header } from './components/Header.js';
 import { Transcript } from './components/Transcript.js';
 import { InputBox } from './components/InputBox.js';
 import { StatusLine } from './components/StatusLine.js';
 import { SidePanel } from './components/SidePanel.js';
-import { NotificationsBadge, NotificationsModal } from './components/Notifications.js';
+import { NotificationsModal } from './components/Notifications.js';
 import { ProjectSwitcher } from './components/ProjectSwitcher.js';
 import { useMutate } from './hooks/useMutate.js';
 import type { MutateResult } from './hooks/useMutate.js';
@@ -109,6 +108,9 @@ export function App({
   const [sidePanelVisible, setSidePanelVisible] = useState(false);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [projectSwitcherOpen, setProjectSwitcherOpen] = useState(false);
+
+  // Bottom-line shortcuts overlay — '?' on an empty input shows it; any key dismisses it.
+  const [showShortcuts, setShowShortcuts] = useState(false);
 
   // Project switcher state
   const [projects, setProjects] = useState<ProjectEntry[]>([]);
@@ -386,12 +388,6 @@ export function App({
 
   return (
     <Box flexDirection="column" height={termSize.rows} width={termSize.columns}>
-      <Header
-        projectId={projectId}
-        queuedCount={queuedCount}
-        notificationCount={notif.unreadCount}
-      />
-
       <Box flexDirection="row" flexGrow={1}>
         {/* Transcript area */}
         <Box flexDirection="column" flexGrow={1}>
@@ -418,13 +414,6 @@ export function App({
           onClose={handleToggleSidePanel}
         />
       </Box>
-
-      {/* Notifications badge in status area */}
-      {!notificationsOpen && notif.unreadCount > 0 ? (
-        <Box justifyContent="flex-end" marginRight={2}>
-          <NotificationsBadge unreadCount={notif.unreadCount} />
-        </Box>
-      ) : null}
 
       {/* Turn status — one line directly above the input: state · time · turns · cost.
           Routed here from status frames instead of the chat transcript. */}
@@ -486,12 +475,19 @@ export function App({
           commands={SLASH_COMMANDS}
           awaitingResponse={awaitingResponse}
           focus={focusZone === 'input'}
+          showShortcuts={showShortcuts}
+          onToggleShortcuts={() => setShowShortcuts(s => !s)}
+          onDismissShortcuts={() => setShowShortcuts(false)}
         />
       )}
 
       <StatusLine
         connectionState={connectionState}
         errorMessage={errorMessage}
+        projectId={projectId}
+        queuedCount={queuedCount}
+        notificationCount={notif.unreadCount}
+        showShortcuts={showShortcuts && focusZone === 'input'}
       />
     </Box>
   );

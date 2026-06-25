@@ -12,6 +12,7 @@ import React, { useCallback, useState } from 'react';
 import { Box, Text, useInput } from 'ink';
 import { SlashMenu } from './SlashMenu.js';
 import { SLASH_COMMANDS, parseSlashInput, filterSlashCommands, findSlashCommand, type SlashCommand } from '../slash-commands.js';
+import { historyPrev, historyNext, pushHistory, type InputHistoryState } from '../logic.js';
 
 interface InputBoxProps {
   onSubmit: (text: string) => void;
@@ -23,12 +24,22 @@ interface InputBoxProps {
   awaitingResponse?: boolean;
   /** Whether this input owns the keyboard (false when dashboard/modal has focus). */
   focus?: boolean;
+  /** Whether the bottom shortcuts overlay is currently shown (any key dismisses it). */
+  showShortcuts?: boolean;
+  /** Toggle the shortcuts overlay (fired by '?' on an empty input). */
+  onToggleShortcuts?: () => void;
+  /** Dismiss the shortcuts overlay (fired by any key while it is shown). */
+  onDismissShortcuts?: () => void;
 }
 
-export function InputBox({ onSubmit, onCommand, commands = SLASH_COMMANDS, awaitingResponse, focus = true }: InputBoxProps): React.JSX.Element {
+export function InputBox({ onSubmit, onCommand, commands = SLASH_COMMANDS, awaitingResponse, focus = true, showShortcuts = false, onToggleShortcuts, onDismissShortcuts }: InputBoxProps): React.JSX.Element {
   const [value, setValue] = useState('');
   const [cursor, setCursor] = useState(0);
   const [selectedIndex, setSelectedIndex] = useState(0);
+
+  // Input history (shell-style ↑/↓ recall of submitted messages).
+  const [history, setHistory] = useState<string[]>([]);
+  const [histState, setHistState] = useState<InputHistoryState>({ index: null, draft: '' });
 
   // The `/` palette is open while the input starts with '/' and owns the keyboard.
   const parsed = parseSlashInput(value);
@@ -40,14 +51,24 @@ export function InputBox({ onSubmit, onCommand, commands = SLASH_COMMANDS, await
     setValue('');
     setCursor(0);
     setSelectedIndex(0);
+    setHistState({ index: null, draft: '' });
   }, []);
 
   const handleSubmit = useCallback((text: string) => {
     if (awaitingResponse) return; // block send, keep typed text
     if (text.trim().length === 0) return;
     onSubmit(text);
+    setHistory(h => pushHistory(h, text));
     clear();
   }, [awaitingResponse, onSubmit, clear]);
+
+  // Apply a history-navigation result to the input buffer.
+  const applyHistory = useCallback((next: { value: string; state: InputHistoryState }) => {
+    setValue(next.value);
+    setCursor(next.value.length);
+    setHistState(next.state);
+    setSelectedIndex(0);
+  }, []);
 
   // Run a slash command id, or fall back to sending the raw text as a message.
   const runSlash = useCallback(() => {
@@ -64,6 +85,9 @@ export function InputBox({ onSubmit, onCommand, commands = SLASH_COMMANDS, await
   }, [parsed.query, parsed.args, matches, safeSelected, onCommand, commands, handleSubmit, value, clear]);
 
   useInput((input, key) => {
+    // While the shortcuts overlay is shown, ANY key just dismisses it (no other action).
+    if (showShortcuts) { onDismissShortcuts?.(); return; }
+
     // Ignore modifier combos so global hotkeys never leak their letter into the box.
     if (key.ctrl || key.meta) return;
 
@@ -86,8 +110,11 @@ export function InputBox({ onSubmit, onCommand, commands = SLASH_COMMANDS, await
       if (key.return) { runSlash(); return; }
       // fall through to normal editing (typing filters the menu)
     } else {
-      // Escape / Tab are owned by other zones; arrows up/down scroll the transcript.
-      if (key.escape || key.tab || key.upArrow || key.downArrow || key.pageUp || key.pageDown) return;
+      // Escape / Tab are owned by other zones; PgUp/PgDn scroll the transcript.
+      if (key.escape || key.tab || key.pageUp || key.pageDown) return;
+      // ↑/↓ cycle the input history (shell-style recall) instead of scrolling.
+      if (key.upArrow) { applyHistory(historyPrev(history, histState, value)); return; }
+      if (key.downArrow) { applyHistory(historyNext(history, histState, value)); return; }
       if (key.return) { handleSubmit(value); return; }
     }
 
@@ -104,7 +131,13 @@ export function InputBox({ onSubmit, onCommand, commands = SLASH_COMMANDS, await
         setValue(v => v.slice(0, cursor - 1) + v.slice(cursor));
         setCursor(c => Math.max(0, c - 1));
         setSelectedIndex(0);
+        setHistState({ index: null, draft: '' }); // editing detaches history navigation
       }
+      return;
+    }
+    // '?' on an empty input toggles the shortcuts overlay instead of typing a literal '?'.
+    if (input === '?' && value.length === 0 && !menuOpen) {
+      onToggleShortcuts?.();
       return;
     }
     // Printable input (may be multiple characters on paste).
@@ -112,6 +145,7 @@ export function InputBox({ onSubmit, onCommand, commands = SLASH_COMMANDS, await
       setValue(v => v.slice(0, cursor) + input + v.slice(cursor));
       setCursor(c => c + input.length);
       setSelectedIndex(0);
+      setHistState({ index: null, draft: '' }); // typing detaches history navigation
     }
   }, { isActive: focus });
 
