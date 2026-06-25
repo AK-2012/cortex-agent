@@ -3,7 +3,7 @@
 // pos:    Main App component wiring all pieces together
 
 import React, { useCallback, useRef, useState, useEffect } from 'react';
-import { Box } from 'ink';
+import { Box, Text, useStdout } from 'ink';
 import { Header } from './components/Header.js';
 import { Transcript } from './components/Transcript.js';
 import { InputBox } from './components/InputBox.js';
@@ -23,8 +23,9 @@ import { SLASH_COMMANDS } from './slash-commands.js';
 import { AskUserModal } from './components/AskUserModal.js';
 import { PlanFeedbackModal } from './components/PlanFeedbackModal.js';
 import type { ResumableSession } from './components/SessionPicker.js';
-import { isNotification, isUiQueryResult, isUiEvent, isModalOpen, isModalAck, isErrorFrame } from '../platform/tui/protocol.js';
+import { isNotification, isUiQueryResult, isUiEvent, isModalOpen, isModalAck, isErrorFrame, isChatPost, isChatUpdate } from '../platform/tui/protocol.js';
 import { computeFocusZone, isAgentResponseFrame } from './logic.js';
+import { parseTurnStatus, formatTurnStatus } from './turn-status.js';
 import type { WsState } from './ws-client.js';
 import type { TuiFrame, HandshakeAck, ModalOpen, ModalAck } from '../platform/tui/protocol.js';
 import type { ProjectEntry } from './components/ProjectSwitcher.js';
@@ -54,6 +55,11 @@ export interface AppProps {
   resumePending?: boolean;
   onResumeSelect?: (sessionId: string, projectId: string) => void;
   onResumeCancel?: () => void;
+}
+
+/** A status message is the only TUI chat content that carries an `actions` rich-block. */
+function hasActionsBlock(content: { richBlocks?: Array<{ type?: string }> } | undefined): boolean {
+  return !!content?.richBlocks?.some(b => b?.type === 'actions');
 }
 
 export function App({
@@ -112,13 +118,26 @@ export function App({
   // `/resume` session picker (client-side, replaces the inert Resume button).
   const [slashResumeSessions, setSlashResumeSessions] = useState<ResumableSession[] | null>(null);
 
+  // Dedicated turn-status line shown above the input (state/time/turns/cost). Status
+  // frames (identified by their `actions` rich-block) are routed here, NOT the transcript.
+  const [turnStatus, setTurnStatus] = useState<string | null>(null);
+
   const transcriptRef = useRef<{ scrollUp: (page?: boolean) => void; scrollDown: (page?: boolean) => void; scrollToEnd: () => void } | null>(null);
 
-  // Cost summary from dashboard state (computed)
-  const costData = dashboard.state.tabs.cost.data.length > 0 ? dashboard.state.tabs.cost.data : [];
-  const costSummary = costData.length > 0 && typeof (costData[0] as any)?.total === 'number'
-    ? `$${(costData[0] as any).total.toFixed(2)}`
-    : null;
+  // Terminal size — drives the full-screen root box and updates on resize so the layout
+  // always fills the alternate-screen buffer (see enterFullscreen in index.tsx).
+  const { stdout } = useStdout();
+  const [termSize, setTermSize] = useState<{ rows: number; columns: number }>(() => ({
+    rows: stdout?.rows ?? 24,
+    columns: stdout?.columns ?? 80,
+  }));
+  useEffect(() => {
+    if (!stdout) return;
+    const onResize = () => setTermSize({ rows: stdout.rows, columns: stdout.columns });
+    onResize();
+    stdout.on('resize', onResize);
+    return () => { stdout.off('resize', onResize); };
+  }, [stdout]);
 
   // Active tab for dashboard
   const [activeTab, setActiveTab] = useState('threads');
@@ -165,6 +184,14 @@ export function App({
         return;
       }
       dashboard.dispatch(frame);
+      return;
+    }
+    // Status messages (the "⏳ Processing…/✅ Done…" line) carry an `actions` rich-block.
+    // Route them to the dedicated turn-status line above the input instead of the
+    // transcript, so the chat history holds only real user/assistant messages.
+    if ((isChatPost(frame) || isChatUpdate(frame)) && hasActionsBlock((frame as any).content)) {
+      const text = String((frame as any).content?.text ?? '');
+      setTurnStatus(text ? formatTurnStatus(parseTurnStatus(text)) : null);
       return;
     }
     transcript.dispatch(frame);
@@ -347,7 +374,7 @@ export function App({
   // If resume mode with sessions to pick, show picker instead of main layout
   if (resumableSessions && resumableSessions.length > 0 && onResumeSelect && onResumeCancel) {
     return (
-      <Box flexDirection="column" height="100%" justifyContent="center" alignItems="center">
+      <Box flexDirection="column" height={termSize.rows} width={termSize.columns} justifyContent="center" alignItems="center">
         <SessionPicker
           sessions={resumableSessions}
           onSelect={onResumeSelect}
@@ -358,14 +385,11 @@ export function App({
   }
 
   return (
-    <Box flexDirection="column" height="100%">
+    <Box flexDirection="column" height={termSize.rows} width={termSize.columns}>
       <Header
         projectId={projectId}
-        sessionName={sessionName}
         queuedCount={queuedCount}
-        connected={connectionState === 'connected'}
         notificationCount={notif.unreadCount}
-        costSummary={costSummary}
       />
 
       <Box flexDirection="row" flexGrow={1}>
@@ -391,6 +415,7 @@ export function App({
           activeTab={activeTab}
           onSetActiveTab={setActiveTab}
           onMutate={mutate}
+          onClose={handleToggleSidePanel}
         />
       </Box>
 
@@ -400,6 +425,10 @@ export function App({
           <NotificationsBadge unreadCount={notif.unreadCount} />
         </Box>
       ) : null}
+
+      {/* Turn status — one line directly above the input: state · time · turns · cost.
+          Routed here from status frames instead of the chat transcript. */}
+      {turnStatus ? <Text dimColor>{turnStatus}</Text> : null}
 
       {/* Input area */}
       {/* AskUserModal — pre-empts all other modals */}
@@ -462,8 +491,6 @@ export function App({
 
       <StatusLine
         connectionState={connectionState}
-        queuedCount={queuedCount}
-        notificationCount={notif.unreadCount}
         errorMessage={errorMessage}
       />
     </Box>

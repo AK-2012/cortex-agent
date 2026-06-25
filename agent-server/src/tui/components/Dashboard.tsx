@@ -40,6 +40,8 @@ interface DashboardProps {
   onUnregisterSubscription: (queryId: string) => void;
   activeTab: string;
   onSetActiveTab: (tab: string) => void;
+  /** Close the panel (Esc while the dashboard owns the keyboard, mirrors the Ctrl+D toggle). */
+  onClose?: () => void;
 }
 
 // ── Tab content renderer ──
@@ -150,8 +152,13 @@ export function Dashboard({
   onUnregisterSubscription,
   activeTab,
   onSetActiveTab,
+  onClose,
 }: DashboardProps): React.JSX.Element {
   useInput((_input, key) => {
+    if (key.escape) {
+      onClose?.();
+      return;
+    }
     if (key.tab) {
       const currentIdx = DASHBOARD_TABS.findIndex(t => t.key === activeTab);
       const nextIdx = (currentIdx + 1) % DASHBOARD_TABS.length;

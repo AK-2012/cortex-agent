@@ -218,7 +218,7 @@ test('useKeybindings does NOT scroll when allowScroll is false', async (t) => {
   instance.cleanup();
 });
 
-test('useKeybindings calls onCancel on Escape', async (t) => {
+test('useKeybindings does NOT cancel on Escape (Esc is owned by the active zone now)', async (t) => {
   const events: string[] = [];
 
   const app = React.createElement(TestApp, { onEvent: (name: string) => events.push(name) });
@@ -232,7 +232,9 @@ test('useKeybindings calls onCancel on Escape', async (t) => {
 
   await delay(200);
 
-  assert.ok(events.includes('cancel'), `expected cancel in events: ${JSON.stringify(events)}`);
+  // Escape no longer triggers a global turn-cancel — the slash palette / open panels /
+  // resume picker handle it; Ctrl+C cancels turns.
+  assert.equal(events.includes('cancel'), false, `expected no cancel from Escape: ${JSON.stringify(events)}`);
 
   instance.unmount();
   instance.cleanup();

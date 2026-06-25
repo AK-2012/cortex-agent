@@ -41,8 +41,14 @@ export function ProjectSwitcher({
     }
   }, [open, onRequestRefresh]);
 
-  useInput((_input, key) => {
+  useInput((input, key) => {
     if (!open) return;
+
+    // Re-pressing the toggle hotkey (Ctrl+P) closes the panel, same as Esc.
+    if (input === 'p' && key.ctrl) {
+      onClose();
+      return;
+    }
 
     if (key.escape) {
       onClose();
@@ -96,7 +102,7 @@ export function ProjectSwitcher({
       )}
 
       <Box marginTop={1}>
-        <Text dimColor>↑/↓ navigate · Enter switch · Esc cancel</Text>
+        <Text dimColor>↑/↓ navigate · Enter switch · Ctrl+P/Esc cancel</Text>
       </Box>
     </Box>
   );

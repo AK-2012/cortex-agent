@@ -68,11 +68,9 @@ export const Transcript = forwardRef<TranscriptHandle, TranscriptProps>(
     const hiddenAbove = start;
 
     if (ids.length === 0) {
-      return (
-        <Box flexDirection="column" flexGrow={1}>
-          <Text dimColor>— no messages —</Text>
-        </Box>
-      );
+      // Empty transcript renders nothing (no "— no messages —" placeholder); the
+      // flexGrow box still reserves the space so the input stays anchored at the bottom.
+      return <Box flexDirection="column" flexGrow={1} />;
     }
 
     return (

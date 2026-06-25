@@ -42,8 +42,26 @@ function parseArgs(argv: string[]): TuiArgs {
 
 // ── Main ──
 
+/** Enter the terminal's alternate-screen buffer so the TUI fills the screen (like vim/htop)
+ *  and leaves the user's scrollback untouched on exit. Restored once on any exit path. */
+function enterFullscreen(): void {
+  if (!process.stdout.isTTY) return;
+  process.stdout.write('\x1b[?1049h\x1b[2J\x1b[H'); // alt-screen + clear + cursor home
+  let restored = false;
+  const restore = () => {
+    if (restored) return;
+    restored = true;
+    try { process.stdout.write('\x1b[?1049l'); } catch { /* best effort */ }
+  };
+  process.on('exit', restore);
+  process.on('SIGINT', () => { restore(); process.exit(0); });
+  process.on('SIGTERM', () => { restore(); process.exit(0); });
+}
+
 async function main(): Promise<void> {
   const args = parseArgs(process.argv);
+
+  enterFullscreen();
 
   const client = new WsClient();
   let dispatchFrame: ((frame: TuiFrame) => void) | null = null;

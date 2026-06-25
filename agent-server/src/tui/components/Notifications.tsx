@@ -41,8 +41,14 @@ export function NotificationsModal({
     }
   }, [open]);
 
-  useInput((_input, key) => {
+  useInput((input, key) => {
     if (!open) return;
+
+    // Re-pressing the toggle hotkey (Ctrl+N) closes the panel, same as Esc.
+    if (input === 'n' && key.ctrl) {
+      onClose();
+      return;
+    }
 
     if (key.escape) {
       if (focusedId) {
@@ -121,7 +127,7 @@ export function NotificationsModal({
         )}
       </Box>
       <Box marginTop={1}>
-        <Text dimColor>↑/↓ navigate · Enter detail · Esc close</Text>
+        <Text dimColor>↑/↓ navigate · Enter detail · Ctrl+N/Esc close</Text>
       </Box>
     </Box>
   );

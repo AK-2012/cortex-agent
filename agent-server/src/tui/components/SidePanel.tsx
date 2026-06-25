@@ -21,6 +21,8 @@ interface SidePanelProps {
   activeTab: string;
   onSetActiveTab: (tab: string) => void;
   onMutate?: (op: string, args: Record<string, unknown>) => Promise<MutateResult>;
+  /** Close the panel (Esc while the dashboard owns the keyboard). */
+  onClose?: () => void;
 }
 
 export function SidePanel({
@@ -35,6 +37,7 @@ export function SidePanel({
   activeTab,
   onSetActiveTab,
   onMutate,
+  onClose,
 }: SidePanelProps): React.JSX.Element | null {
   if (!visible) return null;
 
@@ -51,6 +54,7 @@ export function SidePanel({
         activeTab={activeTab}
         onSetActiveTab={onSetActiveTab}
         mutate={onMutate}
+        onClose={onClose}
       />
     </Box>
   );

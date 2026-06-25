@@ -61,11 +61,9 @@ export function useKeybindings(handlers: KeybindingHandlers, isActive = true, op
       return;
     }
 
-    // Escape: cancel current input
-    if (key.escape) {
-      h.onCancel();
-      return;
-    }
+    // Escape is owned by whichever zone is active: the slash palette (clear), an open
+    // panel (close — Dashboard/Notifications/ProjectSwitcher handle it themselves), or the
+    // resume picker. It is intentionally NOT a global turn-cancel here (Ctrl+C cancels).
 
     // Ctrl+L: clear transcript view
     if (input === 'l' && key.ctrl) {
