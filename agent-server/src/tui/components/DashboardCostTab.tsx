@@ -27,8 +27,12 @@ export function DashboardCostTab({ data }: DashboardCostTabProps): React.JSX.Ele
   const costData: any = Array.isArray(data.data) ? data.data[0] : data.data;
 
   const usd = (v: unknown): string => `$${typeof v === 'number' ? v.toFixed(4) : String(v)}`;
-  const byMode: Record<string, any> = costData?.byMode && typeof costData.byMode === 'object' ? costData.byMode : {};
-  const modeEntries = Object.entries(byMode).filter(([, b]: [string, any]) => (b?.total ?? 0) > 0);
+  // byMode is keyed by PERIOD (today/week/month/total); each value is a ModeBuckets
+  // { total, api, plan, ... } breaking that period down by cost type. The all-time
+  // bucket (byMode.total) gives the api/plan split; skip the 'total' meta key.
+  const allTime: Record<string, any> = costData?.byMode?.total && typeof costData.byMode.total === 'object' ? costData.byMode.total : {};
+  const modeEntries = Object.entries(allTime)
+    .filter(([k, v]: [string, any]) => k !== 'total' && typeof v === 'number' && v > 0);
   const hasAnyTotal = costData?.total != null || costData?.month != null || costData?.today != null;
 
   if (!hasAnyTotal && modeEntries.length === 0) {
@@ -54,16 +58,16 @@ export function DashboardCostTab({ data }: DashboardCostTabProps): React.JSX.Ele
         <Box><Text>Today:      </Text><Text>{usd(costData.today)}</Text></Box>
       ) : null}
 
-      {/* Per-mode breakdown (total spend per mode), strongest first */}
+      {/* All-time cost-type breakdown (api vs plan), strongest first */}
       {modeEntries.length > 0 ? (
         <Box flexDirection="column" marginTop={1}>
-          <Text dimColor>By mode:</Text>
+          <Text dimColor>By cost type (all-time):</Text>
           {modeEntries
-            .sort(([, a]: [string, any], [, b]: [string, any]) => (b?.total ?? 0) - (a?.total ?? 0))
-            .map(([mode, b]: [string, any]) => (
+            .sort(([, a]: [string, any], [, b]: [string, any]) => (b as number) - (a as number))
+            .map(([mode, v]: [string, any]) => (
               <Box key={mode} marginLeft={1}>
                 <Text dimColor>{mode}: </Text>
-                <Text>{usd(b?.total ?? 0)}</Text>
+                <Text>{usd(v)}</Text>
               </Box>
             ))}
         </Box>
