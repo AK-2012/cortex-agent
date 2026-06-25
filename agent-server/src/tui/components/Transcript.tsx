@@ -1,27 +1,24 @@
-// input:  useTranscript hook + MessageRow
+// input:  useTranscript hook + logic line-flattening
 // output: Scrollable transcript, anchored bottom, scroll-up freezes auto-scroll
 // pos:    Main transcript view for M5 Ink client
+//
+// Windowing is measured in TERMINAL LINES, not whole messages: every message is flattened to
+// wrapped display lines (logic.flattenTranscript) and the viewport slices exactly `lineBudget`
+// lines. This means a single long message is shown in FULL across scroll steps (no per-message
+// truncation) while the slice can never exceed the box height (so Ink never garbles). Scrolling
+// (keyboard PgUp/PgDn + mouse wheel) moves the bottom anchor one line / one page at a time.
 
 import React, { useRef, useCallback, useState, useEffect, forwardRef, useImperativeHandle } from 'react';
 import { Box, Text, useStdout } from 'ink';
-import { MessageRow } from './MessageRow.js';
-import { computeLineWindow, estimateLines, collectStreamText } from '../logic.js';
+import { computeVisibleWindow, flattenTranscript, collectStreamText } from '../logic.js';
+import type { FlattenableMessage } from '../logic.js';
+import { InlineMarkdown } from '../render/inline-markdown.js';
 import type { RenderedMessage } from '../hooks/useTranscript.js';
 
-// Rows reserved for header + input + status + borders/margins.
+// Rows reserved for the bottom UI (input box + margins + turn-status + StatusLine; the header
+// was removed) PLUS the two scroll-hint lines ("↑ N above" / "↓ N below"), so the sliced line
+// window plus hints never exceeds the terminal height.
 const RESERVED_ROWS = 10;
-// Cap any single message's contribution so one very long entry (e.g. a replayed
-// multi-line history message) can't dominate or overflow the viewport.
-const MAX_MSG_LINES = 14;
-
-/** All renderable text of a message (for line estimation). */
-function messageText(msg: RenderedMessage): string {
-  const parts: string[] = [];
-  if (msg.text) parts.push(msg.text);
-  if (msg.richBlocks) for (const b of msg.richBlocks) if (b.text) parts.push(String(b.text));
-  if (msg.streams && msg.streams.size > 0) parts.push(collectStreamText(msg.streams));
-  return parts.join('\n');
-}
 
 export interface TranscriptHandle {
   scrollUp: (page?: boolean) => void;
@@ -34,33 +31,50 @@ interface TranscriptProps {
   ids: string[];
 }
 
+/** Convert a rendered message into the structural shape the line-flattener consumes. */
+function toFlattenable(m: RenderedMessage): FlattenableMessage {
+  return {
+    text: m.text,
+    richBlocks: m.richBlocks,
+    streamText: m.streams.size > 0 ? collectStreamText(m.streams) : undefined,
+    queued: m.queued,
+  };
+}
+
 export const Transcript = forwardRef<TranscriptHandle, TranscriptProps>(
   function Transcript({ messages, ids }: TranscriptProps, ref): React.JSX.Element {
     const { stdout } = useStdout();
+    // scrollOffset counts LINES scrolled up from the bottom (0 = pinned to bottom).
     const [scrollOffset, setScrollOffset] = useState(0);
     const userScrolledUpRef = useRef(false);
 
-    // Line budget (not message count) the transcript can show without overflowing.
     const rows = stdout?.rows ?? 24;
     const cols = stdout?.columns ?? 80;
     const lineBudget = Math.max(3, rows - RESERVED_ROWS);
-    const maxChars = MAX_MSG_LINES * cols;
+
+    // Flatten the whole transcript to display lines (no truncation).
+    const orderedMessages = ids
+      .map(id => messages.get(id))
+      .filter((m): m is RenderedMessage => !!m)
+      .map(toFlattenable);
+    const flatLines = flattenTranscript(orderedMessages, cols);
+    const totalLines = flatLines.length;
 
     const scrollUp = useCallback((page = false) => {
       userScrolledUpRef.current = true;
-      setScrollOffset(prev => prev + (page ? 10 : 1));
-    }, []);
+      setScrollOffset(prev => prev + (page ? Math.max(1, lineBudget - 1) : 1));
+    }, [lineBudget]);
 
     const scrollDown = useCallback((page = false) => {
       setScrollOffset(prev => {
-        const next = prev - (page ? 10 : 1);
+        const next = prev - (page ? Math.max(1, lineBudget - 1) : 1);
         if (next <= 0) {
           userScrolledUpRef.current = false;
           return 0;
         }
         return next;
       });
-    }, []);
+    }, [lineBudget]);
 
     const scrollToEnd = useCallback(() => {
       userScrolledUpRef.current = false;
@@ -69,42 +83,45 @@ export const Transcript = forwardRef<TranscriptHandle, TranscriptProps>(
 
     useImperativeHandle(ref, () => ({ scrollUp, scrollDown, scrollToEnd }), [scrollUp, scrollDown, scrollToEnd]);
 
-    // Auto-stick to bottom on new messages unless the user has scrolled up.
+    // Auto-stick to bottom on new content unless the user has scrolled up.
     useEffect(() => {
       if (!userScrolledUpRef.current && scrollOffset !== 0) {
         setScrollOffset(0);
       }
-    }, [ids.length]);
+    }, [totalLines]);
 
-    // Bottom-anchored, line-aware window: each message's estimated height (capped per
-    // message) is summed from the bottom up until the line budget is exhausted.
-    const lineCounts = ids.map((id) => {
-      const m = messages.get(id);
-      if (!m) return 1;
-      return Math.min(MAX_MSG_LINES, estimateLines(messageText(m), cols)) + 1; // +1 marginBottom
-    });
-    const { start, end } = computeLineWindow(lineCounts, lineBudget, scrollOffset);
-    const visibleIds = ids.slice(start, end);
+    // Clamp a stale offset (e.g. after a /clear shrinks the transcript) so the view never
+    // strands above the top with nothing to show.
+    const maxOffset = Math.max(0, totalLines - 1);
+    const effectiveOffset = Math.min(scrollOffset, maxOffset);
+
+    const { start, end } = computeVisibleWindow(totalLines, lineBudget, effectiveOffset);
+    const visible = flatLines.slice(start, end);
     const hiddenAbove = start;
+    const hiddenBelow = totalLines - end;
 
     if (ids.length === 0) {
-      // Empty transcript renders nothing (no "— no messages —" placeholder); the
-      // flexGrow box still reserves the space so the input stays anchored at the bottom.
+      // Empty transcript renders nothing; the flexGrow box still reserves the space so the
+      // input stays anchored at the bottom.
       return <Box flexDirection="column" flexGrow={1} />;
     }
 
     return (
       <Box flexDirection="column" flexGrow={1}>
-        {/* Scroll hint (messages hidden above the viewport) */}
         {hiddenAbove > 0 ? (
-          <Text dimColor>↑ {hiddenAbove} more above</Text>
+          <Text dimColor>↑ {hiddenAbove} more line{hiddenAbove === 1 ? '' : 's'} above</Text>
         ) : null}
 
-        {visibleIds.map((id) => {
-          const msg = messages.get(id);
-          if (!msg) return null;
-          return <MessageRow key={id} message={msg} maxChars={maxChars} />;
+        {visible.map((ln, i) => {
+          const content = ln.text.length > 0 ? ln.text : ' ';
+          return ln.markdown
+            ? <InlineMarkdown key={i} text={content} dimColor={ln.dim} />
+            : <Text key={i} dimColor={ln.dim}>{content}</Text>;
         })}
+
+        {hiddenBelow > 0 ? (
+          <Text dimColor>↓ {hiddenBelow} more line{hiddenBelow === 1 ? '' : 's'} below</Text>
+        ) : null}
       </Box>
     );
   },

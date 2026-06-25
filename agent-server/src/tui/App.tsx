@@ -3,7 +3,7 @@
 // pos:    Main App component wiring all pieces together
 
 import React, { useCallback, useRef, useState, useEffect } from 'react';
-import { Box, Text, useStdout } from 'ink';
+import { Box, useStdout } from 'ink';
 import { Transcript } from './components/Transcript.js';
 import { InputBox } from './components/InputBox.js';
 import { StatusLine } from './components/StatusLine.js';
@@ -14,6 +14,7 @@ import { useMutate } from './hooks/useMutate.js';
 import type { MutateResult } from './hooks/useMutate.js';
 import { useTranscript } from './hooks/useTranscript.js';
 import { useKeybindings } from './hooks/useKeybindings.js';
+import { useMouseScroll } from './hooks/useMouseScroll.js';
 import { useNotifications } from './hooks/useNotifications.js';
 import type { NotificationEntry } from './hooks/useNotifications.js';
 import { useDashboardData } from './hooks/useDashboardData.js';
@@ -23,7 +24,7 @@ import { AskUserModal } from './components/AskUserModal.js';
 import { PlanFeedbackModal } from './components/PlanFeedbackModal.js';
 import type { ResumableSession } from './components/SessionPicker.js';
 import { isNotification, isUiQueryResult, isUiEvent, isModalOpen, isModalAck, isErrorFrame, isChatPost, isChatUpdate } from '../platform/tui/protocol.js';
-import { computeFocusZone, isAgentResponseFrame } from './logic.js';
+import { computeFocusZone, isAgentResponseFrame, matchResumeTarget } from './logic.js';
 import { parseTurnStatus, formatTurnStatus } from './turn-status.js';
 import type { WsState } from './ws-client.js';
 import type { TuiFrame, HandshakeAck, ModalOpen, ModalAck } from '../platform/tui/protocol.js';
@@ -119,6 +120,9 @@ export function App({
 
   // `/resume` session picker (client-side, replaces the inert Resume button).
   const [slashResumeSessions, setSlashResumeSessions] = useState<ResumableSession[] | null>(null);
+  // `/resume <id>` direct-jump target (session id / name / suffix). Resolved against the
+  // sessions.list result; null means "show the picker".
+  const resumeTargetRef = useRef<string | null>(null);
 
   // Dedicated turn-status line shown above the input (state/time/turns/cost). Status
   // frames (identified by their `actions` rich-block) are routed here, NOT the transcript.
@@ -160,16 +164,33 @@ export function App({
     if (isUiQueryResult(frame) || isUiEvent(frame)) {
       // Handle the `/resume` session list
       if (isUiQueryResult(frame) && frame.id === 'slash-resume-list') {
-        if (frame.ok && Array.isArray(frame.data)) {
-          setSlashResumeSessions((frame.data as any[]).map((s: any) => ({
-            sessionId: s.sessionId ?? s.id,
-            name: s.name,
-            projectId: s.projectId,
-            label: s.label ?? null,
-          })));
-        } else {
-          setSlashResumeSessions([]);
+        const list = (frame.ok && Array.isArray(frame.data))
+          ? (frame.data as any[]).map((s: any) => ({
+              sessionId: s.sessionId ?? s.id,
+              name: s.name,
+              projectId: s.projectId,
+              label: s.label ?? null,
+            }))
+          : [];
+        // `/resume <id>`: resolve the target and jump straight in, skipping the picker.
+        const target = resumeTargetRef.current;
+        resumeTargetRef.current = null;
+        if (target) {
+          const matchedId = matchResumeTarget(list, target);
+          if (matchedId) {
+            const matched = list.find(s => s.sessionId === matchedId);
+            sendFrame({
+              type: 'session.switch',
+              id: 'slash-resume-direct',
+              projectId: matched?.projectId ?? projectId ?? 'general',
+              sessionId: matchedId,
+            } as any);
+            setSlashResumeSessions(null);
+            return;
+          }
+          // No match — fall through to the picker so the user can choose.
         }
+        setSlashResumeSessions(list);
         return;
       }
       // Handle project switcher responses
@@ -197,7 +218,7 @@ export function App({
       return;
     }
     transcript.dispatch(frame);
-  }, [transcript.dispatch, dashboard.dispatch, notif.add]);
+  }, [transcript.dispatch, dashboard.dispatch, notif.add, sendFrame, projectId]);
 
   // Mutate hook: sends ui.mutate frames, correlates results by id, 10s timeout
   const { mutate, handleFrame } = useMutate({ sendFrame, onFrame: routeFrame });
@@ -227,9 +248,14 @@ export function App({
       id,
       text,
     } as any);
+    // Optimistically echo genuine user messages into the transcript (the server doesn't echo
+    // them back). Skip `!`-prefixed control commands (!new/!cancel/!restart…) — they aren't chat.
+    if (text && !text.startsWith('!')) {
+      transcript.addUserMessage(text);
+    }
     setQueuedCount(prev => prev + 1);
     setAwaitingResponse(true);
-  }, [sendFrame]);
+  }, [sendFrame, transcript]);
 
   // Cancel (sends !cancel)
   const handleCancel = useCallback(() => {
@@ -299,7 +325,7 @@ export function App({
   }, [sendFrame]);
 
   // Slash-command dispatch from the input palette.
-  const handleCommand = useCallback((name: string, _args: string) => {
+  const handleCommand = useCallback((name: string, args: string) => {
     switch (name) {
       case 'new':
         // Clear the view, then start a new conversation (server runs the pre-close hook).
@@ -314,7 +340,14 @@ export function App({
       case 'cancel':
         handleCancel();
         break;
+      case 'restart':
+        // Send the server-restart command. The WS connection drops during the respawn
+        // and the client reconnects automatically (no need to keep the input locked).
+        handleSubmit('!restart');
+        break;
       case 'resume':
+        // `/resume` opens the picker; `/resume <id>` jumps straight to that session.
+        resumeTargetRef.current = args.trim() || null;
         sendFrame({ type: 'ui.query', id: 'slash-resume-list', scope: 'sessions.list', params: { resumable: true } } as any);
         break;
       case 'help':
@@ -355,6 +388,9 @@ export function App({
     allowScroll: focusZone === 'input',
     allowReconnect: connectionState !== 'connected',
   });
+
+  // Mouse-wheel scrolling for the transcript (always active; harmless when nothing is scrollable).
+  useMouseScroll(handleScrollUp, handleScrollDown);
 
   // Dashboard subscription management callbacks. Depend on the stable inner
   // functions (each a useCallback in useDashboardData), NOT the whole `dashboard`
@@ -415,9 +451,8 @@ export function App({
         />
       </Box>
 
-      {/* Turn status — one line directly above the input: state · time · turns · cost.
-          Routed here from status frames instead of the chat transcript. */}
-      {turnStatus ? <Text dimColor>{turnStatus}</Text> : null}
+      {/* Turn status (state · time · turns · cost) is rendered by InputBox, tight above the
+          input border — see the statusLine prop below. */}
 
       {/* Input area */}
       {/* AskUserModal — pre-empts all other modals */}
@@ -478,6 +513,7 @@ export function App({
           showShortcuts={showShortcuts}
           onToggleShortcuts={() => setShowShortcuts(s => !s)}
           onDismissShortcuts={() => setShowShortcuts(false)}
+          statusLine={turnStatus}
         />
       )}
 

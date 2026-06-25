@@ -191,3 +191,125 @@ export function pushHistory(history: string[], entry: string): string[] {
   if (history[history.length - 1] === entry) return history;
   return [...history, entry];
 }
+
+// ── /resume target resolution ──
+// `/resume <id>` lets the user jump straight to a session without the picker. The arg may be
+// an internal sessionId, a short name (cortex-XXXX), the bare suffix (8cdfbe), or a unique
+// sessionId prefix. Resolve it against the known session list to the internal sessionId.
+
+export function matchResumeTarget(
+  sessions: Array<{ sessionId: string; name?: string | null }>,
+  target: string,
+): string | null {
+  const t = target.trim();
+  if (!t) return null;
+  const byId = sessions.find(s => s.sessionId === t);
+  if (byId) return byId.sessionId;
+  const byName = sessions.find(s => s.name === t);
+  if (byName) return byName.sessionId;
+  const bySuffix = sessions.find(s => s.name && (s.name.endsWith(t) || s.name.replace(/^cortex-/, '') === t));
+  if (bySuffix) return bySuffix.sessionId;
+  const byIdPrefix = sessions.find(s => s.sessionId.startsWith(t));
+  return byIdPrefix ? byIdPrefix.sessionId : null;
+}
+
+// ── Mouse-sequence guard ──
+// With SGR mouse tracking enabled (for wheel scrolling), Ink still forwards the raw escape
+// residue (e.g. "[<64;30;10M" after it strips the leading ESC) to useInput as printable text.
+// This predicate lets the input box drop that residue so it never lands in the message buffer.
+
+export function isMouseSequence(input: string): boolean {
+  if (!input) return false;
+  // eslint-disable-next-line no-control-regex
+  if (/\x1b/.test(input)) return true;
+  return /\[?<\d+;\d+;\d+[Mm]/.test(input);
+}
+
+/** Parse SGR mouse wheel events from a raw stdin chunk. 64=up, 65=down (low bit = direction). */
+export function parseWheelEvents(chunk: string): Array<'up' | 'down'> {
+  const out: Array<'up' | 'down'> = [];
+  // eslint-disable-next-line no-control-regex
+  const re = /\x1b\[<(\d+);\d+;\d+[Mm]/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(chunk)) !== null) {
+    const b = parseInt(m[1], 10);
+    if ((b & 0x40) !== 0) out.push((b & 1) === 0 ? 'up' : 'down');
+  }
+  return out;
+}
+
+// ── Line-level transcript flattening ──
+// The transcript renders a bottom-anchored window measured in TERMINAL LINES (not whole
+// messages), so a single long message is shown in full across scroll steps instead of being
+// truncated. Each message is flattened to wrapped display lines; the viewport slices exactly
+// `budget` lines so it can never overflow Ink's fixed-height box.
+
+export interface FlatLine {
+  text: string;
+  /** Render dimmed (tool/context lines, streamed reply, queued marker). */
+  dim: boolean;
+  /** Render through InlineMarkdown (false → plain Text, e.g. tool/context lines). */
+  markdown: boolean;
+}
+
+export interface FlattenableMessage {
+  text?: string;
+  richBlocks?: Array<{ type: string; text?: string }>;
+  /** Pre-collected streamed text (caller concatenates the stream map). */
+  streamText?: string;
+  queued?: boolean;
+}
+
+/** Word-wrap a single logical line to `width` columns, hard-splitting over-long words. */
+export function wrapToWidth(text: string, width: number): string[] {
+  const w = Math.max(1, width);
+  if (text.length === 0) return [''];
+  const lines: string[] = [];
+  let cur = '';
+  for (const word of text.split(' ')) {
+    if (word.length > w) {
+      if (cur) { lines.push(cur); cur = ''; }
+      let rest = word;
+      while (rest.length > w) { lines.push(rest.slice(0, w)); rest = rest.slice(w); }
+      cur = rest;
+      continue;
+    }
+    const candidate = cur ? `${cur} ${word}` : word;
+    if (candidate.length > w) { lines.push(cur); cur = word; }
+    else cur = candidate;
+  }
+  if (cur || lines.length === 0) lines.push(cur);
+  return lines;
+}
+
+/** Flatten one message into wrapped display lines. */
+export function flattenMessageLines(msg: FlattenableMessage, cols: number): FlatLine[] {
+  const out: FlatLine[] = [];
+  const push = (text: string, dim: boolean, markdown: boolean) => {
+    for (const logical of text.split('\n')) {
+      for (const wrapped of wrapToWidth(logical, cols)) out.push({ text: wrapped, dim, markdown });
+    }
+  };
+  const hasRich = !!(msg.richBlocks && msg.richBlocks.length > 0);
+  // Slack Block-Kit semantics: when richBlocks exist they ARE the content; `text` is only a
+  // fallback (rendering both double-prints the sealed status line).
+  if (msg.text && !hasRich) push(msg.text, false, true);
+  if (hasRich) {
+    for (const b of msg.richBlocks!) {
+      if (b.text) push(String(b.text), b.type === 'context', b.type !== 'context');
+    }
+  }
+  if (msg.streamText) push(msg.streamText, true, true);
+  if (msg.queued) out.push({ text: '⏳ queued', dim: true, markdown: false });
+  return out;
+}
+
+/** Flatten the whole transcript to display lines, with a blank separator between messages. */
+export function flattenTranscript(messages: FlattenableMessage[], cols: number): FlatLine[] {
+  const out: FlatLine[] = [];
+  messages.forEach((m, i) => {
+    if (i > 0) out.push({ text: '', dim: false, markdown: false });
+    out.push(...flattenMessageLines(m, cols));
+  });
+  return out;
+}

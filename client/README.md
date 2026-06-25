@@ -76,7 +76,7 @@ npm install -g @cortex-agent/server
 cortex init
 
 # Start
-cortex start
+cortex daemon
 ```
 
 Once running, message Cortex from Slack — it reads your project context,

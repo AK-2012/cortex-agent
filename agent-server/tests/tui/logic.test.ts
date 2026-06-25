@@ -16,6 +16,12 @@ import {
   historyPrev,
   historyNext,
   pushHistory,
+  matchResumeTarget,
+  isMouseSequence,
+  parseWheelEvents,
+  wrapToWidth,
+  flattenMessageLines,
+  flattenTranscript,
 } from '../../src/tui/logic.js';
 
 // ── estimateLines ──
@@ -215,4 +221,76 @@ test('pushHistory: appends, skips blanks and consecutive duplicates', () => {
   assert.deepEqual(pushHistory(['a'], 'b'), ['a', 'b']);
   assert.deepEqual(pushHistory(['a'], '   '), ['a']); // blank ignored
   assert.deepEqual(pushHistory(['a', 'b'], 'a'), ['a', 'b', 'a']); // non-consecutive dup kept
+});
+
+// ── matchResumeTarget ──
+
+const SESSIONS = [
+  { sessionId: 'sid-aaaa1111', name: 'cortex-8cdfbe' },
+  { sessionId: 'sid-bbbb2222', name: 'cortex-99ffaa' },
+];
+
+test('matchResumeTarget: exact sessionId, exact name, suffix, and bare suffix', () => {
+  assert.equal(matchResumeTarget(SESSIONS, 'sid-aaaa1111'), 'sid-aaaa1111');
+  assert.equal(matchResumeTarget(SESSIONS, 'cortex-8cdfbe'), 'sid-aaaa1111');
+  assert.equal(matchResumeTarget(SESSIONS, '8cdfbe'), 'sid-aaaa1111'); // bare short id
+  assert.equal(matchResumeTarget(SESSIONS, 'sid-bbbb'), 'sid-bbbb2222'); // id prefix
+});
+
+test('matchResumeTarget: no match and empty target → null', () => {
+  assert.equal(matchResumeTarget(SESSIONS, 'nope'), null);
+  assert.equal(matchResumeTarget(SESSIONS, '   '), null);
+  assert.equal(matchResumeTarget([], 'cortex-8cdfbe'), null);
+});
+
+// ── isMouseSequence / parseWheelEvents ──
+
+test('isMouseSequence: detects raw ESC and SGR residue, passes normal text', () => {
+  assert.equal(isMouseSequence('\x1b[<64;1;1M'), true);
+  assert.equal(isMouseSequence('[<64;30;10M'), true); // ESC already stripped by Ink
+  assert.equal(isMouseSequence('hello'), false);
+  assert.equal(isMouseSequence(''), false);
+});
+
+test('parseWheelEvents: extracts up/down from SGR wheel codes', () => {
+  assert.deepEqual(parseWheelEvents('\x1b[<64;10;5M'), ['up']);
+  assert.deepEqual(parseWheelEvents('\x1b[<65;10;5M'), ['down']);
+  assert.deepEqual(parseWheelEvents('\x1b[<0;10;5M'), []); // plain click, not a wheel
+  assert.deepEqual(parseWheelEvents('\x1b[<64;1;1M\x1b[<65;1;1M'), ['up', 'down']);
+});
+
+// ── wrapToWidth ──
+
+test('wrapToWidth: word-wraps and hard-splits over-long words', () => {
+  assert.deepEqual(wrapToWidth('', 10), ['']);
+  assert.deepEqual(wrapToWidth('hello world', 5), ['hello', 'world']);
+  assert.deepEqual(wrapToWidth('abcdefghijk', 5), ['abcde', 'fghij', 'k']);
+  assert.deepEqual(wrapToWidth('hi there friend', 8), ['hi there', 'friend']);
+});
+
+// ── flattenMessageLines / flattenTranscript ──
+
+test('flattenMessageLines: text message wraps into markdown lines (no truncation)', () => {
+  const lines = flattenMessageLines({ text: 'a'.repeat(25) }, 10);
+  assert.equal(lines.length, 3); // 25 chars / 10 → 3 lines, all kept
+  assert.ok(lines.every(l => l.markdown && !l.dim));
+  assert.equal(lines.map(l => l.text).join(''), 'a'.repeat(25));
+});
+
+test('flattenMessageLines: context rich blocks render dim and non-markdown', () => {
+  const lines = flattenMessageLines({ richBlocks: [{ type: 'context', text: '🔧 Bash' }] }, 80);
+  assert.equal(lines.length, 1);
+  assert.equal(lines[0].dim, true);
+  assert.equal(lines[0].markdown, false);
+});
+
+test('flattenMessageLines: streamed text is dim, queued marker appended', () => {
+  const lines = flattenMessageLines({ streamText: 'reply', queued: true }, 80);
+  assert.deepEqual(lines.map(l => l.text), ['reply', '⏳ queued']);
+  assert.ok(lines[0].dim);
+});
+
+test('flattenTranscript: inserts a blank separator line between messages', () => {
+  const lines = flattenTranscript([{ text: 'one' }, { text: 'two' }], 80);
+  assert.deepEqual(lines.map(l => l.text), ['one', '', 'two']);
 });

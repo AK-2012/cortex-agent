@@ -12,7 +12,7 @@ import React, { useCallback, useState } from 'react';
 import { Box, Text, useInput } from 'ink';
 import { SlashMenu } from './SlashMenu.js';
 import { SLASH_COMMANDS, parseSlashInput, filterSlashCommands, findSlashCommand, type SlashCommand } from '../slash-commands.js';
-import { historyPrev, historyNext, pushHistory, type InputHistoryState } from '../logic.js';
+import { historyPrev, historyNext, pushHistory, isMouseSequence, type InputHistoryState } from '../logic.js';
 
 interface InputBoxProps {
   onSubmit: (text: string) => void;
@@ -30,9 +30,11 @@ interface InputBoxProps {
   onToggleShortcuts?: () => void;
   /** Dismiss the shortcuts overlay (fired by any key while it is shown). */
   onDismissShortcuts?: () => void;
+  /** Optional turn-status line (state · time · turns · cost) rendered tight above the input. */
+  statusLine?: string | null;
 }
 
-export function InputBox({ onSubmit, onCommand, commands = SLASH_COMMANDS, awaitingResponse, focus = true, showShortcuts = false, onToggleShortcuts, onDismissShortcuts }: InputBoxProps): React.JSX.Element {
+export function InputBox({ onSubmit, onCommand, commands = SLASH_COMMANDS, awaitingResponse, focus = true, showShortcuts = false, onToggleShortcuts, onDismissShortcuts, statusLine }: InputBoxProps): React.JSX.Element {
   const [value, setValue] = useState('');
   const [cursor, setCursor] = useState(0);
   const [selectedIndex, setSelectedIndex] = useState(0);
@@ -135,6 +137,9 @@ export function InputBox({ onSubmit, onCommand, commands = SLASH_COMMANDS, await
       }
       return;
     }
+    // Drop mouse-tracking escape residue (e.g. "[<64;30;10M") that Ink forwards as text when
+    // SGR mouse mode is on — it must never land in the message buffer.
+    if (isMouseSequence(input)) return;
     // '?' on an empty input toggles the shortcuts overlay instead of typing a literal '?'.
     if (input === '?' && value.length === 0 && !menuOpen) {
       onToggleShortcuts?.();
@@ -152,6 +157,8 @@ export function InputBox({ onSubmit, onCommand, commands = SLASH_COMMANDS, await
   return (
     <Box flexDirection="column" marginTop={1}>
       {menuOpen ? <SlashMenu commands={matches} selectedIndex={safeSelected} /> : null}
+      {/* Turn-status line sits directly on top of the input border (no gap). */}
+      {statusLine ? <Text dimColor>{statusLine}</Text> : null}
       <Box borderStyle="single" borderDimColor paddingX={1}>
         <Box flexGrow={1}>
           {value.length === 0 && !focus ? (

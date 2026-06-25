@@ -26,6 +26,8 @@ export interface RenderedMessage {
   richBlocks?: Array<{ type: string; text?: string; [key: string]: unknown }>;
   queued: boolean;
   streams: Map<string, StreamState>;
+  /** True for locally-echoed user messages (the TUI shows your own input optimistically). */
+  isUser?: boolean;
 }
 
 interface TranscriptState {
@@ -161,6 +163,16 @@ export function useTranscript(opts?: {
     }
   }, [flushBatch, scheduleBatch]);
 
+  // ── Local user echo ──
+  // The TUI sends `msg.user` to the server but the server never echoes it back (unlike Slack,
+  // where the user's message shows natively). Without a local echo the user's own input would
+  // not appear in the transcript, so we append it optimistically on send.
+
+  const addUserMessage = useCallback((text: string) => {
+    flushBatch();
+    setState(prev => _appendUserMessage(prev, text));
+  }, [flushBatch]);
+
   // ── Clear ──
 
   const clear = useCallback(() => {
@@ -178,8 +190,24 @@ export function useTranscript(opts?: {
     messageCount,
     dispatch,
     clear,
+    addUserMessage,
     flushBatch,
   };
+}
+
+/** Append a locally-echoed user message (formatted like the server's replay: "**You:** …"). */
+export function _appendUserMessage(prev: TranscriptState, text: string): TranscriptState {
+  const messageId = `local-user-${Date.now()}-${prev.ids.length}`;
+  const msg: RenderedMessage = {
+    messageId,
+    text: `**You:** ${text}`,
+    queued: false,
+    streams: new Map(),
+    isUser: true,
+  };
+  const messages = new Map(prev.messages);
+  messages.set(messageId, msg);
+  return { messages, ids: [...prev.ids, messageId] };
 }
 
 // ── Pure state helpers (exported for testing) ──
@@ -258,13 +286,15 @@ export function _handleStreamText(prev: TranscriptState, frame: StreamText): Tra
   if (!found) {
     // No existing stream — attach to the last message if one exists, otherwise
     // create a synthetic message keyed by streamId so streamed replies aren't
-    // dropped on an empty transcript (no chat.post anchors TUI streams).
+    // dropped on an empty transcript (no chat.post anchors TUI streams). A locally
+    // echoed user message is NOT a valid anchor — the assistant reply must be its own
+    // row, not merged into the user's bubble — so fall through to a synthetic message.
     const lastId = prev.ids[prev.ids.length - 1];
-    if (lastId) {
-      const lastMsg = messages.get(lastId)!;
+    const lastMsg = lastId ? messages.get(lastId) : undefined;
+    if (lastMsg && !lastMsg.isUser) {
       const streams = new Map(lastMsg.streams);
       streams.set(streamId, { segments: [frame.text], mutable: new Map() });
-      messages.set(lastId, { ...lastMsg, streams });
+      messages.set(lastId!, { ...lastMsg, streams });
       return { messages, ids: prev.ids };
     }
     return _appendSyntheticStreamMessage(prev, streamId, { segments: [frame.text], mutable: new Map() });
@@ -307,16 +337,16 @@ export function _handleStreamMutableOpen(prev: TranscriptState, frame: StreamMut
     }
   }
 
-  // No existing stream — attach to last message, or create a synthetic one
-  // when the transcript is empty so the streamed reply is not lost.
+  // No existing stream — attach to last message (unless it's a user echo, which must not
+  // absorb the assistant reply), or create a synthetic one so the streamed reply is not lost.
   const lastId = prev.ids[prev.ids.length - 1];
-  if (lastId) {
-    const lastMsg = messages.get(lastId)!;
+  const lastMsg = lastId ? messages.get(lastId) : undefined;
+  if (lastMsg && !lastMsg.isUser) {
     const streams = new Map(lastMsg.streams);
     const mutable = new Map<string, string>();
     mutable.set(frame.regionId, frame.text);
     streams.set(streamId, { segments: [], mutable });
-    messages.set(lastId, { ...lastMsg, streams });
+    messages.set(lastId!, { ...lastMsg, streams });
     return { messages, ids: prev.ids };
   }
 

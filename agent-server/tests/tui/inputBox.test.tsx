@@ -104,6 +104,40 @@ test('InputBox dismisses shortcuts on any key when shown', async (t) => {
   instance.cleanup();
 });
 
+test('InputBox renders the turn-status line tight above the input', async (t) => {
+  const app = React.createElement(InputBox, {
+    onSubmit: () => {},
+    statusLine: '✅ Done · 3s · 1 turns · $0.2680',
+    awaitingResponse: false,
+    focus: true,
+  });
+  const instance = render(app);
+  await delay(120);
+  assert.match(instance.lastFrame() ?? '', /✅ Done · 3s · 1 turns · \$0\.2680/);
+  instance.unmount();
+  instance.cleanup();
+});
+
+test('InputBox ignores mouse-tracking escape residue (no leak into the buffer)', async (t) => {
+  const submitted: string[] = [];
+  const app = React.createElement(InputBox, {
+    onSubmit: (txt: string) => submitted.push(txt),
+    awaitingResponse: false,
+    focus: true,
+  });
+  const instance = render(app);
+  await delay(120);
+
+  instance.stdin.write('[<64;30;10M'); // SGR wheel residue (ESC already stripped by Ink)
+  await delay(100);
+  // The residue must not appear in the input (placeholder still shown).
+  assert.match(instance.lastFrame() ?? '', /Type a message/);
+  assert.doesNotMatch(instance.lastFrame() ?? '', /64;30;10M/);
+
+  instance.unmount();
+  instance.cleanup();
+});
+
 test('InputBox does NOT submit while awaiting a response', async (t) => {
   const submitted: string[] = [];
   const app = React.createElement(InputBox, {
