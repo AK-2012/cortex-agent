@@ -51,6 +51,7 @@ How to run tests without tripping it:
 | `codex-bridge.test.ts` | Test | Codex MCP config tsx loader |
 | `codex-event-parser.test.ts` | Test | codexEventToNormalized pure function |
 | `command-handlers.test.ts` | Test | !cancel/!cost/!status/!schedule/!nvtop |
+| `restart-command.test.ts` | Test | `triggerServerRestart` daemon-alive/missing-pid/dead-process branches + `!restart` routing posts a reply |
 | `cortex-run-cli-dispatch.test.ts` | Test | cortex-run.ts CLI dispatch (sendCommand pathway) |
 | `daemon.test.ts` | Test | Import has no side effects |
 | `core/status-format.test.ts` | Test | buildThreadStatusMessage: task-info lead format / thread-only fallback / text+thread-id truncation / turn count |

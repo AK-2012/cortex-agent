@@ -14,8 +14,9 @@ export interface SlashCommand {
 export const SLASH_COMMANDS: SlashCommand[] = [
   { name: 'new', description: 'New conversation — saves memory, then clears the view' },
   { name: 'newx', description: 'New conversation (fast) — skips the save, clears the view' },
-  { name: 'resume', description: 'Resume a previous session' },
+  { name: 'resume', description: 'Resume a session — /resume for the picker, /resume <id> to jump' },
   { name: 'cancel', description: 'Cancel the current turn' },
+  { name: 'restart', description: 'Restart the Cortex server (reconnects automatically)' },
   { name: 'help', description: 'Show available slash commands' },
 ];
 

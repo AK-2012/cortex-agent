@@ -202,6 +202,10 @@ export const commandsEn = {
   // --- orient ---
   'cmd.orient.notImplemented': '`!orient` command not yet implemented.',
 
+  // --- restart ---
+  'cmd.restart.triggered': 'Restarting the Cortex server… it will reconnect automatically in a moment.',
+  'cmd.restart.noDaemon': 'Cannot restart: no running daemon was detected. The server must be started via `cortex daemon` for restart to work.',
+
   // --- thread (thread-handlers) ---
   'cmd.thread.noActive': 'No active thread in this channel.',
   'cmd.thread.activeHeader': '*Active Thread* `${id}` (${mode})',
@@ -446,6 +450,10 @@ export const commandsZh: Record<keyof typeof commandsEn, string> = {
 
   // --- orient ---
   'cmd.orient.notImplemented': '`!orient` 命令尚未实现。',
+
+  // --- restart ---
+  'cmd.restart.triggered': '正在重启 Cortex 服务器……稍后将自动重连。',
+  'cmd.restart.noDaemon': '无法重启：未检测到正在运行的守护进程。需通过 `cortex daemon` 启动服务器才能重启。',
 
   // --- thread ---
   'cmd.thread.noActive': '本频道没有活动线程。',

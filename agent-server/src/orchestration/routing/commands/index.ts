@@ -21,6 +21,7 @@ import { handleTailCmd } from './tail.js';
 import { handleSendFileCmd } from './sendfile.js';
 import { handleDispatchCmd } from './dispatch.js';
 import { handleLangCmd } from './lang.js';
+import { handleRestartCmd } from './restart.js';
 
 const log = createLogger('command-handler');
 
@@ -111,6 +112,7 @@ export function registerCommands(deps: CommandDeps) {
     '!agent':    (ch, ad, msg) => handleAgentCmdInteractive(ch, ad, msg),
     '!orient':   (ch, ad, _msg) => handleOrientCmd(ch, ad),
     '!lang':     (ch, ad, msg) => handleLangCmd(ch, ad, msg),
+    '!restart':  (ch, ad, msg) => handleRestartCmd(ch, ad, msg),
   };
 
   const PREFIX_COMMANDS: { prefix: string; handler: Handler }[] = [
