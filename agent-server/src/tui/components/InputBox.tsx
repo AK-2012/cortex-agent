@@ -10,37 +10,87 @@
 
 import React, { useCallback, useState } from 'react';
 import { Box, Text, useInput } from 'ink';
+import { SlashMenu } from './SlashMenu.js';
+import { SLASH_COMMANDS, parseSlashInput, filterSlashCommands, findSlashCommand, type SlashCommand } from '../slash-commands.js';
 
 interface InputBoxProps {
   onSubmit: (text: string) => void;
+  /** Run a slash command chosen from the palette. */
+  onCommand?: (name: string, args: string) => void;
+  /** Command registry shown in the palette. Defaults to the built-in set. */
+  commands?: SlashCommand[];
   /** While true the user can still type, but Enter does not send (text preserved). */
   awaitingResponse?: boolean;
   /** Whether this input owns the keyboard (false when dashboard/modal has focus). */
   focus?: boolean;
 }
 
-export function InputBox({ onSubmit, awaitingResponse, focus = true }: InputBoxProps): React.JSX.Element {
+export function InputBox({ onSubmit, onCommand, commands = SLASH_COMMANDS, awaitingResponse, focus = true }: InputBoxProps): React.JSX.Element {
   const [value, setValue] = useState('');
   const [cursor, setCursor] = useState(0);
+  const [selectedIndex, setSelectedIndex] = useState(0);
+
+  // The `/` palette is open while the input starts with '/' and owns the keyboard.
+  const parsed = parseSlashInput(value);
+  const menuOpen = focus && parsed.isSlash && parsed.args.length === 0;
+  const matches = menuOpen ? filterSlashCommands(parsed.query, commands) : [];
+  const safeSelected = matches.length > 0 ? Math.min(selectedIndex, matches.length - 1) : 0;
+
+  const clear = useCallback(() => {
+    setValue('');
+    setCursor(0);
+    setSelectedIndex(0);
+  }, []);
 
   const handleSubmit = useCallback((text: string) => {
     if (awaitingResponse) return; // block send, keep typed text
     if (text.trim().length === 0) return;
     onSubmit(text);
-    setValue('');
-    setCursor(0);
-  }, [awaitingResponse, onSubmit]);
+    clear();
+  }, [awaitingResponse, onSubmit, clear]);
+
+  // Run a slash command id, or fall back to sending the raw text as a message.
+  const runSlash = useCallback(() => {
+    const exact = findSlashCommand(parsed.query, commands);
+    const chosen = exact ?? matches[safeSelected] ?? null;
+    if (chosen && onCommand) {
+      onCommand(chosen.name, parsed.args);
+      clear();
+      return;
+    }
+    // No matching command — send the typed text through as a normal message so the
+    // server's own command dispatch (or a plain message) still gets a chance.
+    handleSubmit(value);
+  }, [parsed.query, parsed.args, matches, safeSelected, onCommand, commands, handleSubmit, value, clear]);
 
   useInput((input, key) => {
     // Ignore modifier combos so global hotkeys never leak their letter into the box.
     if (key.ctrl || key.meta) return;
-    // Escape / Tab are owned by other zones; arrows up/down scroll the transcript.
-    if (key.escape || key.tab || key.upArrow || key.downArrow || key.pageUp || key.pageDown) return;
 
-    if (key.return) {
-      handleSubmit(value);
-      return;
+    // ── Palette navigation (only while the menu owns the input) ──
+    if (menuOpen) {
+      if (key.upArrow) { setSelectedIndex(i => Math.max(0, i - 1)); return; }
+      if (key.downArrow) { setSelectedIndex(i => Math.min(Math.max(0, matches.length - 1), i + 1)); return; }
+      if (key.escape) { clear(); return; }
+      if (key.tab) {
+        // Complete the highlighted command into the buffer (ready for args).
+        const chosen = matches[safeSelected];
+        if (chosen) {
+          const next = `/${chosen.name} `;
+          setValue(next);
+          setCursor(next.length);
+          setSelectedIndex(0);
+        }
+        return;
+      }
+      if (key.return) { runSlash(); return; }
+      // fall through to normal editing (typing filters the menu)
+    } else {
+      // Escape / Tab are owned by other zones; arrows up/down scroll the transcript.
+      if (key.escape || key.tab || key.upArrow || key.downArrow || key.pageUp || key.pageDown) return;
+      if (key.return) { handleSubmit(value); return; }
     }
+
     if (key.leftArrow) {
       setCursor(c => Math.max(0, c - 1));
       return;
@@ -53,6 +103,7 @@ export function InputBox({ onSubmit, awaitingResponse, focus = true }: InputBoxP
       if (cursor > 0) {
         setValue(v => v.slice(0, cursor - 1) + v.slice(cursor));
         setCursor(c => Math.max(0, c - 1));
+        setSelectedIndex(0);
       }
       return;
     }
@@ -60,11 +111,13 @@ export function InputBox({ onSubmit, awaitingResponse, focus = true }: InputBoxP
     if (input && input.length > 0) {
       setValue(v => v.slice(0, cursor) + input + v.slice(cursor));
       setCursor(c => c + input.length);
+      setSelectedIndex(0);
     }
   }, { isActive: focus });
 
   return (
     <Box flexDirection="column" marginTop={1}>
+      {menuOpen ? <SlashMenu commands={matches} selectedIndex={safeSelected} /> : null}
       <Box borderStyle="single" borderDimColor paddingX={1}>
         <Box flexGrow={1}>
           {value.length === 0 && !focus ? (

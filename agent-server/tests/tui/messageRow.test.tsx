@@ -27,7 +27,8 @@ test('sealed-status message (text + section block with same text) renders the te
   const instance = render(React.createElement(MessageRow, { message: msg }));
   const frame = instance.lastFrame() ?? '';
   assert.equal(countOccurrences(frame, 'Done cortex-08ab39'), 1, 'status text must appear exactly once');
-  assert.ok(frame.includes('[Resume]'), 'action labels still render');
+  // Action buttons are no longer rendered in the TUI (replaced by `/` slash commands).
+  assert.equal(frame.includes('[Resume]'), false, 'inert action labels are not rendered');
   instance.unmount();
   instance.cleanup();
 });

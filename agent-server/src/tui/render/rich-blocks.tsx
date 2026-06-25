@@ -22,7 +22,7 @@ export function RichBlocks({ blocks }: RichBlocksProps): React.JSX.Element {
   );
 }
 
-function RichBlockItem({ block }: { block: Record<string, unknown> }): React.JSX.Element {
+function RichBlockItem({ block }: { block: Record<string, unknown> }): React.JSX.Element | null {
   switch (block.type) {
     case 'markdown':
       return <InlineMarkdown text={String(block.text ?? '')} />;
@@ -36,10 +36,11 @@ function RichBlockItem({ block }: { block: Record<string, unknown> }): React.JSX
     case 'divider':
       return <Text dimColor>{'─'.repeat(40)}</Text>;
 
-    case 'actions': {
-      const elements = (block.elements as Array<{ text: string }> | undefined) ?? [];
-      return <Text dimColor>{elements.map(e => `[${e.text}]`).join(' ')}</Text>;
-    }
+    case 'actions':
+      // Action buttons were never interactive in the TUI (Slack-only). They are
+      // replaced by `/` slash commands in the input box, so render nothing here
+      // rather than a row of inert `[Resume] [New] [New (quiet)]` labels.
+      return null;
 
     default:
       return <InlineMarkdown text={String((block as any).text ?? '')} />;

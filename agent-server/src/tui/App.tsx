@@ -19,6 +19,7 @@ import { useNotifications } from './hooks/useNotifications.js';
 import type { NotificationEntry } from './hooks/useNotifications.js';
 import { useDashboardData } from './hooks/useDashboardData.js';
 import { SessionPicker } from './components/SessionPicker.js';
+import { SLASH_COMMANDS } from './slash-commands.js';
 import { AskUserModal } from './components/AskUserModal.js';
 import { PlanFeedbackModal } from './components/PlanFeedbackModal.js';
 import type { ResumableSession } from './components/SessionPicker.js';
@@ -108,12 +109,15 @@ export function App({
   const [projectsLoading, setProjectsLoading] = useState(false);
   const [projectsError, setProjectsError] = useState<string | null>(null);
 
+  // `/resume` session picker (client-side, replaces the inert Resume button).
+  const [slashResumeSessions, setSlashResumeSessions] = useState<ResumableSession[] | null>(null);
+
   const transcriptRef = useRef<{ scrollUp: (page?: boolean) => void; scrollDown: (page?: boolean) => void; scrollToEnd: () => void } | null>(null);
 
   // Cost summary from dashboard state (computed)
   const costData = dashboard.state.tabs.cost.data.length > 0 ? dashboard.state.tabs.cost.data : [];
-  const costSummary = costData.length > 0 && typeof (costData[0] as any)?.totalCost === 'number'
-    ? `$${(costData[0] as any).totalCost.toFixed(2)}`
+  const costSummary = costData.length > 0 && typeof (costData[0] as any)?.total === 'number'
+    ? `$${(costData[0] as any).total.toFixed(2)}`
     : null;
 
   // Active tab for dashboard
@@ -133,6 +137,20 @@ export function App({
       return;
     }
     if (isUiQueryResult(frame) || isUiEvent(frame)) {
+      // Handle the `/resume` session list
+      if (isUiQueryResult(frame) && frame.id === 'slash-resume-list') {
+        if (frame.ok && Array.isArray(frame.data)) {
+          setSlashResumeSessions((frame.data as any[]).map((s: any) => ({
+            sessionId: s.sessionId ?? s.id,
+            name: s.name,
+            projectId: s.projectId,
+            label: s.label ?? null,
+          })));
+        } else {
+          setSlashResumeSessions([]);
+        }
+        return;
+      }
       // Handle project switcher responses
       if (isUiQueryResult(frame) && frame.id === 'proj-switcher-list') {
         if (frame.ok) {
@@ -251,8 +269,44 @@ export function App({
     } as any);
   }, [sendFrame]);
 
+  // Slash-command dispatch from the input palette.
+  const handleCommand = useCallback((name: string, _args: string) => {
+    switch (name) {
+      case 'new':
+        // Clear the view, then start a new conversation (server runs the pre-close hook).
+        handleClearView();
+        handleSubmit('!new');
+        break;
+      case 'newx':
+        // Same, but skip the pre-close hook (no save).
+        handleClearView();
+        handleSubmit('!newq');
+        break;
+      case 'cancel':
+        handleCancel();
+        break;
+      case 'resume':
+        sendFrame({ type: 'ui.query', id: 'slash-resume-list', scope: 'sessions.list', params: { resumable: true } } as any);
+        break;
+      case 'help':
+      default:
+        // The palette itself lists the commands — nothing else to do.
+        break;
+    }
+  }, [handleClearView, handleSubmit, handleCancel, sendFrame]);
+
+  // `/resume` picker selection → switch to the chosen session; Esc/cancel closes it.
+  const handleSlashResumeSelect = useCallback((sessionId: string, pickedProjectId: string) => {
+    sendFrame({ type: 'session.switch', id: 'slash-resume', projectId: pickedProjectId, sessionId } as any);
+    setSlashResumeSessions(null);
+  }, [sendFrame]);
+
+  const handleSlashResumeCancel = useCallback(() => {
+    setSlashResumeSessions(null);
+  }, []);
+
   // Modals pre-empt input; an open dashboard takes keyboard focus from the input.
-  const modalOpen = activeModal !== null || notificationsOpen || projectSwitcherOpen;
+  const modalOpen = activeModal !== null || notificationsOpen || projectSwitcherOpen || slashResumeSessions !== null;
   const focusZone = computeFocusZone({ modalOpen, sidePanelVisible });
 
   // Keyboard bindings — toggles/cancel always active outside modals; scroll only
@@ -388,10 +442,19 @@ export function App({
               onRequestRefresh={handleProjectsRefresh}
             />
           ) : null}
+          {slashResumeSessions !== null ? (
+            <SessionPicker
+              sessions={slashResumeSessions}
+              onSelect={handleSlashResumeSelect}
+              onCancel={handleSlashResumeCancel}
+            />
+          ) : null}
         </Box>
       ) : (
         <InputBox
           onSubmit={handleSubmit}
+          onCommand={handleCommand}
+          commands={SLASH_COMMANDS}
           awaitingResponse={awaitingResponse}
           focus={focusZone === 'input'}
         />
