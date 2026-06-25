@@ -7,6 +7,8 @@ import { Box, Text, useInput } from 'ink';
 import type { TabData } from '../hooks/useDashboardData.js';
 import type { MutateResult, MutateError } from '../hooks/useMutate.js';
 import { ConfirmModal } from './ConfirmModal.js';
+import { computeFocusWindow } from '../logic.js';
+import { DASHBOARD_MAX_VISIBLE_ROWS } from './dashboard-constants.js';
 
 interface DashboardSchedulesTabProps {
   data: TabData;
@@ -109,9 +111,14 @@ function SchedulesList({ data, mutate, active = true }: DashboardSchedulesTabPro
     }
   }, { isActive: isInputActive });
 
-  // ── Build schedule rows ──
+  // ── Build schedule rows (windowed so a long list can't overflow the terminal) ──
 
-  const rows = schedules.map((sched: any, i: number) => {
+  const safeFocused = Math.min(focusedRowIndex, schedules.length - 1);
+  const { start, end, hiddenAbove, hiddenBelow } = computeFocusWindow(
+    schedules.length, safeFocused, DASHBOARD_MAX_VISIBLE_ROWS,
+  );
+  const rows = schedules.slice(start, end).map((sched: any, vi: number) => {
+    const i = start + vi;
     const isFocused = i === focusedRowIndex;
     return (
       <Box key={sched.id ?? i} flexDirection="column" marginBottom={1}>
@@ -175,7 +182,9 @@ function SchedulesList({ data, mutate, active = true }: DashboardSchedulesTabPro
 
   return (
     <Box flexDirection="column">
+      {hiddenAbove > 0 ? <Text dimColor>↑ {hiddenAbove} more above</Text> : null}
       {rows}
+      {hiddenBelow > 0 ? <Text dimColor>↓ {hiddenBelow} more below</Text> : null}
       {confirmModal}
     </Box>
   );

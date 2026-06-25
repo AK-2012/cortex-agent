@@ -10,7 +10,41 @@ import {
   isAgentResponseFrame,
   collectStreamText,
   computeVisibleWindow,
+  computeFocusWindow,
 } from '../../src/tui/logic.js';
+
+// ── computeFocusWindow ──
+
+test('computeFocusWindow: short list renders fully, nothing hidden', () => {
+  const w = computeFocusWindow(3, 0, 8);
+  assert.deepEqual(w, { start: 0, end: 3, hiddenAbove: 0, hiddenBelow: 0 });
+});
+
+test('computeFocusWindow: empty list is a no-op', () => {
+  assert.deepEqual(computeFocusWindow(0, 0, 8), { start: 0, end: 0, hiddenAbove: 0, hiddenBelow: 0 });
+});
+
+test('computeFocusWindow: long list caps the slice and reports hidden counts', () => {
+  const w = computeFocusWindow(20, 0, 6);
+  assert.equal(w.end - w.start, 6, 'window is capped at maxVisible');
+  assert.equal(w.start, 0);
+  assert.equal(w.hiddenAbove, 0);
+  assert.equal(w.hiddenBelow, 14);
+});
+
+test('computeFocusWindow: focused row stays inside the window when scrolled down', () => {
+  const w = computeFocusWindow(20, 15, 6);
+  assert.ok(15 >= w.start && 15 < w.end, 'focused index is visible');
+  assert.equal(w.end - w.start, 6);
+});
+
+test('computeFocusWindow: window clamps to the end (no overscroll past last row)', () => {
+  const w = computeFocusWindow(20, 19, 6);
+  assert.equal(w.end, 20);
+  assert.equal(w.start, 14);
+  assert.equal(w.hiddenBelow, 0);
+  assert.equal(w.hiddenAbove, 14);
+});
 
 // ── computeFocusZone ──
 

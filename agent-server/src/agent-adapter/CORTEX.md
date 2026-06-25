@@ -12,7 +12,7 @@ Unified NormalizedEvent event schema and AgentAdapter contract.
 | `normalize/event-stream.ts` | queue | createEventStream single-producer FIFO |
 | `normalize/tool-names.ts` | tool name table | canonical ↔ backend-native bidirectional mapping |
 | `normalize/hooks.ts` | hook contract | NormalizedHookSpec + trigger types |
-| `claude/adapter.ts` | adapter | ClaudeAdapter + session pool + runClaude |
+| `claude/adapter.ts` | adapter | ClaudeAdapter + session pool + runClaude + `resolveResumeForPrint` (gates print-mode `--resume` on the transcript existing — fixes the cortex-tui fresh-session "No conversation found" error) |
 | `claude/defaults.ts` | constants | timeout/MCP/tools/hooks constants |
 | `claude/hooks-builder.ts` | builder | buildHooksSettings generates hook configuration |
 | `claude/tool-summarizers.ts` | summarizer | summarizeToolInput tool input rendering |

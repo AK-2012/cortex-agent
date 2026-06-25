@@ -6,11 +6,12 @@ M5 Ink TUI client — chat+dashboard terminal client speaking M4 protocol. Zero 
 |---|---|---|
 | `index.tsx` | entry | Argv parse → connect → render `<App>`. Handles --resume/--project/--port. Sends handshake.hello on connect. Interactive session picker for --resume. |
 | `App.tsx` | layout | Top-level layout with Header + Transcript + SidePanel + InputBox + StatusLine + modals. Wires hooks, frame routing. Computes `focusZone` (modal/dashboard/input) for keyboard arbitration; `awaitingResponse` blocks send until an agent response frame arrives (then clears queuedCount). |
-| `logic.ts` | pure logic | Testable helpers: `computeFocusZone`, `isAgentResponseFrame`, `collectStreamText`, `computeVisibleWindow`. Imported by App/Transcript/MessageRow. |
+| `logic.ts` | pure logic | Testable helpers: `computeFocusZone`, `isAgentResponseFrame`, `collectStreamText`, `computeVisibleWindow`, `computeFocusWindow` (focus-centered viewport so long dashboard lists can't overflow the terminal). Imported by App/Transcript/MessageRow/Dashboard tabs. |
 | `ws-client.ts` | ws class | Typed WS client wrapping M4 protocol. Exponential backoff: 250/500/1k/2k/4k/8k/30s cap. Retry sends resume. Settles to 'disconnected' on backoff-cap so the UI shows the retry hint. |
 | `components/Header.tsx` | header bar | ProjectId + sessionName + connected indicator + queued count + notification count + cost summary. |
 | `components/Transcript.tsx` | transcript | Bottom-anchored viewport (height from `useStdout().rows`) via `computeVisibleWindow`. Auto-sticks to bottom on new messages unless the user scrolled up (`userScrolledUpRef`). "↑ N more above" hint. |
-| `components/MessageRow.tsx` | message row | Renders text + RichBlock[] + streamed text (joined via `collectStreamText`, single flowing `<Text>`) + queued indicator. |
+| `components/MessageRow.tsx` | message row | Renders text (via `InlineMarkdown`) + RichBlock[] + streamed text (joined via `collectStreamText`, single flowing `<Text>`) + queued indicator. |
+| `components/dashboard-constants.ts` | constants | `DASHBOARD_MAX_VISIBLE_ROWS` — per-tab visible-row cap shared by the four list tabs (windowed via `computeFocusWindow`). |
 | `components/InputBox.tsx` | input | Controlled ink-text-input `TextInput`. Always typeable; `awaitingResponse` blocks Enter-send while preserving text; `focus` prop set false when dashboard/modal owns the keyboard. |
 | `components/AskUserModal.tsx` | modal | Renders modal.open frames: section/select/multi_select/text_input per M4 spec. ↑/↓ navigate, number keys select, Space toggles multi, Enter confirms. Builds modal.submit values and sends via sendFrame. Displays modal.ack errors inline. |
 | `components/PlanFeedbackModal.tsx` | modal | Plan-approval modal variant: plan text (scrollable section) + 3 numbered radio options (Approve/Feedback/Cancel) with hot-keys 1/2/3. Feedback sub-mode for text input. Arrow navigation, Enter/close. App.tsx dispatches when callbackId starts with 'plan'. |
@@ -33,4 +34,5 @@ M5 Ink TUI client — chat+dashboard terminal client speaking M4 protocol. Zero 
 | `hooks/useDashboardData.ts` | dashboard hook | Per-tab state: ui.query on focus, subscribe to events, re-render on ui.event. Pure helpers: `_handleQueryResult`/`_handleEvent`/`_createPendingQuery`/`_clearPendingQuery`. |
 | `hooks/useMutate.ts` | mutate hook | Async action hook for ui.mutate request/response — sends mutate frames, matches results by crypto.randomUUID() id, 10s timeout, cleanup on unmount. Returns `{mutate, handleFrame}`. |
 | `render/markdown.ts` | md parser | Minimal inline markdown: `**bold**`, `*italic*`, `` `code` ``, `[text](url)`. |
-| `render/rich-blocks.tsx` | block renderer | RichBlock[] discriminated union → `<Box>`/`<Text>` elements. Actions → placeholder 'Phase 2'. |
+| `render/inline-markdown.tsx` | md renderer | `<InlineMarkdown>` — applies `parseMarkdown` segments as Ink styles (bold/italic/cyan code/underlined link+url), stripping the raw markers. Used by MessageRow + rich-blocks so `**You:**` renders bold instead of literally. |
+| `render/rich-blocks.tsx` | block renderer | RichBlock[] discriminated union → `<Box>`/`<Text>` elements; markdown/section/context/default text rendered through `InlineMarkdown`. Actions → `[label]` placeholders (not yet interactive). |

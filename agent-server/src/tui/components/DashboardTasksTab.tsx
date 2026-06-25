@@ -7,6 +7,8 @@ import { Box, Text, useInput } from 'ink';
 import type { TabData } from '../hooks/useDashboardData.js';
 import type { MutateResult, MutateError } from '../hooks/useMutate.js';
 import { ConfirmModal } from './ConfirmModal.js';
+import { computeFocusWindow } from '../logic.js';
+import { DASHBOARD_MAX_VISIBLE_ROWS } from './dashboard-constants.js';
 
 // ── Types ──
 
@@ -215,9 +217,16 @@ function TasksList({ data, mutate, projectId, active = true }: DashboardTasksTab
 
   // ── Task list ──
 
+  const safeFocused = Math.min(focusedIndex, tasks.length - 1);
+  const { start, end, hiddenAbove, hiddenBelow } = computeFocusWindow(
+    tasks.length, safeFocused, DASHBOARD_MAX_VISIBLE_ROWS,
+  );
+
   return (
     <Box flexDirection="column">
-      {tasks.map((task: any, i: number) => {
+      {hiddenAbove > 0 ? <Text dimColor>↑ {hiddenAbove} more above</Text> : null}
+      {tasks.slice(start, end).map((task: any, vi: number) => {
+        const i = start + vi;
         const isFocused = i === focusedIndex;
         const isLockBusy = lockBusyRows.has(i);
         const hasError = errorState?.index === i;
@@ -256,6 +265,7 @@ function TasksList({ data, mutate, projectId, active = true }: DashboardTasksTab
           </Box>
         );
       })}
+      {hiddenBelow > 0 ? <Text dimColor>↓ {hiddenBelow} more below</Text> : null}
     </Box>
   );
 }

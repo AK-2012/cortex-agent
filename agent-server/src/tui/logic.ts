@@ -73,3 +73,28 @@ export function computeVisibleWindow(
   const start = Math.max(0, end - Math.max(1, visibleCount));
   return { start, end };
 }
+
+// ── Focus-centered window ──
+// A bounded viewport over a navigable list that always keeps the focused row visible.
+// Dashboard tabs render every item by default, so a long list (schedules / executions)
+// overflows the terminal — and Ink cannot clear lines that scrolled past the top, leaving
+// permanent ghost rows. Capping the rendered slice fixes both the overflow and the
+// corruption. Returns absolute [start, end) indices plus how many rows are hidden on each
+// side (for "↑ N more" / "↓ N more" affordances).
+
+export function computeFocusWindow(
+  total: number,
+  focusedIndex: number,
+  maxVisible: number,
+): { start: number; end: number; hiddenAbove: number; hiddenBelow: number } {
+  if (total <= 0) return { start: 0, end: 0, hiddenAbove: 0, hiddenBelow: 0 };
+  const cap = Math.max(1, maxVisible);
+  if (total <= cap) return { start: 0, end: total, hiddenAbove: 0, hiddenBelow: 0 };
+
+  const focus = Math.min(Math.max(0, focusedIndex), total - 1);
+  // Center the focused row in the window, then clamp to the list bounds.
+  let start = focus - Math.floor(cap / 2);
+  start = Math.max(0, Math.min(start, total - cap));
+  const end = start + cap;
+  return { start, end, hiddenAbove: start, hiddenBelow: total - end };
+}

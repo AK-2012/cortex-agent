@@ -8,6 +8,8 @@ import { Box, Text, useInput } from 'ink';
 import type { TabData } from '../hooks/useDashboardData.js';
 import type { MutateResult } from '../hooks/useMutate.js';
 import { ConfirmModal } from './ConfirmModal.js';
+import { computeFocusWindow } from '../logic.js';
+import { DASHBOARD_MAX_VISIBLE_ROWS } from './dashboard-constants.js';
 
 interface ThreadRow {
   id: string;
@@ -96,30 +98,54 @@ export function DashboardThreadsTab({ data, mutate, active = true }: DashboardTh
           onCancel={() => setConfirmingIndex(null)}
         />
       ) : (
-        data.data.map((t: any, i: number) => (
-          <Box key={t.id ?? i} flexDirection="column" marginBottom={1}>
-            <Box>
-              {i === focusedIndex ? <Text color="cyan">▸ </Text> : <Text>  </Text>}
-              <StatusIcon status={t.status} />
-              <Text> </Text>
-              <Text bold={i === focusedIndex}>{t.templateName ?? 'unnamed'}</Text>
-            </Box>
-            <Box marginLeft={2}>
-              <Text dimColor>
-                {t.status}
-                {t.currentStep ? ` — step ${t.currentStep.index + 1}/${t.totalSteps}` : ''}
-              </Text>
-            </Box>
-            {alreadyTerminalRows.has(i) ? (
-              <Box marginLeft={2}>
-                <Text dimColor>(already finished)</Text>
-              </Box>
-            ) : null}
-          </Box>
-        ))
+        (() => {
+          const safeFocused = Math.min(focusedIndex, data.data.length - 1);
+          const { start, end, hiddenAbove, hiddenBelow } = computeFocusWindow(
+            data.data.length, safeFocused, DASHBOARD_MAX_VISIBLE_ROWS,
+          );
+          return (
+            <>
+              {hiddenAbove > 0 ? <Text dimColor>↑ {hiddenAbove} more above</Text> : null}
+              {data.data.slice(start, end).map((t: any, vi: number) => {
+                const i = start + vi;
+                return (
+                  <Box key={t.id ?? i} flexDirection="column" marginBottom={1}>
+                    <Box>
+                      {i === focusedIndex ? <Text color="cyan">▸ </Text> : <Text>  </Text>}
+                      <StatusIcon status={t.status} />
+                      <Text> </Text>
+                      <Text bold={i === focusedIndex}>{t.templateName ?? 'unnamed'}</Text>
+                    </Box>
+                    <Box marginLeft={2}>
+                      <Text dimColor>
+                        {t.status}
+                        {t.currentStep ? ` — step ${stepLabel(t.currentStep.index, t.totalSteps)}` : ''}
+                      </Text>
+                    </Box>
+                    {alreadyTerminalRows.has(i) ? (
+                      <Box marginLeft={2}>
+                        <Text dimColor>(already finished)</Text>
+                      </Box>
+                    ) : null}
+                  </Box>
+                );
+              })}
+              {hiddenBelow > 0 ? <Text dimColor>↓ {hiddenBelow} more below</Text> : null}
+            </>
+          );
+        })()
       )}
     </Box>
   );
+}
+
+/** "<current>/<total>" step label. A completed thread can report a final step index at or
+ *  past totalSteps (e.g. index 2 with 2 steps → "3/2"); clamp the numerator so the display
+ *  never exceeds the total. */
+function stepLabel(index: number, totalSteps?: number): string {
+  const current = index + 1;
+  if (totalSteps == null) return String(current);
+  return `${Math.min(current, totalSteps)}/${totalSteps}`;
 }
 
 function StatusIcon({ status }: { status: string }): React.JSX.Element {

@@ -638,9 +638,30 @@ export interface RunClaudeOptions {
   anthropicBaseUrl?: string;
 }
 
+/**
+ * Decide whether a print-mode ClaudeSession should spawn with `--resume <id>`.
+ *
+ * Print sessions always run with `cwd: DATA_DIR`, so their Claude transcript lives at
+ * `computeJsonlPath(DATA_DIR, sessionId)`. A *fresh* session (notably the `cortex tui`
+ * frontend) pre-registers its sessionId BEFORE the first Claude turn, so callers ask to
+ * resume an id that has no transcript yet — Claude then exits with
+ * "No conversation found with session ID: <id>". Gating the resume request on the
+ * transcript actually existing keeps the first turn on `--session-id` (create) and lets
+ * only later turns / reconnects use `--resume`. Self-healing: a deleted transcript also
+ * correctly falls back to create. Mirrors {@link resolveTuiResume} for the tmux path.
+ */
+export function resolveResumeForPrint(
+  requestedResume: boolean,
+  sessionId: string,
+  exists?: (p: string) => boolean,
+): boolean {
+  return resolveTuiResume(requestedResume, computeJsonlPath(DATA_DIR, sessionId), exists);
+}
+
 export function runClaude(userMessage: string, opts: RunClaudeOptions) {
   const effectiveSessionId = opts.sessionId || crypto.randomUUID();
-  const session = getOrCreateSession(opts.channel, effectiveSessionId, { ...opts, needsResume: !!opts.sessionId });
+  const needsResume = resolveResumeForPrint(!!opts.sessionId, effectiveSessionId);
+  const session = getOrCreateSession(opts.channel, effectiveSessionId, { ...opts, needsResume });
   const promise = session.sendMessage(userMessage, {
     files: opts.files || [],
     callbackSource: opts.callbackSource ?? null,
@@ -792,6 +813,10 @@ export class ClaudeAdapter implements AgentAdapter {
     // DR-0012: route to TUI implementation when profile selects it.
     if (selectClaudeMode(config) === 'tui') return this.spawnTui(config);
     const { sessionIdEffective, ...sessionOptions } = sessionOptionsFromSpawnConfig(config);
+    // Gate resume on the transcript actually existing — a pre-registered sessionId
+    // (e.g. cortex tui handshake) must spawn `--session-id` on its first turn, not
+    // `--resume` (which fails "No conversation found"). See resolveResumeForPrint.
+    sessionOptions.needsResume = resolveResumeForPrint(sessionOptions.needsResume, sessionIdEffective);
     const channel = config.channel ?? config.env?.SLACK_CHANNEL ?? config.sessionKey;
     const session = getOrCreateSession(channel, sessionIdEffective, sessionOptions);
     const stream = createEventStream<NormalizedEvent>();

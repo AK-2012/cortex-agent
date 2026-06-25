@@ -4,6 +4,7 @@
 
 import React from 'react';
 import { Box, Text } from 'ink';
+import { InlineMarkdown } from './inline-markdown.js';
 import type { RichBlock as RichBlockType } from '../../platform/tui/protocol.js';
 
 interface RichBlocksProps {
@@ -24,13 +25,13 @@ export function RichBlocks({ blocks }: RichBlocksProps): React.JSX.Element {
 function RichBlockItem({ block }: { block: Record<string, unknown> }): React.JSX.Element {
   switch (block.type) {
     case 'markdown':
-      return <Text>{String(block.text ?? '')}</Text>;
+      return <InlineMarkdown text={String(block.text ?? '')} />;
 
     case 'section':
-      return <Text>{String(block.text ?? '')}</Text>;
+      return <InlineMarkdown text={String(block.text ?? '')} />;
 
     case 'context':
-      return <Text dimColor>{String(block.text ?? '')}</Text>;
+      return <InlineMarkdown text={String(block.text ?? '')} dimColor />;
 
     case 'divider':
       return <Text dimColor>{'─'.repeat(40)}</Text>;
@@ -41,6 +42,6 @@ function RichBlockItem({ block }: { block: Record<string, unknown> }): React.JSX
     }
 
     default:
-      return <Text>{String((block as any).text ?? '')}</Text>;
+      return <InlineMarkdown text={String((block as any).text ?? '')} />;
   }
 }

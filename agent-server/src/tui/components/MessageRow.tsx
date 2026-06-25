@@ -5,6 +5,7 @@
 import React from 'react';
 import { Box, Text } from 'ink';
 import { RichBlocks } from '../render/rich-blocks.js';
+import { InlineMarkdown } from '../render/inline-markdown.js';
 import { collectStreamText } from '../logic.js';
 import type { RenderedMessage } from '../hooks/useTranscript.js';
 
@@ -21,7 +22,7 @@ export function MessageRow({ message }: MessageRowProps): React.JSX.Element {
     <Box flexDirection="column" marginBottom={1}>
       {/* Main content */}
       <Box flexDirection="column">
-        {message.text ? <Text>{message.text}</Text> : null}
+        {message.text ? <InlineMarkdown text={message.text} /> : null}
         {message.richBlocks && message.richBlocks.length > 0 ? (
           <RichBlocks blocks={message.richBlocks} />
         ) : null}

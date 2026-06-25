@@ -5,6 +5,8 @@
 import React, { useState, useCallback, useRef, useEffect } from 'react';
 import { Box, Text, useInput } from 'ink';
 import { ConfirmModal } from './ConfirmModal.js';
+import { computeFocusWindow } from '../logic.js';
+import { DASHBOARD_MAX_VISIBLE_ROWS } from './dashboard-constants.js';
 import type { TabData } from '../hooks/useDashboardData.js';
 import type { MutateResult, MutateError } from '../hooks/useMutate.js';
 
@@ -80,6 +82,12 @@ export function DashboardExecutionsTab({ data, mutate, active = true }: Dashboar
   // Clamp focused index to valid range
   const safeFocused = Math.min(focusedIndex, data.data.length - 1);
 
+  // Cap the rendered slice so a long list can't overflow the terminal (ghost-row corruption).
+  const { start, end, hiddenAbove, hiddenBelow } = computeFocusWindow(
+    data.data.length, safeFocused, DASHBOARD_MAX_VISIBLE_ROWS,
+  );
+  const visible = data.data.slice(start, end);
+
   const focusedExec = showConfirm ? (data.data[confirmIndexRef.current] as any) : null;
 
   // Build ConfirmModal body from focused execution fields
@@ -96,22 +104,21 @@ export function DashboardExecutionsTab({ data, mutate, active = true }: Dashboar
 
   return (
     <Box flexDirection="column">
-      {data.data.map((exec: any, i: number) => (
+      {hiddenAbove > 0 ? <Text dimColor>↑ {hiddenAbove} more above</Text> : null}
+      {visible.map((exec: any, vi: number) => {
+        const i = start + vi;
+        return (
         <Box key={exec.id ?? i} flexDirection="column" marginBottom={1}>
           <Box>
             <Text>{i === safeFocused ? '>' : ' '}</Text>
             <Text> </Text>
             <ExecStatusIcon status={exec.status} />
             <Text> </Text>
-            <Text bold>{exec.type ?? 'local'}</Text>
+            <Text bold={i === safeFocused}>{exec.type ?? 'local'}</Text>
             {exec.machine ? <Text dimColor> @{exec.machine}</Text> : null}
           </Box>
           <Box marginLeft={2}>
-            <Text dimColor>
-              {exec.durationMs ? `${(exec.durationMs / 1000).toFixed(1)}s` : ''}
-              {exec.cost != null ? ` | $${typeof exec.cost === 'number' ? exec.cost.toFixed(4) : exec.cost}` : ''}
-              {exec.finishedAt ? ` | ${new Date(exec.finishedAt).toLocaleString()}` : ''}
-            </Text>
+            <Text dimColor>{execDetailLine(exec)}</Text>
           </Box>
           {notFoundMsg?.index === i ? (
             <Box marginLeft={2}>
@@ -119,7 +126,9 @@ export function DashboardExecutionsTab({ data, mutate, active = true }: Dashboar
             </Box>
           ) : null}
         </Box>
-      ))}
+        );
+      })}
+      {hiddenBelow > 0 ? <Text dimColor>↓ {hiddenBelow} more below</Text> : null}
       {showConfirm && focusedExec ? (
         <ConfirmModal
           title="Cancel execution?"
@@ -130,6 +139,16 @@ export function DashboardExecutionsTab({ data, mutate, active = true }: Dashboar
       ) : null}
     </Box>
   );
+}
+
+/** Compose the "45.2s | $0.1234 | <time>" detail line, omitting any missing field so a
+ *  zero/absent duration no longer renders a dangling leading " | ". */
+function execDetailLine(exec: any): string {
+  const parts: string[] = [];
+  if (exec.durationMs) parts.push(`${(exec.durationMs / 1000).toFixed(1)}s`);
+  if (exec.cost != null) parts.push(`$${typeof exec.cost === 'number' ? exec.cost.toFixed(4) : exec.cost}`);
+  if (exec.finishedAt) parts.push(new Date(exec.finishedAt).toLocaleString());
+  return parts.join(' | ');
 }
 
 function ExecStatusIcon({ status }: { status: string }): React.JSX.Element {
