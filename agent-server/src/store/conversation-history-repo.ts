@@ -1,22 +1,27 @@
-// input:  conversation-history.json, sessionId, message events (user / assistant / tool)
+// input:  store/conversation-history/<sessionId>.jsonl, sessionId, message events
 // output: ConversationHistoryRepo — Cortex's own backend-independent conversation history
-// pos:    Keyed by sessionId (persistent across reconnects, unlike the per-channel
-//         conversation-ledger). Records the FULL conversation — user inputs, every
-//         assistant message, and every tool call — as the canonical display source for
-//         the TUI (and any future replay consumer). Backend-agnostic: fed from the
-//         orchestration layer's unified callbacks, identical for Claude / Codex / PI.
+// pos:    One append-only JSONL file PER SESSION under a directory (keyed by sessionId,
+//         persistent across reconnects). Records the FULL conversation — user inputs, every
+//         assistant message, every tool call — as the canonical display source for the TUI.
+//         Backend-agnostic: fed from the orchestration layer's unified callbacks.
+//
+//         Why per-session JSONL (not one big JSON file): writes are pure O(1) appends — a
+//         single line per event, no read-modify-rewrite of the whole store. Turn grouping
+//         and streaming-growth dedup are computed at READ time, so the write path never has
+//         to inspect prior state. Scales to thousands of sessions / long histories.
 // >>> If I am updated, update my header comment and the parent folder's CORTEX.md <<<
 
 import * as path from 'path';
-import { JsonRepository } from '@core/json-repository.js';
+import { promises as fs } from 'fs';
 import { STORE_DIR } from '@core/paths.js';
 
-const HISTORY_FILE = path.join(STORE_DIR, 'conversation-history.json');
+const HISTORY_DIR = path.join(STORE_DIR, 'conversation-history');
 
 // --- Types ---
 
 export type HistoryEventType = 'user' | 'assistant' | 'tool';
 
+/** A resolved history event (turnIndex derived at read time). */
 export interface HistoryEvent {
   type: HistoryEventType;
   /** user / assistant message text (omitted for tool events). */
@@ -30,128 +35,125 @@ export interface HistoryEvent {
   turnIndex: number;
 }
 
-export interface SessionHistory {
-  sessionId: string;
-  sessionName: string | null;
-  projectId: string | null;
-  backend: string;
-  events: HistoryEvent[];
-  updatedAt: string;
+/** Raw line as persisted (no turnIndex — derived on read). */
+interface RawEvent {
+  type: HistoryEventType;
+  text?: string;
+  toolName?: string;
+  toolInput?: string;
+  ts: string;
 }
 
-export type HistoryData = Record<string, SessionHistory>;
-
-interface AppendMeta {
-  sessionName?: string | null;
-  projectId?: string | null;
-  backend?: string | null;
+export interface SessionHistory {
+  sessionId: string;
+  events: HistoryEvent[];
 }
 
 function nowIso(): string {
   return new Date().toISOString();
 }
 
-function ensure(data: HistoryData, sessionId: string, meta: AppendMeta): SessionHistory {
-  let h = data[sessionId];
-  if (!h) {
-    h = {
-      sessionId,
-      sessionName: meta.sessionName ?? null,
-      projectId: meta.projectId ?? null,
-      backend: meta.backend ?? 'unknown',
-      events: [],
-      updatedAt: nowIso(),
-    };
-    data[sessionId] = h;
-  }
-  // Late-arriving metadata fills in / refreshes.
-  if (meta.sessionName) h.sessionName = meta.sessionName;
-  if (meta.projectId) h.projectId = meta.projectId;
-  if (meta.backend) h.backend = meta.backend;
-  return h;
-}
-
-/** Current (most recent) turn index, or -1 when empty. */
-function currentTurn(h: SessionHistory): number {
-  return h.events.length === 0 ? -1 : h.events[h.events.length - 1].turnIndex;
-}
-
 function isPrefixRelated(a: string, b: string): boolean {
   return a.startsWith(b) || b.startsWith(a);
+}
+
+/** UUID sessionIds are filename-safe; sanitize defensively all the same. */
+function sessionFile(sessionId: string): string {
+  const safe = sessionId.replace(/[^A-Za-z0-9._-]/g, '_');
+  return path.join(HISTORY_DIR, `${safe}.jsonl`);
 }
 
 // --- Repo ---
 
 export class ConversationHistoryRepo {
-  private repo = new JsonRepository<HistoryData>({
-    filePath: HISTORY_FILE,
-    defaultValue: () => ({}),
-  });
+  /** Per-session serial write chain — keeps concurrent appends from interleaving a line. */
+  private writeChains = new Map<string, Promise<void>>();
+  private dirReady = false;
 
-  async getHistory(sessionId: string): Promise<SessionHistory | null> {
-    const data = await this.repo.read();
-    return data[sessionId] ?? null;
+  private async ensureDir(): Promise<void> {
+    if (this.dirReady) return;
+    await fs.mkdir(HISTORY_DIR, { recursive: true });
+    this.dirReady = true;
   }
 
-  /** Append a user message — starts a new turn. */
-  async appendUser(sessionId: string, opts: AppendMeta & { text: string }): Promise<void> {
-    await this.repo.mutate(data => {
-      const h = ensure(data, sessionId, opts);
-      const turnIndex = currentTurn(h) + 1;
-      h.events.push({ type: 'user', text: opts.text, ts: nowIso(), turnIndex });
-      h.updatedAt = nowIso();
-      return { next: data, result: undefined };
-    });
+  private append(sessionId: string, ev: RawEvent): Promise<void> {
+    const prev = this.writeChains.get(sessionId) ?? Promise.resolve();
+    const next = prev
+      .catch(() => {})
+      .then(async () => {
+        await this.ensureDir();
+        await fs.appendFile(sessionFile(sessionId), JSON.stringify(ev) + '\n', 'utf8');
+      });
+    this.writeChains.set(sessionId, next);
+    return next;
+  }
+
+  /** Append a user message — starts a new turn (turn boundaries are derived on read). */
+  appendUser(sessionId: string, opts: { text: string }): Promise<void> {
+    return this.append(sessionId, { type: 'user', text: opts.text, ts: nowIso() });
+  }
+
+  /** Append an assistant message. Streaming partials are collapsed at read time. */
+  appendAssistant(sessionId: string, opts: { text: string }): Promise<void> {
+    return this.append(sessionId, { type: 'assistant', text: opts.text, ts: nowIso() });
+  }
+
+  /** Append a tool call. */
+  appendTool(sessionId: string, opts: { toolName: string; toolInput?: string }): Promise<void> {
+    return this.append(sessionId, { type: 'tool', toolName: opts.toolName, toolInput: opts.toolInput ?? '', ts: nowIso() });
   }
 
   /**
-   * Append an assistant message under the current turn. Streaming backends may invoke
-   * this repeatedly with a GROWING string for the same message — when the last event is
-   * an assistant message in the same turn and one text is a prefix of the other, replace
-   * it with the longer one instead of duplicating.
+   * Read a session's history. Derives turnIndex (each `user` event opens a new turn) and
+   * collapses consecutive same-turn assistant events whose texts are prefix-related (a
+   * streaming backend that emitted the message as it grew). Returns null when absent/empty.
    */
-  async appendAssistant(sessionId: string, opts: AppendMeta & { text: string }): Promise<void> {
-    await this.repo.mutate(data => {
-      const h = ensure(data, sessionId, opts);
-      const turnIndex = Math.max(0, currentTurn(h));
-      const last = h.events[h.events.length - 1];
-      if (last && last.type === 'assistant' && last.turnIndex === turnIndex && typeof last.text === 'string' && isPrefixRelated(last.text, opts.text)) {
-        last.text = opts.text.length >= last.text.length ? opts.text : last.text;
-        last.ts = nowIso();
-      } else {
-        h.events.push({ type: 'assistant', text: opts.text, ts: nowIso(), turnIndex });
-      }
-      h.updatedAt = nowIso();
-      return { next: data, result: undefined };
-    });
-  }
+  async getHistory(sessionId: string): Promise<SessionHistory | null> {
+    let raw: string;
+    try {
+      raw = await fs.readFile(sessionFile(sessionId), 'utf8');
+    } catch {
+      return null;
+    }
 
-  /** Append a tool call under the current turn. */
-  async appendTool(sessionId: string, opts: AppendMeta & { toolName: string; toolInput?: string }): Promise<void> {
-    await this.repo.mutate(data => {
-      const h = ensure(data, sessionId, opts);
-      const turnIndex = Math.max(0, currentTurn(h));
-      h.events.push({ type: 'tool', toolName: opts.toolName, toolInput: opts.toolInput ?? '', ts: nowIso(), turnIndex });
-      h.updatedAt = nowIso();
-      return { next: data, result: undefined };
-    });
+    const events: HistoryEvent[] = [];
+    let turnIndex = -1;
+    for (const line of raw.split('\n')) {
+      if (!line.trim()) continue;
+      let ev: RawEvent;
+      try { ev = JSON.parse(line) as RawEvent; } catch { continue; }
+
+      if (ev.type === 'user') {
+        turnIndex++;
+        events.push({ type: 'user', text: ev.text ?? '', ts: ev.ts, turnIndex });
+      } else if (ev.type === 'assistant') {
+        const tIdx = Math.max(0, turnIndex);
+        const last = events[events.length - 1];
+        const text = ev.text ?? '';
+        if (last && last.type === 'assistant' && last.turnIndex === tIdx && typeof last.text === 'string' && isPrefixRelated(last.text, text)) {
+          if (text.length >= last.text.length) { last.text = text; last.ts = ev.ts; }
+        } else {
+          events.push({ type: 'assistant', text, ts: ev.ts, turnIndex: tIdx });
+        }
+      } else if (ev.type === 'tool') {
+        events.push({ type: 'tool', toolName: ev.toolName ?? '', toolInput: ev.toolInput ?? '', ts: ev.ts, turnIndex: Math.max(0, turnIndex) });
+      }
+    }
+
+    if (events.length === 0) return null;
+    return { sessionId, events };
   }
 
   async clear(sessionId: string): Promise<void> {
-    await this.repo.mutate(data => {
-      delete data[sessionId];
-      return { next: data, result: undefined };
-    });
+    // Wait for any in-flight append to this session, then remove the file.
+    await (this.writeChains.get(sessionId) ?? Promise.resolve()).catch(() => {});
+    this.writeChains.delete(sessionId);
+    try { await fs.unlink(sessionFile(sessionId)); } catch { /* already gone */ }
   }
 
-  /** Drop the in-memory cache so the next read() fetches from disk. For testing. */
-  invalidate(): void {
-    this.repo.invalidate();
-  }
-
-  /** Wait for any in-flight mutate() to complete. For graceful SIGTERM drain. */
-  flush(): Promise<void> {
-    return this.repo.flush();
+  /** Wait for all in-flight appends to land (graceful SIGTERM drain). */
+  async flush(): Promise<void> {
+    await Promise.allSettled([...this.writeChains.values()]);
   }
 }
 

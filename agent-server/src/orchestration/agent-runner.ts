@@ -129,8 +129,7 @@ export class AgentRunner {
     // Backend-independent conversation history (keyed by sessionId, the TUI display source).
     // Record the user message now; assistant messages + tool calls are appended via the
     // callbacks below as they stream. Only when we have a sessionId to key by.
-    const histMeta = { sessionName, backend: resolveBackendForChannel(channel) };
-    if (sessionId) recordHistory(conversationHistory.appendUser(sessionId, { ...histMeta, text: userMessage || '' }));
+    if (sessionId) recordHistory(conversationHistory.appendUser(sessionId, { text: userMessage || '' }));
     const onMessagePosted = (ref: MessageRef) => void conversationLedger.addResponseTs(channel, messageTs, ref.messageId).catch((e) => log.error(e));
     // 2. Build agent callbacks (streaming, fallback, progress)
     const callbacks = buildAgentCallbacks(adapter, dest, statusMsg, threadAnchorId, startTime, sessionName, sessionId, onMessagePosted);
@@ -162,13 +161,13 @@ export class AgentRunner {
         },
         onAssistantMessage: (text: string) => {
           callbacks.onAssistantMsg(text);
-          if (sessionId && text) recordHistory(conversationHistory.appendAssistant(sessionId, { ...histMeta, text }));
+          if (sessionId && text) recordHistory(conversationHistory.appendAssistant(sessionId, { text }));
         },
         onProgress: callbacks.onProgress,
         onFallback: callbacks.onFallback,
         onToolUse: composeToolUse(
           composeToolUse(callbacks.onToolUse, interactiveCallbacks.onToolUse),
-          sessionId ? (name: string, input: any) => recordHistory(conversationHistory.appendTool(sessionId, { ...histMeta, toolName: name, toolInput: summarizeToolInputForHistory(input) })) : null,
+          sessionId ? (name: string, input: any) => recordHistory(conversationHistory.appendTool(sessionId, { toolName: name, toolInput: summarizeToolInputForHistory(input) })) : null,
         ),
         onPlanWritten: interactiveCallbacks.onPlanWritten,
         onAskUserQuestion: interactiveCallbacks.onAskUserQuestion,

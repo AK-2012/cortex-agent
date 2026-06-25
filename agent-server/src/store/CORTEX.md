@@ -11,7 +11,7 @@ task-repo.ts responsibilities are limited to I/O + lock + git sync, does not car
 | `thread-repo.ts` | persistence | Thread state persistence |
 | `session-repo.ts` | persistence | Session persistence |
 | `conversation-ledger-repo.ts` | persistence | Conversation ledger persistence (per-channel turn→message-ts mapping for edit/rollback) |
-| `conversation-history-repo.ts` | persistence | Cortex's backend-independent conversation history, keyed by **sessionId** (persistent across reconnects). Records the full event stream — user inputs, every assistant message, every tool call — via `appendUser`/`appendAssistant`(streaming-growth dedup)/`appendTool`. The TUI transcript-replay source. |
+| `conversation-history-repo.ts` | persistence | Cortex's backend-independent conversation history — one **append-only JSONL file per session** under `store/conversation-history/<sessionId>.jsonl` (keyed by sessionId, persistent across reconnects). Writes are pure O(1) appends (`appendUser`/`appendAssistant`/`appendTool`, serialized per session); turn grouping + streaming-growth dedup are derived at READ time (`getHistory`). The full event stream (user inputs, every assistant message, every tool call) and the TUI transcript-replay source. Does NOT use JsonRepository/atomicWrite. |
 | `session-registry-repo.ts` | persistence | Session registry persistence |
 | `execution-repo.ts` | persistence | Execution registry persistence |
 | `project-dir-repo.ts` | persistence | Project → external code directory mapping |
