@@ -3,6 +3,7 @@
 // output: M5 Ink TUI client entry point
 // pos:    Entry point for cortex-tui
 
+import { writeSync } from 'node:fs';
 import React from 'react';
 import { render } from 'ink';
 import { App } from './App.js';
@@ -42,20 +43,49 @@ function parseArgs(argv: string[]): TuiArgs {
 
 // ── Main ──
 
-/** Enter the terminal's alternate-screen buffer so the TUI fills the screen (like vim/htop)
- *  and leaves the user's scrollback untouched on exit. Restored once on any exit path. */
+// ── Alternate-screen (fullscreen) lifecycle ──
+// The TUI runs in the terminal's alternate-screen buffer so it fills the screen (like
+// vim/htop) and leaves the user's scrollback untouched. It MUST be restored on every exit
+// path or the user is dropped back to a blank/garbled terminal. `leaveFullscreen` is
+// idempotent and writes synchronously (TTY writes are blocking on Linux, so they flush
+// before the process dies).
+
+let altScreenActive = false;
+// Set once Ink has mounted; lets the signal handlers tear Ink down BEFORE leaving the
+// alt-screen. Without unmounting first, Ink's own exit cleanup repaints its last frame
+// onto the main buffer after the buffer switch, stranding the TUI on screen.
+let inkUnmount: (() => void) | null = null;
+
+function leaveFullscreen(): void {
+  if (!altScreenActive) return;
+  altScreenActive = false;
+  // Leave alt-screen, show the cursor again, reset attributes. Use writeSync to fd 1:
+  // a buffered process.stdout.write() inside an exit/signal handler is dropped before the
+  // process dies (the enter sequence flushes during the run, but the leave never did),
+  // leaving the user stranded on the alt buffer. writeSync bypasses the stream buffer.
+  try { writeSync(1, '\x1b[?1049l\x1b[?25h\x1b[0m'); } catch { /* best effort */ }
+}
+
+/** Enter the alternate-screen buffer and register restore on EVERY exit path. */
 function enterFullscreen(): void {
   if (!process.stdout.isTTY) return;
-  process.stdout.write('\x1b[?1049h\x1b[2J\x1b[H'); // alt-screen + clear + cursor home
-  let restored = false;
-  const restore = () => {
-    if (restored) return;
-    restored = true;
-    try { process.stdout.write('\x1b[?1049l'); } catch { /* best effort */ }
-  };
-  process.on('exit', restore);
-  process.on('SIGINT', () => { restore(); process.exit(0); });
-  process.on('SIGTERM', () => { restore(); process.exit(0); });
+  // writeSync (unbuffered) so the switch lands on the TTY BEFORE Ink's first render — a
+  // buffered process.stdout.write() can flush after Ink has already painted, leaving Ink
+  // on the MAIN buffer (which then survives the leave, stranding the TUI on screen).
+  writeSync(1, '\x1b[?1049h\x1b[2J\x1b[H'); // alt-screen + clear + cursor home
+  altScreenActive = true;
+  // Synchronous safety net: runs on normal exit AND on process.exit() from anywhere.
+  process.on('exit', leaveFullscreen);
+  // Signals that would otherwise kill us while the alt-screen is still active. SIGHUP is
+  // critical: it fires when the terminal/tmux pane closes, and without handling it the
+  // process was being orphaned with the alt-screen never restored.
+  for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP'] as const) {
+    process.on(sig, () => {
+      try { inkUnmount?.(); } catch { /* best effort */ }
+      leaveFullscreen();
+      process.exit(0);
+    });
+  }
 }
 
 async function main(): Promise<void> {
@@ -94,6 +124,10 @@ async function main(): Promise<void> {
         doConnect();
       },
       onDisconnect: () => {
+        // Tear down Ink (restores raw mode / cursor) then leave the alt-screen before
+        // exiting, so the user lands back on a clean main screen.
+        try { unmount?.(); } catch { /* best effort */ }
+        leaveFullscreen();
         process.exit(0);
       },
       onSendCancel: () => {
@@ -136,6 +170,10 @@ async function main(): Promise<void> {
       const instance = render(app, { exitOnCtrlC: false });
       rerender = instance.rerender;
       unmount = instance.unmount;
+      inkUnmount = instance.unmount; // module-level ref for the signal handlers
+      // Ink (via its `patchConsole`/exit handling) also restores the terminal; ensure our
+      // alt-screen leave still runs after Ink fully exits.
+      instance.waitUntilExit().then(leaveFullscreen).catch(() => {});
     }
   };
 
@@ -251,6 +289,8 @@ async function main(): Promise<void> {
 }
 
 main().catch((e) => {
+  try { inkUnmount?.(); } catch { /* best effort */ }
+  leaveFullscreen(); // restore the main screen so the error is visible
   console.error('Fatal error:', e);
   process.exit(1);
 });
