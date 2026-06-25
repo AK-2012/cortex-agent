@@ -253,7 +253,7 @@ Cortex 运行 `nvidia-smi` 并打印数量。无需输入。如果没有 NVIDIA 
 
 - **macOS** — 在 `~/Library/LaunchAgents/com.cortex.daemon.plist` 创建 `launchd` plist。守护进程在登录时自动启动。
 - **Linux** — 创建 `systemd --user` 单元（无需 `sudo`）。守护进程在登录时自动启动。
-- **Windows** — 不支持。需手动运行 `cortex start`。
+- **Windows** — 不支持。需手动运行 `cortex daemon`。
 
 ### 2.10 自动检测后端用于网关/配置？
 
@@ -266,7 +266,7 @@ Cortex 运行 `nvidia-smi` 并打印数量。无需输入。如果没有 NVIDIA 
 向导完成后你会看到：
 
 ```
-Cortex initialized at /home/you/.cortex. Run `cortex start` to launch.
+Cortex initialized at /home/you/.cortex. Run `cortex daemon` to launch.
 ```
 
 ## `cortex init` 创建了什么
@@ -315,9 +315,9 @@ Cortex initialized at /home/you/.cortex. Run `cortex start` to launch.
 ## 第三步 — 启动服务器
 
 ```bash
-cortex start          # 前台运行，Ctrl-C 停止
-# 或
 cortex daemon         # 受监督运行，崩溃重启 + 热重载
+# 或
+cortex start          # 前台运行，Ctrl-C 停止
 ```
 
 如果你在第二步 2.9 中选择了注册系统服务，守护进程已在运行，可以跳过此步骤。通过以下命令检查：

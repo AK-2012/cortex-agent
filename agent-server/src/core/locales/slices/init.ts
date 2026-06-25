@@ -187,7 +187,7 @@ export const initEn = {
   'init.gatewayProfile.skipped': 'Skipped. Run `cortex setup-gateway` later to auto-configure.',
 
   // ── Outro ──
-  'init.outro': 'Cortex initialized at ${dataDir}. Run `cortex start` to launch.',
+  'init.outro': 'Cortex initialized at ${dataDir}. Run `cortex daemon` to launch.',
 
   // ── Git ──
   'init.git.required': 'Git is required but was not found on your system.',
@@ -391,7 +391,7 @@ export const initZh: Record<keyof typeof initEn, string> = {
   'init.gatewayProfile.skipped': '已跳过。稍后运行 `cortex setup-gateway` 自动配置。',
 
   // ── Outro ──
-  'init.outro': 'Cortex 已在 ${dataDir} 初始化。运行 `cortex start` 启动。',
+  'init.outro': 'Cortex 已在 ${dataDir} 初始化。运行 `cortex daemon` 启动。',
 
   // ── Git ──
   'init.git.required': '需要 Git，但在你的系统上未找到。',

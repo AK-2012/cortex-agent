@@ -46,7 +46,7 @@ npm install -g @cortex-agent/server
 cortex init
 
 # 启动
-cortex start
+cortex daemon
 ```
 
 一旦运行，从 Slack 向 Cortex 发送消息——它会读取你的项目上下文、规划工作并自动调度智能体。

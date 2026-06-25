@@ -26,7 +26,7 @@ Cortex is designed around four failure modes of long agent runs:
 ```bash
 npm install -g @cortex-agent/server
 cortex init
-cortex start
+cortex daemon
 ```
 
 See [Quickstart](quickstart.md) for detailed setup instructions, or browse the navigation for full documentation.

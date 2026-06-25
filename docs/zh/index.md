@@ -26,7 +26,7 @@ Cortex 围绕长智能体运行的四种失败模式而设计：
 ```bash
 npm install -g @cortex-agent/server
 cortex init
-cortex start
+cortex daemon
 ```
 
 详细设置说明请参见 [快速开始](quickstart.md)，或浏览导航栏获取完整文档。

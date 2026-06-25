@@ -328,7 +328,7 @@ displayed).
   automatically on login.
 - **Linux** — creates a `systemd --user` unit (no `sudo` needed). The
   daemon starts automatically on login.
-- **Windows** — not supported. Start manually with `cortex start`.
+- **Windows** — not supported. Start manually with `cortex daemon`.
 
 ### 2.10 Auto-detect backends for gateway/profiles?
 
@@ -346,7 +346,7 @@ You can also run this later with `cortex setup-gateway`.
 When the wizard finishes you will see:
 
 ```
-Cortex initialized at /home/you/.cortex. Run `cortex start` to launch.
+Cortex initialized at /home/you/.cortex. Run `cortex daemon` to launch.
 ```
 
 ## What `cortex init` created
@@ -398,9 +398,9 @@ your `.env`, profiles, and content files.
 ## Step 3 — Start the server
 
 ```bash
-cortex start          # foreground, Ctrl-C to stop
-# or
 cortex daemon         # supervised, restarts on crash + hot-reload
+# or
+cortex start          # foreground, Ctrl-C to stop
 ```
 
 If you chose to register a system service in Step 2.9, the daemon is
