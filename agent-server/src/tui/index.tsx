@@ -163,15 +163,13 @@ async function main(): Promise<void> {
               scope: 'sessions.list',
               params: { resumable: true },
             } as any);
-          } else {
-            // Fresh session
-            client.send({
-              type: 'session.switch',
-              id: 'sess-init',
-              projectId: project,
-              sessionId: null,
-            } as any);
           }
+          // else: do NOT send session.switch here. The server's handshake already resolved a
+          // session — resuming the one carried in hello.resume (set from the last session.switched
+          // on reconnect) or minting a fresh one — and emitted its session.switched. Sending
+          // session.switch{ sessionId: null } would discard that and create a SECOND fresh
+          // session on every (re)connect, which is why the header's session name drifted
+          // (cortex-XXXXXX changing without the user switching). Just await session.switched.
 
           connectionState = 'connected';
           doRender();

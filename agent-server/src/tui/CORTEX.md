@@ -4,7 +4,7 @@ M5 Ink TUI client — chat+dashboard terminal client speaking M4 protocol. Zero 
 
 | File | Role | Function |
 |---|---|---|
-| `index.tsx` | entry | Argv parse → connect → render `<App>`. Handles --resume/--project/--port. Sends handshake.hello on connect. Interactive session picker for --resume. |
+| `index.tsx` | entry | Argv parse → connect → render `<App>`. Handles --resume/--project/--port. Sends handshake.hello on connect; relies on the server handshake's `session.switched` for the session (does NOT send a redundant session.switch{null}, which used to mint a second fresh session and drift the session name). Interactive session picker for --resume. |
 | `App.tsx` | layout | Top-level layout with Header + Transcript + SidePanel + InputBox + StatusLine + modals. Wires hooks, frame routing. Computes `focusZone` (modal/dashboard/input) for keyboard arbitration; `awaitingResponse` blocks send until an agent response frame arrives (then clears queuedCount). |
 | `logic.ts` | pure logic | Testable helpers: `computeFocusZone`, `isAgentResponseFrame`, `collectStreamText`, `computeVisibleWindow`, `computeFocusWindow` (focus-centered viewport so long dashboard lists can't overflow the terminal). Imported by App/Transcript/MessageRow/Dashboard tabs. |
 | `ws-client.ts` | ws class | Typed WS client wrapping M4 protocol. Exponential backoff: 250/500/1k/2k/4k/8k/30s cap. Retry sends resume. Settles to 'disconnected' on backoff-cap so the UI shows the retry hint. |
@@ -23,7 +23,7 @@ M5 Ink TUI client — chat+dashboard terminal client speaking M4 protocol. Zero 
 | `components/DashboardTasksTab.tsx` | tasks tab | Task list with status/priority/text/claimed. ↑/↓ focus, [c] claim, [u] unclaim, [d] done (ConfirmModal), [b] block (ConfirmModal+reason), [B] unblock → ui.mutate tasks.*. 5s auto-clear error state. |
 | `components/DashboardSchedulesTab.tsx` | schedules tab | Schedule list with type/nextRun/paused. ↑/↓ focus, [p] pause, [r] resume, [x] remove (ConfirmModal) → ui.mutate schedules.*. |
 | `components/DashboardExecutionsTab.tsx` | executions tab | Execution list with status/type/machine/duration/cost. ↑/↓ focus, [c] cancel (ConfirmModal) → ui.mutate executions.cancel. 5s auto-clear 'not found' feedback. |
-| `components/DashboardCostTab.tsx` | cost tab | Cost summary: total/monthly/daily by model, budget remaining. |
+| `components/DashboardCostTab.tsx` | cost tab | Cost summary from the `CostSummary` shape: total / this-month / this-week / today USD + per-mode totals (reads real fields `total`/`month`/`week`/`today`/`byMode`, not the old `totalCost`/`models`). |
 | `components/Notifications.tsx` | notifications | Corner badge (`🔔 N`) + Enter-to-open modal listing active notifications. ↑/↓ navigate, Enter detail, Esc close. |
 | `components/ProjectSwitcher.tsx` | project switcher | Ctrl+P modal: list projects via ui.query 'projects.list', select to send session.switch. |
 | `components/SessionPicker.tsx` | session picker | --resume mode: list resumable sessions, ↑/↓/Enter to select. |
