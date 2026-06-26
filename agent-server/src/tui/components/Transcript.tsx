@@ -163,17 +163,21 @@ export const Transcript = forwardRef<TranscriptHandle, TranscriptProps>(
           // Check if this line is (partially) within the selection range and render the
           // selected portion with a blue background highlight. Columns are DISPLAY columns (from
           // the mouse), so split by display width — slicing by char index drifts on CJK text.
+          // Markdown lines stay rendered through InlineMarkdown so bold/italic/code keep their
+          // styled form (no raw **markers** exposed); the blue background is layered via a
+          // wrapping <Text backgroundColor>.
           if (selNorm && i >= selNorm.startLine && i <= selNorm.endLine) {
             const lineText = ln.text.length > 0 ? ln.text : ' ';
             const selStart = i === selNorm.startLine ? selNorm.startCol : 0;
             const selEnd = i === selNorm.endLine ? selNorm.endCol : Number.MAX_SAFE_INTEGER;
             const { before, selected, after } = splitByDisplayCols(lineText, selStart, selEnd);
             if (selected.length > 0) {
+              const Seg = ln.markdown ? InlineMarkdown : ({ text: t, dimColor: d }: { text: string; dimColor?: boolean }) => <Text dimColor={d}>{t}</Text>;
               return (
-                <Text key={i} dimColor={ln.dim}>
-                  {before}
-                  <Text backgroundColor="blue" color="white">{selected}</Text>
-                  {after}
+                <Text key={i}>
+                  {before.length > 0 ? <Seg text={before} dimColor={ln.dim} /> : null}
+                  <Text backgroundColor="blue"><Seg text={selected} dimColor={ln.dim} /></Text>
+                  {after.length > 0 ? <Seg text={after} dimColor={ln.dim} /> : null}
                 </Text>
               );
             }
