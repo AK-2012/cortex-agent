@@ -54,7 +54,7 @@ export function StatusLine({
   }
 
   return (
-    <Box justifyContent="space-between" width="100%">
+    <Box justifyContent="space-between" width="100%" flexShrink={0}>
       <Box>
         {status ? <Text color={color}>{status}{' — '}</Text> : null}
         {dashboardActive

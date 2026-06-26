@@ -475,9 +475,10 @@ export function App({
     unregisterSubscription(queryId);
   }, [unregisterSubscription]);
 
-  // Compute the actual reserved rows for the bottom UI so Transcript sizes its viewport
-  // exactly. Base = marginTop(1) + border(3) + StatusLine(1) = 5, plus optional lines.
-  const reservedBottomRows = 5 + (turnStatus ? 1 : 0) + (awaitingResponse && focusZone === 'input' ? 1 : 0);
+  // Compute the actual reserved rows for the bottom UI so Transcript sizes its viewport exactly.
+  // Base = marginTop(1) + border(3) + StatusLine(1) = 5, plus the optional line above the input
+  // (toast OR turn-status — InputBox renders one or the other) and the awaiting-response hint.
+  const reservedBottomRows = 5 + ((toast || turnStatus) ? 1 : 0) + (awaitingResponse && focusZone === 'input' ? 1 : 0);
 
   // If resume mode with sessions to pick, show picker instead of main layout
   if (resumableSessions && resumableSessions.length > 0 && onResumeSelect && onResumeCancel) {

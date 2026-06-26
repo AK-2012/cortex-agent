@@ -249,7 +249,12 @@ export function InputBox({ onSubmit, onCommand, commands = SLASH_COMMANDS, await
   }, { isActive: focus });
 
   return (
-    <Box flexDirection="column" marginTop={1}>
+    // flexShrink={0}: the input must NEVER be squeezed by the transcript. If the transcript's line
+    // slice momentarily exceeds its flex height (a transition where reservedRows lags the actual
+    // bottom height), Ink would otherwise shrink the input's content box to 0 — leaving the two
+    // borders touching with "Type a message..." overrunning the bottom border. Pinning the input's
+    // size forces the (flex-end) transcript to absorb the overflow by clipping its top instead.
+    <Box flexDirection="column" marginTop={1} flexShrink={0}>
       {menuOpen ? <SlashMenu commands={matches} selectedIndex={safeSelected} /> : null}
       {/* Toast (e.g. "Copied!") takes precedence over the turn-status line. */}
       {toast ? <Text color="cyan" dimColor>{toast}</Text>
