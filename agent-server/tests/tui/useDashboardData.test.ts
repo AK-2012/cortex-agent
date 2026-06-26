@@ -8,6 +8,7 @@ import {
   _handleQueryResult, _handleEvent,
   _createPendingQuery, _clearPendingQuery,
   EMPTY_DASH_STATE, TAB_SCOPES,
+  type TabName,
 } from '../../src/tui/hooks/useDashboardData.js';
 import type { UiQueryResult, UiEvent } from '../../src/platform/tui/protocol.js';
 
@@ -50,7 +51,7 @@ test('_handleQueryResult stores data for a tab', () => {
   );
 
   assert.equal(state.tabs.threads.data.length, 1);
-  assert.equal(state.tabs.threads.data[0].id, 't1');
+  assert.equal((state.tabs.threads.data[0] as { id: string }).id, 't1');
   assert.equal(state.tabs.threads.loading, false);
   assert.equal(state.tabs.threads.error, null);
   assert.ok(typeof state.tabs.threads.lastUpdated === 'number');
@@ -80,7 +81,7 @@ test('_handleQueryResult with non-array (object) data wraps in array', () => {
 
   assert.equal(Array.isArray(state.tabs.cost.data), true);
   assert.equal(state.tabs.cost.data.length, 1);
-  assert.equal(state.tabs.cost.data[0].totalCost, 42.5);
+  assert.equal((state.tabs.cost.data[0] as { totalCost: number }).totalCost, 42.5);
   assert.equal(state.tabs.cost.loading, false);
   assert.equal(state.tabs.cost.error, null);
 });
@@ -111,7 +112,7 @@ test('_handleQueryResult with unknown id is no-op', () => {
 
 test('_handleEvent refreshes tab on matching event', () => {
   // Simulate a tab having an active subscription
-  const activeSubs = new Map<string, string>();
+  const activeSubs = new Map<string, TabName>();
   activeSubs.set('dash-threads', 'threads');
 
   const state = _handleEvent(
@@ -127,7 +128,7 @@ test('_handleEvent refreshes tab on matching event', () => {
 });
 
 test('_handleEvent with unknown subscription id is no-op', () => {
-  const activeSubs = new Map<string, string>();
+  const activeSubs = new Map<string, TabName>();
   activeSubs.set('dash-threads', 'threads');
 
   const state = _handleEvent(
