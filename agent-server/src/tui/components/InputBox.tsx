@@ -8,13 +8,13 @@
 // ink-text-input inserts the bare character for unhandled Ctrl combos, which left a
 // stray 'd' in the box every time the dashboard was toggled.
 
-import React, { useCallback, useState } from 'react';
-import { Box, Text, useInput } from 'ink';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { Box, Text, useInput, useStdin } from 'ink';
 import { SlashMenu } from './SlashMenu.js';
 import { SLASH_COMMANDS, parseSlashInput, filterSlashCommands, findSlashCommand, type SlashCommand } from '../slash-commands.js';
 import {
   historyPrev, historyNext, pushHistory, isMouseSequence,
-  cursorToRowCol, moveCursorVertical, sanitizePastedText,
+  cursorToRowCol, moveCursorVertical, sanitizePastedText, classifyDeleteChunk,
   type InputHistoryState,
 } from '../logic.js';
 
@@ -103,6 +103,41 @@ export function InputBox({ onSubmit, onCommand, commands = SLASH_COMMANDS, await
   // Cursor position as (row, col) for the multi-line render below.
   const { row: cursorRow, col: cursorCol } = cursorToRowCol(value, cursor);
 
+  // ── Raw stdin handler for Backspace vs forward-Delete ──
+  // Ink can't distinguish them in useInput (both are `key.delete`), so we read the raw chunk from
+  // Ink's internal input emitter (the same feed useMouseScroll uses) and classify it. A ref keeps
+  // the latest value/cursor/focus so the (once-subscribed) listener never goes stale.
+  const editRef = useRef({ value, cursor, focus });
+  editRef.current = { value, cursor, focus };
+  const { internal_eventEmitter } = useStdin() as unknown as { internal_eventEmitter?: NodeJS.EventEmitter };
+  useEffect(() => {
+    const emitter = internal_eventEmitter;
+    if (!emitter) return;
+    const onChunk = (chunk: Buffer | string) => {
+      const s = typeof chunk === 'string' ? chunk : chunk.toString('utf8');
+      const kind = classifyDeleteChunk(s);
+      if (!kind) return;
+      const { value: v, cursor: c, focus: f } = editRef.current;
+      if (!f) return; // only edit when the input owns the keyboard
+      if (kind === 'backspace') {
+        if (c > 0) {
+          setValue(v.slice(0, c - 1) + v.slice(c));
+          setCursor(c - 1);
+          setSelectedIndex(0);
+          setHistState({ index: null, draft: '' });
+        }
+      } else { // forward-delete: remove the char AFTER the cursor, cursor stays put
+        if (c < v.length) {
+          setValue(v.slice(0, c) + v.slice(c + 1));
+          setSelectedIndex(0);
+          setHistState({ index: null, draft: '' });
+        }
+      }
+    };
+    emitter.on('input', onChunk);
+    return () => { emitter.removeListener('input', onChunk); };
+  }, [internal_eventEmitter]);
+
   useInput((input, key) => {
     // While the shortcuts overlay is shown, ANY key just dismisses it (no other action).
     if (showShortcuts) { onDismissShortcuts?.(); return; }
@@ -179,15 +214,11 @@ export function InputBox({ onSubmit, onCommand, commands = SLASH_COMMANDS, await
       setCursor(c => Math.min(value.length, c + 1));
       return;
     }
-    if (key.backspace || key.delete) {
-      if (cursor > 0) {
-        setValue(v => v.slice(0, cursor - 1) + v.slice(cursor));
-        setCursor(c => Math.max(0, c - 1));
-        setSelectedIndex(0);
-        setHistState({ index: null, draft: '' }); // editing detaches history navigation
-      }
-      return;
-    }
+    // NOTE: Backspace / forward-Delete are NOT handled here. Ink reports BOTH the Backspace key
+    // (\x7f) and the forward-Delete key (\x1b[3~) as `key.delete` with empty input, so they can't
+    // be told apart in useInput. They're handled from the raw stdin chunk instead (see the
+    // useEffect below), which can distinguish them via classifyDeleteChunk.
+    if (key.backspace || key.delete) return;
     // Drop mouse-tracking escape residue (e.g. "[<64;30;10M") that Ink forwards as text when
     // SGR mouse mode is on — it must never land in the message buffer.
     if (isMouseSequence(input)) return;

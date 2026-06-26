@@ -285,6 +285,20 @@ export function sanitizePastedText(s: string): string {
   return normalizeNewlines(t);
 }
 
+// ── Backspace vs forward-Delete classification ──
+// Ink's keypress parser maps BOTH the Backspace key (\x7f) and the forward-Delete key (\x1b[3~)
+// to `key.delete` with an empty `input`, so they're indistinguishable in useInput. The raw stdin
+// chunk is the only way to tell them apart — this classifier inspects it so the input box can
+// delete the char BEFORE the cursor (backspace) vs AFTER it (forward delete).
+export function classifyDeleteChunk(s: string): 'backspace' | 'forward-delete' | null {
+  // Forward Delete key: ESC[3~ (optionally with a modifier, e.g. ESC[3;5~ for Ctrl+Delete).
+  // eslint-disable-next-line no-control-regex
+  if (s === '\x1b[3~' || /^\x1b\[3;\d+~$/.test(s)) return 'forward-delete';
+  // Backspace key: DEL (\x7f), BS (\x08), or Alt+Backspace (ESC + DEL).
+  if (s === '\x7f' || s === '\x08' || s === '\x1b\x7f') return 'backspace';
+  return null;
+}
+
 /** Parse SGR mouse wheel events from a raw stdin chunk. 64=up, 65=down (low bit = direction). */
 export function parseWheelEvents(chunk: string): Array<'up' | 'down'> {
   const out: Array<'up' | 'down'> = [];

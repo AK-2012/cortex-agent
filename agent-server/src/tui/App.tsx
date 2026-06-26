@@ -113,11 +113,10 @@ export function App({
   // Bottom-line shortcuts overlay — '?' on an empty input shows it; any key dismisses it.
   const [showShortcuts, setShowShortcuts] = useState(false);
 
-  // Mouse capture (SGR tracking) state. Default OFF so native text selection AND right-click
-  // paste work out of the box (index.tsx no longer enables tracking at startup). Ctrl+T / `/mouse`
-  // turns it ON to scroll the transcript with the wheel, by writing the SGR enable/disable
-  // sequences directly to the TTY.
-  const [mouseCapture, setMouseCapture] = useState(false);
+  // Mouse capture (SGR tracking) state. Default ON so the wheel scrolls the transcript (enabled at
+  // startup in index.tsx). Ctrl+T / `/mouse` toggles it OFF — writing the SGR disable sequence —
+  // to free the mouse for native click-drag text selection + right-click paste (the wheel stops).
+  const [mouseCapture, setMouseCapture] = useState(true);
 
   // Project switcher state
   const [projects, setProjects] = useState<ProjectEntry[]>([]);

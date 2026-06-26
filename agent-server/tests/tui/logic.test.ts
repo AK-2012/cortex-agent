@@ -29,6 +29,7 @@ import {
   stripPasteMarkers,
   normalizeNewlines,
   sanitizePastedText,
+  classifyDeleteChunk,
 } from '../../src/tui/logic.js';
 
 // ── estimateLines ──
@@ -392,4 +393,26 @@ test('sanitizePastedText: strips BARE bracketed-paste markers (the [201~ leak)',
   assert.equal(sanitizePastedText('[200~hello world[201~'), 'hello world');
   assert.equal(sanitizePastedText('[201~'), '');
   assert.equal(sanitizePastedText('[200~line1\r\nline2[201~'), 'line1\nline2');
+});
+
+// ── classifyDeleteChunk (Backspace vs forward-Delete) ──
+// Ink lumps \x7f (Backspace) and \x1b[3~ (forward Delete) both into key.delete, so the raw
+// stdin chunk is the only way to tell them apart.
+
+test('classifyDeleteChunk: \\x7f and \\x08 are backspace (delete the char before the cursor)', () => {
+  assert.equal(classifyDeleteChunk('\x7f'), 'backspace');
+  assert.equal(classifyDeleteChunk('\x08'), 'backspace');
+  assert.equal(classifyDeleteChunk('\x1b\x7f'), 'backspace'); // alt+backspace
+});
+
+test('classifyDeleteChunk: \\x1b[3~ (and modified) is forward-delete (delete the char after)', () => {
+  assert.equal(classifyDeleteChunk('\x1b[3~'), 'forward-delete');
+  assert.equal(classifyDeleteChunk('\x1b[3;5~'), 'forward-delete'); // ctrl+delete
+});
+
+test('classifyDeleteChunk: anything else is null', () => {
+  assert.equal(classifyDeleteChunk('a'), null);
+  assert.equal(classifyDeleteChunk(''), null);
+  assert.equal(classifyDeleteChunk('\x1b[D'), null);   // left arrow
+  assert.equal(classifyDeleteChunk('hello'), null);    // a paste
 });

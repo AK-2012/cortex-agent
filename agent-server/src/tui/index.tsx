@@ -74,12 +74,12 @@ function enterFullscreen(): void {
   // writeSync (unbuffered) so the switch lands on the TTY BEFORE Ink's first render — a
   // buffered process.stdout.write() can flush after Ink has already painted, leaving Ink
   // on the MAIN buffer (which then survives the leave, stranding the TUI on screen).
-  // alt-screen + clear + cursor home, then enable bracketed paste (?2004h) so multi-line pastes
-  // arrive wrapped and insert literally instead of submitting per embedded Enter. SGR mouse
-  // tracking is intentionally NOT enabled here: capturing the mouse breaks native text selection
-  // AND right-click paste. Wheel-scroll capture is opt-in via Ctrl+T (or /mouse), which writes
-  // ?1000h;?1006h at runtime; the leave sequence still disables it defensively.
-  writeSync(1, '\x1b[?1049h\x1b[2J\x1b[H\x1b[?2004h');
+  // alt-screen + clear + cursor home, then enable SGR mouse tracking (?1000h button events incl.
+  // wheel; ?1006h SGR encoding) so the transcript scrolls with the wheel, and bracketed paste
+  // (?2004h) so multi-line pastes arrive wrapped and insert literally. NOTE: while mouse tracking
+  // is on, native text selection / right-click paste need Shift (terminal-native), or press Ctrl+T
+  // (/mouse) to toggle capture OFF for plain drag-select + right-click paste (the wheel then stops).
+  writeSync(1, '\x1b[?1049h\x1b[2J\x1b[H\x1b[?1000h\x1b[?1006h\x1b[?2004h');
   altScreenActive = true;
   // Synchronous safety net: runs on normal exit AND on process.exit() from anywhere.
   process.on('exit', leaveFullscreen);
