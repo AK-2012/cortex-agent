@@ -12,12 +12,12 @@ import type {
 import { isChatPost, isChatUpdate, isChatDelete, isChatMarkQueued,
   isStreamText, isStreamMutableOpen, isStreamMutableUpdate, isStreamFlush,
   isTranscriptReplay, isInteractivePost, isModalOpen, isModalAck } from '../../platform/tui/protocol.js';
+import type { StreamBlock } from '../logic.js';
 
 // ── Types ──
 
 export interface StreamState {
-  segments: string[];
-  mutable: Map<string, string>;
+  blocks: StreamBlock[];
 }
 
 export interface RenderedMessage {
@@ -58,7 +58,7 @@ export function useTranscript(opts?: {
 
   // Batcher refs
   const batchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const pendingBatch = useRef<(() => void) | null>(null);
+  const pendingBatch = useRef<Array<() => void>>([]);
 
   // Flush batched updates
   const flushBatch = useCallback(() => {
@@ -66,22 +66,22 @@ export function useTranscript(opts?: {
       clearTimeout(batchTimerRef.current);
       batchTimerRef.current = null;
     }
-    if (pendingBatch.current) {
-      pendingBatch.current();
-      pendingBatch.current = null;
+    if (pendingBatch.current.length > 0) {
+      const fns = pendingBatch.current;
+      pendingBatch.current = [];
+      for (const f of fns) f();
     }
   }, []);
 
   // Schedule a batched state update (for stream.text coalescing)
   const scheduleBatch = useCallback((fn: () => void) => {
-    pendingBatch.current = fn;
+    pendingBatch.current.push(fn);
     if (batchTimerRef.current === null) {
       batchTimerRef.current = setTimeout(() => {
         batchTimerRef.current = null;
-        if (pendingBatch.current) {
-          pendingBatch.current();
-          pendingBatch.current = null;
-        }
+        const fns = pendingBatch.current;
+        pendingBatch.current = [];
+        for (const f of fns) f();
       }, BATCH_WINDOW_MS);
     }
   }, []);
@@ -269,38 +269,29 @@ export function _handleChatMarkQueued(prev: TranscriptState, frame: ChatMarkQueu
 
 export function _handleStreamText(prev: TranscriptState, frame: StreamText): TranscriptState {
   const streamId = frame.streamId;
-  // Find the message that owns this stream (last message with this streamId)
+  const block: StreamBlock = { kind: 'text', text: frame.text };
   const messages = new Map(prev.messages);
-  let found = false;
 
   for (const [mid, msg] of messages) {
     if (msg.streams.has(streamId)) {
       const stream = msg.streams.get(streamId)!;
-      stream.segments = [...stream.segments, frame.text];
-      messages.set(mid, { ...msg, streams: new Map(msg.streams) });
-      found = true;
-      break;
-    }
-  }
-
-  if (!found) {
-    // No existing stream — attach to the last message if one exists, otherwise
-    // create a synthetic message keyed by streamId so streamed replies aren't
-    // dropped on an empty transcript (no chat.post anchors TUI streams). A locally
-    // echoed user message is NOT a valid anchor — the assistant reply must be its own
-    // row, not merged into the user's bubble — so fall through to a synthetic message.
-    const lastId = prev.ids[prev.ids.length - 1];
-    const lastMsg = lastId ? messages.get(lastId) : undefined;
-    if (lastMsg && !lastMsg.isUser) {
-      const streams = new Map(lastMsg.streams);
-      streams.set(streamId, { segments: [frame.text], mutable: new Map() });
-      messages.set(lastId!, { ...lastMsg, streams });
+      const newStreams = new Map(msg.streams);
+      newStreams.set(streamId, { blocks: [...stream.blocks, block] });
+      messages.set(mid, { ...msg, streams: newStreams });
       return { messages, ids: prev.ids };
     }
-    return _appendSyntheticStreamMessage(prev, streamId, { segments: [frame.text], mutable: new Map() });
   }
 
-  return { messages, ids: prev.ids };
+  // No existing stream — attach to the last message if it's not a user echo, else synthetic.
+  const lastId = prev.ids[prev.ids.length - 1];
+  const lastMsg = lastId ? messages.get(lastId) : undefined;
+  if (lastMsg && !lastMsg.isUser) {
+    const newStreams = new Map(lastMsg.streams);
+    newStreams.set(streamId, { blocks: [block] });
+    messages.set(lastId!, { ...lastMsg, streams: newStreams });
+    return { messages, ids: prev.ids };
+  }
+  return _appendSyntheticStreamMessage(prev, streamId, { blocks: [block] });
 }
 
 /** Create a new message owned by an orphan stream (empty-transcript safety net). */
@@ -323,37 +314,34 @@ function _appendSyntheticStreamMessage(
 
 export function _handleStreamMutableOpen(prev: TranscriptState, frame: StreamMutableOpen): TranscriptState {
   const streamId = frame.streamId;
+  const region: StreamBlock = { kind: 'region', regionId: frame.regionId, text: frame.text };
   const messages = new Map(prev.messages);
 
   for (const [mid, msg] of messages) {
-    const streams = new Map(msg.streams);
-    const existing = streams.get(streamId);
-    if (existing) {
-      // Ensure region exists
-      existing.mutable.set(frame.regionId, frame.text);
-      streams.set(streamId, { ...existing });
-      messages.set(mid, { ...msg, streams });
+    if (msg.streams.has(streamId)) {
+      const stream = msg.streams.get(streamId)!;
+      // If the region already exists, update it; otherwise append it.
+      const idx = stream.blocks.findIndex(b => b.kind === 'region' && b.regionId === frame.regionId);
+      const blocks = idx >= 0
+        ? stream.blocks.map((b, i) => (i === idx ? { ...b, text: frame.text } : b))
+        : [...stream.blocks, region];
+      const newStreams = new Map(msg.streams);
+      newStreams.set(streamId, { blocks });
+      messages.set(mid, { ...msg, streams: newStreams });
       return { messages, ids: prev.ids };
     }
   }
 
-  // No existing stream — attach to last message (unless it's a user echo, which must not
-  // absorb the assistant reply), or create a synthetic one so the streamed reply is not lost.
+  // No existing stream — attach to last non-user message, else synthetic.
   const lastId = prev.ids[prev.ids.length - 1];
   const lastMsg = lastId ? messages.get(lastId) : undefined;
   if (lastMsg && !lastMsg.isUser) {
-    const streams = new Map(lastMsg.streams);
-    const mutable = new Map<string, string>();
-    mutable.set(frame.regionId, frame.text);
-    streams.set(streamId, { segments: [], mutable });
-    messages.set(lastId!, { ...lastMsg, streams });
+    const newStreams = new Map(lastMsg.streams);
+    newStreams.set(streamId, { blocks: [region] });
+    messages.set(lastId!, { ...lastMsg, streams: newStreams });
     return { messages, ids: prev.ids };
   }
-
-  return _appendSyntheticStreamMessage(prev, streamId, {
-    segments: [],
-    mutable: new Map([[frame.regionId, frame.text]]),
-  });
+  return _appendSyntheticStreamMessage(prev, streamId, { blocks: [region] });
 }
 
 export function _handleStreamMutableUpdate(prev: TranscriptState, frame: StreamMutableUpdate): TranscriptState {
@@ -361,16 +349,17 @@ export function _handleStreamMutableUpdate(prev: TranscriptState, frame: StreamM
   const messages = new Map(prev.messages);
 
   for (const [mid, msg] of messages) {
-    const stream = msg.streams.get(streamId);
-    if (stream) {
-      const newMutable = new Map(stream.mutable);
-      newMutable.set(frame.regionId, frame.text);
-      const newStreams = new Map(msg.streams);
-      newStreams.set(streamId, { segments: stream.segments, mutable: newMutable });
-      messages.set(mid, { ...msg, streams: newStreams });
-      return { messages, ids: prev.ids };
+    if (msg.streams.has(streamId)) {
+      const stream = msg.streams.get(streamId)!;
+      const idx = stream.blocks.findIndex(b => b.kind === 'region' && b.regionId === frame.regionId);
+      if (idx >= 0) {
+        const blocks = stream.blocks.map((b, i) => (i === idx ? { ...b, text: frame.text } : b));
+        const newStreams = new Map(msg.streams);
+        newStreams.set(streamId, { blocks });
+        messages.set(mid, { ...msg, streams: newStreams });
+        return { messages, ids: prev.ids };
+      }
     }
   }
-
   return prev;
 }

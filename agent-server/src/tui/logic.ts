@@ -89,20 +89,28 @@ export function isAgentResponseFrame(frame: TuiFrame): boolean {
 // Concatenate a message's stream segments + mutable regions into a single string
 // so streamed output renders as flowing text rather than one-line-per-chunk.
 
-export interface StreamLike {
-  segments: string[];
-  mutable: Map<string, string>;
+/** One ordered unit in a stream: a discrete assistant text message, or an updatable region
+ *  (tool-call trace). Each TUI stream frame is a whole message — NOT a token — so blocks render
+ *  one per line, in arrival order. */
+export interface StreamBlock {
+  kind: 'text' | 'region';
+  /** Set for 'region' blocks so stream.mutableUpdate can find and replace it in place. */
+  regionId?: string;
+  text: string;
 }
 
+export interface StreamLike {
+  blocks: StreamBlock[];
+}
+
+/** Join a message's stream blocks into display text — one block per line, in order, so distinct
+ *  assistant messages and interleaved tool traces appear as separate lines (not one merged blob). */
 export function collectStreamText(streams: Map<string, StreamLike>): string {
-  let out = '';
+  const parts: string[] = [];
   for (const [, stream] of streams) {
-    out += stream.segments.join('');
-    for (const [, regionText] of stream.mutable) {
-      out += regionText;
-    }
+    for (const b of stream.blocks) parts.push(b.text);
   }
-  return out;
+  return parts.join('\n');
 }
 
 // ── Visible window ──

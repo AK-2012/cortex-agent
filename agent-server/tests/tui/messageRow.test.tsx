@@ -38,7 +38,7 @@ test('streamed reply with markdown is styled (markers stripped)', () => {
     messageId: 'm2',
     text: '',
     queued: false,
-    streams: new Map([['s1', { segments: ['hello **world** and `foo`'], mutable: new Map() }]]),
+    streams: new Map([['s1', { blocks: [{ kind: 'text' as const, text: 'hello **world** and `foo`' }] }]]),
   };
   const instance = render(React.createElement(MessageRow, { message: msg }));
   const frame = instance.lastFrame() ?? '';

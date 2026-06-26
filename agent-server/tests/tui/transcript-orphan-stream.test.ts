@@ -15,7 +15,7 @@ test('stream.text on empty transcript creates a synthetic message keyed by strea
   assert.equal(s.ids.length, 1, 'a message must exist to hold the stream');
   const msg = s.messages.get(s.ids[0]);
   assert.ok(msg);
-  assert.equal(msg.streams.get('s1')?.segments.join(''), 'hi');
+  assert.equal(msg.streams.get('s1')?.blocks.map(b => b.text).join(''), 'hi');
 });
 
 test('stream.mutableOpen on empty transcript creates a synthetic message', () => {
@@ -25,7 +25,7 @@ test('stream.mutableOpen on empty transcript creates a synthetic message', () =>
   assert.equal(s.ids.length, 1);
   const msg = s.messages.get(s.ids[0]);
   assert.ok(msg);
-  assert.equal(msg.streams.get('s1')?.mutable.get('r1'), 'pending');
+  assert.equal(msg.streams.get('s1')?.blocks.find(b => b.kind === 'region' && b.regionId === 'r1')?.text, 'pending');
 });
 
 test('_appendUserMessage adds a "**You:** …" row flagged isUser', () => {
@@ -44,7 +44,7 @@ test('assistant stream does NOT merge into the last message when it is a user ec
   const userMsg = s.messages.get(s.ids[0]);
   const replyMsg = s.messages.get(s.ids[1]);
   assert.equal(userMsg?.streams.size, 0, 'user bubble has no stream attached');
-  assert.equal(replyMsg?.streams.get('s1')?.segments.join(''), 'answer');
+  assert.equal(replyMsg?.streams.get('s1')?.blocks.map(b => b.text).join(''), 'answer');
 });
 
 test('assistant stream DOES attach to a non-user last message (assistant anchor)', () => {
@@ -54,5 +54,5 @@ test('assistant stream DOES attach to a non-user last message (assistant anchor)
   };
   const s = _handleStreamText(prev as any, { type: 'stream.text' as const, streamId: 's1', text: 'more', seq: 1 });
   assert.equal(s.ids.length, 1, 'attaches in place, no new message');
-  assert.equal(s.messages.get('m1')?.streams.get('s1')?.segments.join(''), 'more');
+  assert.equal(s.messages.get('m1')?.streams.get('s1')?.blocks.map(b => b.text).join(''), 'more');
 });

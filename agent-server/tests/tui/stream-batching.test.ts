@@ -34,9 +34,9 @@ test('multiple stream.text segments accumulate in a single stream', () => {
   assert.ok(msg);
   const stream = msg.streams.get('s1');
   assert.ok(stream);
-  assert.equal(stream.segments.length, 100);
-  assert.equal(stream.segments[0], 'part0');
-  assert.equal(stream.segments[99], 'part99');
+  assert.equal(stream.blocks.length, 100);
+  assert.equal(stream.blocks[0].text, 'part0');
+  assert.equal(stream.blocks[99].text, 'part99');
 });
 
 test('stream batching respects multiple streams on same message', () => {
@@ -56,8 +56,8 @@ test('stream batching respects multiple streams on same message', () => {
 
   const msg = state.messages.get('m-001');
   assert.ok(msg);
-  assert.equal(msg.streams.get('s1')?.segments.join(''), 'ac');
-  assert.equal(msg.streams.get('s2')?.segments.join(''), 'bd');
+  assert.equal(msg.streams.get('s1')?.blocks.map(b => b.text).join(''), 'ac');
+  assert.equal(msg.streams.get('s2')?.blocks.map(b => b.text).join(''), 'bd');
 });
 
 test('mutableUpdate renders immediately (no batching delay)', () => {
@@ -79,6 +79,6 @@ test('mutableUpdate renders immediately (no batching delay)', () => {
   }));
 
   const msg = state.messages.get('m-001');
-  assert.equal(msg?.streams.get('s1')?.mutable.get('r1'), 'done');
-  assert.equal(msg?.streams.get('s1')?.segments.join(''), 'prefix ');
+  assert.equal(msg?.streams.get('s1')?.blocks.find(b => b.kind === 'region' && b.regionId === 'r1')?.text, 'done');
+  assert.equal(msg?.streams.get('s1')?.blocks.find(b => b.kind === 'text')?.text, 'prefix ');
 });

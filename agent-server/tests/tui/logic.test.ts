@@ -144,21 +144,21 @@ test('isAgentResponseFrame: false for non-response frames', () => {
 
 // ── collectStreamText ──
 
-test('collectStreamText: concatenates segments and mutable regions in order', () => {
-  const streams = new Map<string, { segments: string[]; mutable: Map<string, string> }>();
-  streams.set('s1', { segments: ['Hello, ', 'world'], mutable: new Map([['r1', '!']]) });
-  assert.equal(collectStreamText(streams), 'Hello, world!');
+test('collectStreamText: joins blocks one per line, in order', () => {
+  const streams = new Map<string, { blocks: Array<{ kind: 'text' | 'region'; regionId?: string; text: string }> }>();
+  streams.set('s1', { blocks: [{ kind: 'text', text: 'Hello,' }, { kind: 'text', text: 'world' }, { kind: 'region', regionId: 'r1', text: '!' }] });
+  assert.equal(collectStreamText(streams), 'Hello,\nworld\n!');
 });
 
 test('collectStreamText: empty streams → empty string', () => {
   assert.equal(collectStreamText(new Map()), '');
 });
 
-test('collectStreamText: multiple streams concatenated in insertion order', () => {
-  const streams = new Map<string, { segments: string[]; mutable: Map<string, string> }>();
-  streams.set('s1', { segments: ['a', 'b'], mutable: new Map() });
-  streams.set('s2', { segments: ['c'], mutable: new Map() });
-  assert.equal(collectStreamText(streams), 'abc');
+test('collectStreamText: multiple streams joined per line in insertion order', () => {
+  const streams = new Map<string, { blocks: Array<{ kind: 'text' | 'region'; regionId?: string; text: string }> }>();
+  streams.set('s1', { blocks: [{ kind: 'text', text: 'a' }, { kind: 'text', text: 'b' }] });
+  streams.set('s2', { blocks: [{ kind: 'text', text: 'c' }] });
+  assert.equal(collectStreamText(streams), 'a\nb\nc');
 });
 
 // ── computeVisibleWindow ──

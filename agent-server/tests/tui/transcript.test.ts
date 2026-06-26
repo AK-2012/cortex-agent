@@ -101,30 +101,30 @@ test('stream.text appends to last message stream', () => {
   const s2 = _handleStreamText(s1, makeStreamText('s1', 'part1'));
   const msg = s2.messages.get('m-001');
   assert.ok(msg);
-  assert.equal(msg.streams.get('s1')?.segments.length, 1);
-  assert.equal(msg.streams.get('s1')?.segments[0], 'part1');
+  assert.equal(msg.streams.get('s1')?.blocks.length, 1);
+  assert.equal(msg.streams.get('s1')?.blocks[0].text, 'part1');
 });
 
 test('stream.text appends multiple segments to same stream', () => {
   const s1 = _handleChatPost(EMPTY, makeChatPost('m-001', 'hello'));
   const s2 = _handleStreamText(s1, makeStreamText('s1', 'part1'));
   const s3 = _handleStreamText(s2, makeStreamText('s1', 'part2'));
-  assert.equal(s3.messages.get('m-001')?.streams.get('s1')?.segments.length, 2);
-  assert.equal(s3.messages.get('m-001')?.streams.get('s1')?.segments[1], 'part2');
+  assert.equal(s3.messages.get('m-001')?.streams.get('s1')?.blocks.length, 2);
+  assert.equal(s3.messages.get('m-001')?.streams.get('s1')?.blocks[1].text, 'part2');
 });
 
 test('stream.mutableOpen opens a mutable region', () => {
   const s1 = _handleChatPost(EMPTY, makeChatPost('m-001', 'hello'));
   const s2 = _handleStreamMutableOpen(s1, makeStreamMutableOpen('s1', 'r1', 'initial'));
-  const mutable = s2.messages.get('m-001')?.streams.get('s1')?.mutable;
-  assert.ok(mutable);
-  assert.equal(mutable.get('r1'), 'initial');
+  const region = s2.messages.get('m-001')?.streams.get('s1')?.blocks.find(b => b.kind === 'region' && b.regionId === 'r1');
+  assert.ok(region);
+  assert.equal(region.text, 'initial');
 });
 
 test('stream.mutableUpdate replaces region content', () => {
   const s1 = _handleChatPost(EMPTY, makeChatPost('m-001', 'hello'));
   const s2 = _handleStreamMutableOpen(s1, makeStreamMutableOpen('s1', 'r1', 'initial'));
   const s3 = _handleStreamMutableUpdate(s2, makeStreamMutableUpdate('s1', 'r1', 'updated'));
-  assert.equal(s3.messages.get('m-001')?.streams.get('s1')?.mutable.get('r1'), 'updated');
+  assert.equal(s3.messages.get('m-001')?.streams.get('s1')?.blocks.find(b => b.kind === 'region' && b.regionId === 'r1')?.text, 'updated');
 });
 
