@@ -10,7 +10,7 @@
 
 import React, { useRef, useCallback, useState, useEffect, forwardRef, useImperativeHandle } from 'react';
 import { Box, Text, useStdout } from 'ink';
-import { computeVisibleWindow, flattenTranscript, collectStreamText, detectUserMessage, normalizeSelection, extractSelectionText } from '../logic.js';
+import { computeVisibleWindow, flattenTranscript, collectStreamText, detectUserMessage, normalizeSelection, extractSelectionText, padToWidth, splitByDisplayCols } from '../logic.js';
 import type { FlattenableMessage, FlatLine } from '../logic.js';
 import { InlineMarkdown } from '../render/inline-markdown.js';
 import type { RenderedMessage } from '../hooks/useTranscript.js';
@@ -161,15 +161,14 @@ export const Transcript = forwardRef<TranscriptHandle, TranscriptProps>(
           const content = ln.text.length > 0 ? ln.text : ' ';
 
           // Check if this line is (partially) within the selection range and render the
-          // selected portion with a blue background highlight.
+          // selected portion with a blue background highlight. Columns are DISPLAY columns (from
+          // the mouse), so split by display width — slicing by char index drifts on CJK text.
           if (selNorm && i >= selNorm.startLine && i <= selNorm.endLine) {
             const lineText = ln.text.length > 0 ? ln.text : ' ';
             const selStart = i === selNorm.startLine ? selNorm.startCol : 0;
-            const selEnd = i === selNorm.endLine ? selNorm.endCol : lineText.length;
-            if (selStart < selEnd && selStart < lineText.length) {
-              const before = lineText.slice(0, selStart);
-              const selected = lineText.slice(selStart, selEnd);
-              const after = lineText.slice(selEnd);
+            const selEnd = i === selNorm.endLine ? selNorm.endCol : Number.MAX_SAFE_INTEGER;
+            const { before, selected, after } = splitByDisplayCols(lineText, selStart, selEnd);
+            if (selected.length > 0) {
               return (
                 <Text key={i} dimColor={ln.dim}>
                   {before}
@@ -182,9 +181,9 @@ export const Transcript = forwardRef<TranscriptHandle, TranscriptProps>(
 
           if (ln.user) {
             // User input: the whole line is highlighted with a grey background (padded to the
-            // row width so the highlight spans it), no "You:" prefix. padEnd to textCols (cols-1)
-            // so it never reaches the full width and wraps into a phantom extra grey row.
-            return <Text key={i} backgroundColor="gray">{content.padEnd(textCols)}</Text>;
+            // row width so the highlight spans it), no "You:" prefix. padToWidth measures DISPLAY
+            // columns (CJK aware) so a Chinese line fills exactly textCols cells — no phantom row.
+            return <Text key={i} backgroundColor="gray">{padToWidth(content, textCols)}</Text>;
           }
           return ln.markdown
             ? <InlineMarkdown key={i} text={content} dimColor={ln.dim} />

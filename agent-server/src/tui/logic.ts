@@ -3,7 +3,55 @@
 //         detection, stream-text collection, visible-window computation
 // pos:    Testable logic extracted out of React components/hooks
 
+import stringWidth from 'string-width';
 import type { TuiFrame } from '../platform/tui/protocol.js';
+
+// ── Display-width helpers (CJK / full-width aware) ──
+// Terminal columns are display CELLS, but JS strings are code units: a CJK char is 1 char / 2
+// cells. Every layout step (wrap, pad, mouse-selection mapping) must measure in display columns,
+// or Chinese/full-width text drifts (wrong wrap point, phantom grey row, mis-aligned selection).
+
+/** Display width (terminal columns) of a string — CJK/full-width chars count as 2. */
+export function displayWidth(s: string): number {
+  return stringWidth(s);
+}
+
+/** Pad a string with spaces up to `width` DISPLAY columns (no-op if already ≥ width). */
+export function padToWidth(s: string, width: number): string {
+  const w = stringWidth(s);
+  return w >= width ? s : s + ' '.repeat(width - w);
+}
+
+/** Take the longest prefix of `s` fitting within `width` display columns; return [head, rest]. */
+function sliceHeadToWidth(s: string, width: number): [string, string] {
+  const chars = [...s]; // iterate by code point so surrogate pairs stay intact
+  let col = 0;
+  let i = 0;
+  for (; i < chars.length; i++) {
+    const cw = stringWidth(chars[i]);
+    if (col + cw > width) break;
+    col += cw;
+  }
+  return [chars.slice(0, i).join(''), chars.slice(i).join('')];
+}
+
+/** Split a line into before/selected/after by DISPLAY-column range [startCol, endCol). Each char
+ *  is classified by its starting column (a wide char straddling a boundary goes with its start). */
+export function splitByDisplayCols(
+  text: string, startCol: number, endCol: number,
+): { before: string; selected: string; after: string } {
+  let col = 0;
+  let before = '';
+  let selected = '';
+  let after = '';
+  for (const ch of [...text]) {
+    if (col < startCol) before += ch;
+    else if (col < endCol) selected += ch;
+    else after += ch;
+    col += stringWidth(ch);
+  }
+  return { before, selected, after };
+}
 
 // ── Focus arbitration ──
 // Only one zone owns the keyboard at a time. Modals pre-empt everything; an open
@@ -348,25 +396,26 @@ export function normalizeSelection(
   return { startLine, startCol, endLine, endCol };
 }
 
-/** Extract selected text from flat display lines given a normalized selection range. */
+/** Extract selected text from flat display lines given a normalized selection range. Columns are
+ *  DISPLAY columns (from the mouse), so slicing is width-aware (CJK safe). */
 export function extractSelectionText(
   lines: Array<{ text: string }>,
   sel: { startLine: number; startCol: number; endLine: number; endCol: number },
 ): string {
   if (sel.startLine < 0 || sel.startLine >= lines.length) return '';
   if (sel.startLine === sel.endLine) {
-    return lines[sel.startLine].text.slice(sel.startCol, sel.endCol);
+    return splitByDisplayCols(lines[sel.startLine].text, sel.startCol, sel.endCol).selected;
   }
   const parts: string[] = [];
-  // First line: from startCol to end
-  parts.push(lines[sel.startLine].text.slice(sel.startCol));
+  // First line: from startCol to end (use a huge endCol to take the remainder).
+  parts.push(splitByDisplayCols(lines[sel.startLine].text, sel.startCol, Number.MAX_SAFE_INTEGER).selected);
   // Middle lines: full text
   for (let i = sel.startLine + 1; i < Math.min(sel.endLine, lines.length); i++) {
     parts.push(lines[i].text);
   }
   // Last line: from start to endCol
   if (sel.endLine < lines.length) {
-    parts.push(lines[sel.endLine].text.slice(0, sel.endCol));
+    parts.push(splitByDisplayCols(lines[sel.endLine].text, 0, sel.endCol).selected);
   }
   return parts.join('\n');
 }
@@ -425,23 +474,37 @@ export function detectUserMessage(text: string, isUserFlag?: boolean): { text: s
   return { text, user: !!isUserFlag };
 }
 
-/** Word-wrap a single logical line to `width` columns, hard-splitting over-long words. */
+/** Word-wrap a single logical line to `width` DISPLAY columns, hard-splitting over-wide words.
+ *  Measured in terminal columns (CJK aware) so Chinese/full-width text wraps where it actually
+ *  reaches the edge — matching what the terminal renders, which the selection mapping relies on. */
 export function wrapToWidth(text: string, width: number): string[] {
   const w = Math.max(1, width);
   if (text.length === 0) return [''];
   const lines: string[] = [];
   let cur = '';
+  let curW = 0;
   for (const word of text.split(' ')) {
-    if (word.length > w) {
-      if (cur) { lines.push(cur); cur = ''; }
+    const wordW = stringWidth(word);
+    if (wordW > w) {
+      // A single word wider than the line: flush, then hard-split it by display width.
+      if (cur) { lines.push(cur); cur = ''; curW = 0; }
       let rest = word;
-      while (rest.length > w) { lines.push(rest.slice(0, w)); rest = rest.slice(w); }
-      cur = rest;
+      while (stringWidth(rest) > w) {
+        let [head, tail] = sliceHeadToWidth(rest, w);
+        if (head.length === 0) { // a lone char wider than w — force-take it so we make progress
+          const chars = [...rest];
+          head = chars[0];
+          tail = chars.slice(1).join('');
+        }
+        lines.push(head);
+        rest = tail;
+      }
+      cur = rest; curW = stringWidth(rest);
       continue;
     }
-    const candidate = cur ? `${cur} ${word}` : word;
-    if (candidate.length > w) { lines.push(cur); cur = word; }
-    else cur = candidate;
+    const sep = cur ? 1 : 0;
+    if (curW + sep + wordW > w) { lines.push(cur); cur = word; curW = wordW; }
+    else { cur = cur ? `${cur} ${word}` : word; curW += sep + wordW; }
   }
   if (cur || lines.length === 0) lines.push(cur);
   return lines;

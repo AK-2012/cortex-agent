@@ -34,6 +34,8 @@ import {
   normalizeSelection,
   extractSelectionText,
   osc52Copy,
+  padToWidth,
+  splitByDisplayCols,
 } from '../../src/tui/logic.js';
 
 // ── estimateLines ──
@@ -545,4 +547,34 @@ test('osc52Copy: writes the correct OSC 52 escape to stdout', () => {
   } finally {
     process.stdout.write = origWrite;
   }
+});
+
+// ── Display-width-aware helpers (CJK / full-width support) ──
+// Terminal columns are display cells; CJK chars occupy 2 columns but 1 JS char. These helpers
+// keep wrapping / padding / selection aligned to what the terminal actually shows.
+
+test('padToWidth: pads to display columns, accounting for full-width chars', () => {
+  assert.equal(padToWidth('ab', 5), 'ab   ');        // 2 cols + 3 spaces
+  assert.equal(padToWidth('你好', 6), '你好  ');      // 4 cols + 2 spaces
+  assert.equal(padToWidth('你好', 4), '你好');        // already 4 cols, no pad
+  assert.equal(padToWidth('你好', 3), '你好');        // wider than target → unchanged
+});
+
+test('splitByDisplayCols: splits a line by display columns (CJK aware)', () => {
+  // "a你b" → cols: a@0, 你@1-2, b@3
+  assert.deepEqual(splitByDisplayCols('a你b', 1, 3), { before: 'a', selected: '你', after: 'b' });
+  assert.deepEqual(splitByDisplayCols('你好世界', 2, 6), { before: '你', selected: '好世', after: '界' });
+  assert.deepEqual(splitByDisplayCols('hello', 1, 3), { before: 'h', selected: 'el', after: 'lo' });
+});
+
+test('wrapToWidth: wraps CJK by display width, not char count', () => {
+  assert.deepEqual(wrapToWidth('你好世界', 4), ['你好', '世界']); // each char 2 cols → 2 per line
+  assert.deepEqual(wrapToWidth('你好世界', 5), ['你好', '世界']); // 你好=4 cols, +世=6 > 5 → wrap
+  // ASCII behaviour unchanged
+  assert.deepEqual(wrapToWidth('abcdef', 3), ['abc', 'def']);
+});
+
+test('extractSelectionText: uses display columns for CJK lines', () => {
+  // single line, select the middle two full-width chars (cols 2..6)
+  assert.equal(extractSelectionText([{ text: '你好世界' }], { startLine: 0, startCol: 2, endLine: 0, endCol: 6 }), '好世');
 });
