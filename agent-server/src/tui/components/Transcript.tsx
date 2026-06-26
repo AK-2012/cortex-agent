@@ -24,6 +24,8 @@ const DEFAULT_RESERVED_ROWS = 5;
 export interface TranscriptHandle {
   scrollUp: (page?: boolean) => void;
   scrollDown: (page?: boolean) => void;
+  /** Scroll by a signed line count in ONE state update (delta>0 = up into history, <0 = toward bottom). */
+  scrollByLines: (delta: number) => void;
   scrollToEnd: () => void;
   /** Extract the text under the given screen-coordinate selection range. */
   getSelectedText: (range: SelectionRange) => string;
@@ -92,6 +94,21 @@ export const Transcript = forwardRef<TranscriptHandle, TranscriptProps>(
       });
     }, [lineBudget]);
 
+    // Coalesced scroll: a burst of wheel notches (batched in useMouseHandler) lands as a single
+    // signed delta, so the transcript re-flattens/re-renders once instead of once per notch.
+    const scrollByLines = useCallback((delta: number) => {
+      if (delta === 0) return;
+      setScrollOffset(prev => {
+        const next = prev + delta;
+        if (next <= 0) {
+          userScrolledUpRef.current = false;
+          return 0;
+        }
+        userScrolledUpRef.current = true;
+        return next;
+      });
+    }, []);
+
     const scrollToEnd = useCallback(() => {
       userScrolledUpRef.current = false;
       setScrollOffset(0);
@@ -116,7 +133,7 @@ export const Transcript = forwardRef<TranscriptHandle, TranscriptProps>(
       return extractSelectionText(vis, norm);
     }, [lineBudget]);
 
-    useImperativeHandle(ref, () => ({ scrollUp, scrollDown, scrollToEnd, getSelectedText }), [scrollUp, scrollDown, scrollToEnd, getSelectedText]);
+    useImperativeHandle(ref, () => ({ scrollUp, scrollDown, scrollByLines, scrollToEnd, getSelectedText }), [scrollUp, scrollDown, scrollByLines, scrollToEnd, getSelectedText]);
 
     // Auto-stick to bottom on new content unless the user has scrolled up.
     useEffect(() => {

@@ -144,7 +144,7 @@ export function App({
   // frames (identified by their `actions` rich-block) are routed here, NOT the transcript.
   const [turnStatus, setTurnStatus] = useState<string | null>(null);
 
-  const transcriptRef = useRef<{ scrollUp: (page?: boolean) => void; scrollDown: (page?: boolean) => void; scrollToEnd: () => void; getSelectedText: (range: SelectionRange) => string } | null>(null);
+  const transcriptRef = useRef<{ scrollUp: (page?: boolean) => void; scrollDown: (page?: boolean) => void; scrollByLines: (delta: number) => void; scrollToEnd: () => void; getSelectedText: (range: SelectionRange) => string } | null>(null);
 
   // Terminal size — drives the full-screen root box and updates on resize so the layout
   // always fills the alternate-screen buffer (see enterFullscreen in index.tsx).
@@ -302,6 +302,11 @@ export function App({
     transcriptRef.current?.scrollDown(page);
   }, []);
 
+  // Coalesced wheel scroll: a batched net delta from useMouseHandler applied in one update.
+  const handleScrollByLines = useCallback((delta: number) => {
+    transcriptRef.current?.scrollByLines(delta);
+  }, []);
+
   // Side panel toggle
   const handleToggleSidePanel = useCallback(() => {
     setSidePanelVisible(prev => !prev);
@@ -454,6 +459,7 @@ export function App({
   const { selection } = useMouseHandler({
     onScrollUp: handleScrollUp,
     onScrollDown: handleScrollDown,
+    onScrollByLines: handleScrollByLines,
     onSelectionComplete: handleSelectionComplete,
     onRightClick: handleRightClick,
   });

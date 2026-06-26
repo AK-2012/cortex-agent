@@ -10,6 +10,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useStdin } from 'ink';
 import { parseAllMouseEvents } from '../logic.js';
+import { createNumericBatcher, createThrottle, type NumericBatcher, type Throttled } from '../raf-batch.js';
 
 export interface SelectionRange {
   startRow: number; startCol: number; // screen coordinates, 0-based
@@ -19,9 +20,14 @@ export interface SelectionRange {
 export interface UseMouseHandlerOpts {
   onScrollUp: () => void;
   onScrollDown: () => void;
+  /** Apply a coalesced wheel scroll in ONE update (delta>0 = up, <0 = down). Preferred over the unit callbacks. */
+  onScrollByLines?: (delta: number) => void;
   onSelectionComplete?: (range: SelectionRange) => void;
   onRightClick?: () => void;
 }
+
+// Cap drag-selection re-renders at ~one per frame (60fps) while still landing the final position.
+const DRAG_THROTTLE_MS = 16;
 
 export function useMouseHandler(opts: UseMouseHandlerOpts): { selection: SelectionRange | null } {
   const optsRef = useRef(opts);
@@ -34,6 +40,26 @@ export function useMouseHandler(opts: UseMouseHandlerOpts): { selection: Selecti
   // React state for rendering (updated on drag/release to trigger re-render)
   const [selection, setSelection] = useState<SelectionRange | null>(null);
 
+  // Coalesce wheel notches: a burst of wheel events (often several per stdin chunk) sums into one
+  // scroll update instead of one re-render per notch. Lazily created once, reads opts via the ref.
+  const scrollBatchRef = useRef<NumericBatcher | null>(null);
+  if (scrollBatchRef.current === null) {
+    scrollBatchRef.current = createNumericBatcher((sum) => {
+      const o = optsRef.current;
+      if (o.onScrollByLines) { o.onScrollByLines(sum); return; }
+      // Fallback when no batched handler is wired: replay the unit callbacks.
+      const n = Math.abs(sum);
+      for (let i = 0; i < n; i++) (sum > 0 ? o.onScrollUp : o.onScrollDown)();
+    });
+  }
+
+  // Throttle drag-selection re-renders (the dragRef itself is always updated synchronously so the
+  // release still reads the exact end position).
+  const selThrottleRef = useRef<Throttled<[SelectionRange]> | null>(null);
+  if (selThrottleRef.current === null) {
+    selThrottleRef.current = createThrottle((range: SelectionRange) => setSelection(range), DRAG_THROTTLE_MS);
+  }
+
   const emitter = (useStdin() as unknown as { internal_eventEmitter?: NodeJS.EventEmitter }).internal_eventEmitter;
 
   useEffect(() => {
@@ -42,21 +68,22 @@ export function useMouseHandler(opts: UseMouseHandlerOpts): { selection: Selecti
       const s = typeof chunk === 'string' ? chunk : chunk.toString('utf8');
       for (const evt of parseAllMouseEvents(s)) {
         if (evt.type === 'wheel') {
-          if ((evt.button & 1) === 0) optsRef.current.onScrollUp();
-          else optsRef.current.onScrollDown();
+          // Accumulate notches (up = +1, down = -1); the batcher applies the net delta once.
+          scrollBatchRef.current!.add((evt.button & 1) === 0 ? 1 : -1);
           continue;
         }
         if (evt.type === 'press' && evt.button === 0) {
           // Left press: start selection
           dragRef.current = { active: true, startRow: evt.row, startCol: evt.col, endRow: evt.row, endCol: evt.col };
+          selThrottleRef.current!.cancel(); // drop any pending trailing update
           setSelection(null); // clear any previous selection highlight
           continue;
         }
         if (evt.type === 'drag' && evt.button === 0 && dragRef.current.active) {
-          // Left drag: update end position
+          // Left drag: update the end position synchronously, but throttle the render update.
           dragRef.current.endRow = evt.row;
           dragRef.current.endCol = evt.col;
-          setSelection({
+          selThrottleRef.current!.call({
             startRow: dragRef.current.startRow, startCol: dragRef.current.startCol,
             endRow: evt.row, endCol: evt.col,
           });
@@ -71,7 +98,8 @@ export function useMouseHandler(opts: UseMouseHandlerOpts): { selection: Selecti
           if (startRow !== endRow || startCol !== endCol) {
             optsRef.current.onSelectionComplete?.({ startRow, startCol, endRow, endCol });
           }
-          // Keep selection visible briefly (App clears it after the toast)
+          // Cancel any pending throttled update so it can't overwrite the final range, then set it.
+          selThrottleRef.current!.cancel();
           setSelection({ startRow, startCol, endRow, endCol });
           continue;
         }
@@ -82,7 +110,11 @@ export function useMouseHandler(opts: UseMouseHandlerOpts): { selection: Selecti
       }
     };
     emitter.on('input', onChunk);
-    return () => { emitter.removeListener('input', onChunk); };
+    return () => {
+      emitter.removeListener('input', onChunk);
+      scrollBatchRef.current?.cancel();
+      selThrottleRef.current?.cancel();
+    };
   }, [emitter]);
 
   return { selection };
