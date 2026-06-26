@@ -3,10 +3,11 @@
 // output: M5 Ink TUI client entry point
 // pos:    Entry point for cortex-tui
 
-import { writeSync } from 'node:fs';
+import { writeSync, appendFileSync } from 'node:fs';
 import React from 'react';
 import { render } from 'ink';
 import { App } from './App.js';
+import { makeRenderStdout, newRenderStats, writesPerSecond, type RenderStats } from './render-output.js';
 import { WsClient } from './ws-client.js';
 import { isHandshakeAck, isSessionSwitched, isUiQueryResult, isUiEvent, isNotification } from '../platform/tui/protocol.js';
 import { CORTEX_VERSION } from '../core/version.js';
@@ -94,10 +95,34 @@ function enterFullscreen(): void {
   }
 }
 
+// ── Render output (synchronized output + optional stats) ──
+// Stage 1: wrap Ink's frame writes in DEC-2026 synchronized-update markers so the full-screen
+// clear+repaint Ink emits each frame is presented atomically (no blank-flash flicker). Stage 0:
+// when CORTEX_TUI_RENDER_STATS is set, also count writes/bytes/full-clears and dump a one-line
+// summary to that file on exit so before/after can be compared. Disable the sync wrapping entirely
+// with CORTEX_TUI_NO_SYNC=1 (escape hatch for a terminal that mis-handles 2026).
+function setupRenderStdout(): { stdout: NodeJS.WriteStream | undefined } {
+  if (!process.stdout.isTTY) return { stdout: undefined };
+  const sync = process.env.CORTEX_TUI_NO_SYNC !== '1';
+  const statsPath = process.env.CORTEX_TUI_RENDER_STATS;
+  const stats: RenderStats | null = statsPath ? newRenderStats() : null;
+  const stdout = makeRenderStdout(process.stdout, { sync, stats });
+  if (stats && statsPath) {
+    process.on('exit', () => {
+      try {
+        const line = `${new Date().toISOString()} sync=${sync} writes=${stats.writes} bytes=${stats.bytes} clears=${stats.clears} writes/s=${writesPerSecond(stats).toFixed(1)}\n`;
+        appendFileSync(statsPath, line);
+      } catch { /* best effort */ }
+    });
+  }
+  return { stdout };
+}
+
 async function main(): Promise<void> {
   const args = parseArgs(process.argv);
 
   enterFullscreen();
+  const { stdout: renderStdout } = setupRenderStdout();
 
   const client = new WsClient();
   let dispatchFrame: ((frame: TuiFrame) => void) | null = null;
@@ -173,7 +198,7 @@ async function main(): Promise<void> {
     if (rerender) {
       rerender(app);
     } else {
-      const instance = render(app, { exitOnCtrlC: false });
+      const instance = render(app, { exitOnCtrlC: false, ...(renderStdout ? { stdout: renderStdout } : {}) });
       rerender = instance.rerender;
       unmount = instance.unmount;
       inkUnmount = instance.unmount; // module-level ref for the signal handlers
