@@ -250,6 +250,8 @@ export interface FlatLine {
   dim: boolean;
   /** Render through InlineMarkdown (false → plain Text, e.g. tool/context lines). */
   markdown: boolean;
+  /** A user-message line — rendered with a full-width grey background. */
+  user: boolean;
 }
 
 export interface FlattenableMessage {
@@ -258,6 +260,17 @@ export interface FlattenableMessage {
   /** Pre-collected streamed text (caller concatenates the stream map). */
   streamText?: string;
   queued?: boolean;
+  /** Whether this message is the user's own input (grey-background highlight, no "You:"). */
+  user?: boolean;
+}
+
+/** The prefix the server/echo uses to encode a user-role message in plain text. */
+export const USER_PREFIX = '**You:** ';
+
+/** Detect a user message (by the isUser flag OR the `**You:** ` prefix) and strip the prefix. */
+export function detectUserMessage(text: string, isUserFlag?: boolean): { text: string; user: boolean } {
+  if (text.startsWith(USER_PREFIX)) return { text: text.slice(USER_PREFIX.length), user: true };
+  return { text, user: !!isUserFlag };
 }
 
 /** Word-wrap a single logical line to `width` columns, hard-splitting over-long words. */
@@ -285,22 +298,23 @@ export function wrapToWidth(text: string, width: number): string[] {
 /** Flatten one message into wrapped display lines. */
 export function flattenMessageLines(msg: FlattenableMessage, cols: number): FlatLine[] {
   const out: FlatLine[] = [];
-  const push = (text: string, dim: boolean, markdown: boolean) => {
+  const isUser = !!msg.user;
+  const push = (text: string, dim: boolean, markdown: boolean, user = false) => {
     for (const logical of text.split('\n')) {
-      for (const wrapped of wrapToWidth(logical, cols)) out.push({ text: wrapped, dim, markdown });
+      for (const wrapped of wrapToWidth(logical, cols)) out.push({ text: wrapped, dim, markdown, user });
     }
   };
   const hasRich = !!(msg.richBlocks && msg.richBlocks.length > 0);
   // Slack Block-Kit semantics: when richBlocks exist they ARE the content; `text` is only a
   // fallback (rendering both double-prints the sealed status line).
-  if (msg.text && !hasRich) push(msg.text, false, true);
+  if (msg.text && !hasRich) push(msg.text, false, !isUser, isUser); // user lines render plain on grey
   if (hasRich) {
     for (const b of msg.richBlocks!) {
       if (b.text) push(String(b.text), b.type === 'context', b.type !== 'context');
     }
   }
   if (msg.streamText) push(msg.streamText, true, true);
-  if (msg.queued) out.push({ text: '⏳ queued', dim: true, markdown: false });
+  if (msg.queued) out.push({ text: '⏳ queued', dim: true, markdown: false, user: false });
   return out;
 }
 
@@ -308,7 +322,7 @@ export function flattenMessageLines(msg: FlattenableMessage, cols: number): Flat
 export function flattenTranscript(messages: FlattenableMessage[], cols: number): FlatLine[] {
   const out: FlatLine[] = [];
   messages.forEach((m, i) => {
-    if (i > 0) out.push({ text: '', dim: false, markdown: false });
+    if (i > 0) out.push({ text: '', dim: false, markdown: false, user: false });
     out.push(...flattenMessageLines(m, cols));
   });
   return out;

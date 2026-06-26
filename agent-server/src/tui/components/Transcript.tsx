@@ -10,15 +10,16 @@
 
 import React, { useRef, useCallback, useState, useEffect, forwardRef, useImperativeHandle } from 'react';
 import { Box, Text, useStdout } from 'ink';
-import { computeVisibleWindow, flattenTranscript, collectStreamText } from '../logic.js';
+import { computeVisibleWindow, flattenTranscript, collectStreamText, detectUserMessage } from '../logic.js';
 import type { FlattenableMessage } from '../logic.js';
 import { InlineMarkdown } from '../render/inline-markdown.js';
 import type { RenderedMessage } from '../hooks/useTranscript.js';
 
-// Rows reserved for the bottom UI (input box + margins + turn-status + StatusLine; the header
-// was removed) PLUS the two scroll-hint lines ("↑ N above" / "↓ N below"), so the sliced line
-// window plus hints never exceeds the terminal height.
-const RESERVED_ROWS = 10;
+// Rows reserved for the bottom UI (input box marginTop + border(3) + optional turn-status +
+// optional awaiting hint + StatusLine; the header was removed). Kept slightly generous so the
+// sliced line window never overflows into the input — any small deficit shows as blank at the
+// TOP (flex-end anchors content to the bottom), never as a gap above the input.
+const RESERVED_ROWS = 8;
 
 export interface TranscriptHandle {
   scrollUp: (page?: boolean) => void;
@@ -33,11 +34,15 @@ interface TranscriptProps {
 
 /** Convert a rendered message into the structural shape the line-flattener consumes. */
 function toFlattenable(m: RenderedMessage): FlattenableMessage {
+  // A user message is the local echo (isUser flag) OR a replayed `**You:** …` line; either way
+  // strip the prefix so it renders cleanly on the grey highlight (no "You:" text).
+  const { text, user } = detectUserMessage(m.text, m.isUser);
   return {
-    text: m.text,
+    text,
     richBlocks: m.richBlocks,
     streamText: m.streams.size > 0 ? collectStreamText(m.streams) : undefined,
     queued: m.queued,
+    user,
   };
 }
 
@@ -97,8 +102,6 @@ export const Transcript = forwardRef<TranscriptHandle, TranscriptProps>(
 
     const { start, end } = computeVisibleWindow(totalLines, lineBudget, effectiveOffset);
     const visible = flatLines.slice(start, end);
-    const hiddenAbove = start;
-    const hiddenBelow = totalLines - end;
 
     if (ids.length === 0) {
       // Empty transcript renders nothing; the flexGrow box still reserves the space so the
@@ -106,22 +109,22 @@ export const Transcript = forwardRef<TranscriptHandle, TranscriptProps>(
       return <Box flexDirection="column" flexGrow={1} />;
     }
 
+    // `justifyContent="flex-end"` anchors the lines to the BOTTOM of the grow box (just above
+    // the input), so when the conversation is shorter than the viewport the empty space sits
+    // at the top — not as a blank gap between the messages and the input.
     return (
-      <Box flexDirection="column" flexGrow={1}>
-        {hiddenAbove > 0 ? (
-          <Text dimColor>↑ {hiddenAbove} more line{hiddenAbove === 1 ? '' : 's'} above</Text>
-        ) : null}
-
+      <Box flexDirection="column" flexGrow={1} justifyContent="flex-end">
         {visible.map((ln, i) => {
           const content = ln.text.length > 0 ? ln.text : ' ';
+          if (ln.user) {
+            // User input: the whole line is highlighted with a grey background (padded to the
+            // full width so the highlight spans the row), no "You:" prefix.
+            return <Text key={i} backgroundColor="gray">{content.padEnd(cols)}</Text>;
+          }
           return ln.markdown
             ? <InlineMarkdown key={i} text={content} dimColor={ln.dim} />
             : <Text key={i} dimColor={ln.dim}>{content}</Text>;
         })}
-
-        {hiddenBelow > 0 ? (
-          <Text dimColor>↓ {hiddenBelow} more line{hiddenBelow === 1 ? '' : 's'} below</Text>
-        ) : null}
       </Box>
     );
   },
