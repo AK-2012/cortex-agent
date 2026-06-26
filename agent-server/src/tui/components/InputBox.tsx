@@ -36,9 +36,11 @@ interface InputBoxProps {
   onDismissShortcuts?: () => void;
   /** Optional turn-status line (state · time · turns · cost) rendered tight above the input. */
   statusLine?: string | null;
+  /** Optional toast message (e.g. "Copied!") shown briefly in place of the status line. */
+  toast?: string | null;
 }
 
-export function InputBox({ onSubmit, onCommand, commands = SLASH_COMMANDS, awaitingResponse, focus = true, showShortcuts = false, onToggleShortcuts, onDismissShortcuts, statusLine }: InputBoxProps): React.JSX.Element {
+export function InputBox({ onSubmit, onCommand, commands = SLASH_COMMANDS, awaitingResponse, focus = true, showShortcuts = false, onToggleShortcuts, onDismissShortcuts, statusLine, toast }: InputBoxProps): React.JSX.Element {
   const [value, setValue] = useState('');
   const [cursor, setCursor] = useState(0);
   const [selectedIndex, setSelectedIndex] = useState(0);
@@ -105,7 +107,7 @@ export function InputBox({ onSubmit, onCommand, commands = SLASH_COMMANDS, await
 
   // ── Raw stdin handler for Backspace vs forward-Delete ──
   // Ink can't distinguish them in useInput (both are `key.delete`), so we read the raw chunk from
-  // Ink's internal input emitter (the same feed useMouseScroll uses) and classify it. A ref keeps
+  // Ink's internal input emitter (the same feed useMouseHandler uses) and classify it. A ref keeps
   // the latest value/cursor/focus so the (once-subscribed) listener never goes stale.
   const editRef = useRef({ value, cursor, focus });
   editRef.current = { value, cursor, focus };
@@ -115,6 +117,16 @@ export function InputBox({ onSubmit, onCommand, commands = SLASH_COMMANDS, await
     if (!emitter) return;
     const onChunk = (chunk: Buffer | string) => {
       const s = typeof chunk === 'string' ? chunk : chunk.toString('utf8');
+      // Shift+Enter (kitty CSI u protocol): ESC[13;2u -> insert newline
+      if (s === '\x1b[13;2u') {
+        const { value: v, cursor: c, focus: f } = editRef.current;
+        if (!f) return;
+        setValue(v.slice(0, c) + '\n' + v.slice(c));
+        setCursor(c + 1);
+        setSelectedIndex(0);
+        setHistState({ index: null, draft: '' });
+        return;
+      }
       const kind = classifyDeleteChunk(s);
       if (!kind) return;
       const { value: v, cursor: c, focus: f } = editRef.current;
@@ -239,8 +251,10 @@ export function InputBox({ onSubmit, onCommand, commands = SLASH_COMMANDS, await
   return (
     <Box flexDirection="column" marginTop={1}>
       {menuOpen ? <SlashMenu commands={matches} selectedIndex={safeSelected} /> : null}
-      {/* Turn-status line sits directly on top of the input border (no gap). */}
-      {statusLine ? <Text dimColor>{statusLine}</Text> : null}
+      {/* Toast (e.g. "Copied!") takes precedence over the turn-status line. */}
+      {toast ? <Text color="cyan" dimColor>{toast}</Text>
+        : statusLine ? <Text dimColor>{statusLine}</Text>
+        : null}
       <Box borderStyle="single" borderDimColor paddingX={1}>
         <Box flexDirection="column" flexGrow={1}>
           {value.length === 0 && !focus ? (

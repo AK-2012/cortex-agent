@@ -30,6 +30,10 @@ import {
   normalizeNewlines,
   sanitizePastedText,
   classifyDeleteChunk,
+  parseAllMouseEvents,
+  normalizeSelection,
+  extractSelectionText,
+  osc52Copy,
 } from '../../src/tui/logic.js';
 
 // ── estimateLines ──
@@ -415,4 +419,130 @@ test('classifyDeleteChunk: anything else is null', () => {
   assert.equal(classifyDeleteChunk(''), null);
   assert.equal(classifyDeleteChunk('\x1b[D'), null);   // left arrow
   assert.equal(classifyDeleteChunk('hello'), null);    // a paste
+});
+
+// ── parseAllMouseEvents ──
+
+test('parseAllMouseEvents: parses left press + release (SGR)', () => {
+  // button 0 (left), col 10, row 5, M = press
+  const events = parseAllMouseEvents('\x1b[<0;10;5M');
+  assert.equal(events.length, 1);
+  assert.deepEqual(events[0], { type: 'press', button: 0, col: 9, row: 4 }); // 1-based → 0-based
+});
+
+test('parseAllMouseEvents: parses release (lowercase m)', () => {
+  const events = parseAllMouseEvents('\x1b[<0;10;5m');
+  assert.equal(events.length, 1);
+  assert.deepEqual(events[0], { type: 'release', button: 0, col: 9, row: 4 });
+});
+
+test('parseAllMouseEvents: parses drag events (button bit 0x20 set)', () => {
+  // button code 32 = 0x20 (motion flag) | 0 (left button)
+  const events = parseAllMouseEvents('\x1b[<32;15;8M');
+  assert.equal(events.length, 1);
+  assert.deepEqual(events[0], { type: 'drag', button: 0, col: 14, row: 7 });
+});
+
+test('parseAllMouseEvents: parses wheel events (button bit 0x40 set)', () => {
+  // 64 = wheel up, 65 = wheel down
+  const events = parseAllMouseEvents('\x1b[<64;1;1M\x1b[<65;1;1M');
+  assert.equal(events.length, 2);
+  assert.equal(events[0].type, 'wheel');
+  assert.equal(events[0].button, 64);
+  assert.equal(events[1].type, 'wheel');
+  assert.equal(events[1].button, 65);
+});
+
+test('parseAllMouseEvents: parses right-click (button 2)', () => {
+  const events = parseAllMouseEvents('\x1b[<2;20;10M');
+  assert.equal(events.length, 1);
+  assert.deepEqual(events[0], { type: 'press', button: 2, col: 19, row: 9 });
+});
+
+test('parseAllMouseEvents: handles multiple events in one chunk', () => {
+  // left press then drag then release
+  const chunk = '\x1b[<0;5;3M\x1b[<32;10;3M\x1b[<0;10;3m';
+  const events = parseAllMouseEvents(chunk);
+  assert.equal(events.length, 3);
+  assert.equal(events[0].type, 'press');
+  assert.equal(events[1].type, 'drag');
+  assert.equal(events[2].type, 'release');
+});
+
+test('parseAllMouseEvents: returns empty array for non-mouse input', () => {
+  assert.deepEqual(parseAllMouseEvents('hello'), []);
+  assert.deepEqual(parseAllMouseEvents(''), []);
+});
+
+// ── normalizeSelection ──
+
+test('normalizeSelection: already normalized (start before end) is returned as-is', () => {
+  const s = normalizeSelection(2, 5, 4, 10);
+  assert.deepEqual(s, { startLine: 2, startCol: 5, endLine: 4, endCol: 10 });
+});
+
+test('normalizeSelection: swaps when start is after end (backward drag)', () => {
+  const s = normalizeSelection(4, 10, 2, 5);
+  assert.deepEqual(s, { startLine: 2, startCol: 5, endLine: 4, endCol: 10 });
+});
+
+test('normalizeSelection: same line, swaps columns when startCol > endCol', () => {
+  const s = normalizeSelection(3, 15, 3, 5);
+  assert.deepEqual(s, { startLine: 3, startCol: 5, endLine: 3, endCol: 15 });
+});
+
+test('normalizeSelection: same point is a no-op', () => {
+  const s = normalizeSelection(3, 5, 3, 5);
+  assert.deepEqual(s, { startLine: 3, startCol: 5, endLine: 3, endCol: 5 });
+});
+
+// ── extractSelectionText ──
+
+test('extractSelectionText: single-line selection', () => {
+  const lines = [
+    { text: 'Hello, world!' },
+    { text: 'Second line' },
+  ];
+  assert.equal(extractSelectionText(lines, { startLine: 0, startCol: 7, endLine: 0, endCol: 12 }), 'world');
+});
+
+test('extractSelectionText: multi-line selection', () => {
+  const lines = [
+    { text: 'line zero' },
+    { text: 'line one' },
+    { text: 'line two' },
+    { text: 'line three' },
+  ];
+  const text = extractSelectionText(lines, { startLine: 1, startCol: 5, endLine: 3, endCol: 4 });
+  assert.equal(text, 'one\nline two\nline');
+});
+
+test('extractSelectionText: out-of-range startLine returns empty', () => {
+  const lines = [{ text: 'only' }];
+  assert.equal(extractSelectionText(lines, { startLine: 5, startCol: 0, endLine: 5, endCol: 3 }), '');
+  assert.equal(extractSelectionText(lines, { startLine: -1, startCol: 0, endLine: 0, endCol: 3 }), '');
+});
+
+test('extractSelectionText: endLine clamped to lines length', () => {
+  const lines = [{ text: 'alpha' }, { text: 'beta' }];
+  // endLine beyond array length — only first line from startCol
+  const text = extractSelectionText(lines, { startLine: 0, startCol: 2, endLine: 5, endCol: 2 });
+  assert.equal(text, 'pha\nbeta');
+});
+
+// ── osc52Copy ──
+
+test('osc52Copy: writes the correct OSC 52 escape to stdout', () => {
+  // Capture what osc52Copy writes to stdout
+  const written: string[] = [];
+  const origWrite = process.stdout.write;
+  process.stdout.write = ((chunk: string) => { written.push(chunk); return true; }) as any;
+  try {
+    osc52Copy('hello');
+    assert.equal(written.length, 1);
+    const b64 = Buffer.from('hello').toString('base64');
+    assert.equal(written[0], `\x1b]52;c;${b64}\x07`);
+  } finally {
+    process.stdout.write = origWrite;
+  }
 });

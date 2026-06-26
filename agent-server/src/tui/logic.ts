@@ -299,6 +299,84 @@ export function classifyDeleteChunk(s: string): 'backspace' | 'forward-delete' |
   return null;
 }
 
+// ── General mouse event parsing ──
+// Parse ALL SGR mouse events from raw stdin (press, release, drag, wheel) for text selection,
+// right-click, and wheel scroll. SGR mode (?1006h) encodes events as ESC[<b;col;rowM/m where
+// b carries button identity + modifier flags, M = press/drag, m = release.
+
+export interface TuiMouseEvent {
+  type: 'press' | 'release' | 'drag' | 'wheel';
+  button: number; // 0=left, 1=middle, 2=right (for wheel: 64=up, 65=down)
+  col: number;    // 0-based column
+  row: number;    // 0-based row
+}
+
+/** Parse ALL SGR mouse events from a raw stdin chunk (press, release, drag, wheel). */
+export function parseAllMouseEvents(chunk: string): TuiMouseEvent[] {
+  const out: TuiMouseEvent[] = [];
+  // eslint-disable-next-line no-control-regex
+  const re = /\x1b\[<(\d+);(\d+);(\d+)([Mm])/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(chunk)) !== null) {
+    const b = parseInt(m[1], 10);
+    const col = parseInt(m[2], 10) - 1; // 1-based → 0-based
+    const row = parseInt(m[3], 10) - 1;
+    const isRelease = m[4] === 'm';
+
+    if ((b & 0x40) !== 0) {
+      // Wheel event
+      out.push({ type: 'wheel', button: b, col, row });
+    } else if (isRelease) {
+      out.push({ type: 'release', button: b & 0x03, col, row });
+    } else if ((b & 0x20) !== 0) {
+      // Motion (drag) — button is in lower 2 bits
+      out.push({ type: 'drag', button: b & 0x03, col, row });
+    } else {
+      out.push({ type: 'press', button: b & 0x03, col, row });
+    }
+  }
+  return out;
+}
+
+/** Normalize a selection so start is always before end (top-left to bottom-right). */
+export function normalizeSelection(
+  startLine: number, startCol: number, endLine: number, endCol: number,
+): { startLine: number; startCol: number; endLine: number; endCol: number } {
+  if (startLine > endLine || (startLine === endLine && startCol > endCol)) {
+    return { startLine: endLine, startCol: endCol, endLine: startLine, endCol: startCol };
+  }
+  return { startLine, startCol, endLine, endCol };
+}
+
+/** Extract selected text from flat display lines given a normalized selection range. */
+export function extractSelectionText(
+  lines: Array<{ text: string }>,
+  sel: { startLine: number; startCol: number; endLine: number; endCol: number },
+): string {
+  if (sel.startLine < 0 || sel.startLine >= lines.length) return '';
+  if (sel.startLine === sel.endLine) {
+    return lines[sel.startLine].text.slice(sel.startCol, sel.endCol);
+  }
+  const parts: string[] = [];
+  // First line: from startCol to end
+  parts.push(lines[sel.startLine].text.slice(sel.startCol));
+  // Middle lines: full text
+  for (let i = sel.startLine + 1; i < Math.min(sel.endLine, lines.length); i++) {
+    parts.push(lines[i].text);
+  }
+  // Last line: from start to endCol
+  if (sel.endLine < lines.length) {
+    parts.push(lines[sel.endLine].text.slice(0, sel.endCol));
+  }
+  return parts.join('\n');
+}
+
+/** Copy text to the system clipboard via the OSC 52 terminal escape (BEL terminator). */
+export function osc52Copy(text: string): void {
+  const b64 = Buffer.from(text).toString('base64');
+  try { process.stdout.write(`\x1b]52;c;${b64}\x07`); } catch { /* best effort */ }
+}
+
 /** Parse SGR mouse wheel events from a raw stdin chunk. 64=up, 65=down (low bit = direction). */
 export function parseWheelEvents(chunk: string): Array<'up' | 'down'> {
   const out: Array<'up' | 'down'> = [];

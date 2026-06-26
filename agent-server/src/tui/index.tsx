@@ -60,12 +60,12 @@ function leaveFullscreen(): void {
   if (!altScreenActive) return;
   altScreenActive = false;
   // Leave alt-screen, show the cursor again, reset attributes, disable SGR mouse tracking
-  // (?1000l/?1006l) and bracketed paste (?2004l) so the terminal isn't left reporting mouse
+  // (?1002l/?1006l) and bracketed paste (?2004l) so the terminal isn't left reporting mouse
   // events or wrapping pastes after we exit. Use writeSync to fd 1: a buffered
   // process.stdout.write() inside an exit/signal handler is dropped before the process dies (the
   // enter sequence flushes during the run, but the leave never did), leaving the user stranded
   // on the alt buffer. writeSync bypasses the buffer.
-  try { writeSync(1, '\x1b[?2004l\x1b[?1000l\x1b[?1006l\x1b[?1049l\x1b[?25h\x1b[0m'); } catch { /* best effort */ }
+  try { writeSync(1, '\x1b[?2004l\x1b[?1002l\x1b[?1006l\x1b[?1049l\x1b[?25h\x1b[0m'); } catch { /* best effort */ }
 }
 
 /** Enter the alternate-screen buffer and register restore on EVERY exit path. */
@@ -74,12 +74,11 @@ function enterFullscreen(): void {
   // writeSync (unbuffered) so the switch lands on the TTY BEFORE Ink's first render — a
   // buffered process.stdout.write() can flush after Ink has already painted, leaving Ink
   // on the MAIN buffer (which then survives the leave, stranding the TUI on screen).
-  // alt-screen + clear + cursor home, then enable SGR mouse tracking (?1000h button events incl.
-  // wheel; ?1006h SGR encoding) so the transcript scrolls with the wheel, and bracketed paste
-  // (?2004h) so multi-line pastes arrive wrapped and insert literally. NOTE: while mouse tracking
-  // is on, native text selection / right-click paste need Shift (terminal-native), or press Ctrl+T
-  // (/mouse) to toggle capture OFF for plain drag-select + right-click paste (the wheel then stops).
-  writeSync(1, '\x1b[?1049h\x1b[2J\x1b[H\x1b[?1000h\x1b[?1006h\x1b[?2004h');
+  // alt-screen + clear + cursor home, then enable SGR mouse tracking (?1002h button-event
+  // tracking — motion events ONLY while a button is held, for drag selection; ?1006h SGR
+  // encoding) so the transcript scrolls with the wheel and left-drag selects text, and
+  // bracketed paste (?2004h) so multi-line pastes arrive wrapped and insert literally.
+  writeSync(1, '\x1b[?1049h\x1b[2J\x1b[H\x1b[?1002h\x1b[?1006h\x1b[?2004h');
   altScreenActive = true;
   // Synchronous safety net: runs on normal exit AND on process.exit() from anywhere.
   process.on('exit', leaveFullscreen);

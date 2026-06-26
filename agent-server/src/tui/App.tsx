@@ -14,7 +14,9 @@ import { useMutate } from './hooks/useMutate.js';
 import type { MutateResult } from './hooks/useMutate.js';
 import { useTranscript } from './hooks/useTranscript.js';
 import { useKeybindings } from './hooks/useKeybindings.js';
-import { useMouseScroll } from './hooks/useMouseScroll.js';
+import { useMouseHandler } from './hooks/useMouseHandler.js';
+import type { SelectionRange } from './hooks/useMouseHandler.js';
+import { osc52Copy, normalizeSelection, extractSelectionText } from './logic.js';
 import { useNotifications } from './hooks/useNotifications.js';
 import type { NotificationEntry } from './hooks/useNotifications.js';
 import { useDashboardData } from './hooks/useDashboardData.js';
@@ -118,6 +120,15 @@ export function App({
   // to free the mouse for native click-drag text selection + right-click paste (the wheel stops).
   const [mouseCapture, setMouseCapture] = useState(true);
 
+  // Toast message (e.g. "Copied to clipboard!") — auto-clears after 3 seconds.
+  const [toast, setToast] = useState<string | null>(null);
+  const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const showToast = useCallback((msg: string) => {
+    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    setToast(msg);
+    toastTimerRef.current = setTimeout(() => { setToast(null); toastTimerRef.current = null; }, 3000);
+  }, []);
+
   // Project switcher state
   const [projects, setProjects] = useState<ProjectEntry[]>([]);
   const [projectsLoading, setProjectsLoading] = useState(false);
@@ -133,7 +144,7 @@ export function App({
   // frames (identified by their `actions` rich-block) are routed here, NOT the transcript.
   const [turnStatus, setTurnStatus] = useState<string | null>(null);
 
-  const transcriptRef = useRef<{ scrollUp: (page?: boolean) => void; scrollDown: (page?: boolean) => void; scrollToEnd: () => void } | null>(null);
+  const transcriptRef = useRef<{ scrollUp: (page?: boolean) => void; scrollDown: (page?: boolean) => void; scrollToEnd: () => void; getSelectedText: (range: SelectionRange) => string } | null>(null);
 
   // Terminal size — drives the full-screen root box and updates on resize so the layout
   // always fills the alternate-screen buffer (see enterFullscreen in index.tsx).
@@ -308,11 +319,13 @@ export function App({
 
   // Toggle mouse capture. Writes the SGR mouse enable/disable sequences straight to the TTY so
   // the change takes effect immediately: OFF frees the mouse for native text selection, ON
-  // restores wheel-scroll capture. index.tsx's leaveFullscreen disables tracking on exit anyway.
+  // restores wheel-scroll + in-TUI drag-select capture. ?1002h = button-event tracking (motion
+  // only while a button is held), ?1006h = SGR encoding. index.tsx's leaveFullscreen disables
+  // tracking on exit anyway.
   const handleToggleMouse = useCallback(() => {
     setMouseCapture(prev => {
       const next = !prev;
-      try { process.stdout.write(next ? '\x1b[?1000h\x1b[?1006h' : '\x1b[?1000l\x1b[?1006l'); } catch { /* best effort */ }
+      try { process.stdout.write(next ? '\x1b[?1002h\x1b[?1006h' : '\x1b[?1002l\x1b[?1006l'); } catch { /* best effort */ }
       return next;
     });
   }, []);
@@ -425,8 +438,25 @@ export function App({
     allowReconnect: connectionState !== 'connected',
   });
 
-  // Mouse-wheel scrolling for the transcript (always active; harmless when nothing is scrollable).
-  useMouseScroll(handleScrollUp, handleScrollDown);
+  // Mouse handler: wheel scroll, text selection (left-drag → OSC 52 copy), right-click hint.
+  const handleSelectionComplete = useCallback((range: SelectionRange) => {
+    const text = transcriptRef.current?.getSelectedText(range);
+    if (text && text.length > 0) {
+      osc52Copy(text);
+      showToast(`Copied ${text.length} chars to clipboard (OSC 52)`);
+    }
+  }, [showToast]);
+
+  const handleRightClick = useCallback(() => {
+    showToast('Use Ctrl+Shift+V to paste');
+  }, [showToast]);
+
+  const { selection } = useMouseHandler({
+    onScrollUp: handleScrollUp,
+    onScrollDown: handleScrollDown,
+    onSelectionComplete: handleSelectionComplete,
+    onRightClick: handleRightClick,
+  });
 
   // Dashboard subscription management callbacks. Depend on the stable inner
   // functions (each a useCallback in useDashboardData), NOT the whole `dashboard`
@@ -444,6 +474,10 @@ export function App({
   const handleUnregisterSubscription = useCallback((queryId: string) => {
     unregisterSubscription(queryId);
   }, [unregisterSubscription]);
+
+  // Compute the actual reserved rows for the bottom UI so Transcript sizes its viewport
+  // exactly. Base = marginTop(1) + border(3) + StatusLine(1) = 5, plus optional lines.
+  const reservedBottomRows = 5 + (turnStatus ? 1 : 0) + (awaitingResponse && focusZone === 'input' ? 1 : 0);
 
   // If resume mode with sessions to pick, show picker instead of main layout
   if (resumableSessions && resumableSessions.length > 0 && onResumeSelect && onResumeCancel) {
@@ -485,6 +519,8 @@ export function App({
               ref={transcriptRef}
               messages={transcript.messages}
               ids={transcript.ids}
+              reservedRows={reservedBottomRows}
+              selection={selection}
             />
           </Box>
         )}
@@ -553,6 +589,7 @@ export function App({
           onToggleShortcuts={() => setShowShortcuts(s => !s)}
           onDismissShortcuts={() => setShowShortcuts(false)}
           statusLine={turnStatus}
+          toast={toast}
         />
       )}
 

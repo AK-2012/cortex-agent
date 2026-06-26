@@ -10,26 +10,32 @@
 
 import React, { useRef, useCallback, useState, useEffect, forwardRef, useImperativeHandle } from 'react';
 import { Box, Text, useStdout } from 'ink';
-import { computeVisibleWindow, flattenTranscript, collectStreamText, detectUserMessage } from '../logic.js';
-import type { FlattenableMessage } from '../logic.js';
+import { computeVisibleWindow, flattenTranscript, collectStreamText, detectUserMessage, normalizeSelection, extractSelectionText } from '../logic.js';
+import type { FlattenableMessage, FlatLine } from '../logic.js';
 import { InlineMarkdown } from '../render/inline-markdown.js';
 import type { RenderedMessage } from '../hooks/useTranscript.js';
+import type { SelectionRange } from '../hooks/useMouseHandler.js';
 
-// Rows reserved for the bottom UI (input box marginTop + border(3) + optional turn-status +
-// optional awaiting hint + StatusLine; the header was removed). Kept slightly generous so the
-// sliced line window never overflows into the input — any small deficit shows as blank at the
-// TOP (flex-end anchors content to the bottom), never as a gap above the input.
-const RESERVED_ROWS = 8;
+// Default rows reserved for the bottom UI (marginTop(1) + border(3) + StatusLine(1) = 5).
+// The actual count is now passed from App.tsx via the reservedRows prop, accounting for
+// optional turn-status and awaiting-response hint lines.
+const DEFAULT_RESERVED_ROWS = 5;
 
 export interface TranscriptHandle {
   scrollUp: (page?: boolean) => void;
   scrollDown: (page?: boolean) => void;
   scrollToEnd: () => void;
+  /** Extract the text under the given screen-coordinate selection range. */
+  getSelectedText: (range: SelectionRange) => string;
 }
 
 interface TranscriptProps {
   messages: Map<string, RenderedMessage>;
   ids: string[];
+  /** Rows reserved for the bottom UI (default 5). App.tsx computes the actual value. */
+  reservedRows?: number;
+  /** Active text selection range (screen coordinates, from useMouseHandler). */
+  selection?: SelectionRange | null;
 }
 
 /** Convert a rendered message into the structural shape the line-flattener consumes. */
@@ -47,7 +53,7 @@ function toFlattenable(m: RenderedMessage): FlattenableMessage {
 }
 
 export const Transcript = forwardRef<TranscriptHandle, TranscriptProps>(
-  function Transcript({ messages, ids }: TranscriptProps, ref): React.JSX.Element {
+  function Transcript({ messages, ids, reservedRows = DEFAULT_RESERVED_ROWS, selection }: TranscriptProps, ref): React.JSX.Element {
     const { stdout } = useStdout();
     // scrollOffset counts LINES scrolled up from the bottom (0 = pinned to bottom).
     const [scrollOffset, setScrollOffset] = useState(0);
@@ -55,7 +61,7 @@ export const Transcript = forwardRef<TranscriptHandle, TranscriptProps>(
 
     const rows = stdout?.rows ?? 24;
     const cols = stdout?.columns ?? 80;
-    const lineBudget = Math.max(3, rows - RESERVED_ROWS);
+    const lineBudget = Math.max(3, rows - reservedRows);
     // Wrap/pad to one column short of the terminal width. A line padded to the FULL width wraps to
     // a phantom extra row in the terminal (the cursor auto-margins at the last column) — visible as
     // a stray partial grey line under a user message. Capping at cols-1 keeps each user line a
@@ -91,7 +97,26 @@ export const Transcript = forwardRef<TranscriptHandle, TranscriptProps>(
       setScrollOffset(0);
     }, []);
 
-    useImperativeHandle(ref, () => ({ scrollUp, scrollDown, scrollToEnd }), [scrollUp, scrollDown, scrollToEnd]);
+    // Keep a ref to the current visible lines for getSelectedText (avoids stale closure).
+    const visibleRef = useRef<FlatLine[]>([]);
+
+    const getSelectedText = useCallback((range: SelectionRange): string => {
+      // Map screen coordinates to line indices within the visible slice.
+      // The transcript area occupies `lineBudget` rows at the top of the terminal.
+      // Content is flex-end anchored, so:
+      //   contentStartRow = lineBudget - visibleCount
+      //   lineIndex = screenRow - contentStartRow
+      const vis = visibleRef.current;
+      const visibleCount = vis.length;
+      const contentStartRow = lineBudget - visibleCount;
+      const norm = normalizeSelection(
+        range.startRow - contentStartRow, range.startCol,
+        range.endRow - contentStartRow, range.endCol,
+      );
+      return extractSelectionText(vis, norm);
+    }, [lineBudget]);
+
+    useImperativeHandle(ref, () => ({ scrollUp, scrollDown, scrollToEnd, getSelectedText }), [scrollUp, scrollDown, scrollToEnd, getSelectedText]);
 
     // Auto-stick to bottom on new content unless the user has scrolled up.
     useEffect(() => {
@@ -107,11 +132,24 @@ export const Transcript = forwardRef<TranscriptHandle, TranscriptProps>(
 
     const { start, end } = computeVisibleWindow(totalLines, lineBudget, effectiveOffset);
     const visible = flatLines.slice(start, end);
+    visibleRef.current = visible;
 
     if (ids.length === 0) {
       // Empty transcript renders nothing; the flexGrow box still reserves the space so the
       // input stays anchored at the bottom.
       return <Box flexDirection="column" flexGrow={1} />;
+    }
+
+    // Pre-compute the normalized selection range mapped to line indices within the visible
+    // slice, so the render loop can check each line cheaply.
+    const visibleCount = visible.length;
+    const contentStartRow = lineBudget - visibleCount;
+    let selNorm: { startLine: number; startCol: number; endLine: number; endCol: number } | null = null;
+    if (selection && (selection.startRow !== selection.endRow || selection.startCol !== selection.endCol)) {
+      selNorm = normalizeSelection(
+        selection.startRow - contentStartRow, selection.startCol,
+        selection.endRow - contentStartRow, selection.endCol,
+      );
     }
 
     // `justifyContent="flex-end"` anchors the lines to the BOTTOM of the grow box (just above
@@ -121,6 +159,27 @@ export const Transcript = forwardRef<TranscriptHandle, TranscriptProps>(
       <Box flexDirection="column" flexGrow={1} justifyContent="flex-end">
         {visible.map((ln, i) => {
           const content = ln.text.length > 0 ? ln.text : ' ';
+
+          // Check if this line is (partially) within the selection range and render the
+          // selected portion with a blue background highlight.
+          if (selNorm && i >= selNorm.startLine && i <= selNorm.endLine) {
+            const lineText = ln.text.length > 0 ? ln.text : ' ';
+            const selStart = i === selNorm.startLine ? selNorm.startCol : 0;
+            const selEnd = i === selNorm.endLine ? selNorm.endCol : lineText.length;
+            if (selStart < selEnd && selStart < lineText.length) {
+              const before = lineText.slice(0, selStart);
+              const selected = lineText.slice(selStart, selEnd);
+              const after = lineText.slice(selEnd);
+              return (
+                <Text key={i} dimColor={ln.dim}>
+                  {before}
+                  <Text backgroundColor="blue" color="white">{selected}</Text>
+                  {after}
+                </Text>
+              );
+            }
+          }
+
           if (ln.user) {
             // User input: the whole line is highlighted with a grey background (padded to the
             // row width so the highlight spans it), no "You:" prefix. padEnd to textCols (cols-1)
