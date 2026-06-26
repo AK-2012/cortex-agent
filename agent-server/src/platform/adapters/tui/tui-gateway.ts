@@ -686,16 +686,28 @@ export class TuiGatewayAdapter implements PlatformAdapter, TuiAdapterControls {
       conn.send({ type: 'error', code: 4500, message: 'Session service unavailable' });
       return;
     }
+
+    const resumeSessionId = frame.resume?.sessionId ?? null;
+    if (!resumeSessionId) {
+      // Lazy session creation: a plain launch (no resume) no longer mints a session at
+      // handshake — that was creating an empty `cortex-XXXX` on every open. We leave the
+      // conduit session-less (conduitState already holds sessionId:null from above) and emit
+      // NO session.switched. The first `msg.user` creates and announces the session instead
+      // (see _ensureSession in _handleMsgUser). Reconnects carry resume.sessionId, so an
+      // active conversation still re-attaches below.
+      return;
+    }
+
     const res = await this._sessionService.resolveHandshake({
       conduitId: conn.conduitId,
       projectId,
-      resumeSessionId: frame.resume?.sessionId ?? null,
+      resumeSessionId,
     });
     if (res.emitNotFoundError) {
       conn.send({
         type: 'error',
         code: 4003,
-        message: `Session ${frame.resume?.sessionId} not found, creating fresh session`,
+        message: `Session ${resumeSessionId} not found, creating fresh session`,
       });
     }
     conn.activeSessionId = res.sessionId;
@@ -714,6 +726,32 @@ export class TuiGatewayAdapter implements PlatformAdapter, TuiAdapterControls {
       const replay = buildTranscriptReplay(res.transcript);
       if (replay) conn.send(replay);
     }
+  }
+
+  /**
+   * Ensure the connection has a session, creating a fresh one on demand (lazy creation). Used
+   * by the first inbound user message after a no-resume handshake. Emits `session.switched` so
+   * the client learns the new session id/name. No-op when a session already exists.
+   */
+  private async _ensureSession(conn: TuiConnection): Promise<void> {
+    if (conn.activeSessionId || !this._sessionService) return;
+    const res = await this._sessionService.switchSession({
+      conduitId: conn.conduitId,
+      projectId: conn.activeProjectId ?? 'general',
+      sessionId: null,
+    });
+    conn.activeSessionId = res.sessionId;
+    conn.activeProjectId = res.projectId;
+    setConduitState(conn.conduitId, { sessionId: res.sessionId, projectId: res.projectId, backend: 'tui' });
+    conn.send({
+      type: 'session.switched',
+      id: '',
+      projectId: res.projectId,
+      sessionId: res.sessionId,
+      sessionName: res.sessionName,
+      isFresh: res.isFresh,
+      seq: 1,
+    });
   }
 
   // ── Private: session switch ─────────────────────────────────────
@@ -783,6 +821,10 @@ export class TuiGatewayAdapter implements PlatformAdapter, TuiAdapterControls {
 
     // Enqueue into per-conduit serial queue (injected port wraps the shared singleton)
     const run = async () => {
+      // Lazy session creation: the no-resume handshake leaves the conduit session-less, so the
+      // first message mints + announces the session before the handler routes it. Done inside
+      // the serial run() so concurrent first messages can't double-create.
+      await this._ensureSession(conn);
       const adapter = this;
       await this._messageHandler!({
         message: incoming,

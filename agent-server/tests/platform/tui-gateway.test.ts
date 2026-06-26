@@ -133,6 +133,16 @@ async function handshake(
   assert.equal(ack.type, 'handshake.ack');
   assert.equal(ack.protocolVersion, 1);
 
+  // Lazy session creation: a no-resume handshake no longer emits session.switched (no session
+  // is minted until the first message). Resume handshakes still announce their session.
+  // For tests that need an established session, explicitly create one via session.switch.
+  if (opts?.resume) {
+    const switched: any = await collector.read();
+    assert.equal(switched.type, 'session.switched');
+    return { conduitId: ack.conduitId, sessionId: switched.sessionId, sessionName: switched.sessionName };
+  }
+
+  sendFrame(ws, { type: 'session.switch', id: 'hs-init', projectId: opts?.project ?? 'general', sessionId: null });
   const switched: any = await collector.read();
   assert.equal(switched.type, 'session.switched');
 
@@ -185,6 +195,62 @@ test('handshake → session.attach → msg.user → chat.post → session.switch
   // Step 5: Close
   ws.close();
   await waitForClose(ws);
+});
+
+test('lazy session: no-resume handshake emits NO session.switched (no session minted on open)', async (t) => {
+  const { adapter, port, stop } = await startEphemeralGateway();
+  t.after(() => stop());
+
+  const ws = await wsConnect(port);
+  const coll = makeFrameCollector(ws);
+  t.after(() => ws.close());
+
+  sendFrame(ws, {
+    type: 'handshake.hello', protocolVersion: 1, clientName: 'test', clientVersion: '1.0',
+    project: 'general', resume: null,
+  });
+
+  const ack: any = await coll.read();
+  assert.equal(ack.type, 'handshake.ack');
+
+  // No session.switched should follow — opening the TUI must not mint a session.
+  const next = await coll.read(400).catch(() => null);
+  assert.equal(next, null, 'no session.switched (no session created at handshake)');
+
+  // The connection exists but carries no active session yet.
+  const conn = Array.from(adapter.connections.values())[0];
+  assert.equal(conn.activeSessionId, null, 'conduit is session-less until the first message');
+});
+
+test('lazy session: the first msg.user mints + announces the session, then replies', async (t) => {
+  const { adapter, port, stop } = await startEphemeralGateway();
+  t.after(() => stop());
+
+  const ws = await wsConnect(port);
+  const coll = makeFrameCollector(ws);
+  t.after(() => ws.close());
+
+  sendFrame(ws, {
+    type: 'handshake.hello', protocolVersion: 1, clientName: 'test', clientVersion: '1.0',
+    project: 'general', resume: null,
+  });
+  const ack: any = await coll.read();
+  assert.equal(ack.type, 'handshake.ack');
+
+  adapter.onMessage(async (ctx) => { await ctx.reply({ text: 'reply' }); });
+
+  sendFrame(ws, { type: 'msg.user', id: 'm1', text: 'first message' });
+
+  // First the lazily-created session is announced...
+  const switched: any = await coll.read();
+  assert.equal(switched.type, 'session.switched');
+  assert.equal(switched.isFresh, true);
+  assert.ok(switched.sessionId.length > 0);
+
+  // ...then the agent reply.
+  const post: any = await coll.read();
+  assert.equal(post.type, 'chat.post');
+  assert.equal(post.content.text, 'reply');
 });
 
 test('handshake protocol version mismatch causes error + close', async (t) => {

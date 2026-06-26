@@ -233,11 +233,21 @@ export function App({
     sendFrame({ type: 'ui.query', id: 'dash-cost', scope: 'cost.summary', params: {} } as any);
   }, []);
 
-  // Switching project/session (session.switched is handled in index.tsx and never
-  // reaches routeFrame) must release any pending send-lock from the old session.
+  // Switching project/session (session.switched is handled in index.tsx and never reaches
+  // routeFrame) must release any pending send-lock from the OLD session. With lazy session
+  // creation the first message transitions sessionName null→name — that is NOT a switch and
+  // must NOT clear the in-flight `awaitingResponse`/queued state, so we only reset when a real
+  // prior session existed and actually changed.
+  const prevSessionRef = useRef<{ projectId: string | null; sessionName: string | null }>({ projectId, sessionName });
   useEffect(() => {
-    setAwaitingResponse(false);
-    setQueuedCount(0);
+    const prev = prevSessionRef.current;
+    const isRealSwitch = (prev.sessionName !== null && prev.sessionName !== sessionName)
+      || (prev.projectId !== null && prev.projectId !== projectId);
+    prevSessionRef.current = { projectId, sessionName };
+    if (isRealSwitch) {
+      setAwaitingResponse(false);
+      setQueuedCount(0);
+    }
   }, [projectId, sessionName]);
 
   // Submit message

@@ -34,7 +34,7 @@ export function buildTranscriptReplay(
     };
     if (msg.role === 'tool') {
       // Tool calls render as a dim context line, mirroring the live display.
-      const label = msg.toolName ? `🔧 ${msg.toolName}${msg.toolInput ? `  ${msg.toolInput}` : ''}` : '🔧 tool';
+      const label = msg.toolName ? `· ${msg.toolName}${msg.toolInput ? `  ${msg.toolInput}` : ''}` : '· tool';
       items.push({ type: 'chat.post', ref, content: { text: '', richBlocks: [{ type: 'context', text: label }] as any }, seq: ++seq });
     } else if (msg.role === 'user') {
       items.push({ type: 'chat.post', ref, content: { text: `**You:** ${msg.text}` }, seq: ++seq });
