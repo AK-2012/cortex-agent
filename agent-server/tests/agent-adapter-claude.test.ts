@@ -419,7 +419,7 @@ test('SESSION_START_HOOKS — includes cortex-md-injector with expected matchers
   assert.equal(SESSION_START_HOOKS.length, 1);
   assert.equal(SESSION_START_HOOKS[0].matcher, 'startup|resume|clear|compact');
   assert.equal(SESSION_START_HOOKS[0].hooks.length, 1);
-  assert.ok(SESSION_START_HOOKS[0].hooks[0].command.includes('cortex-md-injector.mjs'));
+  assert.ok((SESSION_START_HOOKS[0].hooks[0] as any).command.includes('cortex-md-injector.mjs'));
 });
 
 // --- POST_TOOL_USE_HOOKS cortex-md-injector entry ---
@@ -428,7 +428,7 @@ test('POST_TOOL_USE_HOOKS — includes cortex-md-injector entry for Read', () =>
   const entry = POST_TOOL_USE_HOOKS.find((h: any) => h.matcher === 'Read');
   assert.ok(entry, 'expected cortex-md-injector entry in POST_TOOL_USE_HOOKS');
   assert.equal(entry.hooks.length, 1);
-  assert.ok(entry.hooks[0].command.includes('cortex-md-injector.mjs'));
+  assert.ok((entry.hooks[0] as any).command.includes('cortex-md-injector.mjs'));
 });
 
 // --- buildHooksSettings includes session keys ---
@@ -437,7 +437,7 @@ test('buildHooksSettings — return value includes SessionStart key', () => {
   const settings = buildHooksSettings(null);
   assert.ok(Array.isArray(settings.SessionStart));
   assert.equal(settings.SessionStart.length, 1);
-  assert.equal(settings.UserPromptSubmit, undefined);
+  assert.equal((settings as any).UserPromptSubmit, undefined);
 });
 
 // --- buildClaudeEnv extraEnv merge ---

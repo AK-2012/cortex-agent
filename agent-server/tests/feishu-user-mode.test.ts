@@ -36,13 +36,13 @@ test('wrapWithUserToken injects the user_access_token into every leaf call', asy
   let provided = 0;
   const wrapped = wrapWithUserToken(client, async () => { provided++; return 'UTOK'; });
 
-  const res = await wrapped.docx.v1.document.create({ title: 'T' });
+  const res = await wrapped.docx.v1.document.create({ title: 'T' } as any);
   assert.deepEqual(res, { code: 0, data: { ok: true } });          // return value preserved
   assert.equal(provided, 1);                                        // token provider invoked
   assert.deepEqual(calls[0].payload, { title: 'T' });               // payload passed through
   assert.equal(tokenFromOptions(calls[0].options), 'UTOK');         // token attached
 
-  await wrapped.drive.v1.permissionPublic.patch({ token: 'x' });
+  await wrapped.drive.v1.permissionPublic.patch({ token: 'x' } as any);
   assert.equal(provided, 2);
   assert.equal(tokenFromOptions(calls[1].options), 'UTOK');
 });

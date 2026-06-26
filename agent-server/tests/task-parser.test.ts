@@ -541,6 +541,10 @@ test('serializeTasksFileWithLock: round-trip non-empty tasks', () => {
     completed_at: null,
     completed_note: null,
     pending_at: null,
+    parent: null,
+    origin_session_id: null,
+    origin_channel: null,
+    origin_thread_id: null,
   }];
   const lock = { owner: 'x', acquired_at: 't1', expires_at: 't2' };
   const yaml = serializeTasksFileWithLock({ tasks, lock });

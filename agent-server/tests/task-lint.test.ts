@@ -30,6 +30,11 @@ function task(overrides: Record<string, any>) {
     not_before: null,
     completed_at: null,
     completed_note: null,
+    parent: null,
+    pending_at: null,
+    origin_session_id: null,
+    origin_channel: null,
+    origin_thread_id: null,
     ...overrides,
   };
 }

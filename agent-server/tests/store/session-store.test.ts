@@ -168,6 +168,7 @@ test('sessionStore - pruneStale keeps expired sessions referenced by executionRe
     templateName: null,
     status: 'running',
     channel: 'C001',
+    projectId: 'p1',
     platformThreadId: null,
     userMessage: 'test',
     userMessageTs: Date.now().toString(),

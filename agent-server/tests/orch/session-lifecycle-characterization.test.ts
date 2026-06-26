@@ -12,7 +12,7 @@ import { MockAdapter } from '../../src/platform/testing.js';
 import type { PlatformAdapter } from '../../src/platform/adapter.js';
 
 // Stub adapter for tests 1-3: resolveSessionName only calls resolveInboundProject
-const stubAdapter = { resolveInboundProject: async () => 'projX' } as PlatformAdapter;
+const stubAdapter = { resolveInboundProject: async () => 'projX' } as unknown as PlatformAdapter;
 
 // ── resolveSessionName tests ──────────────────────────────────────────────────
 

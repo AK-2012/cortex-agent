@@ -152,6 +152,7 @@ test('getResolvedPaths resolves relative --home to absolute', () => {
 // ─── generateDotEnvContent ───────────────────────────────────────
 
 const MINIMAL_ANSWERS: InitAnswers = {
+    lang: 'en',
   backends: ['claude'],
   machineName: 'test-host',
   gpuCount: 0,
@@ -161,6 +162,7 @@ const MINIMAL_ANSWERS: InitAnswers = {
 };
 
 const SLACK_ANSWERS: InitAnswers = {
+    lang: 'en',
   backends: ['claude'],
   machineName: 'test-host',
   gpuCount: 0,
@@ -175,6 +177,7 @@ const SLACK_ANSWERS: InitAnswers = {
 };
 
 const FEISHU_ANSWERS: InitAnswers = {
+    lang: 'en',
   backends: ['claude'],
   machineName: 'test-host',
   gpuCount: 0,
@@ -189,6 +192,7 @@ const FEISHU_ANSWERS: InitAnswers = {
 };
 
 const MULTI_ANSWERS: InitAnswers = {
+    lang: 'en',
   backends: ['claude'],
   machineName: 'test-host',
   gpuCount: 0,
@@ -271,6 +275,7 @@ test('generateDotEnvContent never emits FEISHU_ENCRYPT_KEY / FEISHU_VERIFICATION
 
 test('generateDotEnvContent omits optional feishu fields when undefined', () => {
   const minimalFeishu: InitAnswers = {
+    lang: 'en',
     ...MINIMAL_ANSWERS,
     platforms: ['feishu'],
     feishuConfig: { appId: 'id', appSecret: 'sec' },
@@ -290,6 +295,7 @@ test('generateDotEnvContent defaults FEISHU_AUTH_MODE=bot and omits redirect URI
 
 test('generateDotEnvContent writes FEISHU_AUTH_MODE=user with no redirect URI (device flow)', () => {
   const userMode: InitAnswers = {
+    lang: 'en',
     ...FEISHU_ANSWERS,
     feishuConfig: { ...FEISHU_ANSWERS.feishuConfig!, authMode: 'user' },
   };

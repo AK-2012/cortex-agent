@@ -83,7 +83,7 @@ test('askManager resolves the waiting manager via the task tree, delivers the qu
 
   assert.equal(res.ok, true);
   assert.equal(res.ok && res.target, 'manager');
-  assert.equal(res.ok && res.managerThreadId, manager.id);
+  assert.equal(res.ok && (res as { managerThreadId?: string }).managerThreadId, manager.id);
 
   const m = threadStore.get(manager.id)!;
   assert.equal(m.metadata!.pendingMessages!.length, 1);
@@ -141,7 +141,7 @@ test('askManager escalates to the human origin channel when there is no manager'
 
   assert.equal(res.ok, true);
   assert.equal(res.ok && res.target, 'human');
-  assert.equal(res.ok && res.channel, 'C-human-origin');
+  assert.equal(res.ok && (res as { channel?: string }).channel, 'C-human-origin');
   assert.equal(posted.length, 1);
   assert.equal(posted[0][0], 'C-human-origin');
   assert.match(posted[0][1], /speed or accuracy/);
