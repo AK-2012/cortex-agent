@@ -225,6 +225,64 @@ export function isMouseSequence(input: string): boolean {
   return /\[?<\d+;\d+;\d+[Mm]/.test(input);
 }
 
+// ── Multi-line cursor geometry ──
+// The input box holds a single string that may contain '\n' (multi-line entry). The cursor is a
+// flat character index; these pure helpers map it to a (row, col) grid and back so vertical
+// arrow navigation can move between wrapped logical lines.
+
+/** Map a flat cursor index to its zero-based (row, col) within a newline-delimited value. */
+export function cursorToRowCol(value: string, cursor: number): { row: number; col: number } {
+  const c = Math.max(0, Math.min(cursor, value.length));
+  const before = value.slice(0, c);
+  const lastNl = before.lastIndexOf('\n');
+  const row = before.length === 0 ? 0 : (before.match(/\n/g)?.length ?? 0);
+  const col = c - (lastNl + 1);
+  return { row, col };
+}
+
+/** Map a (row, col) back to a flat cursor index, clamping row to the line count and col to that line. */
+export function rowColToCursor(value: string, row: number, col: number): number {
+  const lines = value.split('\n');
+  const r = Math.max(0, Math.min(row, lines.length - 1));
+  const c = Math.max(0, Math.min(col, lines[r].length));
+  let idx = 0;
+  for (let i = 0; i < r; i++) idx += lines[i].length + 1;
+  return idx + c;
+}
+
+/** Move the cursor one logical line up (dir -1) or down (dir +1), preserving the column. */
+export function moveCursorVertical(value: string, cursor: number, dir: -1 | 1): number {
+  const { row, col } = cursorToRowCol(value, cursor);
+  return rowColToCursor(value, row + dir, col);
+}
+
+// ── Paste sanitization ──
+// With bracketed-paste mode on (?2004h, enabled in index.tsx) a paste arrives wrapped in
+// ESC[200~ … ESC[201~. These helpers strip the markers and any escape residue and normalize
+// line endings so multi-line pastes insert literally instead of submitting per Enter.
+
+/** Remove bracketed-paste begin/end markers (ESC[200~ / ESC[201~). */
+export function stripPasteMarkers(s: string): string {
+  // eslint-disable-next-line no-control-regex
+  return s.replace(/\x1b\[20[01]~/g, '');
+}
+
+/** Collapse CRLF and bare CR to LF so pasted line endings are uniform. */
+export function normalizeNewlines(s: string): string {
+  return s.replace(/\r\n?/g, '\n');
+}
+
+/** Clean a pasted chunk for literal insertion: drop paste markers + escape sequences, normalize newlines. */
+export function sanitizePastedText(s: string): string {
+  let t = stripPasteMarkers(s);
+  // Strip CSI / SGR / mouse escape sequences (cursor reports etc.) but keep printable text + newlines.
+  // eslint-disable-next-line no-control-regex
+  t = t.replace(/\x1b\[[0-9;?<>]*[ -/]*[@-~]/g, '');
+  // eslint-disable-next-line no-control-regex
+  t = t.replace(/\x1b[@-_]?/g, '');
+  return normalizeNewlines(t);
+}
+
 /** Parse SGR mouse wheel events from a raw stdin chunk. 64=up, 65=down (low bit = direction). */
 export function parseWheelEvents(chunk: string): Array<'up' | 'down'> {
   const out: Array<'up' | 'down'> = [];

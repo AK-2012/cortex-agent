@@ -59,12 +59,13 @@ let inkUnmount: (() => void) | null = null;
 function leaveFullscreen(): void {
   if (!altScreenActive) return;
   altScreenActive = false;
-  // Leave alt-screen, show the cursor again, reset attributes, and disable SGR mouse tracking
-  // (?1000l/?1006l) so the terminal isn't left reporting mouse events after we exit. Use
-  // writeSync to fd 1: a buffered process.stdout.write() inside an exit/signal handler is
-  // dropped before the process dies (the enter sequence flushes during the run, but the leave
-  // never did), leaving the user stranded on the alt buffer. writeSync bypasses the buffer.
-  try { writeSync(1, '\x1b[?1000l\x1b[?1006l\x1b[?1049l\x1b[?25h\x1b[0m'); } catch { /* best effort */ }
+  // Leave alt-screen, show the cursor again, reset attributes, disable SGR mouse tracking
+  // (?1000l/?1006l) and bracketed paste (?2004l) so the terminal isn't left reporting mouse
+  // events or wrapping pastes after we exit. Use writeSync to fd 1: a buffered
+  // process.stdout.write() inside an exit/signal handler is dropped before the process dies (the
+  // enter sequence flushes during the run, but the leave never did), leaving the user stranded
+  // on the alt buffer. writeSync bypasses the buffer.
+  try { writeSync(1, '\x1b[?2004l\x1b[?1000l\x1b[?1006l\x1b[?1049l\x1b[?25h\x1b[0m'); } catch { /* best effort */ }
 }
 
 /** Enter the alternate-screen buffer and register restore on EVERY exit path. */
@@ -74,9 +75,11 @@ function enterFullscreen(): void {
   // buffered process.stdout.write() can flush after Ink has already painted, leaving Ink
   // on the MAIN buffer (which then survives the leave, stranding the TUI on screen).
   // alt-screen + clear + cursor home, then enable SGR mouse tracking (?1000h button events incl.
-  // wheel; ?1006h SGR encoding) so the transcript can be scrolled with the mouse wheel. Note:
-  // while mouse tracking is on, native terminal text selection requires holding Shift.
-  writeSync(1, '\x1b[?1049h\x1b[2J\x1b[H\x1b[?1000h\x1b[?1006h');
+  // wheel; ?1006h SGR encoding) so the transcript can be scrolled with the mouse wheel, and
+  // bracketed paste (?2004h) so multi-line pastes arrive wrapped and insert literally instead of
+  // submitting per embedded Enter. Note: while mouse tracking is on, native text selection needs
+  // Shift — Ctrl+T (or /mouse) toggles capture off to free the mouse for plain drag-selection.
+  writeSync(1, '\x1b[?1049h\x1b[2J\x1b[H\x1b[?1000h\x1b[?1006h\x1b[?2004h');
   altScreenActive = true;
   // Synchronous safety net: runs on normal exit AND on process.exit() from anywhere.
   process.on('exit', leaveFullscreen);

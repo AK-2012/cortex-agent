@@ -113,6 +113,11 @@ export function App({
   // Bottom-line shortcuts overlay — '?' on an empty input shows it; any key dismisses it.
   const [showShortcuts, setShowShortcuts] = useState(false);
 
+  // Mouse capture (SGR tracking) state. ON → the wheel scrolls the transcript (enabled at startup
+  // in index.tsx). OFF → the terminal's native click-drag text selection works. Ctrl+T / `/mouse`
+  // toggle it by writing the SGR enable/disable sequences directly to the TTY.
+  const [mouseCapture, setMouseCapture] = useState(true);
+
   // Project switcher state
   const [projects, setProjects] = useState<ProjectEntry[]>([]);
   const [projectsLoading, setProjectsLoading] = useState(false);
@@ -301,6 +306,17 @@ export function App({
     setProjectSwitcherOpen(prev => !prev);
   }, []);
 
+  // Toggle mouse capture. Writes the SGR mouse enable/disable sequences straight to the TTY so
+  // the change takes effect immediately: OFF frees the mouse for native text selection, ON
+  // restores wheel-scroll capture. index.tsx's leaveFullscreen disables tracking on exit anyway.
+  const handleToggleMouse = useCallback(() => {
+    setMouseCapture(prev => {
+      const next = !prev;
+      try { process.stdout.write(next ? '\x1b[?1000h\x1b[?1006h' : '\x1b[?1000l\x1b[?1006l'); } catch { /* best effort */ }
+      return next;
+    });
+  }, []);
+
   // Project switcher select
   const handleProjectSelect = useCallback((selectedProjectId: string) => {
     sendFrame({
@@ -360,12 +376,21 @@ export function App({
         resumeTargetRef.current = args.trim() || null;
         sendFrame({ type: 'ui.query', id: 'slash-resume-list', scope: 'sessions.list', params: { resumable: true } } as any);
         break;
+      case 'mouse':
+        // Client-side only (the server has no !mouse): toggle mouse capture for text selection.
+        handleToggleMouse();
+        break;
       case 'help':
-      default:
         // The palette itself lists the commands — nothing else to do.
         break;
+      default:
+        // Every other registered slash command mirrors a server `!` command (same name). Forward
+        // it as `!<name> <args>` so the server's command dispatcher handles it and replies into
+        // the transcript. `!`-prefixed text is not echoed as a chat message (see handleSubmit).
+        handleSubmit(`!${name}${args ? ` ${args}` : ''}`);
+        break;
     }
-  }, [handleClearView, handleSubmit, handleCancel, sendFrame]);
+  }, [handleClearView, handleSubmit, handleCancel, handleToggleMouse, sendFrame]);
 
   // `/resume` picker selection → switch to the chosen session; Esc/cancel closes it.
   const handleSlashResumeSelect = useCallback((sessionId: string, pickedProjectId: string) => {
@@ -393,6 +418,7 @@ export function App({
     onToggleSidePanel: handleToggleSidePanel,
     onToggleNotifications: handleToggleNotifications,
     onToggleProjectSwitcher: handleToggleProjectSwitcher,
+    onToggleMouse: handleToggleMouse,
     onReconnect,
   }, focusZone !== 'modal', {
     allowScroll: focusZone === 'input',
@@ -434,31 +460,34 @@ export function App({
 
   return (
     <Box flexDirection="column" height={termSize.rows} width={termSize.columns}>
-      <Box flexDirection="row" flexGrow={1}>
-        {/* Transcript area */}
-        <Box flexDirection="column" flexGrow={1}>
-          <Transcript
-            ref={transcriptRef}
-            messages={transcript.messages}
-            ids={transcript.ids}
+      {/* Main area. When the dashboard is open it takes over this row, horizontally centered
+          (justifyContent="center"); the transcript is hidden so the dashboard reads as a centered
+          card. Otherwise the transcript fills the width. */}
+      <Box flexDirection="row" flexGrow={1} justifyContent="center">
+        {sidePanelVisible ? (
+          <SidePanel
+            visible={sidePanelVisible}
+            active={focusZone === 'dashboard'}
+            sendFrame={sendFrame}
+            projectId={projectId}
+            dashState={dashboard.state}
+            onMarkPending={handleMarkPending}
+            onRegisterSubscription={handleRegisterSubscription}
+            onUnregisterSubscription={handleUnregisterSubscription}
+            activeTab={activeTab}
+            onSetActiveTab={setActiveTab}
+            onMutate={mutate}
+            onClose={handleToggleSidePanel}
           />
-        </Box>
-
-        {/* Dashboard side panel */}
-        <SidePanel
-          visible={sidePanelVisible}
-          active={focusZone === 'dashboard'}
-          sendFrame={sendFrame}
-          projectId={projectId}
-          dashState={dashboard.state}
-          onMarkPending={handleMarkPending}
-          onRegisterSubscription={handleRegisterSubscription}
-          onUnregisterSubscription={handleUnregisterSubscription}
-          activeTab={activeTab}
-          onSetActiveTab={setActiveTab}
-          onMutate={mutate}
-          onClose={handleToggleSidePanel}
-        />
+        ) : (
+          <Box flexDirection="column" flexGrow={1}>
+            <Transcript
+              ref={transcriptRef}
+              messages={transcript.messages}
+              ids={transcript.ids}
+            />
+          </Box>
+        )}
       </Box>
 
       {/* Turn status (state · time · turns · cost) is rendered by InputBox, tight above the
@@ -534,6 +563,8 @@ export function App({
         queuedCount={queuedCount}
         notificationCount={notif.unreadCount}
         showShortcuts={showShortcuts && focusZone === 'input'}
+        dashboardActive={focusZone === 'dashboard'}
+        mouseCapture={mouseCapture}
       />
     </Box>
   );

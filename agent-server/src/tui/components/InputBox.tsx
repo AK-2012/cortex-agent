@@ -12,7 +12,11 @@ import React, { useCallback, useState } from 'react';
 import { Box, Text, useInput } from 'ink';
 import { SlashMenu } from './SlashMenu.js';
 import { SLASH_COMMANDS, parseSlashInput, filterSlashCommands, findSlashCommand, type SlashCommand } from '../slash-commands.js';
-import { historyPrev, historyNext, pushHistory, isMouseSequence, type InputHistoryState } from '../logic.js';
+import {
+  historyPrev, historyNext, pushHistory, isMouseSequence,
+  cursorToRowCol, moveCursorVertical, sanitizePastedText,
+  type InputHistoryState,
+} from '../logic.js';
 
 interface InputBoxProps {
   onSubmit: (text: string) => void;
@@ -56,6 +60,15 @@ export function InputBox({ onSubmit, onCommand, commands = SLASH_COMMANDS, await
     setHistState({ index: null, draft: '' });
   }, []);
 
+  // Insert literal text at the cursor (used by typing, paste, and newline insertion).
+  const insertText = useCallback((text: string) => {
+    if (!text) return;
+    setValue(v => v.slice(0, cursor) + text + v.slice(cursor));
+    setCursor(c => c + text.length);
+    setSelectedIndex(0);
+    setHistState({ index: null, draft: '' }); // editing detaches history navigation
+  }, [cursor]);
+
   const handleSubmit = useCallback((text: string) => {
     if (awaitingResponse) return; // block send, keep typed text
     if (text.trim().length === 0) return;
@@ -86,9 +99,27 @@ export function InputBox({ onSubmit, onCommand, commands = SLASH_COMMANDS, await
     handleSubmit(value);
   }, [parsed.query, parsed.args, matches, safeSelected, onCommand, commands, handleSubmit, value, clear]);
 
+  const isMultiline = value.includes('\n');
+  // Cursor position as (row, col) for the multi-line render below.
+  const { row: cursorRow, col: cursorCol } = cursorToRowCol(value, cursor);
+
   useInput((input, key) => {
     // While the shortcuts overlay is shown, ANY key just dismisses it (no other action).
     if (showShortcuts) { onDismissShortcuts?.(); return; }
+
+    // ── Newline insertion (multi-line input) ──
+    // Alt/Option+Enter inserts a literal newline (terminal-dependent). The terminal-agnostic
+    // fallback is a trailing backslash + Enter (handled in the Enter branch below).
+    if (key.return && key.meta) { insertText('\n'); return; }
+
+    // ── Bracketed paste (unambiguous: wrapped in ESC[200~ … ESC[201~) ──
+    // Strip the markers + escape residue and insert literally (newlines included) so a
+    // multi-line paste never submits per embedded Enter. Handled before the modifier guard
+    // (a paste carries no ctrl/meta) but before navigation it cannot be mistaken for a key.
+    if (input.includes('\x1b[200~') || input.includes('\x1b[201~')) {
+      insertText(sanitizePastedText(input));
+      return;
+    }
 
     // Ignore modifier combos so global hotkeys never leak their letter into the box.
     if (key.ctrl || key.meta) return;
@@ -114,10 +145,28 @@ export function InputBox({ onSubmit, onCommand, commands = SLASH_COMMANDS, await
     } else {
       // Escape / Tab are owned by other zones; PgUp/PgDn scroll the transcript.
       if (key.escape || key.tab || key.pageUp || key.pageDown) return;
-      // ↑/↓ cycle the input history (shell-style recall) instead of scrolling.
-      if (key.upArrow) { applyHistory(historyPrev(history, histState, value)); return; }
-      if (key.downArrow) { applyHistory(historyNext(history, histState, value)); return; }
-      if (key.return) { handleSubmit(value); return; }
+      // ↑/↓: in multi-line input they move the cursor between lines; otherwise they cycle the
+      // shell-style input history.
+      if (key.upArrow) {
+        if (isMultiline) { setCursor(c => moveCursorVertical(value, c, -1)); return; }
+        applyHistory(historyPrev(history, histState, value)); return;
+      }
+      if (key.downArrow) {
+        if (isMultiline) { setCursor(c => moveCursorVertical(value, c, 1)); return; }
+        applyHistory(historyNext(history, histState, value)); return;
+      }
+      if (key.return) {
+        // Trailing backslash + Enter → newline (terminal-agnostic multi-line entry).
+        if (cursor > 0 && value[cursor - 1] === '\\') {
+          setValue(v => v.slice(0, cursor - 1) + '\n' + v.slice(cursor));
+          setHistState({ index: null, draft: '' });
+          return; // cursor index is unchanged: it now sits just after the inserted newline
+        }
+        // A slash invocation with args (menu closed) still runs the command, forwarding args.
+        if (parsed.isSlash) { runSlash(); return; }
+        handleSubmit(value);
+        return;
+      }
     }
 
     if (key.leftArrow) {
@@ -140,17 +189,17 @@ export function InputBox({ onSubmit, onCommand, commands = SLASH_COMMANDS, await
     // Drop mouse-tracking escape residue (e.g. "[<64;30;10M") that Ink forwards as text when
     // SGR mouse mode is on — it must never land in the message buffer.
     if (isMouseSequence(input)) return;
+    // A multi-character chunk (terminal without bracketed paste, or a fast paste) is text — insert
+    // it literally so multi-line pastes keep their newlines instead of triggering a submit.
+    if (input.length > 1) { insertText(sanitizePastedText(input)); return; }
     // '?' on an empty input toggles the shortcuts overlay instead of typing a literal '?'.
     if (input === '?' && value.length === 0 && !menuOpen) {
       onToggleShortcuts?.();
       return;
     }
-    // Printable input (may be multiple characters on paste).
+    // Single printable character.
     if (input && input.length > 0) {
-      setValue(v => v.slice(0, cursor) + input + v.slice(cursor));
-      setCursor(c => c + input.length);
-      setSelectedIndex(0);
-      setHistState({ index: null, draft: '' }); // typing detaches history navigation
+      insertText(input);
     }
   }, { isActive: focus });
 
@@ -160,7 +209,7 @@ export function InputBox({ onSubmit, onCommand, commands = SLASH_COMMANDS, await
       {/* Turn-status line sits directly on top of the input border (no gap). */}
       {statusLine ? <Text dimColor>{statusLine}</Text> : null}
       <Box borderStyle="single" borderDimColor paddingX={1}>
-        <Box flexGrow={1}>
+        <Box flexDirection="column" flexGrow={1}>
           {value.length === 0 && !focus ? (
             <Text dimColor>Type a message...</Text>
           ) : value.length === 0 ? (
@@ -168,21 +217,26 @@ export function InputBox({ onSubmit, onCommand, commands = SLASH_COMMANDS, await
               <Text inverse> </Text>
               <Text dimColor>Type a message...</Text>
             </Text>
-          ) : focus ? (
-            <Text>
-              {value.slice(0, cursor)}
-              <Text inverse>{value.slice(cursor, cursor + 1) || ' '}</Text>
-              {value.slice(cursor + 1)}
-            </Text>
           ) : (
-            <Text>{value}</Text>
+            // Multi-line aware: render each logical line; on the cursor's row draw the inverse
+            // cursor block. A single-line value collapses to one row (identical to the old look).
+            value.split('\n').map((line, r) => {
+              if (focus && r === cursorRow) {
+                return (
+                  <Text key={r}>
+                    {line.slice(0, cursorCol)}
+                    <Text inverse>{line.slice(cursorCol, cursorCol + 1) || ' '}</Text>
+                    {line.slice(cursorCol + 1)}
+                  </Text>
+                );
+              }
+              return <Text key={r}>{line.length > 0 ? line : ' '}</Text>;
+            })
           )}
         </Box>
       </Box>
       {awaitingResponse ? (
         <Text dimColor>Waiting for response — Enter is disabled until the agent replies (Ctrl+C to cancel)</Text>
-      ) : !focus ? (
-        <Text dimColor>Press Ctrl+D to return to the input</Text>
       ) : null}
     </Box>
   );

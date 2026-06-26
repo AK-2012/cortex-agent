@@ -22,6 +22,13 @@ import {
   wrapToWidth,
   flattenMessageLines,
   flattenTranscript,
+  detectUserMessage,
+  cursorToRowCol,
+  rowColToCursor,
+  moveCursorVertical,
+  stripPasteMarkers,
+  normalizeNewlines,
+  sanitizePastedText,
 } from '../../src/tui/logic.js';
 
 // ── estimateLines ──
@@ -293,4 +300,83 @@ test('flattenMessageLines: streamed text is dim, queued marker appended', () => 
 test('flattenTranscript: inserts a blank separator line between messages', () => {
   const lines = flattenTranscript([{ text: 'one' }, { text: 'two' }], 80);
   assert.deepEqual(lines.map(l => l.text), ['one', '', 'two']);
+});
+
+// ── detectUserMessage ──
+
+test('detectUserMessage: strips the "**You:** " prefix and marks user', () => {
+  assert.deepEqual(detectUserMessage('**You:** hi there'), { text: 'hi there', user: true });
+});
+
+test('detectUserMessage: honours the isUser flag without a prefix', () => {
+  assert.deepEqual(detectUserMessage('hello', true), { text: 'hello', user: true });
+});
+
+test('detectUserMessage: plain assistant text is not a user message', () => {
+  assert.deepEqual(detectUserMessage('some answer'), { text: 'some answer', user: false });
+});
+
+// ── user-message flattening ──
+
+test('flattenMessageLines: user message marks lines user + plain (no markdown)', () => {
+  const lines = flattenMessageLines({ text: 'my question', user: true }, 80);
+  assert.ok(lines.length >= 1);
+  assert.ok(lines.every(l => l.user === true), 'all user lines flagged');
+  assert.ok(lines.every(l => l.markdown === false), 'user lines render plain (grey bg, no markdown)');
+});
+
+test('flattenMessageLines: non-user message lines are not flagged user', () => {
+  const lines = flattenMessageLines({ text: 'assistant reply' }, 80);
+  assert.ok(lines.every(l => l.user === false));
+});
+
+// ── multi-line cursor navigation ──
+
+test('cursorToRowCol: maps a flat index to row/col across newlines', () => {
+  const v = 'ab\ncde\nf';
+  assert.deepEqual(cursorToRowCol(v, 0), { row: 0, col: 0 });
+  assert.deepEqual(cursorToRowCol(v, 2), { row: 0, col: 2 });       // end of first line
+  assert.deepEqual(cursorToRowCol(v, 3), { row: 1, col: 0 });       // just after first newline
+  assert.deepEqual(cursorToRowCol(v, 6), { row: 1, col: 3 });       // end of "cde"
+  assert.deepEqual(cursorToRowCol(v, 8), { row: 2, col: 1 });       // end of "f"
+});
+
+test('rowColToCursor: inverse of cursorToRowCol, clamps out-of-range col', () => {
+  const v = 'ab\ncde\nf';
+  assert.equal(rowColToCursor(v, 0, 0), 0);
+  assert.equal(rowColToCursor(v, 1, 0), 3);
+  assert.equal(rowColToCursor(v, 1, 3), 6);
+  // col clamps to the target line's length (line "f" has length 1)
+  assert.equal(rowColToCursor(v, 2, 9), 8);
+  // row clamps to last line
+  assert.equal(rowColToCursor(v, 99, 0), 7);
+});
+
+test('moveCursorVertical: down/up preserve column where possible', () => {
+  const v = 'abcd\nef\nghij';
+  // From row0 col3 (index 3) moving down → row1, but "ef" has length 2 so col clamps to 2 (index 7)
+  assert.equal(moveCursorVertical(v, 3, 1), 7);
+  // From row2 col2 (index 12... actually g=8,h=9,i=10,j=11; col2 → index 10) moving up → row1 clamps col2→2 (index 7)
+  assert.equal(moveCursorVertical(v, 10, -1), 7);
+  // Up from the first row is a no-op (stays on row 0)
+  assert.equal(cursorToRowCol(v, moveCursorVertical(v, 2, -1)).row, 0);
+});
+
+// ── paste sanitization ──
+
+test('stripPasteMarkers: removes bracketed-paste begin/end markers', () => {
+  assert.equal(stripPasteMarkers('\x1b[200~hello\x1b[201~'), 'hello');
+  assert.equal(stripPasteMarkers('no markers'), 'no markers');
+});
+
+test('normalizeNewlines: collapses CRLF and bare CR to LF', () => {
+  assert.equal(normalizeNewlines('a\r\nb\rc\nd'), 'a\nb\nc\nd');
+});
+
+test('sanitizePastedText: strips markers + escape residue, normalizes newlines', () => {
+  assert.equal(sanitizePastedText('\x1b[200~line1\r\nline2\x1b[201~'), 'line1\nline2');
+  // pure escape residue sanitizes to empty
+  assert.equal(sanitizePastedText('\x1b[2J'), '');
+  // plain multi-line text passes through with normalized newlines
+  assert.equal(sanitizePastedText('a\r\nb'), 'a\nb');
 });

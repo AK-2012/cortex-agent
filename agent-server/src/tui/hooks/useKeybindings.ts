@@ -15,6 +15,7 @@ export interface KeybindingHandlers {
   onToggleSidePanel?: () => void; // Ctrl+D
   onToggleNotifications?: () => void; // Ctrl+N
   onToggleProjectSwitcher?: () => void; // Ctrl+P
+  onToggleMouse?: () => void; // Ctrl+T — toggle mouse capture (wheel scroll vs text selection)
   onReconnect?: () => void; // R (when disconnected)
 }
 
@@ -86,6 +87,13 @@ export function useKeybindings(handlers: KeybindingHandlers, isActive = true, op
     // Ctrl+P: open project switcher
     if (input === 'p' && key.ctrl) {
       h.onToggleProjectSwitcher?.();
+      return;
+    }
+
+    // Ctrl+T: toggle mouse capture — when off, the terminal's native text selection works;
+    // when on, the mouse wheel scrolls the transcript.
+    if (input === 't' && key.ctrl) {
+      h.onToggleMouse?.();
       return;
     }
 

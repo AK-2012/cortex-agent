@@ -18,12 +18,17 @@ interface StatusLineProps {
   notificationCount?: number;
   /** When true the whole bottom line shows the full shortcut list instead of the hint + badges. */
   showShortcuts?: boolean;
+  /** When the dashboard owns the keyboard, the left hint becomes "Ctrl+D to return" (not the
+   *  '? for shortcuts' tip), so the input box no longer needs its own intrusive return line. */
+  dashboardActive?: boolean;
+  /** Whether mouse capture (wheel scroll) is on. When off the mouse is free for text selection. */
+  mouseCapture?: boolean;
 }
 
 /** Full keyboard-shortcut list, revealed by typing '?' on an empty input. */
 const SHORTCUTS =
   'Ctrl+D Dashboard · Ctrl+N Notifications · Ctrl+P Projects · Ctrl+L Clear · '
-  + '↑/↓ History · PgUp/PgDn Scroll · Ctrl+C Cancel (×2 Exit) · / Commands';
+  + '↑/↓ History · PgUp/PgDn Scroll · Ctrl+T Mouse select · Ctrl+C Cancel (×2 Exit) · / Commands';
 
 export function StatusLine({
   connectionState,
@@ -32,6 +37,8 @@ export function StatusLine({
   queuedCount = 0,
   notificationCount = 0,
   showShortcuts = false,
+  dashboardActive = false,
+  mouseCapture = true,
 }: StatusLineProps): React.JSX.Element {
   const status = getConnectionStatus(connectionState, errorMessage);
   const color = getStatusColor(connectionState, errorMessage);
@@ -50,9 +57,12 @@ export function StatusLine({
     <Box justifyContent="space-between" width="100%">
       <Box>
         {status ? <Text color={color}>{status}{' — '}</Text> : null}
-        <Text dimColor>? for shortcuts</Text>
+        {dashboardActive
+          ? <Text dimColor>Press Ctrl+D to return to the input</Text>
+          : <Text dimColor>? for shortcuts</Text>}
       </Box>
       <Box>
+        {!mouseCapture ? <Text color="cyan">🖱 select · </Text> : null}
         {projectId ? <Text dimColor>{projectId}</Text> : null}
         {queuedCount > 0 ? <Text color="yellow"> · ⏳ {queuedCount}</Text> : null}
         {notificationCount > 0 ? <Text color="yellow"> · 🔔 {notificationCount}</Text> : null}

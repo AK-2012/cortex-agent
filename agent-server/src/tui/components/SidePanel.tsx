@@ -41,8 +41,10 @@ export function SidePanel({
 }: SidePanelProps): React.JSX.Element | null {
   if (!visible) return null;
 
+  // No marginLeft: the parent row centers this panel horizontally (App.tsx wraps the row in
+  // justifyContent="center"). Width stays fixed so the dashboard reads as a centered card.
   return (
-    <Box width={44} borderStyle="single" borderDimColor marginLeft={1} flexShrink={0}>
+    <Box width={44} borderStyle="single" borderDimColor flexShrink={0}>
       <Dashboard
         active={active}
         sendFrame={sendFrame}

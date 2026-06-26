@@ -134,6 +134,34 @@ test('useKeybindings calls onToggleProjectSwitcher on Ctrl+P', async (t) => {
   instance.cleanup();
 });
 
+test('useKeybindings calls onToggleMouse on Ctrl+T', async (t) => {
+  const events: string[] = [];
+
+  function TestAppMouse() {
+    useKeybindings({
+      onSubmit: () => {},
+      onCancel: () => {},
+      onScrollUp: () => {},
+      onScrollDown: () => {},
+      onClearView: () => {},
+      onExit: () => {},
+      onToggleMouse: () => events.push('toggleMouse'),
+    });
+    return React.createElement(Text, null, 'test');
+  }
+
+  const instance = render(React.createElement(TestAppMouse));
+  await delay(200);
+
+  instance.stdin.write('\x14'); // Ctrl+T
+  await delay(200);
+
+  assert.ok(events.includes('toggleMouse'), `expected toggleMouse in events: ${JSON.stringify(events)}`);
+
+  instance.unmount();
+  instance.cleanup();
+});
+
 test('useKeybindings calls onReconnect on R when allowReconnect is set', async (t) => {
   const events: string[] = [];
 
