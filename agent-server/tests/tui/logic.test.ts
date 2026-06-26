@@ -369,6 +369,13 @@ test('stripPasteMarkers: removes bracketed-paste begin/end markers', () => {
   assert.equal(stripPasteMarkers('no markers'), 'no markers');
 });
 
+test('stripPasteMarkers: removes BARE markers (ESC already stripped by ink)', () => {
+  // Ink consumes the leading ESC and forwards the remainder as text, so the markers arrive as
+  // bare "[200~"/"[201~" — these must be stripped too or they leak into the buffer.
+  assert.equal(stripPasteMarkers('[200~hello[201~'), 'hello');
+  assert.equal(stripPasteMarkers('[201~'), '');
+});
+
 test('normalizeNewlines: collapses CRLF and bare CR to LF', () => {
   assert.equal(normalizeNewlines('a\r\nb\rc\nd'), 'a\nb\nc\nd');
 });
@@ -379,4 +386,10 @@ test('sanitizePastedText: strips markers + escape residue, normalizes newlines',
   assert.equal(sanitizePastedText('\x1b[2J'), '');
   // plain multi-line text passes through with normalized newlines
   assert.equal(sanitizePastedText('a\r\nb'), 'a\nb');
+});
+
+test('sanitizePastedText: strips BARE bracketed-paste markers (the [201~ leak)', () => {
+  assert.equal(sanitizePastedText('[200~hello world[201~'), 'hello world');
+  assert.equal(sanitizePastedText('[201~'), '');
+  assert.equal(sanitizePastedText('[200~line1\r\nline2[201~'), 'line1\nline2');
 });

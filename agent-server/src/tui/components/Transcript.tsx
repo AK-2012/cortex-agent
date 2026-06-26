@@ -56,13 +56,18 @@ export const Transcript = forwardRef<TranscriptHandle, TranscriptProps>(
     const rows = stdout?.rows ?? 24;
     const cols = stdout?.columns ?? 80;
     const lineBudget = Math.max(3, rows - RESERVED_ROWS);
+    // Wrap/pad to one column short of the terminal width. A line padded to the FULL width wraps to
+    // a phantom extra row in the terminal (the cursor auto-margins at the last column) — visible as
+    // a stray partial grey line under a user message. Capping at cols-1 keeps each user line a
+    // single complete grey row.
+    const textCols = Math.max(1, cols - 1);
 
     // Flatten the whole transcript to display lines (no truncation).
     const orderedMessages = ids
       .map(id => messages.get(id))
       .filter((m): m is RenderedMessage => !!m)
       .map(toFlattenable);
-    const flatLines = flattenTranscript(orderedMessages, cols);
+    const flatLines = flattenTranscript(orderedMessages, textCols);
     const totalLines = flatLines.length;
 
     const scrollUp = useCallback((page = false) => {
@@ -118,8 +123,9 @@ export const Transcript = forwardRef<TranscriptHandle, TranscriptProps>(
           const content = ln.text.length > 0 ? ln.text : ' ';
           if (ln.user) {
             // User input: the whole line is highlighted with a grey background (padded to the
-            // full width so the highlight spans the row), no "You:" prefix.
-            return <Text key={i} backgroundColor="gray">{content.padEnd(cols)}</Text>;
+            // row width so the highlight spans it), no "You:" prefix. padEnd to textCols (cols-1)
+            // so it never reaches the full width and wraps into a phantom extra grey row.
+            return <Text key={i} backgroundColor="gray">{content.padEnd(textCols)}</Text>;
           }
           return ln.markdown
             ? <InlineMarkdown key={i} text={content} dimColor={ln.dim} />

@@ -28,7 +28,7 @@ interface StatusLineProps {
 /** Full keyboard-shortcut list, revealed by typing '?' on an empty input. */
 const SHORTCUTS =
   'Ctrl+D Dashboard · Ctrl+N Notifications · Ctrl+P Projects · Ctrl+L Clear · '
-  + '↑/↓ History · PgUp/PgDn Scroll · Ctrl+T Mouse select · Ctrl+C Cancel (×2 Exit) · / Commands';
+  + '↑/↓ History · PgUp/PgDn Scroll · Ctrl+T Wheel-scroll (blocks text select) · Ctrl+C Cancel (×2 Exit) · / Commands';
 
 export function StatusLine({
   connectionState,
@@ -62,7 +62,7 @@ export function StatusLine({
           : <Text dimColor>? for shortcuts</Text>}
       </Box>
       <Box>
-        {!mouseCapture ? <Text color="cyan">🖱 select · </Text> : null}
+        {mouseCapture ? <Text color="cyan">🖱 wheel · </Text> : null}
         {projectId ? <Text dimColor>{projectId}</Text> : null}
         {queuedCount > 0 ? <Text color="yellow"> · ⏳ {queuedCount}</Text> : null}
         {notificationCount > 0 ? <Text color="yellow"> · 🔔 {notificationCount}</Text> : null}

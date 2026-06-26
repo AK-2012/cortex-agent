@@ -261,10 +261,12 @@ export function moveCursorVertical(value: string, cursor: number, dir: -1 | 1): 
 // ESC[200~ … ESC[201~. These helpers strip the markers and any escape residue and normalize
 // line endings so multi-line pastes insert literally instead of submitting per Enter.
 
-/** Remove bracketed-paste begin/end markers (ESC[200~ / ESC[201~). */
+/** Remove bracketed-paste begin/end markers — both ESC[200~/ESC[201~ and the BARE [200~/[201~
+ *  form (Ink consumes the leading ESC and forwards the remainder as text, so the markers arrive
+ *  without their escape and otherwise leak into the buffer). */
 export function stripPasteMarkers(s: string): string {
   // eslint-disable-next-line no-control-regex
-  return s.replace(/\x1b\[20[01]~/g, '');
+  return s.replace(/(?:\x1b)?\[20[01]~/g, '');
 }
 
 /** Collapse CRLF and bare CR to LF so pasted line endings are uniform. */

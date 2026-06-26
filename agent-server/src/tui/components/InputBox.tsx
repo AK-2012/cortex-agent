@@ -112,11 +112,13 @@ export function InputBox({ onSubmit, onCommand, commands = SLASH_COMMANDS, await
     // fallback is a trailing backslash + Enter (handled in the Enter branch below).
     if (key.return && key.meta) { insertText('\n'); return; }
 
-    // ── Bracketed paste (unambiguous: wrapped in ESC[200~ … ESC[201~) ──
-    // Strip the markers + escape residue and insert literally (newlines included) so a
-    // multi-line paste never submits per embedded Enter. Handled before the modifier guard
-    // (a paste carries no ctrl/meta) but before navigation it cannot be mistaken for a key.
-    if (input.includes('\x1b[200~') || input.includes('\x1b[201~')) {
+    // ── Bracketed paste (wrapped in ESC[200~ … ESC[201~, possibly with the ESC already stripped
+    // by Ink so it arrives as a bare [200~ / [201~) ──
+    // Strip the markers + escape residue and insert literally (newlines included) so a multi-line
+    // paste never submits per embedded Enter. Handled before the modifier guard (a paste carries
+    // no ctrl/meta) so it cannot be mistaken for a key.
+    // eslint-disable-next-line no-control-regex
+    if (/(?:\x1b)?\[20[01]~/.test(input)) {
       insertText(sanitizePastedText(input));
       return;
     }
