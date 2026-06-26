@@ -72,7 +72,7 @@ test('notifyTaskOriginSession ignores tasks with no origin channel', async () =>
   const proj = `_ow_p${seq++}`;
   makeProject(proj, 'tasks:\n' + originTaskYaml('b1', { status: 'done' }));
   const calls: any[] = [];
-  await notifyTaskOriginSession('b1', 'completed', { wake: (c, n) => calls.push({ c, n }) });
+  await notifyTaskOriginSession('b1', 'completed', { wake: (c, n) => { calls.push({ c, n }); } });
   assert.equal(calls.length, 0);
 });
 
@@ -82,7 +82,7 @@ test('notifyTaskOriginSession defers to the thread-parent path when a thread is 
   makeProject(proj, 'tasks:\n' + originTaskYaml('c1', { channel: 'C-x', status: 'done' }));
   makeWaitingThread(proj, ['c1']);
   const calls: any[] = [];
-  await notifyTaskOriginSession('c1', 'completed', { wake: (c, n) => calls.push({ c, n }) });
+  await notifyTaskOriginSession('c1', 'completed', { wake: (c, n) => { calls.push({ c, n }); } });
   assert.equal(calls.length, 0);
 });
 
@@ -91,7 +91,7 @@ test('notifyTaskOriginSession ignores a loose completed event when the task is n
   const proj = `_ow_p${seq++}`;
   makeProject(proj, 'tasks:\n' + originTaskYaml('d1', { channel: 'C-y', status: 'open' }));
   const calls: any[] = [];
-  await notifyTaskOriginSession('d1', 'completed', { wake: (c, n) => calls.push({ c, n }) });
+  await notifyTaskOriginSession('d1', 'completed', { wake: (c, n) => { calls.push({ c, n }); } });
   assert.equal(calls.length, 0);
 });
 
@@ -100,8 +100,8 @@ test('notifyTaskOriginSession is single-fire per task+kind', async () => {
   const proj = `_ow_p${seq++}`;
   makeProject(proj, 'tasks:\n' + originTaskYaml('e1', { channel: 'C-z', status: 'done' }));
   const calls: any[] = [];
-  await notifyTaskOriginSession('e1', 'completed', { wake: (c, n) => calls.push({ c, n }) });
-  await notifyTaskOriginSession('e1', 'completed', { wake: (c, n) => calls.push({ c, n }) });
+  await notifyTaskOriginSession('e1', 'completed', { wake: (c, n) => { calls.push({ c, n }); } });
+  await notifyTaskOriginSession('e1', 'completed', { wake: (c, n) => { calls.push({ c, n }); } });
   assert.equal(calls.length, 1);
 });
 
@@ -110,7 +110,7 @@ test('notifyTaskOriginSession wakes on blocked with the block reason', async () 
   const proj = `_ow_p${seq++}`;
   makeProject(proj, 'tasks:\n' + originTaskYaml('f1', { channel: 'C-b', status: 'open', blocked: 'stuck' }));
   const calls: { channel: string; notice: string }[] = [];
-  await notifyTaskOriginSession('f1', 'blocked', { wake: (channel, notice) => calls.push({ channel, notice }) });
+  await notifyTaskOriginSession('f1', 'blocked', { wake: (channel, notice) => { calls.push({ channel, notice }); } });
   assert.equal(calls.length, 1);
   assert.match(calls[0].notice, /stuck|受阻|阻塞/);
 });

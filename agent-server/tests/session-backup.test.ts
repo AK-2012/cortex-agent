@@ -5,7 +5,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdirSync, writeFileSync, unlinkSync, rmdirSync, existsSync, readFileSync } from 'fs';
+import { mkdirSync, writeFileSync, unlinkSync, rmSync, existsSync, readFileSync } from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import {
@@ -47,7 +47,7 @@ test('backupSessionFile: creates .turn-N.bak alongside original', () => {
     assert.ok(existsSync(backupPath), 'backup file should exist');
     assert.equal(readFileSync(backupPath, 'utf8'), 'content');
   } finally {
-    try { rmdirSync(dir, { recursive: true }); } catch { /* cleanup */ }
+    try { rmSync(dir, { recursive: true, force: true }); } catch { /* cleanup */ }
   }
 });
 
@@ -57,7 +57,7 @@ test('backupSessionFile: returns null if file does not exist', () => {
     const backupPath = backupSessionFile(path.join(dir, 'nonexistent.jsonl'), 0);
     assert.equal(backupPath, null);
   } finally {
-    try { rmdirSync(dir, { recursive: true }); } catch { /* cleanup */ }
+    try { rmSync(dir, { recursive: true, force: true }); } catch { /* cleanup */ }
   }
 });
 
@@ -76,7 +76,7 @@ test('restoreSessionFile: copies backup over original', () => {
     assert.equal(restored, true);
     assert.equal(readFileSync(filePath, 'utf8'), 'original content');
   } finally {
-    try { rmdirSync(dir, { recursive: true }); } catch { /* cleanup */ }
+    try { rmSync(dir, { recursive: true, force: true }); } catch { /* cleanup */ }
   }
 });
 
@@ -88,7 +88,7 @@ test('restoreSessionFile: returns false if backup does not exist', () => {
     const restored = restoreSessionFile(filePath, 99);
     assert.equal(restored, false);
   } finally {
-    try { rmdirSync(dir, { recursive: true }); } catch { /* cleanup */ }
+    try { rmSync(dir, { recursive: true, force: true }); } catch { /* cleanup */ }
   }
 });
 
@@ -121,7 +121,7 @@ test('cleanupBackupsForFile: removes backups after given turn index', () => {
     assert.ok(!existsSync(`${filePath}.turn-2.bak`), 'turn 2 should be removed');
     assert.ok(!existsSync(`${filePath}.turn-3.bak`), 'turn 3 should be removed');
   } finally {
-    try { rmdirSync(dir, { recursive: true }); } catch { /* cleanup */ }
+    try { rmSync(dir, { recursive: true, force: true }); } catch { /* cleanup */ }
   }
 });
 
@@ -133,7 +133,7 @@ test('cleanupBackupsForFile: no-op when no backups exist', () => {
     // Should not throw
     cleanupBackupsForFile(filePath, 0);
   } finally {
-    try { rmdirSync(dir, { recursive: true }); } catch { /* cleanup */ }
+    try { rmSync(dir, { recursive: true, force: true }); } catch { /* cleanup */ }
   }
 });
 
@@ -154,7 +154,7 @@ test('findPISessionFile: finds file by header id', () => {
     // The findPISessionFile function is tested indirectly through the lifecycle/edit-handler
     // integration test.
   } finally {
-    try { rmdirSync(dir, { recursive: true }); } catch { /* cleanup */ }
+    try { rmSync(dir, { recursive: true, force: true }); } catch { /* cleanup */ }
   }
 });
 
@@ -177,6 +177,6 @@ test('backup/restore cycle preserves binary-identical content', () => {
 
     assert.equal(readFileSync(filePath, 'utf8'), original);
   } finally {
-    try { rmdirSync(dir, { recursive: true }); } catch { /* cleanup */ }
+    try { rmSync(dir, { recursive: true, force: true }); } catch { /* cleanup */ }
   }
 });

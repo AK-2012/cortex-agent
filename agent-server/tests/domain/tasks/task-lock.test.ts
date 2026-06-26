@@ -42,7 +42,7 @@ test('acquire — acquires a lock with default TTL', () => {
   const project = nextProject();
   setupProject(project);
   try {
-    const result = acquireLock(project, { owner: 'owner-A', ttlMs: 300_000 });
+    const result = acquireLock(project, { owner: 'owner-A' });
     assert.equal(result.acquired, true);
     assert.ok(result.lock);
     assert.equal(result.lock!.owner, 'owner-A');
@@ -62,7 +62,7 @@ test('acquire — fails when lock held by different owner and not expired', () =
   const project = nextProject();
   setupProject(project);
   try {
-    acquireLock(project, { owner: 'owner-A', ttlMs: 300_000 });
+    acquireLock(project, { owner: 'owner-A' });
     const result = acquireLock(project, { owner: 'owner-B' });
     assert.equal(result.acquired, false);
     assert.match(result.message!, /Lock held by/i);
@@ -76,7 +76,7 @@ test('acquire — force overrides existing valid lock', () => {
   const project = nextProject();
   setupProject(project);
   try {
-    acquireLock(project, { owner: 'owner-A', ttlMs: 300_000 });
+    acquireLock(project, { owner: 'owner-A' });
     const result = acquireLock(project, { owner: 'owner-B', force: true });
     assert.equal(result.acquired, true);
     assert.ok(result.lock);
@@ -110,7 +110,7 @@ test('release — releases lock held by same owner', () => {
   const project = nextProject();
   setupProject(project);
   try {
-    acquireLock(project, { owner: 'owner-A', ttlMs: 300_000 });
+    acquireLock(project, { owner: 'owner-A' });
     const result = releaseLock(project, 'owner-A');
     assert.equal(result.released, true);
     assert.equal(readLock(project), null);
@@ -123,7 +123,7 @@ test('release — fails when lock held by different owner', () => {
   const project = nextProject();
   setupProject(project);
   try {
-    acquireLock(project, { owner: 'owner-A', ttlMs: 300_000 });
+    acquireLock(project, { owner: 'owner-A' });
     const result = releaseLock(project, 'owner-B');
     assert.equal(result.released, false);
     assert.match(result.message!, /different owner/i);
@@ -138,7 +138,7 @@ test('release — force releases across different owner', () => {
   const project = nextProject();
   setupProject(project);
   try {
-    acquireLock(project, { owner: 'owner-A', ttlMs: 300_000 });
+    acquireLock(project, { owner: 'owner-A' });
     const result = releaseLock(project, 'owner-B', { force: true });
     assert.equal(result.released, true);
     assert.equal(readLock(project), null);

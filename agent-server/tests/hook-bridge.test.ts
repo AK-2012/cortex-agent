@@ -69,7 +69,7 @@ test('ask-user.requested subscriber calls MockAdapter.postMessage (Slack side ef
   await new Promise(setImmediate as any);
 
   assert.equal(mockAdapter.posted.length, 1, 'exactly one message posted to mock adapter');
-  assert.equal(mockAdapter.posted[0].destination.conduit, 'C_ASK');
+  assert.equal((mockAdapter.posted[0].destination as { conduit: string }).conduit, 'C_ASK');
   assert.equal((mockAdapter.posted[0].content as any).text, 'Questions (1)');
 
   hb.resolveRequest('req-2', { answers: {} });
@@ -99,7 +99,7 @@ test('registerPlanApproval publishes plan.submitted and subscriber calls MockAda
   await new Promise(setImmediate as any);
 
   assert.equal(mockAdapter.posted.length, 1, 'exactly one interactive message posted');
-  assert.equal(mockAdapter.posted[0].destination.conduit, 'C_PLAN');
+  assert.equal((mockAdapter.posted[0].destination as { conduit: string }).conduit, 'C_PLAN');
   assert.equal((mockAdapter.posted[0].content as any).text, 'Plan approval');
 
   const actions = mockAdapter.posted[0].actions ?? [];

@@ -115,7 +115,7 @@ test('!status reports running executions from injected registry summary', async 
   assert.equal(handled, true);
   await new Promise(resolve => setImmediate(resolve));
 
-  assert.equal(adapter.posted[0].destination.conduit, 'C123');
+  assert.equal((adapter.posted[0].destination as { conduit: string }).conduit, 'C123');
   assert.equal(adapter.posted[0].content.text, 'Running executions: 2\n• local C1 proj-a running\n• dispatch lab:t123 proj-b running');
 });
 
@@ -278,7 +278,7 @@ test('!cancel <taskId> cancels a dispatched task via injected handler', async ()
   await new Promise(resolve => setImmediate(resolve));
 
   assert.deepEqual(calls, [{ taskId: 'abcd', channel: 'C123' }]);
-  assert.equal(adapter.posted[0].destination.conduit, 'C123');
+  assert.equal((adapter.posted[0].destination as { conduit: string }).conduit, 'C123');
   assert.equal(adapter.posted[0].content.text, 'cancelled abcd');
 });
 
@@ -300,7 +300,7 @@ test('plain !cancel still cancels the current active process', async (t) => {
 
   assert.equal(killed, true);
   assert.equal(conduitQueues.has('C123'), false);
-  assert.equal(adapter.posted[0].destination.conduit, 'C123');
+  assert.equal((adapter.posted[0].destination as { conduit: string }).conduit, 'C123');
   assert.equal(adapter.posted[0].content.text, '🛑 Cancelled. Session preserved — next message will resume.');
 });
 

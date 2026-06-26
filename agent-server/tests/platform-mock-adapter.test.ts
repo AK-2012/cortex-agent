@@ -68,7 +68,7 @@ test('postMessage records destination/content/threadId and returns unique ascend
 
 test('updateMessage and deleteMessage record the affected ref', async () => {
   const adapter = new MockAdapter();
-  const ref = await adapter.postMessage('C1', { text: 'x' });
+  const ref = await adapter.postMessage({ type: 'interactive-reply', conduit: 'C1', sessionId: '' }, { text: 'x' });
   await adapter.updateMessage(ref, { text: 'y' });
   await adapter.deleteMessage(ref);
 
@@ -102,7 +102,7 @@ test('openModal records every opened modal with triggerId', async () => {
 
 test('markQueued records its input', async () => {
   const adapter = new MockAdapter();
-  const ref = await adapter.postMessage('C1', { text: 'hi' });
+  const ref = await adapter.postMessage({ type: 'interactive-reply', conduit: 'C1', sessionId: '' }, { text: 'hi' });
   await adapter.markQueued(ref);
 
   assert.deepEqual(adapter.marksQueued, [{ ref }]);
