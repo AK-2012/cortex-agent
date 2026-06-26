@@ -114,6 +114,9 @@ export function App({
 
   // Bottom-line shortcuts overlay — '?' on an empty input shows it; any key dismisses it.
   const [showShortcuts, setShowShortcuts] = useState(false);
+  // Stable callbacks so the memoized InputBox isn't re-rendered by unrelated App state changes.
+  const handleToggleShortcuts = useCallback(() => setShowShortcuts(s => !s), []);
+  const handleDismissShortcuts = useCallback(() => setShowShortcuts(false), []);
 
   // Mouse capture (SGR tracking) state. Default ON so the wheel scrolls the transcript (enabled at
   // startup in index.tsx). Ctrl+T / `/mouse` toggles it OFF — writing the SGR disable sequence —
@@ -593,8 +596,8 @@ export function App({
           awaitingResponse={awaitingResponse}
           focus={focusZone === 'input'}
           showShortcuts={showShortcuts}
-          onToggleShortcuts={() => setShowShortcuts(s => !s)}
-          onDismissShortcuts={() => setShowShortcuts(false)}
+          onToggleShortcuts={handleToggleShortcuts}
+          onDismissShortcuts={handleDismissShortcuts}
           statusLine={turnStatus}
           toast={toast}
         />

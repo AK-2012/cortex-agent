@@ -8,7 +8,7 @@
 // truncation) while the slice can never exceed the box height (so Ink never garbles). Scrolling
 // (keyboard PgUp/PgDn + mouse wheel) moves the bottom anchor one line / one page at a time.
 
-import React, { useRef, useCallback, useState, useEffect, forwardRef, useImperativeHandle } from 'react';
+import React, { useRef, useCallback, useState, useEffect, useMemo, forwardRef, useImperativeHandle } from 'react';
 import { Box, Text, useStdout } from 'ink';
 import { computeVisibleWindow, flattenTranscript, collectStreamText, detectUserMessage, normalizeSelection, extractSelectionText, padToWidth, splitByDisplayCols } from '../logic.js';
 import type { FlattenableMessage, FlatLine } from '../logic.js';
@@ -70,12 +70,16 @@ export const Transcript = forwardRef<TranscriptHandle, TranscriptProps>(
     // single complete grey row.
     const textCols = Math.max(1, cols - 1);
 
-    // Flatten the whole transcript to display lines (no truncation).
-    const orderedMessages = ids
-      .map(id => messages.get(id))
-      .filter((m): m is RenderedMessage => !!m)
-      .map(toFlattenable);
-    const flatLines = flattenTranscript(orderedMessages, textCols);
+    // Flatten the whole transcript to display lines (no truncation). Memoized on the message
+    // content + width so scroll- or selection-only re-renders (which change neither) skip the
+    // O(all messages × wrap) flatten and just re-slice the cached lines below.
+    const flatLines = useMemo(() => {
+      const orderedMessages = ids
+        .map(id => messages.get(id))
+        .filter((m): m is RenderedMessage => !!m)
+        .map(toFlattenable);
+      return flattenTranscript(orderedMessages, textCols);
+    }, [messages, ids, textCols]);
     const totalLines = flatLines.length;
 
     const scrollUp = useCallback((page = false) => {

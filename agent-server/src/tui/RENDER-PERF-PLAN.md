@@ -1,9 +1,24 @@
 # TUI 渲染性能改造计划（消除闪烁 + 降低延迟）
 
-状态：草案 / 待评审
+状态：阶段 0–3 已实现（Windows Terminal 目标），待真机验证
 范围：`agent-server/src/tui/`
 作者：Cortex
 日期：2026-06-26
+
+## 实现进度（2026-06-26）
+
+已落地阶段 0–3（用户在 Windows Terminal 运行，DEC 2026 受支持）：
+
+- **阶段 0/1**（commit：synchronized-output）：新增 `render-output.ts`，用一个 stdout 代理把 Ink 每帧输出包进 `\x1b[?2026h`/`\x1b[?2026l`（BSU/ESU）。Ink 全屏时每帧走 `clearTerminal + output` 的非原子清屏+重绘路径（已在 `node_modules/ink/build/ink.js` onRender L121–124 核实），同步输出让清+绘原子呈现，消除闪屏。`CORTEX_TUI_NO_SYNC=1` 关闭；`CORTEX_TUI_RENDER_STATS=<file>` 在退出时落盘 writes/bytes/clears/writes-per-second 基准。8 个单测。
+- **阶段 2**（commit：coalesce wheel + throttle drag）：新增 `raf-batch.ts`（`createNumericBatcher` / `createThrottle`，7 单测）。`useMouseHandler` 把一串滚轮 notch 累加成一次 `scrollByLines(净delta)`（Transcript 新增的句柄方法），不再每 notch 一次 `setScrollOffset`+整表 re-flatten；拖拽 selection 的 setState 节流到 ~60fps（dragRef 仍同步更新，release 读到精确终点）。
+- **阶段 3**（commit：memoize render surface）：Transcript 的 `flattenTranscript` 用 `useMemo` 按 (messages, ids, textCols) 缓存——仅滚动/选区变化的重渲染不再重排全表；`StatusLine` 与 `InputBox` 包 `React.memo`，App 因 turn-status / 拖拽 / 计数等无关 state 重渲染时不再 reconcile 它们（并把 InputBox 的两个内联回调在 App 用 `useCallback` 稳定化）。
+
+未实现：阶段 4（自研 cell-diff 渲染层）——按计划仅在阶段 0–3 真机验证后仍不达标才做，且需单独审批。
+
+待验证：在 Windows Terminal 实测三个场景（快速滚轮 / 连续打字 / 拖拽选区）的闪烁与延迟，用 `CORTEX_TUI_RENDER_STATS` 对比 before/after。
+
+---
+
 
 ## 1. 问题与现象
 

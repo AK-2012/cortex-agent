@@ -30,7 +30,9 @@ const SHORTCUTS =
   'Ctrl+D Dashboard · Ctrl+N Notifications · Ctrl+P Projects · Ctrl+L Clear · '
   + '↑/↓ History · PgUp/PgDn Scroll · Ctrl+T Text-select mode (stops wheel) · Ctrl+C Cancel (×2 Exit) · / Commands';
 
-export function StatusLine({
+// Memoized (React.memo below): all props are primitives, so App re-renders driven by unrelated
+// state (turn-status ticks, drag-selection, toasts) skip reconciling the status bar entirely.
+function StatusLineImpl({
   connectionState,
   errorMessage,
   projectId,
@@ -70,6 +72,8 @@ export function StatusLine({
     </Box>
   );
 }
+
+export const StatusLine = React.memo(StatusLineImpl);
 
 /** Connection status text, or null when connected normally (nothing to show). */
 function getConnectionStatus(state: WsState, errorMessage?: string | null): string | null {

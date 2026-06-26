@@ -40,7 +40,10 @@ interface InputBoxProps {
   toast?: string | null;
 }
 
-export function InputBox({ onSubmit, onCommand, commands = SLASH_COMMANDS, awaitingResponse, focus = true, showShortcuts = false, onToggleShortcuts, onDismissShortcuts, statusLine, toast }: InputBoxProps): React.JSX.Element {
+// Memoized (React.memo below) so App re-renders driven by unrelated state (drag-selection,
+// queued/notification counts, dashboard data) skip reconciling the input while it owns purely
+// local editing state. It still re-renders when its own props change (statusLine/toast/focus/…).
+function InputBoxImpl({ onSubmit, onCommand, commands = SLASH_COMMANDS, awaitingResponse, focus = true, showShortcuts = false, onToggleShortcuts, onDismissShortcuts, statusLine, toast }: InputBoxProps): React.JSX.Element {
   const [value, setValue] = useState('');
   const [cursor, setCursor] = useState(0);
   const [selectedIndex, setSelectedIndex] = useState(0);
@@ -293,3 +296,5 @@ export function InputBox({ onSubmit, onCommand, commands = SLASH_COMMANDS, await
     </Box>
   );
 }
+
+export const InputBox = React.memo(InputBoxImpl);
