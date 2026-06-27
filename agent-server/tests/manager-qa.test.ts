@@ -1,6 +1,7 @@
 // input:  Node test runner + orchestration/manager-qa daemon-side ask/answer logic
-// output: askManager (manager resolution + delivery + resume / human escalation) / submitAnswer /
-//         getAnswer / tryAnswerFromHuman / buildQuestionNotice tests
+// output: askManager (manager resolution + delivery + resume / top-of-tree origin-session wake +
+//         human backstop) / submitAnswer / getAnswer / tryAnswerFromHuman / buildQuestionNotice /
+//         buildOriginSessionNotice tests
 // pos:    Verify the synchronous ask_manager / answer_subtask Q&A channel (subtask → manager up-ask)
 // >>> If I am updated, update my header comment and the parent folder's CORTEX.md <<<
 
@@ -13,6 +14,7 @@ import {
   getAnswer,
   tryAnswerFromHuman,
   buildQuestionNotice,
+  buildOriginSessionNotice,
   _testResetManagerQa,
 } from '../src/orchestration/manager-qa.js';
 import type { ThreadRecord, ThreadStatus } from '../src/core/types/thread-types.js';
@@ -129,29 +131,58 @@ test('askManager does not resume a manager that is not currently waiting (only d
   assert.equal(m.metadata!.pendingMessages!.length, 1, 'question still delivered');
 });
 
-test('askManager escalates to the human origin channel when there is no manager', async () => {
+test('askManager wakes the origin session (no manager) and the origin agent answers via answer_subtask', async () => {
   _testResetManagerQa();
   const { child, readTask } = makeManagerChild({ parentTaskId: null, originChannel: 'C-human-origin' });
-  const posted: Array<[string, string]> = [];
+  const woke: Array<[string, string]> = [];
   const res = await askManager(child.id, 'Should I prioritize speed or accuracy?', {
     readTask,
     resume: () => { throw new Error('must not resume — no manager'); },
-    postToChannel: (ch, t) => { posted.push([ch, t]); },
+    wakeOriginSession: (ch, t) => { woke.push([ch, t]); },
   });
 
   assert.equal(res.ok, true);
   assert.equal(res.ok && res.target, 'human');
   assert.equal(res.ok && (res as { channel?: string }).channel, 'C-human-origin');
-  assert.equal(posted.length, 1);
-  assert.equal(posted[0][0], 'C-human-origin');
-  assert.match(posted[0][1], /speed or accuracy/);
+  // The origin session (the dispatcher) is woken as an AGENT — not a passive human ping.
+  assert.equal(woke.length, 1);
+  assert.equal(woke[0][0], 'C-human-origin');
+  assert.match(woke[0][1], /speed or accuracy/);
+  assert.match(woke[0][1], /answer_subtask/, 'origin session is told to answer via answer_subtask');
+  assert.ok(res.ok && new RegExp(res.questionId).test(woke[0][1]), 'origin notice carries the questionId');
 
-  // The human replies on that channel — routed back as the answer.
-  const handled = tryAnswerFromHuman('C-human-origin', 'Prioritize accuracy.');
+  // The origin agent resolves it from its own context and answers via answer_subtask.
+  const out = await submitAnswer(res.ok ? res.questionId : '', 'Prioritize accuracy.');
+  assert.equal(out.ok, true);
+  const got = getAnswer(res.ok ? res.questionId : '');
+  assert.equal(got.answered, true);
+  assert.equal(got.answer, 'Prioritize accuracy.');
+});
+
+test('origin-session escalation keeps the human backstop armed — a human reply on the channel is delivered', async () => {
+  _testResetManagerQa();
+  const { child, readTask } = makeManagerChild({ parentTaskId: null, originChannel: 'C-human-origin2' });
+  const res = await askManager(child.id, 'speed or accuracy?', {
+    readTask,
+    resume: () => { throw new Error('must not resume — no manager'); },
+    wakeOriginSession: () => {}, // origin session can't answer → defers to the human in-channel
+  });
+  assert.equal(res.ok, true);
+
+  // The human (or the origin agent relaying them) replies on the channel — captured as the answer.
+  const handled = tryAnswerFromHuman('C-human-origin2', 'Prioritize accuracy.');
   assert.equal(handled, true);
   const got = getAnswer(res.ok ? res.questionId : '');
   assert.equal(got.answered, true);
   assert.equal(got.answer, 'Prioritize accuracy.');
+});
+
+test('buildOriginSessionNotice is agent-facing: carries the subtask id, question, questionId, and answer_subtask guidance', () => {
+  const notice = buildOriginSessionNotice({ questionId: 'q_xyz789', fromTaskId: 'CH7', question: 'Which eval split?' });
+  assert.match(notice, /q_xyz789/);
+  assert.match(notice, /Which eval split\?/);
+  assert.match(notice, /answer_subtask/);
+  assert.match(notice, /CH7/);
 });
 
 test('askManager returns an error when there is neither a manager nor an origin channel', async () => {

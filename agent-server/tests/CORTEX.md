@@ -81,7 +81,7 @@ How to run tests without tripping it:
 | `thread-tree.test.ts` | Test | DR-0014 tree: getRootThreadId/getTreeThreads/summarizeTree/checkSpawnGuards/buildThreadTree/registerChildSpawn |
 | `thread-wait-children.test.ts` | Test | DR-0014/0015 suspend: pendingControl(wait)/tryEnterWaiting/detectSplitFromControl + restart/cleanup semantics |
 | `webhook-thread-control.test.ts` | Test | DR-0015: /webhook/thread-op `control` action — abort/split/wait validation + pendingControl persistence + reject-second/terminal/unknown |
-| `manager-qa.test.ts` | Test | DR-0016 up-ask channel: askManager manager-resolution (thread-parent + task-tree) / deliver→resume / human escalation / submitAnswer + getAnswer round-trip / tryAnswerFromHuman / buildQuestionNotice |
+| `manager-qa.test.ts` | Test | DR-0016 up-ask channel: askManager manager-resolution (thread-parent + task-tree) / deliver→resume / top-of-tree origin-session wake (origin agent answers via answer_subtask) + human backstop (tryAnswerFromHuman) / submitAnswer + getAnswer round-trip / buildQuestionNotice / buildOriginSessionNotice |
 | `webhook-manager-qa.test.ts` | Test | DR-0016: /webhook/manager-qa `ask`/`poll`/`answer` HTTP round-trip + unknown thread/question/action validation |
 | `thread-callback-tree.test.ts` | Test | DR-0014 re-entry: notifyThreadParent idempotency+resume / recoverWaitingThreads / buildChildResultNotice |
 | `thread-contract.test.ts` | Test | DR-0014 contracts: buildContractPrompt/buildMissionChain/checkContractBudget |

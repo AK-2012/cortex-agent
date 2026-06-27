@@ -1,5 +1,5 @@
 // input:  terminal thread record (threadStore), interactive runner, outbound queue, live adapter
-// output: fireThreadCallback / notifyThreadParent / recoverWaitingThreads / buildChildResultNotice
+// output: fireThreadCallback / notifyThreadParent / recoverWaitingThreads / buildChildResultNotice / wakeSession
 // pos:    completion callback for MCP thread_start; closes the loop when a spawned thread finishes.
 //         DR-0014: thread-parent children deliver results into the parent's pendingMessages and
 //         resume the suspended parent when its last awaited child turns terminal.
@@ -325,10 +325,11 @@ export async function notifyTaskParentThreads(taskId: string, kind: 'completed' 
 type WakeFn = (channel: string, notice: string) => void | Promise<void>;
 
 /** Wake (or create) the session on a channel by routing a synthetic user message — the same
- *  mechanism the interactive thread-parent path uses. Shared by thread completion (fireThreadCallback)
- *  and task completion (notifyTaskOriginSession). agentRunner.route find-or-creates the channel's
- *  session, so this works whether or not a live session still exists. */
-async function wakeSession(channel: string, notice: string, tag: string): Promise<void> {
+ *  mechanism the interactive thread-parent path uses. Shared by thread completion (fireThreadCallback),
+ *  task completion (notifyTaskOriginSession), and top-of-tree ask_manager escalation (manager-qa).
+ *  agentRunner.route find-or-creates the channel's session, so this works whether or not a live
+ *  session still exists. */
+export async function wakeSession(channel: string, notice: string, tag: string): Promise<void> {
   const adapter = jobCtx.adapter;
   if (!adapter) { log.error(`no adapter; cannot wake session on ${channel} (${tag})`); return; }
   const message: IncomingMessage = {

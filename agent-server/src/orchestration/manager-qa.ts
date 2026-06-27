@@ -1,23 +1,23 @@
 // input:  webhook /webhook/manager-qa (ask/poll/answer), agent-runner human-reply interception
-// output: askManager / submitAnswer / getAnswer / tryAnswerFromHuman / buildQuestionNotice
-// pos:    DR-0016 up-ask channel — a subtask asks its manager (or, at the top, a human) a clarifying
-//         question and blocks (synchronously, via the ask_manager MCP tool's poll loop) until
-//         answered. A suspended manager is woken to answer (resumeManagerForQuestion) and re-suspends
-//         via pendingControl='wait' after answer_subtask. Central question state is an in-memory Map
-//         in the daemon (synchronous model: a daemon restart fails the in-flight ask, consistent with
-//         running threads failing on restart — no persistence in v1).
+// output: askManager / submitAnswer / getAnswer / tryAnswerFromHuman / buildQuestionNotice / buildOriginSessionNotice
+// pos:    DR-0016 up-ask channel — a subtask asks its manager a clarifying question and blocks
+//         (synchronously, via the ask_manager MCP tool's poll loop) until answered. A suspended
+//         manager is woken to answer (resumeManagerForQuestion) and re-suspends via
+//         pendingControl='wait' after answer_subtask. At the TOP of the tree (no manager thread) the
+//         ORIGIN session — the agent that dispatched the work — is woken (wakeSession / agentRunner.route)
+//         and answers from its own context via answer_subtask; only if it cannot does it consult the
+//         human, whose direct channel reply is captured by the still-armed backstop (channelIndex +
+//         tryAnswerFromHuman). Central question state is an in-memory Map in the daemon (synchronous
+//         model: a daemon restart fails the in-flight ask, consistent with running threads failing
+//         on restart — no persistence in v1).
 // >>> If I am updated, update my header comment and the parent folder's CORTEX.md <<<
 
 import { threadStore } from '@store/thread-repo.js';
 import { scanAllTasks } from '@core/task-parser.js';
 import { isTerminalStatus } from '@domain/threads/tree.js';
-import { resumeManagerForQuestion } from './thread-callback.js';
-import { ctx as jobCtx } from '@domain/scheduling/job-registry.js';
-import { getOutboundQueue, durablePost } from '@store/outbound-queue.js';
+import { resumeManagerForQuestion, wakeSession } from './thread-callback.js';
 import { createLogger } from '@core/log.js';
-import { t } from '@core/i18n.js';
 import type { ThreadRecord } from '@core/types/thread-types.js';
-import type { Destination } from '@platform/index.js';
 
 const log = createLogger('manager-qa');
 
@@ -52,8 +52,9 @@ export interface ManagerQaDeps {
   readTask?: (project: string | null, taskId: string) => TaskLite | null;
   /** Resume a waiting manager so it can answer (defaults to resumeManagerForQuestion). */
   resume?: (managerThreadId: string) => void;
-  /** Post the question to a human-escalation channel (defaults to the platform adapter). */
-  postToChannel?: (channel: string, text: string) => void | Promise<void>;
+  /** Wake the origin agent session at the top of the tree, handing it the question (defaults to the
+   *  shared wakeSession → agentRunner.route). Injected in tests to avoid spawning a real turn. */
+  wakeOriginSession?: (channel: string, notice: string) => void | Promise<void>;
 }
 
 function defaultReadTask(project: string | null, taskId: string): TaskLite | null {
@@ -65,13 +66,8 @@ function defaultReadTask(project: string | null, taskId: string): TaskLite | nul
   }
 }
 
-async function defaultPostToChannel(channel: string, text: string): Promise<void> {
-  const adapter = jobCtx.adapter;
-  if (!adapter) { log.error(`no adapter; cannot escalate question to ${channel}`); return; }
-  const dest: Destination = { type: 'interactive-reply', conduit: channel, sessionId: '' };
-  const queue = getOutboundQueue();
-  if (queue) await durablePost(queue, adapter, dest, { text });
-  else await adapter.postMessage(dest, { text });
+async function defaultWakeOriginSession(channel: string, notice: string): Promise<void> {
+  await wakeSession(channel, notice, `askmgr_${Date.now().toString(36)}`);
 }
 
 /** Notice injected into the manager's pendingMessages — an AGENT-facing prompt (English, not i18n;
@@ -90,17 +86,21 @@ export function buildQuestionNotice(q: { questionId: string; fromTaskId: string 
   ].join('\n');
 }
 
-/** Notice posted to a human's chat channel when a subtask escalates to the top of the tree — a
- *  USER-facing platform message, so it is localized via i18n.t() (CORTEX_LANG). The ❓ icon stays
- *  in code per the locales convention (icons never live in the message tables). */
-function buildHumanEscalationNotice(q: PendingQuestion): string {
-  const from = q.fromTaskId ? t('subtask.fromTask', { taskId: q.fromTaskId }) : t('subtask.fromUnknown');
+/** Notice routed into the ORIGIN session at the top of the tree — woken as an AGENT (the dispatcher
+ *  of this work is the nearest manager), so it is agent-facing English (not i18n), mirroring
+ *  buildQuestionNotice. It must answer via answer_subtask, or consult the human and let their reply
+ *  flow back through the backstop. A prose reply here is NOT delivered to the subtask. */
+export function buildOriginSessionNotice(q: { questionId: string; fromTaskId: string | null; question: string }): string {
+  const from = q.fromTaskId ? `subtask #${q.fromTaskId}` : 'a subtask';
   return [
-    `❓ ${t('subtask.escalateHeader', { from })}`,
+    `[Subtask question — you dispatched this task] ${from} hit something unclear/contradictory while executing and is checking the planning intent of whoever set it in motion. There is no dispatched manager thread above it, so YOU (this session) are its nearest manager:`,
     '',
-    t('subtask.questionLabel', { question: q.question }),
+    `Question: ${q.question}`,
     '',
-    t('subtask.escalateReply'),
+    'Resolve it one of two ways — a prose reply in this channel is NOT delivered to the subtask:',
+    `1. If you can answer from your own context / the task spec / the repo, answer the subtask directly with the answer_subtask tool:`,
+    `       answer_subtask(question_id="${q.questionId}", answer="<your answer>")`,
+    '2. If you genuinely cannot and it needs the human who owns this work, ask the human in this channel — their next reply here is delivered to the subtask as the answer.',
   ].join('\n');
 }
 
@@ -198,9 +198,16 @@ export async function askManager(threadId: string, question: string, deps: Manag
     managerThreadId: null, channel, awaitingHuman: true, question: q, answer: null, createdAt: Date.now(),
   };
   questions.set(questionId, rec);
+  // Arm the human backstop BEFORE waking the origin session: if that session decides it cannot
+  // answer and asks the human here, the human's reply must already be routable back (tryAnswerFromHuman).
   channelIndex.set(channel, questionId);
-  await (deps.postToChannel ?? defaultPostToChannel)(channel, buildHumanEscalationNotice(rec));
-  log.info(`ask_manager: ${threadId} → human escalation on ${channel} (${questionId})`);
+  // Top of the tree: wake the ORIGIN session (the agent that dispatched this work) and let it answer
+  // from its own context via answer_subtask, only consulting the human if it cannot. Fire-and-forget —
+  // wakeSession runs a full agent turn; the asking subtask's ask registration must not block on it.
+  const wake = deps.wakeOriginSession ?? defaultWakeOriginSession;
+  Promise.resolve(wake(channel, buildOriginSessionNotice(rec))).catch((e: Error) =>
+    log.error(`ask_manager origin-wake on ${channel}: ${e.message}`));
+  log.info(`ask_manager: ${threadId} → origin session on ${channel} (${questionId})`);
   return { ok: true, questionId, target: 'human', channel };
 }
 
