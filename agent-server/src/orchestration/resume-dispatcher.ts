@@ -5,7 +5,10 @@
 //         serialized per channel; threads (status 'rate_limited') are re-run from the interrupted
 //         step via resumeRateLimitedThread, fired concurrently (channel-parallel-safe) and only
 //         skipped if a live direct session holds the channel. Options rebuilt by buildResumeOptions
-//         (dispatch onEnd hook + destination). All deps injectable for tests.
+//         (dispatch onEnd hook + destination). After the resumed run returns, settleResumedThread
+//         seals the live status message to its terminal summary and cascades the completion callback
+//         (mirrors the DR-0014 suspended-parent onSettled) — otherwise the status message freezes at
+//         the last running step. All deps injectable for tests.
 // >>> If I am updated, update my header comment and the parent folder's CORTEX.md <<<
 
 import type { PlatformAdapter, IncomingMessage } from '@platform/index.js';
@@ -13,7 +16,7 @@ import type { ThreadRecord, RunThreadOptions } from '@core/types/thread-types.js
 import { takeAllResumes, type ResumeEntry } from '@domain/costs/resume-registry.js';
 import { agentRunner } from './agent-runner.js';
 import { resumeRateLimitedThread } from '@domain/threads/runner.js';
-import { buildResumeOptions } from './thread-callback.js';
+import { buildResumeOptions, sealSuspendedStatusMsg, fireThreadCallback } from './thread-callback.js';
 import { threadStore } from '@store/thread-repo.js';
 import { runningExecutions } from '@core/running-executions.js';
 import { createLogger } from '@core/log.js';
@@ -50,6 +53,12 @@ export interface ResumeDeps {
   takeAll: () => ResumeEntry[];
   route: (ctx: Parameters<typeof agentRunner.route>[0]) => Promise<void>;
   resumeThread: (threadId: string, opts: RunThreadOptions) => Promise<unknown>;
+  /** Settle a resumed thread once its run returns: refresh the live status message to its
+   *  terminal/re-suspended/re-rate-limited summary and cascade completion to any parent.
+   *  Without this the status message freezes at the last running step (the resumed run keeps
+   *  updating it mid-flight, but nothing seals it at the end). Mirrors the DR-0014
+   *  suspended-parent onSettled in thread-callback.defaultResume. */
+  settleResumedThread: (threadId: string) => Promise<void>;
   buildResumeOptions: (thread: ThreadRecord) => RunThreadOptions | null;
   getThread: (threadId: string) => ThreadRecord | null;
   channelBusy: (channel: string) => boolean;
@@ -67,6 +76,10 @@ function defaultDeps(): ResumeDeps {
     takeAll: takeAllResumes,
     route: (ctx) => agentRunner.route(ctx),
     resumeThread: (id, opts) => resumeRateLimitedThread(id, opts),
+    settleResumedThread: async (id) => {
+      await sealSuspendedStatusMsg(id).catch((e) => log.warn(`seal status ${id}: ${(e as Error).message}`));
+      await fireThreadCallback(id).catch((e) => log.error(`cascade callback ${id}: ${(e as Error).message}`));
+    },
     buildResumeOptions: (thread) => buildResumeOptions(thread),
     getThread: (id) => threadStore.get(id),
     channelBusy: (ch) => runningExecutions.hasChannel(ch),
@@ -161,4 +174,9 @@ async function resumeThread(entry: Extract<ResumeEntry, { kind: 'thread' }>, thr
   }
   log.info(`Resuming thread ${entry.threadId} on ${entry.channel}`);
   await deps.resumeThread(entry.threadId, opts);
+  // The resumed run has returned terminal (or re-suspended / re-rate-limited). Seal the live
+  // status message to its final state and cascade completion to any parent — mirrors the
+  // DR-0014 suspended-parent onSettled. Without this the status message freezes at the last
+  // running step ("Step N … ⏳") even though the thread ran to completion.
+  await deps.settleResumedThread(entry.threadId);
 }

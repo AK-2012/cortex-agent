@@ -12,11 +12,12 @@ import type { ResumeEntry } from '../../src/domain/costs/resume-registry.js';
 const NOW = 1_000_000_000_000;
 
 function baseDeps(entries: ResumeEntry[], overrides: any = {}) {
-  const calls = { route: [] as any[], resume: [] as any[], built: [] as any[], taken: 0 };
+  const calls = { route: [] as any[], resume: [] as any[], built: [] as any[], settled: [] as string[], taken: 0 };
   const deps = {
     takeAll: () => { calls.taken++; return entries; },
     route: async (ctx: any) => { calls.route.push(ctx); },
     resumeThread: async (threadId: string, opts: any) => { calls.resume.push({ threadId, opts }); },
+    settleResumedThread: async (threadId: string) => { calls.settled.push(threadId); },
     buildResumeOptions: (thread: any) => {
       calls.built.push(thread);
       return { adapter: {}, channel: thread.channel, destination: { type: 'project-report', projectId: thread.projectId, trigger: 'rate-limit-resume', sessionId: '' }, threadAnchorId: null, statusMsg: null, startTime: 0 };
@@ -81,6 +82,35 @@ test('thread entry resumes a rate_limited thread with rebuilt options', async ()
   assert.equal(calls.built.length, 1, 'options rebuilt from the thread record');
   // Threads re-run their interrupted step from the original prompt — no reminder injected.
   assert.equal(calls.route.length, 0);
+});
+
+test('resumed thread is settled after its run returns (status message sealed)', async () => {
+  // Regression: the resumed run keeps updating the live status message mid-flight, but nothing
+  // sealed it at the end, so the message froze at the last running step ("Step N … ⏳") even
+  // though the thread finished. settleResumedThread must fire once per resumed thread, after resume.
+  const adapter = new MockAdapter({ adminChannel: 'admin' });
+  const order: string[] = [];
+  const { deps, calls } = baseDeps(
+    [{ kind: 'thread', threadId: 'thr_a', channel: 'C2', userMessage: 'go', recordedAt: NOW }],
+    {
+      resumeThread: async (threadId: string) => { order.push(`resume:${threadId}`); },
+      settleResumedThread: async (threadId: string) => { order.push(`settle:${threadId}`); calls.settled.push(threadId); },
+    },
+  );
+  await dispatchPendingResumes(adapter as any, deps);
+  assert.deepEqual(calls.settled, ['thr_a'], 'settle fires exactly once for the resumed thread');
+  assert.deepEqual(order, ['resume:thr_a', 'settle:thr_a'], 'settle runs only AFTER the resumed run returns');
+});
+
+test('a thread that is skipped by a guard is never settled', async () => {
+  const adapter = new MockAdapter({ adminChannel: 'admin' });
+  const { deps, calls } = baseDeps(
+    [{ kind: 'thread', threadId: 'thr_a', channel: 'C2', userMessage: 'go', recordedAt: NOW }],
+    { getThread: (_id: string) => ({ id: _id, status: 'completed', channel: 'C2', projectId: 'proj' }) as any },
+  );
+  await dispatchPendingResumes(adapter as any, deps);
+  assert.equal(calls.resume.length, 0, 'guarded thread is not resumed');
+  assert.equal(calls.settled.length, 0, 'guarded thread is not settled');
 });
 
 test('stale entry is dropped (older than max age)', async () => {
