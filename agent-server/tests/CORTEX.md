@@ -88,6 +88,7 @@ How to run tests without tripping it:
 | `task-parent-split.test.ts` | Test | DR-0014 task tree: Task.parent round-trip / decompose keepParent / lint parent rules / processSplitOutcome |
 | `thread-wait-tasks.test.ts` | Test | DR-0014 §8: tryEnterWaiting task-children snapshot / restart preservation / cleanup orphan detection |
 | `thread-task-bridge.test.ts` | Test | DR-0014 §8: notifyTaskParentThreads / reconcileWaitingTasks race closer / recovery keeps open task children |
+| `thread-resume-task-loop.test.ts` | Test | 2026-06-29 fix: closeResumedTaskLoop re-emits task.completed/task.blocked when a task-dispatch thread re-enters via a resume path (rate-limit or DR-0014) that bypasses the dispatch cycle — terminal+done→completed, terminal+blocked→blocked, no-op for non-terminal / non-dispatch / still-open |
 | `task-origin-wake.test.ts` | Test | Problem 1: notifyTaskOriginSession wakes the origin channel on task complete/blocked; defers to thread-parent path; single-fire |
 | `task-abort-outcome.test.ts` | Test | DR-0014 §8: processAbortOutcome worker escalation (aborted thread → block task; fixes aborted-as-success bug) |
 | `thread-statusmsg-seal.test.ts` | Test | DR-0014 §8: sealSuspendedStatusMsg refreshes the stale "suspended" status message after resume |

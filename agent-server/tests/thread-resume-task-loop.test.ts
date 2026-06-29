@@ -1,0 +1,120 @@
+// input:  Node test runner + thread-callback.closeResumedTaskLoop
+// output: regression for the resume-path missing task.completed/task.blocked publish
+// pos:    2026-06-29 finding — a task-dispatch thread that re-enters via a resume path
+//         (rate-limit resume OR DR-0014 child-completion resume) bypasses the dispatch cycle,
+//         so the task.completed event that wakes a waiting manager/session was never published.
+//         The worker marks the task done on disk, but nobody tells the parent → it stays
+//         suspended forever (leaf task ef14 left manager 5afd → e5be stuck). closeResumedTaskLoop
+//         re-emits that event after a resumed task-dispatch thread settles terminal.
+// >>> If I am updated, update my header comment and the parent folder's CORTEX.md <<<
+
+import './_test-home.js'; // MUST be first: isolate CORTEX_HOME before paths.ts loads
+import test, { after } from 'node:test';
+import assert from 'node:assert/strict';
+import * as fs from 'node:fs';
+import * as path from 'node:path';
+import { PROJECTS_DIR } from '../src/core/paths.js';
+import { threadStore } from '../src/store/thread-repo.js';
+import { closeResumedTaskLoop } from '../src/orchestration/thread-callback.js';
+import type { ThreadRecord, ThreadStatus } from '../src/core/types/thread-types.js';
+
+const createdThreadIds = new Set<string>();
+const projectDirs: string[] = [];
+let seq = 0;
+
+after(async () => {
+  for (const id of createdThreadIds) await threadStore.delete(id);
+  await threadStore.flush();
+  for (const d of projectDirs) { try { fs.rmSync(d, { recursive: true, force: true }); } catch {} }
+});
+
+function makeProject(name: string, tasksYaml: string): void {
+  const dir = path.join(PROJECTS_DIR, name);
+  projectDirs.push(dir);
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, 'TASKS.yaml'), tasksYaml);
+}
+
+function taskYaml(id: string, over: Record<string, string> = {}): string {
+  const lines = [
+    `  - id: "${id}"`,
+    `    text: task ${id}`,
+    '    why: w',
+    `    done-when: criteria for ${id}`,
+    '    priority: medium',
+    `    status: ${over.status ?? 'open'}`,
+    '    template: coder-review',
+    '    plan: p',
+  ];
+  if (over.blocked) lines.push(`    blocked-by: ${over.blocked}`);
+  return lines.join('\n') + '\n';
+}
+
+function makeWorker(proj: string, taskId: string | null, status: ThreadStatus, over: Partial<ThreadRecord> = {}): ThreadRecord {
+  const id = `thr_rt${(seq++).toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+  const now = new Date().toISOString();
+  const rec: ThreadRecord = {
+    id, templateName: 'coder-review', status,
+    channel: 'C-rt-test', projectId: proj, platformThreadId: null,
+    userMessage: 'x', userMessageTs: 'ts', workspacePath: '', artifactPath: '',
+    agents: {}, activeAgent: 'coder', activeStage: null, currentStepIndex: 1,
+    steps: [], iterationCounts: {}, totalCostUsd: 0, createdAt: now, updatedAt: now,
+    endedAt: status === 'completed' ? now : null, error: null, abortReason: null,
+    metadata: taskId ? { trigger: 'task-dispatch', taskId, taskProject: proj } : null,
+    ...over,
+  };
+  threadStore.set(rec);
+  createdThreadIds.add(id);
+  return rec;
+}
+
+function capture() {
+  const published: Array<{ type: string; taskId?: string; reason?: string }> = [];
+  return { published, publish: (e: any) => published.push(e) };
+}
+
+test('closeResumedTaskLoop publishes task.completed for a terminal task-dispatch thread whose task is done', async () => {
+  const proj = `_rt_p${seq++}`;
+  makeProject(proj, 'tasks:\n' + taskYaml('aa20', { status: 'done' }));
+  const w = makeWorker(proj, 'aa20', 'completed');
+  const { published, publish } = capture();
+  await closeResumedTaskLoop(w.id, { publish });
+  assert.deepEqual(published, [{ type: 'task.completed', taskId: 'aa20' }]);
+});
+
+test('closeResumedTaskLoop publishes task.blocked when the task is blocked on disk', async () => {
+  const proj = `_rt_p${seq++}`;
+  makeProject(proj, 'tasks:\n' + taskYaml('aa21', { blocked: 'worker-abort:too-big' }));
+  // A worker that aborted lands terminal as failed/aborted; the task is blocked on disk.
+  const w = makeWorker(proj, 'aa21', 'failed');
+  const { published, publish } = capture();
+  await closeResumedTaskLoop(w.id, { publish });
+  assert.deepEqual(published, [{ type: 'task.blocked', taskId: 'aa21', reason: 'worker-abort:too-big' }]);
+});
+
+test('closeResumedTaskLoop is a no-op for a non-terminal (re-suspended) thread', async () => {
+  const proj = `_rt_p${seq++}`;
+  makeProject(proj, 'tasks:\n' + taskYaml('aa22', { status: 'done' }));
+  const w = makeWorker(proj, 'aa22', 'waiting');
+  const { published, publish } = capture();
+  await closeResumedTaskLoop(w.id, { publish });
+  assert.equal(published.length, 0, 'suspension is not completion — let reconcile/dispatch handle it');
+});
+
+test('closeResumedTaskLoop is a no-op for a non-task-dispatch thread', async () => {
+  const proj = `_rt_p${seq++}`;
+  makeProject(proj, 'tasks:\n' + taskYaml('aa23', { status: 'done' }));
+  const w = makeWorker(proj, null, 'completed'); // metadata null → not a dispatch thread
+  const { published, publish } = capture();
+  await closeResumedTaskLoop(w.id, { publish });
+  assert.equal(published.length, 0);
+});
+
+test('closeResumedTaskLoop does not publish while the task is still open on disk (worker did not complete it)', async () => {
+  const proj = `_rt_p${seq++}`;
+  makeProject(proj, 'tasks:\n' + taskYaml('aa24', { status: 'open' }));
+  const w = makeWorker(proj, 'aa24', 'completed');
+  const { published, publish } = capture();
+  await closeResumedTaskLoop(w.id, { publish });
+  assert.equal(published.length, 0, 'nothing terminal on disk to report');
+});

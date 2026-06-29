@@ -1,5 +1,5 @@
 // input:  terminal thread record (threadStore), interactive runner, outbound queue, live adapter
-// output: fireThreadCallback / notifyThreadParent / recoverWaitingThreads / buildChildResultNotice / wakeSession
+// output: fireThreadCallback / notifyThreadParent / recoverWaitingThreads / buildChildResultNotice / wakeSession / closeResumedTaskLoop
 // pos:    completion callback for MCP thread_start; closes the loop when a spawned thread finishes.
 //         DR-0014: thread-parent children deliver results into the parent's pendingMessages and
 //         resume the suspended parent when its last awaited child turns terminal.
@@ -158,6 +158,10 @@ const defaultResume: ResumeFn = (parentId) => {
       // Cascade: when the resumed parent itself terminates (or suspends again and later
       // terminates), its own parent gets notified through the same callback chain.
       await fireThreadCallback(tid).catch((e) => log.error(`cascade callback ${tid}: ${(e as Error).message}`));
+      // A resumed manager IS itself a dispatched task; its completion must publish task.completed
+      // so ITS parent (the grandparent waiting on this task) wakes — the dispatch cycle that would
+      // have published it is bypassed on the resume path.
+      await closeResumedTaskLoop(tid).catch((e) => log.error(`close task loop ${tid}: ${(e as Error).message}`));
     },
   });
 };
@@ -411,6 +415,36 @@ export async function reconcileWaitingTasks(threadId: string, deps: { resume?: R
     // open/pending and unblocked → keep waiting (tasks survive restarts).
   }
   maybeResumeParent(threadId, deps.resume);
+}
+
+/** After a resumed task-dispatch thread settles TERMINAL, publish the task-tree event that the
+ *  dispatch cycle (task-dispatch.ts:281) would have published — but didn't, because the thread
+ *  re-entered via a RESUME path (rate-limit resume in resume-dispatcher, OR the DR-0014
+ *  child-completion resume in defaultResume) that bypasses the dispatch cycle entirely. The
+ *  worker still marks its task done/blocked on disk, but without this nobody emits the event
+ *  that wakes a manager/session waiting on that task — it stays suspended forever (2026-06-29
+ *  finding: rate-limit-resumed leaf task ef14 left manager 5afd → e5be permanently stuck; the
+ *  only accidental rescue was a later re-suspension's reconcile-on-suspend sweep). Mirrors the
+ *  loose publish at task-dispatch.ts — every subscriber re-verifies disk state (notifyTaskParent
+ *  rejects a not-actually-done task; deliveredChildResults dedupes), so a duplicate/stale publish
+ *  is a safe no-op. No-op unless the thread is a TERMINAL task-dispatch thread whose task is
+ *  done (→ task.completed) or blocked (→ task.blocked) on disk. */
+export async function closeResumedTaskLoop(
+  threadId: string,
+  deps: { publish?: (e: { type: 'task.completed'; taskId: string } | { type: 'task.blocked'; taskId: string; reason: string }) => void } = {},
+): Promise<void> {
+  const t = threadStore.get(threadId);
+  if (!t || !isTerminalStatus(t.status)) return; // suspension/rate-limit re-entry is not completion
+  const m = t.metadata;
+  if (m?.trigger !== 'task-dispatch' || !m?.taskId) return; // only dispatch threads close a task loop
+  const task = readTaskFromDisk(m.taskProject || t.projectId, m.taskId);
+  if (!task) return;
+  const publish = deps.publish ?? ((e) => jobCtx.bus?.publish(e));
+  if (task.status === 'done') {
+    publish({ type: 'task.completed', taskId: m.taskId });
+  } else if (task.blocked_by) {
+    publish({ type: 'task.blocked', taskId: m.taskId, reason: task.blocked_by });
+  }
 }
 
 /** Register the EventBus subscribers that wake suspended manager threads on child-task

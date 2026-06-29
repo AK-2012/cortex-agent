@@ -6,9 +6,11 @@
 //         step via resumeRateLimitedThread, fired concurrently (channel-parallel-safe) and only
 //         skipped if a live direct session holds the channel. Options rebuilt by buildResumeOptions
 //         (dispatch onEnd hook + destination). After the resumed run returns, settleResumedThread
-//         seals the live status message to its terminal summary and cascades the completion callback
-//         (mirrors the DR-0014 suspended-parent onSettled) — otherwise the status message freezes at
-//         the last running step. All deps injectable for tests.
+//         seals the live status message to its terminal summary, cascades the completion callback,
+//         and closeResumedTaskLoop re-emits task.completed/task.blocked (the dispatch cycle that
+//         normally publishes it is bypassed on resume) — mirrors the DR-0014 suspended-parent
+//         onSettled; otherwise the status message freezes and a waiting manager never wakes. All
+//         deps injectable for tests.
 // >>> If I am updated, update my header comment and the parent folder's CORTEX.md <<<
 
 import type { PlatformAdapter, IncomingMessage } from '@platform/index.js';
@@ -16,7 +18,7 @@ import type { ThreadRecord, RunThreadOptions } from '@core/types/thread-types.js
 import { takeAllResumes, type ResumeEntry } from '@domain/costs/resume-registry.js';
 import { agentRunner } from './agent-runner.js';
 import { resumeRateLimitedThread } from '@domain/threads/runner.js';
-import { buildResumeOptions, sealSuspendedStatusMsg, fireThreadCallback } from './thread-callback.js';
+import { buildResumeOptions, sealSuspendedStatusMsg, fireThreadCallback, closeResumedTaskLoop } from './thread-callback.js';
 import { threadStore } from '@store/thread-repo.js';
 import { runningExecutions } from '@core/running-executions.js';
 import { createLogger } from '@core/log.js';
@@ -79,6 +81,10 @@ function defaultDeps(): ResumeDeps {
     settleResumedThread: async (id) => {
       await sealSuspendedStatusMsg(id).catch((e) => log.warn(`seal status ${id}: ${(e as Error).message}`));
       await fireThreadCallback(id).catch((e) => log.error(`cascade callback ${id}: ${(e as Error).message}`));
+      // A rate-limit-resumed worker bypasses the dispatch cycle, which is the only place
+      // task.completed/task.blocked is published — re-emit it here so a manager/session waiting
+      // on this task is woken (2026-06-29 finding: resumed leaf task left its manager suspended).
+      await closeResumedTaskLoop(id).catch((e) => log.error(`close task loop ${id}: ${(e as Error).message}`));
     },
     buildResumeOptions: (thread) => buildResumeOptions(thread),
     getThread: (id) => threadStore.get(id),
