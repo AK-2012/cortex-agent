@@ -15,7 +15,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { PROJECTS_DIR } from '../src/core/paths.js';
 import { threadStore } from '../src/store/thread-repo.js';
-import { closeResumedTaskLoop } from '../src/orchestration/thread-callback.js';
+import { closeResumedTaskLoop, sweepWaitingManagers } from '../src/orchestration/thread-callback.js';
 import type { ThreadRecord, ThreadStatus } from '../src/core/types/thread-types.js';
 
 const createdThreadIds = new Set<string>();
@@ -117,4 +117,37 @@ test('closeResumedTaskLoop does not publish while the task is still open on disk
   const { published, publish } = capture();
   await closeResumedTaskLoop(w.id, { publish });
   assert.equal(published.length, 0, 'nothing terminal on disk to report');
+});
+
+// --- sweepWaitingManagers: periodic disk-driven backstop ---
+
+function makeWaitingManager(proj: string, taskId: string, waitingOnTasks: string[]): ThreadRecord {
+  return makeWorker(proj, taskId, 'waiting', {
+    templateName: 'manager',
+    metadata: { trigger: 'task-dispatch', taskId, taskProject: proj, waitingOnTasks: [...waitingOnTasks] },
+  });
+}
+
+test('sweepWaitingManagers delivers an already-done child the fast paths missed and resumes when last', async () => {
+  const proj = `_rt_p${seq++}`;
+  makeProject(proj, 'tasks:\n' + taskYaml('mm30', { status: 'open' }) + taskYaml('cc30', { status: 'done' }));
+  const mgr = makeWaitingManager(proj, 'mm30', ['cc30']);
+  const resumed: string[] = [];
+  const n = await sweepWaitingManagers({ resume: (id) => resumed.push(id) });
+
+  assert.ok(n >= 1, 'swept at least the one waiting manager');
+  const t = threadStore.get(mgr.id)!;
+  assert.deepEqual(t.metadata!.waitingOnTasks, [], 'done child delivered, list emptied');
+  assert.deepEqual(resumed, [mgr.id], 'manager resumed once list empty');
+});
+
+test('sweepWaitingManagers keeps a manager waiting on a still-open child (no spurious resume)', async () => {
+  const proj = `_rt_p${seq++}`;
+  makeProject(proj, 'tasks:\n' + taskYaml('mm31', { status: 'open' }) + taskYaml('cc31', { status: 'open' }));
+  const mgr = makeWaitingManager(proj, 'mm31', ['cc31']);
+  const resumed: string[] = [];
+  await sweepWaitingManagers({ resume: (id) => resumed.push(id) });
+
+  assert.deepEqual(threadStore.get(mgr.id)!.metadata!.waitingOnTasks, ['cc31']);
+  assert.equal(resumed.length, 0);
 });

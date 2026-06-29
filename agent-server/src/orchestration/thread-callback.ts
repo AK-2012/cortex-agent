@@ -1,5 +1,5 @@
 // input:  terminal thread record (threadStore), interactive runner, outbound queue, live adapter
-// output: fireThreadCallback / notifyThreadParent / recoverWaitingThreads / buildChildResultNotice / wakeSession / closeResumedTaskLoop
+// output: fireThreadCallback / notifyThreadParent / recoverWaitingThreads / buildChildResultNotice / wakeSession / closeResumedTaskLoop / sweepWaitingManagers / startWaitingManagerSweep
 // pos:    completion callback for MCP thread_start; closes the loop when a spawned thread finishes.
 //         DR-0014: thread-parent children deliver results into the parent's pendingMessages and
 //         resume the suspended parent when its last awaited child turns terminal.
@@ -445,6 +445,42 @@ export async function closeResumedTaskLoop(
   } else if (task.blocked_by) {
     publish({ type: 'task.blocked', taskId: m.taskId, reason: task.blocked_by });
   }
+}
+
+/** Periodic disk-driven backstop: reconcile EVERY suspended manager's task children against disk
+ *  and resume any whose list has emptied. The two fast paths — the task.completed/task.blocked
+ *  event (notifyTaskParentThreads) and closeResumedTaskLoop — can each miss a single delivery to a
+ *  race: a resume-path settle that reads state a beat early, a loose event rejected before the disk
+ *  flip with no re-publish, or a partial TASKS.yaml read mid-commit. Each miss strands a manager on
+ *  a child that is ALREADY done/blocked on disk until the next restart (2026-06-29: even with
+ *  closeResumedTaskLoop, manager 5afd's completion was never delivered to its parent e5be). This
+ *  sweep is purely disk-driven and idempotent (deliveredChildResults dedupes), so it eventually
+ *  wakes any such manager regardless of which fast path failed. Returns the number swept. */
+export async function sweepWaitingManagers(deps: { resume?: ResumeFn } = {}): Promise<number> {
+  let swept = 0;
+  for (const t of threadStore.getAll()) {
+    if (t.status !== 'waiting' || !t.metadata?.waitingOnTasks?.length) continue;
+    swept++;
+    await reconcileWaitingTasks(t.id, deps).catch((e) => log.error(`sweep reconcile ${t.id}: ${(e as Error).message}`));
+  }
+  return swept;
+}
+
+/** Default sweep cadence — frequent enough to recover a stranded manager within a minute, cheap
+ *  enough (a disk scan per waiting manager) to run unconditionally. Override with
+ *  CORTEX_WAITING_SWEEP_MS (0 disables). */
+const WAITING_SWEEP_INTERVAL_MS = (() => {
+  const v = parseInt(process.env.CORTEX_WAITING_SWEEP_MS || '', 10);
+  return Number.isFinite(v) ? v : 60_000;
+})();
+
+/** Start the periodic waiting-manager sweep (thin setInterval wrapper, mirrors
+ *  startDispatchReconciler). No-op when the interval is 0. */
+export function startWaitingManagerSweep(): void {
+  if (WAITING_SWEEP_INTERVAL_MS <= 0) return;
+  setInterval(() => {
+    void sweepWaitingManagers().catch((e) => log.error(`waiting-manager sweep: ${(e as Error).message}`));
+  }, WAITING_SWEEP_INTERVAL_MS).unref?.();
 }
 
 /** Register the EventBus subscribers that wake suspended manager threads on child-task

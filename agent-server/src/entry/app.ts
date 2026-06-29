@@ -48,7 +48,7 @@ import { busyTracker } from '@orch/busy-tracker.js';
 import { buildExecutionStatusReport } from '@orch/status-helpers.js';
 import { reprocessMessage } from '@orch/lifecycle.js';
 import { initScheduledRunner, createScheduler, setSchedulerRef, setBus, setInteractiveCallbacksFactory, cancelDispatchedTask } from '@domain/scheduling/runner.js';
-import { recoverWaitingThreads, registerTaskTreeSubscribers, reconcileWaitingTasks } from '../orchestration/thread-callback.js';
+import { recoverWaitingThreads, registerTaskTreeSubscribers, reconcileWaitingTasks, startWaitingManagerSweep } from '../orchestration/thread-callback.js';
 import { ctx as jobCtx } from '@domain/scheduling/job-registry.js';
 import { buildInteractiveCallbacks } from '@orch/agent-runner.js';
 import { registerInteractionHandlers, initInteractionHandlers } from '@orch/interactions/interaction-handlers.js';
@@ -460,6 +460,10 @@ process.on('SIGTERM', async () => {
   // awaited child THREAD is terminal or missing by now; child TASKS are reconciled
   // against disk and stay awaited while open.)
   recoverWaitingThreads().catch((e) => log.error(`recoverWaitingThreads failed: ${(e as Error).message}`));
+
+  // Periodic disk-driven backstop: recover any manager left suspended on a child task that is
+  // already terminal on disk but whose event/settle delivery was lost to a race (2026-06-29).
+  startWaitingManagerSweep();
 
   log.info(`Cortex agent is running (${adapter.name}) — backend: ${getActiveBackend()}`);
 })();
