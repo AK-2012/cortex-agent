@@ -9,7 +9,8 @@ import { threadStore } from '@store/thread-repo.js';
 import { agentRunner } from './agent-runner.js';
 import { getOutboundQueue, durablePost } from '@store/outbound-queue.js';
 import { ctx as jobCtx } from '@domain/scheduling/job-registry.js';
-import { resumeThread, buildThreadSummary } from '@domain/threads/runner.js';
+import { resumeThread } from '@domain/threads/runner.js';
+import { sealThreadStatus } from './status-helpers.js';
 import { isTerminalStatus } from '@domain/threads/tree.js';
 import { runThreadDetached } from './thread-executor.js';
 import { createLogger } from '@core/log.js';
@@ -131,8 +132,9 @@ export async function sealSuspendedStatusMsg(threadId: string, adapter?: Platfor
   const a = adapter ?? jobCtx.adapter;
   if (!a) return;
   const totalNumTurns = t.steps.reduce((acc, st) => acc + (st.numTurns || 0), 0);
-  const text = buildThreadSummary({ thread: t, totalCostUsd: t.totalCostUsd, totalNumTurns, finalOutput: null, lastAgentResult: null, executionId: null });
-  await a.updateMessage(ref, { text }).catch((e) => log.warn(`seal status msg ${threadId}: ${(e as Error).message}`));
+  // Background seal: buildThreadSummary text, no interactive action blocks (no live user to click).
+  await sealThreadStatus(a, ref, { thread: t, totalCostUsd: t.totalCostUsd, totalNumTurns, finalOutput: null, lastAgentResult: null, executionId: null })
+    .catch((e) => log.warn(`seal status msg ${threadId}: ${(e as Error).message}`));
 }
 
 export type ResumeFn = (parentThreadId: string) => void;

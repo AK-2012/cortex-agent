@@ -12,9 +12,9 @@ import { Icons } from '../core/icons.js';
 import { conduitQueues, enqueue } from './conduit-queue.js';
 import { trackPendingTask } from './busy-tracker.js';
 import { addAgentToThread, createThread, getTemplate, getAgent } from '@domain/threads/index.js';
-import { runThread, continueThread, buildThreadSummary, getActiveHandle } from '@domain/threads/runner.js';
+import { runThread, continueThread, getActiveHandle } from '@domain/threads/runner.js';
 import { downloadFiles as downloadPlatformFiles } from './routing/file-handler.js';
-import { computeElapsed, buildStatusActionBlocks, buildSealedStatusActionBlocks, initStatusBlocks } from './status-helpers.js';
+import { computeElapsed, buildStatusActionBlocks, buildSealedStatusActionBlocks, initStatusBlocks, sealThreadStatus } from './status-helpers.js';
 import { threadStore } from '@store/thread-repo.js';
 import { WORKSPACE_DIR } from '@core/utils.js';
 import { buildInteractiveCallbacks } from './agent-runner.js';
@@ -195,11 +195,7 @@ async function handleThreadAdd({ threadAddMatch, existingThread, channel, adapte
     destination: interactiveDest,
     onToolUse: interactiveCallbacks.onToolUse, onPlanWritten: interactiveCallbacks.onPlanWritten, onAskUserQuestion: interactiveCallbacks.onAskUserQuestion,
   });
-  const summaryText = buildThreadSummary(threadResult);
-  await adapter.updateMessage(statusMsg, {
-    text: summaryText,
-    richBlocks: buildSealedStatusActionBlocks(summaryText, threadBlocksTemplate),
-  });
+  await sealThreadStatus(adapter, statusMsg, threadResult, { blocksTemplate: threadBlocksTemplate });
   return statusMsg;
 }
 
@@ -244,11 +240,7 @@ async function handleThreadContinue({ existingThread, agentMessage, channel, ada
     onToolUse: interactiveCallbacks.onToolUse, onPlanWritten: interactiveCallbacks.onPlanWritten, onAskUserQuestion: interactiveCallbacks.onAskUserQuestion,
   });
 
-  const continueSummaryText = buildThreadSummary(threadResult);
-  await adapter.updateMessage(statusMsg, {
-    text: continueSummaryText,
-    richBlocks: buildSealedStatusActionBlocks(continueSummaryText, continueBlocksTemplate),
-  });
+  await sealThreadStatus(adapter, statusMsg, threadResult, { blocksTemplate: continueBlocksTemplate });
   return statusMsg;
 }
 
@@ -290,11 +282,7 @@ async function handleThreadStart({ threadStartMatch, messageId, channel, adapter
     destination: interactiveDest,
     onToolUse: interactiveCallbacks.onToolUse, onPlanWritten: interactiveCallbacks.onPlanWritten, onAskUserQuestion: interactiveCallbacks.onAskUserQuestion,
   });
-  const startSummaryText = buildThreadSummary(threadResult);
-  await adapter.updateMessage(statusMsg, {
-    text: startSummaryText,
-    richBlocks: buildSealedStatusActionBlocks(startSummaryText, startBlocksTemplate),
-  });
+  await sealThreadStatus(adapter, statusMsg, threadResult, { blocksTemplate: startBlocksTemplate });
   return statusMsg;
 }
 

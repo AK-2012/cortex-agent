@@ -11,6 +11,8 @@ import type { ExecutionRecord } from '@domain/executions/registry.js';
 import * as executionRegistry from '@domain/executions/registry.js';
 import { runAgent } from '@domain/agents/index.js';
 import { shouldAutoRunCompound, combineFinalOutputs } from '@domain/threads/auto-thread.js';
+import { buildThreadSummary } from '@domain/threads/runner.js';
+import type { ThreadRunResult } from '@domain/threads/runner.js';
 import { projectStore } from '@domain/projects/index.js';
 import { getOutboundQueue } from '@store/outbound-queue.js';
 import { durableUpdate } from './durable-helpers.js';
@@ -194,6 +196,29 @@ function buildStatusBlocksImpl(text: string, template: StatusBlocksTemplate, opt
     blocks.push({ type: 'actions', elements: actionElements });
   }
   return blocks;
+}
+
+// --- Unified thread-completion seal (interactive `!thread` + background/resume) ---
+//
+// Both the interactive `!thread` path (thread-executor handleThreadStart/Add/Continue) and the
+// background/resume path (thread-callback.sealSuspendedStatusMsg) end a thread by writing
+// buildThreadSummary(threadResult) onto the live status message. They differ only in whether
+// sealed interactive action blocks (Cancel removed; Resume/New retained) are attached. Funnel both
+// through this one function so "seal a finished thread's status message" has a single, hard-to-forget
+// implementation — the omission of exactly this call is what froze rate-limit-resumed status messages.
+//
+// The task-dispatch seal (finalizeThreadSuccess) stays separate BY DESIGN: it lives in the domain
+// layer (which must not import these orch-layer block builders) and presents task-framed text
+// ("Done: [project] …") with durable delivery, not a thread summary. See _shared.finalizeThreadSuccess.
+export async function sealThreadStatus(
+  adapter: PlatformAdapter,
+  statusMsg: MessageRef,
+  threadResult: ThreadRunResult,
+  opts: { blocksTemplate?: StatusBlocksTemplate } = {},
+): Promise<void> {
+  const text = buildThreadSummary(threadResult);
+  const richBlocks = opts.blocksTemplate ? buildSealedStatusActionBlocks(text, opts.blocksTemplate) : undefined;
+  await adapter.updateMessage(statusMsg, { text, ...(richBlocks && { richBlocks }) });
 }
 
 // --- Status message serializer (anti-race for onProgress vs. final update) ---
