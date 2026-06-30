@@ -343,17 +343,21 @@ let _getRegistryImpl: () => MachineRegistry = getMachineRegistry;
  */
 function buildRemoteSpawnCommand(reg: MachineEntry, clientToken?: string): string {
   const token = clientToken?.trim();
+  // Launch command is configurable per machine (machines.json `clientCommand`); defaults
+  // to a bare `cortex-client`. Override for non-login-PATH cases, e.g. `bash -lc cortex-client`
+  // on nvm machines so the login profile resolves node + cortex-client.
+  const launch = reg.clientCommand?.trim() || 'cortex-client';
   if (reg.win) {
-    // Inject the token via `cmd.exe /c set ... && cortex-client` so the WMI-spawned process
+    // Inject the token via `cmd.exe /c set ... && <launch>` so the WMI-spawned process
     // sees CORTEX_CLIENT_TOKEN. Tokens are hex (no shell metacharacters), so no escaping needed.
     const inner = token
-      ? `cmd.exe /c set CORTEX_CLIENT_TOKEN=${token} && cortex-client`
-      : `cmd.exe /c cortex-client`;
+      ? `cmd.exe /c set CORTEX_CLIENT_TOKEN=${token} && ${launch}`
+      : `cmd.exe /c ${launch}`;
     return `powershell -Command "(Invoke-WmiMethod -Class Win32_Process -Name Create -ArgumentList '${inner}').ProcessId"`;
   }
   // Single-quote the token for the remote shell (hex value has no quotes to escape).
   const envPrefix = token ? `CORTEX_CLIENT_TOKEN='${token}' ` : '';
-  return `${envPrefix}nohup cortex-client > /dev/null 2>&1 & echo $!`;
+  return `${envPrefix}nohup ${launch} > /dev/null 2>&1 & echo $!`;
 }
 
 async function isRemotePidAlive(device: string): Promise<boolean> {

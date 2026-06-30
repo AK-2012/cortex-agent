@@ -197,6 +197,29 @@ test('buildRemoteSpawnCommand uses nohup + echo $! on Linux remotes', () => {
   assert.match(cmd, /echo \$!/);
 });
 
+// --- Configurable launch command (machines.json `clientCommand`) ---
+// nvm/custom-PATH machines can't rely on a bare `cortex-client` over a non-login
+// SSH shell. `clientCommand` overrides the launched command (e.g. `bash -lc cortex-client`
+// loads the login profile so nvm puts node + cortex-client on PATH) while keeping the
+// nohup/echo-$! (Linux) and cmd.exe-wrap WMI (Windows) machinery + token injection intact.
+test('buildRemoteSpawnCommand uses reg.clientCommand over the default on Linux', () => {
+  const cmd = buildRemoteSpawnCommand({ cortexPath: '/home/nvidia', gpuCount: 8, ssh: 'nvidia@server-nvidia', clientCommand: 'bash -lc cortex-client' }, 'sektok123');
+  assert.match(cmd, /CORTEX_CLIENT_TOKEN='sektok123'/);
+  assert.match(cmd, /nohup bash -lc cortex-client > \/dev\/null 2>&1 & echo \$!/);
+  assert.doesNotMatch(cmd, /nohup cortex-client\b/); // bare default must be replaced
+});
+
+test('buildRemoteSpawnCommand uses reg.clientCommand over the default on Windows', () => {
+  const cmd = buildRemoteSpawnCommand({ cortexPath: 'D:\\x', gpuCount: 0, ssh: 'user@host', win: true, clientCommand: 'my-cortex-client' }, 'sektok123');
+  assert.match(cmd, /cmd\.exe \/c set CORTEX_CLIENT_TOKEN=sektok123 && my-cortex-client/);
+  assert.match(cmd, /Invoke-WmiMethod -Class Win32_Process -Name Create/);
+});
+
+test('buildRemoteSpawnCommand falls back to cortex-client when clientCommand is blank', () => {
+  const cmd = buildRemoteSpawnCommand({ cortexPath: '/home/x', gpuCount: 0, ssh: 'user@host', clientCommand: '   ' });
+  assert.match(cmd, /^nohup cortex-client > \/dev\/null/);
+});
+
 // --- Regression: when SSH spawn returns an unparseable PID (the live failure mode
 //     on my-pc), `startRemoteClient` previously only logged a WARN and returned —
 //     no retry was scheduled. Combined with the WMI bug above, this caused my-pc to

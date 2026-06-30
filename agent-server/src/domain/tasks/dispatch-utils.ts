@@ -19,6 +19,14 @@ export interface MachineEntry {
   gpuCount: number;
   ssh?: string;
   win?: boolean;
+  /**
+   * Command the server runs (over SSH) to launch cortex-client on this machine.
+   * Defaults to `cortex-client`. Override for machines where a bare `cortex-client`
+   * isn't on the non-login SSH PATH — e.g. nvm installs need `bash -lc cortex-client`
+   * so the login profile puts node + cortex-client on PATH. The token-injection and
+   * nohup/echo-$! (Linux) / cmd.exe-wrap WMI (Windows) machinery wraps this command.
+   */
+  clientCommand?: string;
 }
 
 export type MachineRegistry = Record<string, MachineEntry>;

@@ -130,6 +130,7 @@ cortex-client
 - `gpuCount`（必需）— GPU 数量（非 GPU 机器为 0）
 - `ssh`（可选）— SSH 连接的 `user@host`。如果省略，假设机器是本地的，不需要 SSH
 - `win`（可选）— 对 Windows 目标设为 `true`（更改 SSH 命令语法）
+- `clientCommand`（可选）— 服务器（通过 SSH）启动该机器上 `cortex-client` 所用的命令，默认为裸的 `cortex-client`。当 `cortex-client` 不在该机器**非登录** SSH 的 PATH 上时需要覆盖它——最常见的是 `nvm` 安装：二进制位于 `~/.nvm/...` 下，只有在登录 profile 运行后才出现在 PATH 上。这种情况设为 `"clientCommand": "bash -lc cortex-client"`，让登录 shell 解析出 node 与 `cortex-client`。服务器仍会用其 token 注入及 `nohup`/`echo $!`（Linux）或 `cmd.exe` 包裹的 WMI（Windows）启动机制来包裹这条命令。
 
 文件通过 `fs.watch()` 热重载——更改在几百毫秒内生效，无需重启服务器。
 

@@ -149,6 +149,14 @@ Each entry:
   is assumed to be local and no SSH is needed
 - `win` (optional) — set to `true` for Windows targets (changes the SSH
   command syntax)
+- `clientCommand` (optional) — the command the server runs (over SSH) to launch
+  `cortex-client` on this machine. Defaults to a bare `cortex-client`. Override it
+  when `cortex-client` isn't on the machine's non-login SSH PATH — most commonly an
+  `nvm` install, where the binary lives under `~/.nvm/...` and only appears on PATH
+  after the login profile runs. In that case set `"clientCommand": "bash -lc cortex-client"`
+  so a login shell resolves node and `cortex-client`. The server still wraps this command
+  with its token injection and the `nohup`/`echo $!` (Linux) or `cmd.exe`-wrapped WMI
+  (Windows) launch machinery.
 
 The file is hot-reloaded via `fs.watch()` — changes take effect within a few
 hundred milliseconds without restarting the server.
