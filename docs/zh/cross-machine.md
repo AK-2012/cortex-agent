@@ -86,6 +86,8 @@ npm install -g @cortex-agent/client
 
 - `serverHost` — agent-server 机器的 IP 或主机名，从该远程机器可达
 - `serverPort` — WebSocket 端口（默认 3002）
+- `serverUrl`（可选）— 客户端拨号的完整 WebSocket URL，优先级高于 `serverHost`/`serverPort`。用于 Cloudflare Tunnel 或任何反向代理路由，例如 `"wss://cortex.example.com"`——这让客户端能连到没有公网 IP 的服务器（见下方 Cloudflare Tunnel）
+- `clientToken` — 服务器的 `CORTEX_CLIENT_TOKEN` 共享密钥；没有它 WS 升级会被 `401` 拒绝。服务器通过 SSH 启动客户端时会自动注入，因此仅在手动启动或 systemd 托管的客户端上才需在此设置
 - `deviceName` — 此机器的唯一名称，匹配服务器 `machines.json` 中的键
 
 启动客户端：
@@ -167,6 +169,25 @@ tailscale ip -4
 ```
 
 Tailscale 无需端口转发即可穿透 NAT 和防火墙。这是不同网络上机器的推荐选项。
+
+### Cloudflare Tunnel
+
+当服务器和客户端都在 NAT 后、没有公网 IP 时，在服务器上运行 `cloudflared` 把它的 WebSocket 端口通过隧道暴露出去，并用 `serverUrl` 让客户端指向隧道主机名。服务器的 `cloudflared` ingress 把主机名映射到本地 WS 端口：
+
+```yaml
+ingress:
+  - hostname: cortex.example.com
+    service: http://localhost:3002
+  - service: http_status:404
+```
+
+然后客户端通过 wss/443 拨号连隧道：
+
+```json
+{ "serverUrl": "wss://cortex.example.com", "deviceName": "my-pc", "clientToken": "<token>" }
+```
+
+两端都是向 Cloudflare 边缘拨出，所以谁都不需要公网 IP 或端口转发，WebSocket 升级也会透明地穿过隧道。
 
 ### STCP 隧道
 

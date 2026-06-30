@@ -2,7 +2,7 @@
 name: client-manage
 description: "Use when creating, deploying, updating, or troubleshooting cortex-client instances on remote devices"
 author: Cortex
-version: 1.1.0
+version: 1.2.0
 allowed-tools:
   - Read
   - Write
@@ -28,12 +28,13 @@ The server (`client-manager.ts`) starts clients automatically. Your job is to en
 ```
 cortex-agent-server ──SSH──► starts cortex-client on remote device
         ▲                                    │
-        │  WebSocket ws://<serverHost>:3002   │
+        │  WebSocket  wss://<tunnel-host>     │
+        │  (or ws://<serverHost>:3002 on LAN) │
         └────────────────────────────────────┘
       (client initiates this connection back to server)
 ```
 
-**Critical:** The WebSocket connection is initiated FROM the remote device TO the server. The `serverHost` in the config MUST be an IP the remote device can reach. The server's SSH access to the device is separate — it's used for lifecycle management (start/kill/update) but not for the real-time command channel.
+**Critical:** The WebSocket connection is initiated FROM the remote device TO the server. The client's target is resolved from `serverUrl` (a full `wss://`/`ws://` URL — used for Cloudflare Tunnel / cross-NAT) or `ws://<serverHost>:<serverPort>` (LAN/Tailscale), and that target MUST be reachable from the remote device. When both server and client are behind NAT, expose the server's WS port via a Cloudflare Tunnel and set the client's `serverUrl` to `wss://<tunnel-host>`. The server's SSH access to the device is separate — it's used for lifecycle management (start/kill/update) but not for the real-time command channel.
 
 ## Authentication (WS bearer token)
 
@@ -47,14 +48,17 @@ A remote client gets the token automatically when the server spawns it over SSH 
 
 ```json
 {
-  "serverHost": "<reachable-ip>",
-  "serverPort": 3002,
-  "deviceName": "<device-name>"
+  "serverUrl": "wss://<tunnel-host>",
+  "deviceName": "<device-name>",
+  "clientToken": "<server CORTEX_CLIENT_TOKEN>"
 }
 ```
 
-- `serverHost` — The IP the client connects TO. **Must be reachable from the remote device.** Use Tailscale IP when available (`tailscale ip -4` on server), LAN IP for devices on same subnet, `127.0.0.1` for same-machine.
-- `serverPort` — Usually `3002`.
+The client resolves its server URL by precedence (`server-url.ts`): `CORTEX_SERVER_URL` env > config `serverUrl` > `ws://<serverHost>:<serverPort>`.
+
+- `serverUrl` — **Preferred for cross-NAT / cross-network.** A full WebSocket URL the client dials. When both server and client are behind NAT (no public IP), expose the server's WS port through a **Cloudflare Tunnel** and point every client at `wss://<tunnel-host>` (e.g. the server runs `cloudflared` with an ingress `<tunnel-host> → http://localhost:3002`). The client dials outbound over wss/443 — no inbound or public IP needed on either side. If set, `serverHost`/`serverPort` are ignored.
+- `serverHost` / `serverPort` — Legacy LAN/same-machine path: `ws://serverHost:serverPort` (default port 3002). `serverHost` must be an IP the remote device can reach (LAN IP, Tailscale IP, or `127.0.0.1` for same-machine). Use only when there is a direct/Tailscale route; for NAT-to-NAT use `serverUrl`.
+- `clientToken` — The server's `CORTEX_CLIENT_TOKEN` (see Authentication). Required unless injected via the `CORTEX_CLIENT_TOKEN` env at launch.
 - `deviceName` — Must match the name in `machines.json` on the server.
 
 **This config file is managed by you (LLM).** The server never writes it. Server only starts/kills the client process.
@@ -80,11 +84,12 @@ ssh user@host "timeout 3 bash -c 'echo > /dev/tcp/<serverHost>/3002' 2>&1 && ech
 
 | Situation | Fix |
 |-----------|-----|
+| Both sides behind NAT (no public IP) | Expose the server WS through a Cloudflare Tunnel; set client `serverUrl` to `wss://<tunnel-host>` (preferred when neither side is publicly reachable) |
 | Same LAN, unreachable | Check firewall: `sudo ufw allow 3002` on server |
-| Different network | Use Tailscale IP (works through NAT) |
+| Different network | Use Tailscale IP (works through NAT) or a Cloudflare Tunnel `serverUrl` |
 | STCP tunnel only | Use Tailscale or set up reverse SSH: `ssh -R 3002:localhost:3002 user@host` on server |
 | Tailscale but unreachable | `tailscale status` — ensure both devices are connected, check ACLs |
-| Can SSH but can't TCP | SSH works on port 22 only. Either open port 3002 or use Tailscale/reverse tunnel |
+| Can SSH but can't TCP | SSH works on port 22 only. Either open port 3002 or use Tailscale / Cloudflare Tunnel / reverse tunnel |
 
 ### Determine the Right serverHost
 
@@ -104,6 +109,7 @@ Read `machines.json` on the server for the current device list. Key fields per d
 - `cortexPath` — Path to user's workspace on the device
 - `gpuCount` — Number of GPUs
 - `win` — `true` for Windows
+- `clientCommand` — (optional) command the server runs over SSH to launch the client; defaults to `cortex-client`. Override on machines where `cortex-client` isn't on the **non-login** SSH PATH — e.g. nvm installs: set `"bash -lc cortex-client"` so a login shell resolves node + cortex-client. See Troubleshooting.
 
 ## Bootstrap — New Device
 
@@ -203,4 +209,5 @@ ssh user@host "pkill -f 'node.*cortex-client'"
 | WebSocket connect EHOSTUNREACH | Wrong serverHost | Verify with `/dev/tcp` test, fix the IP |
 | `Unexpected server response: 401` | Missing/mismatched `CORTEX_CLIENT_TOKEN` | Ensure the client's env has the server's token (see Authentication); restart the client |
 | Exit code 127 | cortex-client binary not on PATH | `ssh user@host "which cortex-client"`, reinstall with `npm i -g` |
+| Runs when started by hand but never reconnects after an auto-restart (nvm machines) | Server's SSH auto-restart uses a **non-login** shell where nvm's `node`/`cortex-client` aren't on PATH — `ssh user@host "which cortex-client"` returns empty | Set `clientCommand: "bash -lc cortex-client"` in `machines.json` (login shell loads nvm), or symlink `node`+`cortex-client` into `/usr/local/bin` |
 | Server can't SSH to device | SSH key or tunnel issue | `ssh user@host hostname` from server |

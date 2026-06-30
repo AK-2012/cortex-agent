@@ -100,6 +100,14 @@ Create `~/.cortex/config/cortex-client.json` on the remote machine:
 - `serverHost` — the IP or hostname of the agent-server machine, reachable
   from this remote machine
 - `serverPort` — the WebSocket port (default 3002)
+- `serverUrl` — (optional) a full WebSocket URL the client dials, taking
+  precedence over `serverHost`/`serverPort`. Use it for a Cloudflare Tunnel or
+  any reverse-proxied route, e.g. `"wss://cortex.example.com"` — this lets a
+  client reach a server that has no public IP (see Cloudflare Tunnel below)
+- `clientToken` — the server's `CORTEX_CLIENT_TOKEN` shared secret; the WS
+  upgrade is rejected with `401` without it. The server injects this
+  automatically when it launches the client over SSH, so set it here only for
+  hand-started or systemd-managed clients
 - `deviceName` — a unique name for this machine, matching the key in the
   server's `machines.json`
 
@@ -197,6 +205,29 @@ tailscale ip -4
 
 Tailscale works through NAT and firewalls without port forwarding. This is
 the recommended option for machines on different networks.
+
+### Cloudflare Tunnel
+
+When both the server and the client are behind NAT with no public IP, run
+`cloudflared` on the server to expose its WebSocket port through a tunnel, and
+point the client at the tunnel hostname with `serverUrl`. The server's
+`cloudflared` ingress maps a hostname to the local WS port:
+
+```yaml
+ingress:
+  - hostname: cortex.example.com
+    service: http://localhost:3002
+  - service: http_status:404
+```
+
+The client then dials the tunnel over wss/443:
+
+```json
+{ "serverUrl": "wss://cortex.example.com", "deviceName": "my-pc", "clientToken": "<token>" }
+```
+
+Both sides connect outbound to Cloudflare's edge, so neither needs a public IP
+or port forwarding, and WebSocket upgrades pass through the tunnel transparently.
 
 ### STCP tunnel
 
