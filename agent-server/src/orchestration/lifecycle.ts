@@ -42,7 +42,7 @@ const log = createLogger('lifecycle');
 
 // --- Agent success handler ---
 
-export async function handleAgentSuccess({ result, channel, adapter, statusMsg, startTime, userMessage, executionId, trigger = 'user', sessionName = null, threadAnchorId = null, userMessageTs = null, onAssistantMessage = null, registerContinuationSink = null }: { result: AgentResult; channel: string; adapter: PlatformAdapter; statusMsg: MessageRef; startTime: number; userMessage: string; executionId: string | null; trigger?: string; sessionName?: string | null; threadAnchorId?: string | null; userMessageTs?: string | null; onAssistantMessage?: ((text: string) => void) | null; registerContinuationSink?: ((sink: ContinuationSink) => void) | null }): Promise<void> {
+export async function handleAgentSuccess({ result, channel, adapter, statusMsg, startTime, userMessage, executionId, trigger = 'user', sessionName = null, threadAnchorId = null, userMessageTs = null, onAssistantMessage = null, onToolUse = null, registerContinuationSink = null }: { result: AgentResult; channel: string; adapter: PlatformAdapter; statusMsg: MessageRef; startTime: number; userMessage: string; executionId: string | null; trigger?: string; sessionName?: string | null; threadAnchorId?: string | null; userMessageTs?: string | null; onAssistantMessage?: ((text: string) => void) | null; onToolUse?: ((name: string, input: any) => void) | null; registerContinuationSink?: ((sink: ContinuationSink) => void) | null }): Promise<void> {
   if (result?.sessionId) await setSessionAsync(channel, result.sessionId, resolveBackendForChannel(channel));
 
   await registerOrUpdateSession(result, sessionName, channel, trigger, projectStore.resolveFromMessage(userMessage)?.id ?? 'general');
@@ -68,7 +68,19 @@ export async function handleAgentSuccess({ result, channel, adapter, statusMsg, 
     let finalized = false;
     const sink = buildContinuationSink({
       stream,
+      onToolUse: onToolUse || null,
       onWaiting: (pending) => { void writeStatus(adapter, statusMsg, waitingText(pending)); },
+      onRateLimited: (contResult) => {
+        if (finalized) return;
+        finalized = true;
+        // Record for auto-resume when the rate-limit window resets.
+        recordResume({ kind: 'direct', channel, userMessage, recordedAt: Date.now() });
+        const { elapsedStr: fullElapsed } = computeElapsed(startTime);
+        const metrics = formatMetricsSuffix({ costUsd: (result?.total_cost_usd ?? 0) + (contResult?.total_cost_usd ?? 0), numTurns: (result?.num_turns ?? 0) + (contResult?.num_turns ?? 0) });
+        const rateLimitText = `${Icons.warning} ${sessionTag}${t('status.rateLimitedExhausted')} (${fullElapsed}${metrics})`;
+        void sealStatus(adapter, statusMsg, rateLimitText, buildSealedStatusActionBlocks(rateLimitText, { channel, sessionName, isDm: true }));
+        clearStreamingCallback(channel);
+      },
       onComplete: (contResult) => {
         if (finalized) return;
         finalized = true;

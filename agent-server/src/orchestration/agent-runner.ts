@@ -241,7 +241,7 @@ async function handleDefaultAgentResult({ result, channel, adapter, statusMsg, s
     await sealStatus(adapter, statusMsg, fallbackText, buildSealedStatusActionBlocks(fallbackText, { channel, sessionName, isDm: true }));
     return;
   }
-  await handleAgentSuccess({ result, channel, adapter, statusMsg, startTime, userMessage, executionId, trigger: 'user', sessionName, threadAnchorId, userMessageTs: messageTs, onAssistantMessage: callbacks.onAssistantMsg, registerContinuationSink });
+  await handleAgentSuccess({ result, channel, adapter, statusMsg, startTime, userMessage, executionId, trigger: 'user', sessionName, threadAnchorId, userMessageTs: messageTs, onAssistantMessage: callbacks.onAssistantMsg, onToolUse: callbacks.onToolUse, registerContinuationSink });
 }
 
 export async function resolveSessionName(sessionId: string | null, channel: string, userMessage: string, adapter: PlatformAdapter): Promise<string> {

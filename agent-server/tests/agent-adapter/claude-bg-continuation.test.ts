@@ -92,6 +92,7 @@ test('integration: real captured line sequence merges continuation text + dispat
     stream: stream as any,
     onWaiting: () => { waitingCalls++; },
     onComplete: (r: any) => { completedWith = r; },
+    onRateLimited: () => {},
   }));
 
   // Replay the exact event order captured from a real `claude -p` background run.

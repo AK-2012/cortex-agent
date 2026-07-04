@@ -11,9 +11,16 @@ export interface ContinuationSinkDeps {
   /** The originating turn's OutputStream — continuation text is appended here so the
    *  follow-up merges into the same reply (looks like one turn). */
   stream: OutputStream;
+  /** Optional callback for tool_use events from the continuation turn. When set,
+   *  forwarded to the ContinuationSink so the adapter can route continuation tool
+   *  calls to the originating turn's ToolTrace (Slack tool traces + history). */
+  onToolUse?: ((name: string, input: any) => void) | null;
   /** Called when the continuation result still has background tasks pending (chained
    *  tasks): keep the status in a waiting state with the remaining count. */
   onWaiting: (pendingCount: number) => void;
+  /** Called when the continuation turn is rate-limited: seal the status as rate-limited
+   *  and record for auto-resume, instead of leaving it in waiting or sealing as done. */
+  onRateLimited: (result: AgentResult) => void;
   /** Called when no background tasks remain: seal the status as complete, record the
    *  continuation's cost, and clear the streaming callback + sink. */
   onComplete: (result: AgentResult) => void;
@@ -28,7 +35,9 @@ export interface ContinuationSinkDeps {
 export function buildContinuationSink(deps: ContinuationSinkDeps): ContinuationSink {
   return {
     onAssistantText: (text: string) => deps.stream.emitText(text),
+    onToolUse: deps.onToolUse || undefined,
     onResult: (result: AgentResult) => {
+      if (result.rateLimited) { deps.onRateLimited(result); return; }
       const pending = result.pendingBackgroundTasks ?? 0;
       if (pending > 0) deps.onWaiting(pending);
       else deps.onComplete(result);
