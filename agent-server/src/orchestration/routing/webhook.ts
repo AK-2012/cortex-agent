@@ -13,7 +13,7 @@ import { sendCommand, isDeviceOnline, getOnlineDevices } from '@domain/remote/cl
 import { registerAskQuestion, registerPlanApproval } from './hook-bridge.js';
 import { getCurrentPlanFilePath } from '@domain/agents/index.js';
 import { ctx as jobCtx } from '@domain/scheduling/job-registry.js';
-import { createThread, cancelThread, readArtifact, listTemplates, listAgents, checkSpawnGuards, getRootThreadId, registerChildSpawn, buildThreadTree, getTreeThreads, buildContractPrompt, buildMissionChain } from '@domain/threads/index.js';
+import { createThread, cancelThread, readArtifact, listTemplates, listAgents, checkSpawnGuards, getRootThreadId, registerChildSpawn, buildThreadTree, getTreeThreads, buildContractPrompt, buildMissionChain, isArtifactUnchangedSinceStepStart } from '@domain/threads/index.js';
 import { runThreadDetached } from '../thread-executor.js';
 import { buildThreadSummary } from '@domain/threads/runner.js';
 import { Icons } from '@core/icons.js';
@@ -378,6 +378,12 @@ function createWebhookHandler(_options: {
             }
             if (t.metadata?.pendingControl) {
               return reply({ success: false, error: `thread already has a pending ${t.metadata.pendingControl.action} control — only one control intent at a time` });
+            }
+            // DR-0017 W2 checkpoint gate: suspension requires a fresh checkpoint. Reject wait
+            // while the artifact still matches its step-start baseline; abort/split are exempt
+            // (escalation must never be blocked). Fails open when no baseline is recorded.
+            if (control.action === 'wait' && isArtifactUnchangedSinceStepStart(threadId)) {
+              return reply({ success: false, error: 'checkpoint gate (DR-0017): your artifact has not been updated during this step. Before suspending, write your checkpoint into the artifact — current delegations & their acceptance criteria, decisions made, remaining plan, assumptions — then call thread_wait again.' });
             }
             const requestedAtStep = t.currentStepIndex;
             await threadStore.mutate(threadId, (r) => {

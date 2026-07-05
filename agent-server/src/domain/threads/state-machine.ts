@@ -3,9 +3,11 @@
 // output: createThread / addAgentToThread /
 //         resolveNextStep / evaluateTransitions / recordStepResult / completeThread /
 //         failThread / cancelThread / abortThread / tryEnterWaiting /
-//         peekPendingControl / clearPendingControl / detectSplitFromControl (DR-0015 control plane)
+//         peekPendingControl / clearPendingControl / detectSplitFromControl (DR-0015 control plane) /
+//         isArtifactUnchangedSinceStepStart (DR-0017 W2 checkpoint gate)
 
 import { mkdirSync, writeFileSync, readFileSync } from 'fs';
+import { createHash } from 'crypto';
 import * as path from 'path';
 import { WORKSPACE_DIR } from '@core/utils.js';
 import { ensureTaskArtifact } from '@core/task-node.js';
@@ -68,6 +70,25 @@ function createWorkspace(threadId: string): { workspacePath: string; artifactPat
   mkdirSync(workspacePath, { recursive: true });
   writeFileSync(artifactPath, '');
   return { workspacePath, artifactPath };
+}
+
+/** sha256 of the artifact content at `artifactPath` (missing/unreadable file → hash of ''). */
+function hashArtifactAt(artifactPath: string): string {
+  let content = '';
+  try { content = readFileSync(artifactPath, 'utf8'); } catch { /* absent == empty */ }
+  return createHash('sha256').update(content).digest('hex');
+}
+
+/** DR-0017 W2 checkpoint gate predicate: true iff the thread HAS a recorded step-start
+ *  baseline and the artifact content still matches it (i.e. the agent has not written its
+ *  checkpoint this step). Every uncertain case — no artifactPath, no baseline — returns
+ *  false so the gate FAILS OPEN (never blocks a legitimate wait). */
+export function isArtifactUnchangedSinceStepStart(threadId: string): boolean {
+  const thread = threadStore.get(threadId);
+  if (!thread?.artifactPath) return false;
+  const baseline = thread.metadata?.stepStartArtifactHash;
+  if (!baseline) return false;
+  return hashArtifactAt(thread.artifactPath) === baseline;
 }
 
 /** Templates whose dispatch threads keep their artifact on the TASK node instead of the
@@ -150,7 +171,9 @@ export function createThread(channel: string, options: {
     userMessageTs: options.userMessageTs,
     workspacePath, artifactPath,
     agents: agentSlots, activeAgent: entryAgent, activeStage: entryStage,
-    metadata: options.metadata || null,
+    // DR-0017 W2: baseline for the checkpoint gate — the artifact state the first step starts
+    // against (non-empty for a rehydrated manager inheriting a task-keyed artifact).
+    metadata: { ...(options.metadata ?? {}), stepStartArtifactHash: hashArtifactAt(artifactPath) },
   });
   threadStore.set(thread);
   const mode = isTemplate ? `template=${options.templateName}` : `agent=${options.agentName}`;
@@ -289,6 +312,9 @@ export async function recordStepResult(threadId: string, agentSlotId: AgentSlotI
     if (result.costUsd != null) t.totalCostUsd += result.costUsd;
     const slot = t.agents[agentSlotId];
     if (slot) updateSlotAfterStep(slot, result);
+    // DR-0017 W2: the artifact as this step left it IS the next step's start state
+    // (nothing writes the artifact between steps) — refresh the checkpoint-gate baseline.
+    if (t.artifactPath) (t.metadata ??= {}).stepStartArtifactHash = hashArtifactAt(t.artifactPath);
   });
   return step;
 }

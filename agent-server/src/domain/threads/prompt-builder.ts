@@ -147,6 +147,9 @@ export const THREAD_PROTOCOL_PREAMBLE = [
   '`thread_wait` tool to suspend; you are re-entered once ALL awaited children finish, with their',
   'results injected. Acceptance before trust: verify each child deliverable against its done_when',
   'yourself (read files, run tests) — never accept a child\'s self-report as evidence.',
+  'Checkpoint gate (DR-0017): thread_wait is REJECTED unless you updated your artifact during the',
+  'current step — write your checkpoint (delegations & acceptance criteria / decisions made /',
+  'remaining plan / assumptions) to the artifact before suspending.',
 ].join('\n');
 
 // --- Prompt assembly ---

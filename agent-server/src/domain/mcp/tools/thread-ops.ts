@@ -91,7 +91,7 @@ export function registerThreadTools(server: McpServer): void {
 
   server.tool(
     'thread_wait',
-    'Suspend YOUR OWN thread until its awaited children finish (DR-0014 parent suspension). Call this after creating child tasks you depend on (cortex-task spawn) — you are re-entered once ALL awaited children are terminal, with their results injected. If nothing is left to wait on, the thread simply continues. After calling, end your step.',
+    'Suspend YOUR OWN thread until its awaited children finish (DR-0014 parent suspension). Call this after creating child tasks you depend on (cortex-task spawn) — you are re-entered once ALL awaited children are terminal, with their results injected. If nothing is left to wait on, the thread simply continues. PRECONDITION (DR-0017 checkpoint gate): you must have updated your artifact during this step (delegations & acceptance criteria / decisions / remaining plan / assumptions) — the call is rejected otherwise. After calling, end your step.',
     {
       on_tasks: z.array(z.string()).optional().describe('Optional explicit child task ids to wait on (otherwise inferred from the thread / task tree).'),
       on_threads: z.array(z.string()).optional().describe('Optional explicit child thread ids to wait on (otherwise inferred from spawned children).'),

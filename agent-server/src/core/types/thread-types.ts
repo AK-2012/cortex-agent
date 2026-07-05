@@ -311,6 +311,12 @@ export interface ThreadMetadata {
   /** Children whose results were already queued into pendingMessages — persistent
    *  idempotency for completion callbacks (survives restarts, unlike the in-memory fired set). */
   deliveredChildResults?: string[];
+  /** sha256 of the artifact content at the current step's start (DR-0017 W2 checkpoint gate):
+   *  set by createThread (initial state) and refreshed by recordStepResult (post-step state ==
+   *  next step's start state; nothing writes the artifact between steps). The webhook `control`
+   *  wait action rejects thread_wait while the current artifact still matches this baseline —
+   *  a manager must write its checkpoint before suspending. Absent → gate fails open. */
+  stepStartArtifactHash?: string | null;
   /** Open questions a subtask asked this manager via ask_manager (DR-0016), for visibility /
    *  debugging. The authoritative pending-question state lives in orchestration/manager-qa's
    *  in-memory store; this is the manager-side mirror, cleared by answer_subtask. */
