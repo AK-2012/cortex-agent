@@ -1,6 +1,6 @@
 ---
 name: thread
-description: "Use when working with the Cortex thread system — understanding thread architecture, writing or modifying thread-templates.json (agents, templates, transitions, hooks), debugging thread execution, or when the user asks about multi-agent pipelines, agent orchestration, or the !thread command. Also trigger when modifying prompts/directives/, prompts/systemPrompts/, or prompts/promptTemplates/ files that feed into threads."
+description: "Use when working with the Cortex thread system — understanding thread architecture, writing or modifying thread config (the per-entity JSON files under config/thread-templates/ — agents, templates, shells, transitions, hooks), debugging thread execution, or when the user asks about multi-agent pipelines, agent orchestration, or the !thread command. Also trigger when modifying prompts/directives/, prompts/systemPrompts/, or prompts/promptTemplates/ files that feed into threads."
 author: Cortex
 version: 1.0.0
 allowed-tools:
@@ -77,7 +77,7 @@ All three target `CORTEX_THREAD_ID` (the thread you are running inside) — you 
 
 ### How Agents Know About the Control Plane
 
-The protocol is **auto-injected** by the thread system — you do **not** need to add anything to an agent's directive. `buildStepPrompt` prepends a short `THREAD_PROTOCOL_PREAMBLE` block (defined in `agent-server/src/domain/threads/prompt-builder.ts`) to every step prompt of any thread that owns a workspace artifact. The preamble is skipped for auto-record / default / direct paths (no artifact) and on `--resume` of a persistent session (already delivered). Adding a new artifact-writing agent to `thread-templates.json` automatically gets the control tools without editing its directive / promptTemplate / systemPrompt.
+The protocol is **auto-injected** by the thread system — you do **not** need to add anything to an agent's directive. `buildStepPrompt` prepends a short `THREAD_PROTOCOL_PREAMBLE` block (defined in `agent-server/src/domain/threads/prompt-builder.ts`) to every step prompt of any thread that owns a workspace artifact. The preamble is skipped for auto-record / default / direct paths (no artifact) and on `--resume` of a persistent session (already delivered). Adding a new artifact-writing agent (a new file under `config/thread-templates/agents/`) automatically gets the control tools without editing its directive / promptTemplate / systemPrompt.
 
 ### When to Abort
 
@@ -443,7 +443,7 @@ Dispatch flow: `task-dispatcher.ts` selects a task → extracts template name �
 
 | File | Role |
 |------|------|
-| `agent-server/thread-templates.json` | Agent + template configuration |
+| `~/.cortex/config/thread-templates/` | Agent + template + shell configuration (directory, one JSON file per entity under `agents/`, `templates/`, `shells/`) |
 | `agent-server/src/thread-types.ts` | All TypeScript interfaces |
 | `agent-server/src/thread-store.ts` | In-memory cache + threads.json persistence |
 | `agent-server/src/thread-manager.ts` | Core orchestration (create, step, transition, prompt assembly) |
@@ -458,7 +458,7 @@ Dispatch flow: `task-dispatcher.ts` selects a task → extracts template name �
 
 ## How to Add a New Agent
 
-1. Add the agent definition to the `agents` section of `thread-templates.json`
+1. Add the agent definition as a new file `config/thread-templates/agents/<name>.json` (the filename without `.json` is the agent name)
 2. If using a `file:` directive, create the directive file in `prompts/directives/`
 3. If using a `file:` systemPrompt, create it in `prompts/systemPrompts/`
 4. Choose the right `profile` (plan/execute/qa/__active__)
@@ -467,8 +467,8 @@ Dispatch flow: `task-dispatcher.ts` selects a task → extracts template name �
 
 ## How to Add a New Template
 
-1. Define any new agents needed in the `agents` section
-2. Add the template to the `templates` section with:
+1. Define any new agents needed as files under `config/thread-templates/agents/`
+2. Add the template as a file `config/thread-templates/templates/<name>.json` (the filename without `.json` is the template name) with:
    - `agents`: list of agent refs (simple strings or override objects)
    - `transitions`: rules connecting agents
    - `entryAgent`: the starting agent
