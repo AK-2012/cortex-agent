@@ -222,6 +222,21 @@ running → waiting     （等待用户输入 — 第 6 阶段缓冲）
 
 线程控制是带外（out-of-band）的：智能体通过调用 `thread_abort`、`thread_split`、`thread_wait` MCP 工具来控制自己的线程，而不是向产物写入标记（在产物里提及这些关键字不会触发任何动作）。工具会在该智能体自己的线程上写入结构化的 `metadata.pendingControl`；runner 在每步完成后读取它，**优先级高于所有转换规则**。`thread_abort({ kind, diagnosis })` 立即将线程终止为 `aborted`（`onEnd` 钩子仍会触发）；`thread_split({ subtasks })` 提议对所属派发任务做分解；`thread_wait` 挂起直到被等待的子项完成。
 
+### thread_wait 检查点门禁（DR-0017）
+
+manager 通过 `thread_wait` 挂起之前，必须为它（可能被轮换过的）下一个化身留下一份新鲜的检查点。runner 通过**检查点门禁**强制这一点：
+
+- 调用 `thread_wait` 时，门禁将产物的**当前内容哈希**与**当前步骤开始时**记录的哈希比对。若产物自步骤开始以来**未改变**，`thread_wait` 被**拒绝**；若**已改变**，则允许挂起。
+- 比对用的是**内容哈希，而非 mtime**——单纯 `touch` 无法绕过它。
+- 基线哈希在线程创建时记录（初始/继承的产物状态），并在每一步结束时再次记录，因此门禁既覆盖第一步，也覆盖每一次重新进入。
+- **豁免**：`thread_abort` 和 `thread_split` 豁免——升级永远不能被阻断。门禁只作用于持有 `artifactPath` 的线程，并在没有记录基线时**故障放行（fail open）**。
+
+manager 写入的检查点始终覆盖四个部分：**当前委托及其验收标准**、**已做决策**（追加式日志）、**剩余计划**和**假设**。
+
+当门禁拒绝挂起时，返回：
+
+> `checkpoint gate (DR-0017): your artifact has not been updated during this step. Before suspending, write your checkpoint into the artifact — current delegations & their acceptance criteria, decisions made, remaining plan, assumptions — then call thread_wait again.`
+
 ### 执行循环
 
 `runner.ts` 中的主执行循环运行如下：
@@ -312,6 +327,18 @@ tmp/threads/thr_a1b2c3d4/
 - `{{modifiedFiles}}` — 上一个智能体编辑的文件列表（从会话活动日志中提取）
 - `{{modifiedFilesWithDiff}}` — 文件列表，带有从会话活动 JSONL 重建的每文件 diff 块
 
+### 任务定址的 manager 产物（DR-0017）
+
+大多数线程把产物放在上文所示的**临时线程工作区**（`tmp/threads/{threadId}/artifact.md`），按线程 id 定址，并在线程清理时被删除。**manager 线程**不同：它拥有一个复合任务节点，其产物放在**任务定址**的路径下——按所属任务 id 定址，而非线程 id：
+
+```
+context/projects/{project}/manager/{taskId}/artifact.md
+```
+
+该产物是**持久的**。它能在线程清理、服务器重启以及 manager 替换/轮换后存活，并随 context 仓库进行 git 版本管理（每次检查点都累积版本历史）——与临时的 `tmp/threads/{threadId}/artifact.md` 工作区形成对比，后者在线程清理时被丢弃。它在派发时即被设定——manager 线程的 `artifactPath` 指向这个任务定址路径——因此 `{{artifactPath}}`、产物读取以及**thread_wait 检查点门禁**（见上文）全都无缝地作用于它，工作区清理永远不会触及它。
+
+它的角色是**再水化（rehydration）记忆**：一个新鲜的 manager 化身（在轮换或崩溃之后）从此文件继承上一个化身的检查点，因此 manager 应当把它写得让一个陌生人仅凭此文件就能继续这个任务。manager 节点概念及其验收台账记录在 [tasks.md](./tasks.md) 中。
+
 ## 线程命令
 
 ### 启动线程
@@ -394,6 +421,15 @@ Cortex 内部使用三种类型的线程记录：
 每个智能体定义通过 `pluginDirs` 指定要加载的插件目录。插件相对于 `DATA_DIR`（默认：`~/.cortex/`）解析。例如，`plugins/cortex-coder` 解析为 `~/.cortex/plugins/cortex-coder/`。
 
 插件目录作为 `--plugin-dir` 标志（Claude Code）或 `--skill` 标志（PI）传递给 LLM 后端。后端然后扫描 `SKILL.md` 文件并将其作为可调用技能提供。完整的技能和插件系统参见 [skills-and-plugins.md](./skills-and-plugins.md)。
+
+## Manager 会话轮换与再水化（DR-0017）
+
+manager 线程是长生命周期的：随着子项运行，它跨越多次唤醒累积上下文。为保持上下文清洁，DR-0017 会周期性地**轮换 manager 的 LLM 会话**，依赖持久的**任务定址 manager 产物**（见上文）及其验收台账（见 [tasks.md](./tasks.md)）来跨越边界携带状态。
+
+- **触发**：在恢复的收窄点检查，就在重新进入一个被挂起的 manager 之前。当 `steps.length - rotationBaseStepIndex >= CORTEX_MANAGER_ROTATE_STEPS`（环境变量，**默认 10**）时，会话被轮换。只有 **manager（任务产物）模板**会轮换——普通线程从不轮换。
+- **轮换动作**：清空每个智能体槽位的 `sessionId`（这样下一步在一个**全新的 LLM 会话**上运行，会自然地重新注入完整的 manager 指令和原始任务契约提示），把 `rotationBaseStepIndex` 重置为当前步骤计数，并为新鲜化身入队一条**再水化通知**。
+- **再水化通知**：它指示新鲜化身：(1) **先读自己的产物**——该文件保存着前任的检查点；(2) **对账任务树**（例如 `cortex-task tree --task-id <id>`）；(3) **验证台账中待处理的交付**——仍在等待本 manager 裁决的子项结果，必须逐一按其 `done-when` 核验后才可信任。它还告诉化身**不要**重做已完成的工作或重新争论已记录的决策，而是从剩余计划继续。
+- 轮换是一次**刻意的击杀测试**：它与灾难/崩溃恢复同构——新鲜化身纯粹从持久状态再水化。它**故障放行**：轮换失败是非致命的（恢复在旧会话上继续），且非 manager 线程从不轮换。
 
 ## 线程清理
 

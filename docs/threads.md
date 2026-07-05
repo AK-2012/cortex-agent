@@ -221,6 +221,21 @@ Terminal states: `completed`, `failed`, `cancelled`, `aborted`.
 
 Thread control is out-of-band: an agent signals its own thread by calling the `thread_abort`, `thread_split`, or `thread_wait` MCP tools, never by writing markers into the artifact (text mentioning those keywords in the artifact does nothing). The tool writes a structured `metadata.pendingControl` on the agent's own thread; the runner reads it after every step completion, with **higher priority than all transition rules**. `thread_abort({ kind, diagnosis })` immediately terminates the thread with status `aborted` (but `onEnd` hooks still fire); `thread_split({ subtasks })` proposes a decomposition of the owning dispatch task; `thread_wait` suspends until awaited children finish.
 
+### thread_wait Checkpoint Gate (DR-0017)
+
+Before a manager suspends via `thread_wait`, it must leave a fresh checkpoint for its (possibly rotated) next incarnation. The runner enforces this with a **checkpoint gate**:
+
+- On `thread_wait`, the gate compares the artifact's **current content hash** against the hash recorded at the **start of the current step**. If the artifact is **unchanged** since step start, `thread_wait` is **rejected**; if it **changed**, the wait is allowed.
+- The comparison uses a **content hash, not mtime** — a bare `touch` cannot bypass it.
+- The baseline hash is recorded at thread creation (the initial/inherited artifact state) and again at the end of every step, so the gate covers both the first step and every re-entry.
+- **Exemptions**: `thread_abort` and `thread_split` are exempt — escalation must never be blocked. The gate applies only to threads that hold an `artifactPath`, and it **fails open** when no baseline was recorded.
+
+The checkpoint the manager writes always covers four sections: **current delegations & their acceptance criteria**, **decisions made** (an append-only log), **remaining plan**, and **assumptions**.
+
+When the gate rejects a wait, it returns:
+
+> `checkpoint gate (DR-0017): your artifact has not been updated during this step. Before suspending, write your checkpoint into the artifact — current delegations & their acceptance criteria, decisions made, remaining plan, assumptions — then call thread_wait again.`
+
 ### Execution Loop
 
 The main execution loop in `runner.ts` runs as follows:
@@ -311,6 +326,18 @@ Agents can also read files modified by previous agents:
 - `{{modifiedFiles}}` — list of files edited by the previous agent (extracted from session activity logs)
 - `{{modifiedFilesWithDiff}}` — file list with per-file diff blocks reconstructed from session activity JSONL
 
+### Task-Keyed Manager Artifact (DR-0017)
+
+Most threads keep their artifact in the **ephemeral thread workspace** shown above (`tmp/threads/{threadId}/artifact.md`), addressed by thread id and deleted on thread cleanup. A **manager thread** is different: it owns a composite task node and keeps its artifact at a **task-keyed** path, addressed by the owning task id rather than the thread id:
+
+```
+context/projects/{project}/manager/{taskId}/artifact.md
+```
+
+This artifact is **durable**. It survives thread cleanup, server restarts, and manager replacement/rotation, and is git-versioned with the context repo (every checkpoint accrues version history) — in contrast to the ephemeral `tmp/threads/{threadId}/artifact.md` workspace, which is discarded when the thread is cleaned up. It is set at dispatch time — the manager thread's `artifactPath` points at this task-keyed path — so `{{artifactPath}}`, artifact reads, and the [checkpoint gate](#thread_wait-checkpoint-gate-dr-0017) all operate on it unchanged, and workspace cleanup never touches it.
+
+Its role is **rehydration memory**: a fresh manager incarnation (after rotation or a crash) inherits the previous incarnation's checkpoint from this file, so managers are expected to write it such that a stranger could continue the task from it alone. The manager-node concept and its acceptance ledger are documented in [tasks.md](./tasks.md).
+
 ## Thread Commands
 
 ### Starting a Thread
@@ -393,6 +420,15 @@ Agent prompts support template variables that are resolved at runtime:
 Each agent definition specifies which plugin directories to load via `pluginDirs`. Plugins are resolved relative to `DATA_DIR` (default: `~/.cortex/`). For example, `plugins/cortex-coder` resolves to `~/.cortex/plugins/cortex-coder/`.
 
 The plugin directories are passed to the LLM backend as `--plugin-dir` flags (Claude Code) or `--skill` flags (PI). The backend then scans for `SKILL.md` files and makes them available as invocable skills. See [skills-and-plugins.md](./skills-and-plugins.md) for the full skill and plugin system.
+
+## Manager Session Rotation & Rehydration (DR-0017)
+
+A manager thread is long-lived: it accumulates context across many wake-ups as its children run. To keep that context clean, DR-0017 **rotates the manager's LLM session** periodically, relying on the durable [task-keyed artifact](#task-keyed-manager-artifact-dr-0017) and its acceptance ledger (see [tasks.md](./tasks.md)) to carry state across the boundary.
+
+- **Trigger**: checked at the resume chokepoint, just before re-entering a suspended manager. When `steps.length - rotationBaseStepIndex >= CORTEX_MANAGER_ROTATE_STEPS` (environment variable, **default 10**), the session rotates. Only **manager (task-artifact) templates** rotate — ordinary threads never do.
+- **Rotation action**: clear every agent slot's `sessionId` (so the next step runs on a **fresh LLM session**, which naturally re-injects the full manager directive and the original task contract prompt), reset `rotationBaseStepIndex` to the current step count, and enqueue a **rehydration notice** for the fresh incarnation.
+- **Rehydration notice**: it instructs the fresh incarnation to (1) **read its artifact first** — the file holds the predecessor's checkpoint; (2) **reconcile the task tree** (e.g. `cortex-task tree --task-id <id>`); and (3) **verify pending ledger deliveries** — child results still awaiting this manager's verdict must each be checked against their `done-when` before being trusted. It also tells the incarnation **not** to redo completed work or re-litigate recorded decisions, but to continue from the remaining plan.
+- Rotation is a **deliberate kill test**: it is isomorphic to disaster/crash recovery — the fresh incarnation is rehydrated purely from durable state. It **fails open**: a rotation failure is non-fatal (the resume proceeds on the old session), and non-manager threads never rotate.
 
 ## Thread Cleanup
 
