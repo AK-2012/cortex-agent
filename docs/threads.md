@@ -6,20 +6,28 @@ The thread system is Cortex's multi-agent orchestration engine. A thread is a re
 
 A thread is like a relay race. Each agent (runner) picks up the baton (the `artifact.md` file), does its work, and hands off to the next agent based on transition rules. The artifact file is the shared memory — agents write their findings to it, and subsequent agents read what came before.
 
-Threads are defined by **templates** in `~/.cortex/config/thread-templates.json`. Threads are often launched by the task dispatch system — see [tasks.md](./tasks.md) for how tasks trigger thread execution. A template specifies: which agents participate, in what order, with what transition logic, and what lifecycle hooks fire between steps.
+Threads are defined by **templates** under `~/.cortex/config/thread-templates/` (see [Configuration File](#configuration-file)). Threads are often launched by the task dispatch system — see [tasks.md](./tasks.md) for how tasks trigger thread execution. A template specifies: which agents participate, in what order, with what transition logic, and what lifecycle hooks fire between steps.
 
 ## Configuration File
 
-The thread system is configured via `~/.cortex/config/thread-templates.json` (read from `$CORTEX_HOME/config/thread-templates.json`). This file has two top-level sections:
+The thread system is configured under `~/.cortex/config/thread-templates/` (read from `$CORTEX_HOME/config/thread-templates/`) — a **directory** holding one JSON file per entity, split across three subdirectories:
 
-```json
-{
-  "agents": { ... },      // Independent agent definitions
-  "templates": { ... }    // Multi-agent pipeline templates
-}
+```
+~/.cortex/config/thread-templates/
+├── agents/<name>.json      # one agent definition per file
+├── templates/<name>.json   # one pipeline template (or shell binding) per file
+└── shells/<name>.json      # one shell definition (parameterized transition graph) per file
 ```
 
-Configuration supports **hot-reload**: changes to `thread-templates.json` or any prompt files in the `prompts/` directory are detected via `fs.watch` (300ms debounce) and reloaded without restarting the server. A notification is sent to the admin Slack channel on reload.
+Each file holds a single entity, and **the filename (without `.json`) is the entity name**. For `agents/`, the JSON's `name` field must match the filename or the file is skipped with a warning; for `templates/`, a `name` field is optional but if present must match the filename.
+
+**Loading priority.** If the `config/thread-templates/` directory exists, it is used. Otherwise the loader falls back to the legacy single file `config/thread-templates.json` (backward compatibility). Note that shell bindings only resolve in the directory form — shell definitions live under `shells/`, so a legacy single-file config cannot expand them.
+
+**One-time migration.** On startup, if a legacy `config/thread-templates.json` exists and the directory does not, the server splits the single file into per-entity files under the directory and renames the original to `thread-templates.json.migrated-bak` (the original is preserved, never deleted). The migration is idempotent — it is a no-op once the directory exists.
+
+**Defaults merge.** The shipped defaults are a directory too. On startup they are merged into your config with **per-file copy-if-missing** semantics (aligned with plugin-sync): a default agent/template/shell file you do not yet have is copied in; files you already have are never overwritten. This lets new default entities (for example a newly shipped shell definition) reach existing installs without clobbering local edits.
+
+**Hot-reload.** Each entity subdirectory (`agents/`, `templates/`, `shells/`) is watched, along with any prompt files in the `prompts/` directory. Changes are detected via `fs.watch`, debounced (300ms), and the whole config is reloaded without restarting the server. Reload is fail-soft: a single malformed JSON file is skipped with a warning rather than clearing the whole table. A notification is sent to the admin Slack channel on reload.
 
 ### Agent Definitions
 
@@ -154,6 +162,70 @@ Templates reference agents either by name (as a string) or with per-template ove
 ```
 
 Override fields: `promptTemplate`, `directive`, `systemPrompt`, `persistSession`, `claudeAgent`, `outputStyle`, `tools`, `pluginDirs`.
+
+### Shell Templates
+
+Pipelines that share the same transition graph and differ only in which agents fill the roles are defined once as a **shell** — a parameterized transition graph stored as pure JSON in `shells/<name>.json` — and referenced by lightweight **shell bindings** in `templates/`.
+
+A shell declares its parameters and uses placeholders in the graph:
+
+- `{param}` — substituted with the binding's value for that parameter (an agent name).
+- `{param.entryStage}` — substituted with that agent's `entryStage`, resolved from the agents map.
+
+For example, the shipped `worker-review` shell (`shells/worker-review.json`) — a generic produce-then-audit loop:
+
+```json
+{
+  "params": ["worker", "reviewer"],
+  "agents": ["{worker}", "{reviewer}"],
+  "transitions": [
+    { "from": "{worker}:{worker.entryStage}", "to": "{reviewer}", "condition": { "type": "always" } },
+    { "from": "{reviewer}", "to": "{worker}:retry", "condition": { "type": "convergence", "marker": "[APPROVED]", "maxIterations": 1 } },
+    { "from": "{worker}:retry", "to": "{reviewer}", "condition": { "type": "output_not_contains", "pattern": "\\[REVISED\\]" } }
+  ],
+  "entryAgent": "{worker}",
+  "entryStage": "{worker.entryStage}",
+  "maxTotalSteps": 4,
+  "hooks": {
+    "onEnd": { "command": "node ~/.cortex/hooks/post-task-hook.mjs", "args": ["{worker}"], "timeout": 10000 }
+  }
+}
+```
+
+A template then binds it by naming the shell and its parameters (`templates/doc-review.json`):
+
+```json
+{
+  "shell": "worker-review",
+  "worker": "doc-writer",
+  "reviewer": "doc-reviewer",
+  "description": "Generic produce-then-audit for documents"
+}
+```
+
+At load time the engine interpolates the placeholders and validates the result, producing a full template equivalent to writing the graph out by hand (here: `doc-writer` at its entry stage → `doc-reviewer` → `doc-writer:retry` until `[APPROVED]`). Validation errors — a missing parameter, an unknown placeholder, a referenced agent that does not exist, an agent missing its `entryStage`, or a transition endpoint naming a stage the agent lacks — fail that one template at load with a logged error; an unknown shell name is fail-soft skipped. In every case the rest of the config still loads.
+
+**Shell definition fields (`shells/<name>.json`):**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `params` | string[] | Required binding parameter names |
+| `agents` | string[] | Agent slots as placeholder strings (e.g. `"{worker}"`) — declares which params name agents |
+| `transitions` | TransitionRule[] | Transition graph with placeholder endpoints |
+| `entryAgent` | string | Entry agent placeholder |
+| `entryStage` | string? | Entry stage placeholder |
+| `maxTotalSteps` | number | Default step budget (a binding's `maxTotalSteps` overrides it) |
+| `maxTotalCostUsd` | number? | Cost limit in USD |
+| `hooks` | ThreadHooks? | Lifecycle hooks (placeholders allowed in args) |
+
+**Shell binding fields (a template that references a shell):**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `shell` | string | Name of the shell to expand |
+| `<param>` | string | One value per shell parameter (e.g. `worker`, `reviewer`) — the agent name that fills that role |
+| `description` | string? | Human-readable description (carried onto the expanded template) |
+| `maxTotalSteps` | number? | Override the shell's default step budget |
 
 ## Transitions
 

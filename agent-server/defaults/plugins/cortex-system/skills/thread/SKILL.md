@@ -113,11 +113,25 @@ The signal is cleared after consumption so an intent fires exactly once; the web
 
 ---
 
-## Configuration File: thread-templates.json
+## Configuration File: thread-templates/
 
-Location: `agent-server/thread-templates.json`
+Location: `~/.cortex/config/thread-templates/` (a **directory**, one JSON file per entity).
 
-This file has two top-level sections: `agents` (independent agent definitions) and `templates` (multi-agent pipeline templates). The config supports **hot-reload** — changes are detected automatically via `fs.watch` with a 300ms debounce.
+Config is directory-based (DR-0017 D6 Phase 2.5): entities live one-file-each under three subdirectories, and **the filename without `.json` is the entity name**:
+
+```
+~/.cortex/config/thread-templates/
+├── agents/<name>.json      # one agent definition per file
+├── templates/<name>.json   # one pipeline template (or shell binding) per file
+└── shells/<name>.json      # one shell definition (parameterized transition graph) per file
+```
+
+- **Loading priority:** the directory is used if it exists; otherwise the loader falls back to the legacy single file `config/thread-templates.json`. Shell bindings only resolve in the directory form (shells live under `shells/`).
+- **One-time migration:** on startup a legacy single file (with no directory yet) is split into per-entity files and the original is renamed `thread-templates.json.migrated-bak` (preserved, never deleted; idempotent).
+- **Defaults merge:** shipped defaults are a directory too, merged **per-file copy-if-missing** (never overwrites your files) so new default agents/templates/shells reach existing installs.
+- **Hot-reload:** each entity subdirectory (`agents/`, `templates/`, `shells/`) and the `prompts/` directory are watched via `fs.watch` (300ms debounce); reload is fail-soft (a malformed file is skipped, not the whole table).
+
+The two core entity kinds are `agents` (independent agent definitions) and `templates` (multi-agent pipelines, either full templates or shell bindings); `shells` are parameterized transition graphs the templates reuse.
 
 ### Agents Section
 
@@ -243,6 +257,44 @@ Templates reference agents in two ways:
 ```
 
 Override objects support: `ref` (required), `promptTemplate`, `directive`, `systemPrompt`, `persistSession`, `claudeAgent`, `outputStyle`, `tools`, `pluginDirs`.
+
+### Shell Templates (shells/ + shell bindings)
+
+When several pipelines share the same transition graph and differ only in which agents fill the roles, define the graph once as a **shell** (pure JSON in `shells/<name>.json`) and reference it from `templates/` with a small **shell binding**. The shell declares `params` and uses placeholders in its graph:
+
+- `{param}` → the binding's value for that parameter (an agent name).
+- `{param.entryStage}` → that agent's `entryStage`, resolved from the agents map.
+
+Shell definition (`shells/worker-review.json` — the shipped generic produce-then-audit loop):
+
+```json
+{
+  "params": ["worker", "reviewer"],
+  "agents": ["{worker}", "{reviewer}"],
+  "transitions": [
+    { "from": "{worker}:{worker.entryStage}", "to": "{reviewer}", "condition": { "type": "always" } },
+    { "from": "{reviewer}", "to": "{worker}:retry", "condition": { "type": "convergence", "marker": "[APPROVED]", "maxIterations": 1 } },
+    { "from": "{worker}:retry", "to": "{reviewer}", "condition": { "type": "output_not_contains", "pattern": "\\[REVISED\\]" } }
+  ],
+  "entryAgent": "{worker}",
+  "entryStage": "{worker.entryStage}",
+  "maxTotalSteps": 4,
+  "hooks": { "onEnd": { "command": "node ~/.cortex/hooks/post-task-hook.mjs", "args": ["{worker}"], "timeout": 10000 } }
+}
+```
+
+Shell binding (`templates/doc-review.json`) — a template that just names the shell and its params:
+
+```json
+{
+  "shell": "worker-review",
+  "worker": "doc-writer",
+  "reviewer": "doc-reviewer",
+  "description": "Generic produce-then-audit for documents"
+}
+```
+
+At load, the loader interpolates the placeholders and validates the result into a full template (here: `doc-writer` at its entry stage → `doc-reviewer` → `doc-writer:retry` until `[APPROVED]`). A validation failure (missing param, unknown placeholder, agent not found, agent missing `entryStage`, or a transition endpoint naming a stage the agent lacks) fails that one template with a logged error; an unknown shell name is fail-soft skipped — the rest of the config still loads. A binding may also set `maxTotalSteps` to override the shell's default budget.
 
 ---
 
