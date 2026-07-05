@@ -7,20 +7,28 @@
 
 线程就像接力赛。每个智能体（跑者）拿起接力棒（`artifact.md` 文件），完成自己的工作，并根据转换规则将接力棒交给下一个智能体。产物文件是共享内存——智能体将发现写入其中，后续智能体读取之前的输出。
 
-线程由 `~/.cortex/config/thread-templates.json` 中的**模板**定义。线程通常由任务调度系统启动——任务如何触发线程执行参见 [tasks.md](./tasks.md)。模板指定：哪些智能体参与、以什么顺序、按什么转换逻辑、以及在步骤之间触发什么生命周期钩子。
+线程由 `~/.cortex/config/thread-templates/` 下的**模板**定义（参见下方"配置文件"章节）。线程通常由任务调度系统启动——任务如何触发线程执行参见 [tasks.md](./tasks.md)。模板指定：哪些智能体参与、以什么顺序、按什么转换逻辑、以及在步骤之间触发什么生命周期钩子。
 
 ## 配置文件
 
-线程系统通过 `~/.cortex/config/thread-templates.json` 配置（从 `$CORTEX_HOME/config/thread-templates.json` 读取）。此文件有两个顶级部分：
+线程系统在 `~/.cortex/config/thread-templates/` 目录下配置（从 `$CORTEX_HOME/config/thread-templates/` 读取）——这是一个**目录**，每个实体一个 JSON 文件，分为三个子目录：
 
-```json
-{
-  "agents": { ... },      // 独立的智能体定义
-  "templates": { ... }    // 多智能体管道模板
-}
+```
+~/.cortex/config/thread-templates/
+├── agents/<name>.json      # 每个文件一个智能体定义
+├── templates/<name>.json   # 每个文件一个管道模板（或 shell 绑定）
+└── shells/<name>.json      # 每个文件一个 shell 定义（参数化转换图）
 ```
 
-配置支持**热重载**：对 `thread-templates.json` 或 `prompts/` 目录中任何提示文件的更改通过 `fs.watch`（300ms 去抖）检测，并在不重启服务器的情况下重新加载。重载时向管理 Slack 频道发送通知。
+每个文件只装一个实体，且**文件名（去掉 `.json`）即实体名**。对于 `agents/`，JSON 中的 `name` 字段必须与文件名一致，否则该文件被跳过并告警；对于 `templates/`，`name` 字段可选，但若存在则必须与文件名一致。
+
+**加载优先级。** 若 `config/thread-templates/` 目录存在，则使用该目录。否则加载器回落读取旧的单文件 `config/thread-templates.json`（向后兼容）。注意 shell 绑定仅在目录形式下才能解析——shell 定义位于 `shells/` 下，因此旧的单文件配置无法展开它们。
+
+**一次性迁移。** 服务器启动时，若存在旧的 `config/thread-templates.json` 且目录尚不存在，则将该单文件拆分为目录下的每实体文件，并将原文件改名为 `thread-templates.json.migrated-bak`（原文件保留，绝不删除）。迁移是幂等的——目录一旦存在即为空操作。
+
+**默认值合并。** 随产品发货的默认配置同样是目录。启动时它们以**逐文件 copy-if-missing** 语义合并进你的配置（对齐 plugin-sync）：你尚未拥有的默认 agent/template/shell 文件会被拷入；你已有的文件绝不被覆盖。这让新增的默认实体（例如新发货的 shell 定义）能够到达已有安装，同时不冲掉本地改动。
+
+**热重载。** 每个实体子目录（`agents/`、`templates/`、`shells/`）都被监视，`prompts/` 目录中的任何提示文件也一并监视。更改通过 `fs.watch` 检测、去抖（300ms）后整体重新加载，无需重启服务器。重载为 fail-soft：单个格式错误的 JSON 文件被跳过并告警，而非清空整张表。重载时向管理 Slack 频道发送通知。
 
 ### 智能体定义
 
@@ -155,6 +163,70 @@
 ```
 
 覆盖字段：`promptTemplate`、`directive`、`systemPrompt`、`persistSession`、`claudeAgent`、`outputStyle`、`tools`、`pluginDirs`。
+
+### Shell 模板
+
+若多个管道共享同一转换图、仅在由哪些智能体担任角色上不同，可将其一次性定义为一个 **shell**——即一个参数化转换图，以纯 JSON 存于 `shells/<name>.json`——并由 `templates/` 中轻量的 **shell 绑定**引用。
+
+shell 声明其参数，并在转换图中使用占位符：
+
+- `{param}` — 替换为该参数在绑定中的取值（一个智能体名）。
+- `{param.entryStage}` — 替换为该智能体的 `entryStage`，从 agents 表解析。
+
+例如随产品发货的 `worker-review` shell（`shells/worker-review.json`）——一个通用的"产出后审核"环：
+
+```json
+{
+  "params": ["worker", "reviewer"],
+  "agents": ["{worker}", "{reviewer}"],
+  "transitions": [
+    { "from": "{worker}:{worker.entryStage}", "to": "{reviewer}", "condition": { "type": "always" } },
+    { "from": "{reviewer}", "to": "{worker}:retry", "condition": { "type": "convergence", "marker": "[APPROVED]", "maxIterations": 1 } },
+    { "from": "{worker}:retry", "to": "{reviewer}", "condition": { "type": "output_not_contains", "pattern": "\\[REVISED\\]" } }
+  ],
+  "entryAgent": "{worker}",
+  "entryStage": "{worker.entryStage}",
+  "maxTotalSteps": 4,
+  "hooks": {
+    "onEnd": { "command": "node ~/.cortex/hooks/post-task-hook.mjs", "args": ["{worker}"], "timeout": 10000 }
+  }
+}
+```
+
+模板随后通过指定 shell 名及其参数来绑定它（`templates/doc-review.json`）：
+
+```json
+{
+  "shell": "worker-review",
+  "worker": "doc-writer",
+  "reviewer": "doc-reviewer",
+  "description": "文档的通用产出后审核"
+}
+```
+
+加载时引擎插值占位符并校验结果，产出一个与手写转换图等价的完整模板（此例为：`doc-writer` 在其入口阶段 → `doc-reviewer` → `doc-writer:retry`，直至 `[APPROVED]`）。校验错误——缺少参数、未知占位符、引用的智能体不存在、智能体缺少 `entryStage`、或某转换端点引用了该智能体没有的阶段——会使该单个模板在加载期报错失败；未知的 shell 名则 fail-soft 跳过。任一情形下，配置的其余部分照常加载。
+
+**Shell 定义字段（`shells/<name>.json`）：**
+
+| 字段 | 类型 | 描述 |
+|-------|------|-------------|
+| `params` | string[] | 必需的绑定参数名 |
+| `agents` | string[] | 以占位符字符串表示的智能体槽位（如 `"{worker}"`）——声明哪些参数命名智能体 |
+| `transitions` | TransitionRule[] | 带占位符端点的转换图 |
+| `entryAgent` | string | 入口智能体占位符 |
+| `entryStage` | string? | 入口阶段占位符 |
+| `maxTotalSteps` | number | 默认步数预算（绑定的 `maxTotalSteps` 可覆盖） |
+| `maxTotalCostUsd` | number? | 以 USD 计的成本上限 |
+| `hooks` | ThreadHooks? | 生命周期钩子（args 中允许占位符） |
+
+**Shell 绑定字段（引用 shell 的模板）：**
+
+| 字段 | 类型 | 描述 |
+|-------|------|-------------|
+| `shell` | string | 要展开的 shell 名 |
+| `<param>` | string | 每个 shell 参数一个取值（如 `worker`、`reviewer`）——担任该角色的智能体名 |
+| `description` | string? | 人类可读描述（携带到展开后的模板上） |
+| `maxTotalSteps` | number? | 覆盖 shell 的默认步数预算 |
 
 ## 转换
 
