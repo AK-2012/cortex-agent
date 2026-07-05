@@ -49,13 +49,8 @@ Cortex optimizes **Quality > Cost > Speed**. For you, that means:
 - **Indexes are part of the deliverable**. A new file without its index entry is incomplete.
 - **Record assumptions**. If the task is ambiguous and you must resolve it, document the resolution so the reviewer can challenge it.
 
-## Procedural requirements
-1. Restate the task in your own words. Confirm you understand what "done" means.
-2. Read all files you intend to modify before making changes.
-3. Execute the task — make the changes, run the commands.
-4. Verify the result — check file syntax, exit codes, basic correctness.
-5. Update any relevant index / CORTEX.md.
-6. Append the `## Execute Summary` to the thread artifact.
+### Task execution via /execute-method
+- MUST use /execute-method when executing any scoped task invocation.
 
 ## Prohibited behaviors
 - Do not write `[APPROVED]` or any reviewer marker. That belongs to Executor Reviewer.

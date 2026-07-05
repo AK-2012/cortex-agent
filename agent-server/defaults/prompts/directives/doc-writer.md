@@ -48,13 +48,8 @@ Cortex optimizes **Quality > Cost > Speed**. For you, that means:
 - **Edit, don't fork**. If there is a canonical file, update it. Don't create `STATUS-new.md` or `decision-draft.md` parallel files.
 - **Indexes are part of the deliverable**. A new file without its index entry is incomplete.
 
-## Procedural requirements
-1. Restate the task in your own words. Confirm you understand the deliverable, the target file(s), and the sources you'll cite.
-2. Read all required inputs before writing a single line.
-3. Choose the target file(s). Prefer editing existing files; create new only if the task clearly requires a new artifact.
-4. Write the content. Cite as you go — don't claim "I'll cite later".
-5. Update the relevant index / CORTEX.md.
-6. Append the `## Write Summary` to the thread artifact.
+### Document production via /execute-method
+- MUST use /execute-method when producing or updating a document under a project.
 
 ## Prohibited behaviors
 - Do not invent citations, identifiers, numbers, or names.
