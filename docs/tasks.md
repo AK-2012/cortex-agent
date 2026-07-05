@@ -253,6 +253,7 @@ CLI reference including every subcommand and flag, see
 | `reopen --task-id <id>` | Restore a stuck `pending` task back to `open` (rescue a lost cortex-run callback) |
 | `complete --task-id <id>` | Mark complete (`--note`, `--skip-verify` to bypass verification) |
 | `uncomplete --task-id <id>` | Reverse a completed task back to open |
+| `verdict --task-id <parent> --child <id> --verdict accepted\|rejected` | Record a manager's acceptance verdict for a delivered child into the parent's acceptance ledger (see [Manager Tasks and the Acceptance Ledger](#manager-tasks-and-the-acceptance-ledger-dr-0017); full syntax in [cli-reference.md](./cli-reference.md)) |
 
 ### Approval Commands
 
@@ -300,6 +301,63 @@ Mutation commands (`add`, `edit`, `batch-edit`, `decompose`) require the caller 
 ## One Criterion, One Task (DR-0006)
 
 Each task should have exactly one verifiable completion criterion. A task with multiple independent criteria should be decomposed into subtasks using the `decompose` command. This ensures clean dispatch, clear ownership, and unambiguous completion verification.
+
+## Manager Tasks and the Acceptance Ledger (DR-0017)
+
+Simple work is a single leaf task dispatched to a worker thread. **Composite work** — a goal that decomposes into several independently verifiable units and needs coordination, acceptance, and rework — is modeled instead as a **manager task**.
+
+### Manager Task Node
+
+A task whose `template` is `manager` is a **composite task node**, owned by a resident **manager thread**. The manager does not do the work itself. Its lifecycle is:
+
+1. **Decompose** — split the task into child tasks (typically via `decompose --keep-parent`, so the parent survives as the join/acceptance node that depends on its children).
+2. **Suspend** — call `thread_wait` and sleep while the children run.
+3. **Verify** — once children finish, verify each child's deliverable against that child's own `done-when` (acceptance before trust: read the files, run the tests — never accept a child's self-report as evidence).
+4. **Record a verdict** — accept or reject each delivered child (see the acceptance ledger below).
+5. **Integrate and complete** — after every child is accepted, integrate the results and complete the parent task.
+
+The full manager thread lifecycle — its durable task-keyed artifact, the `thread_wait` checkpoint gate, and session rotation/rehydration — is documented in [threads.md](./threads.md).
+
+### Acceptance Ledger
+
+The acceptance ledger is a durable, machine-readable record of which child results the manager has received and judged. It lives at:
+
+```
+context/projects/{project}/manager/{taskId}/ledger.json
+```
+
+alongside the manager's task-keyed artifact, and is written sync-atomically as JSON.
+
+**Why it exists:** cross-incarnation dedupe of child-result delivery for *task* children. The per-thread delivery record only dedupes within a single manager incarnation; the ledger dedupes **across incarnations** (session rotation, server restart, or manager replacement), so a delivered result is neither lost nor delivered twice when the manager's LLM session is replaced.
+
+**Structure:** `{ parent, project, children: { <childId>: LedgerEntry } }`, where each `LedgerEntry` has these fields:
+
+| Field | Meaning |
+|-------|---------|
+| `child` | Child task id |
+| `kind` | How the child terminated: `completed` or `blocked` |
+| `delivered_at` | ISO timestamp the result was delivered to the manager |
+| `verdict` | `pending` \| `accepted` \| `rejected` |
+| `verdict_at` | ISO timestamp of the verdict (null until recorded) |
+| `verdict_note` | Manager's note on the verdict |
+| `rework_round` | How many times the child has been rejected and sent back |
+
+**Delivery semantics** (delivery is at-least-once per incarnation until a verdict is recorded):
+
+- **`accepted`** → the child result **never re-delivers** to future manager incarnations.
+- **`pending`** (delivered but not yet judged — including the case where the incarnation died before judging) → **re-delivers** to a fresh incarnation. The bias is deliberate: re-deliver rather than lose.
+- **`rejected`** → re-opens to `pending` and re-delivers when the child completes again after rework, **preserving `rework_round`**.
+
+**Fail-open:** a missing or corrupt ledger degrades to an empty ledger — the worst case is a result re-delivered, never a result lost.
+
+### The `verdict` Command in the Acceptance Loop
+
+The manager writes verdicts into the ledger through the `cortex-task verdict` command — the ledger's write path. In the manager's verify phase, for each delivered child:
+
+- **On pass** → `verdict --verdict accepted`. The child result never re-delivers again.
+- **On fail** → `verdict --verdict rejected --note "<gap>"`. This increments the child's `rework_round`; the child is then reworked (e.g. `uncomplete` + edit, or a revision child) and re-delivered, at which point it re-opens for another verdict.
+
+`--verdict` must be exactly `accepted` or `rejected`, and `--child` is required. For the exact command signature and flags, see [cli-reference.md](./cli-reference.md).
 
 ## Task Dispatch Concurrency
 
