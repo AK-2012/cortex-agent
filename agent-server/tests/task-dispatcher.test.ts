@@ -157,7 +157,7 @@ test('filterDispatchableTasks drops tasks with unknown or missing [template:X] t
 test('filterDispatchableTasks skips rate-limited-template task and keeps later usable task', async () => {
   loadConfig();
   const tasks = [
-    { id: 'a1', project: 'cortex-self', text: 'limited template task', gpu: null, template: 'plan-review' },
+    { id: 'a1', project: 'cortex-self', text: 'limited template task', gpu: null, template: 'doc-review' },
     { id: 'b2', project: 'cortex-self', text: 'usable template task', gpu: null, template: 'coder-review' },
   ];
   const seen: [string, string | null][] = [];
@@ -167,7 +167,7 @@ test('filterDispatchableTasks skips rate-limited-template task and keeps later u
     checkRealGpuOccupancy: async () => ({ gpus: [], freeIndices: [], allOccupied: false }),
     isTemplateRateLimited: (template: string, profile: string | null) => {
       seen.push([template, profile]);
-      return template === 'plan-review';
+      return template === 'doc-review';
     },
     profileName: 'plan',
   });
@@ -175,13 +175,13 @@ test('filterDispatchableTasks skips rate-limited-template task and keeps later u
   // a1 blocked by its template's profiles; b2 falls through (the over-blocking regression)
   assert.deepEqual(filtered.map((task) => task.id), ['b2']);
   // dispatch profileName is forwarded to the check (resolves __active__ slots)
-  assert.deepEqual(seen, [['plan-review', 'plan'], ['coder-review', 'plan']]);
+  assert.deepEqual(seen, [['doc-review', 'plan'], ['coder-review', 'plan']]);
 });
 
 test('filterDispatchableTasks returns empty when every candidate template is rate-limited', async () => {
   loadConfig();
   const tasks = [
-    { id: 'a1', project: 'cortex-self', text: 'task one', gpu: null, template: 'plan-review' },
+    { id: 'a1', project: 'cortex-self', text: 'task one', gpu: null, template: 'doc-review' },
     { id: 'b2', project: 'cortex-self', text: 'task two', gpu: null, template: 'default' },
   ];
 
@@ -198,7 +198,7 @@ test('filterDispatchableTasks returns empty when every candidate template is rat
 test('filterDispatchableTasks default rate-limit check passes everything when not throttled', async () => {
   loadConfig();
   const tasks = [
-    { id: 'a1', project: 'cortex-self', text: 'task one', gpu: null, template: 'plan-review' },
+    { id: 'a1', project: 'cortex-self', text: 'task one', gpu: null, template: 'doc-review' },
   ];
 
   // No injected check → default isTemplateRateLimited → allConfigsRateLimited, which is
@@ -214,12 +214,12 @@ test('filterDispatchableTasks default rate-limit check passes everything when no
 
 test('isTemplateRateLimited: any limited template profile blocks the task', () => {
   loadConfig();
-  // defaults: plan-review resolves to ['plan', 'execute']
-  assert.equal(isTemplateRateLimited('plan-review', 'disp', (p) => p === 'execute'), true);
-  assert.equal(isTemplateRateLimited('plan-review', 'disp', (p) => p === 'plan'), true);
-  assert.equal(isTemplateRateLimited('plan-review', 'disp', () => false), false);
+  // defaults: doc-review (shell binding) resolves to ['plan', 'execute'] — doc-writer(plan) + doc-reviewer(execute)
+  assert.equal(isTemplateRateLimited('doc-review', 'disp', (p) => p === 'execute'), true);
+  assert.equal(isTemplateRateLimited('doc-review', 'disp', (p) => p === 'plan'), true);
+  assert.equal(isTemplateRateLimited('doc-review', 'disp', () => false), false);
   // dispatch profile itself is NOT consulted when the template resolves concrete profiles
-  assert.equal(isTemplateRateLimited('plan-review', 'disp', (p) => p === 'disp'), false);
+  assert.equal(isTemplateRateLimited('doc-review', 'disp', (p) => p === 'disp'), false);
 });
 
 test('isTemplateRateLimited: empty profile resolution falls back to the dispatch profile', () => {
