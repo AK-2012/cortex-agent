@@ -18,6 +18,7 @@ import {
   printStatsText,
 } from '../parser.js';
 import { lintTasks } from '../lint.js';
+import { recordVerdict, readLedger } from '../acceptance-ledger.js';
 import { loadConfig, listTemplateNames } from '../../threads/template-loader.js';
 import { editTask } from './task-lifecycle-edit.js';
 import { assignIds, validateIds } from './task-id-utils.js';
@@ -73,6 +74,8 @@ interface ParsedValues {
   keepParent: boolean;
   skipVerify: boolean;
   skipVerifyReason: string | null;
+  child: string | null;
+  verdict: string | null;
   force: boolean;
   showDeps: boolean;
   autoLock: boolean;
@@ -84,7 +87,7 @@ const READ_COMMANDS = new Set(['list', 'all', 'query', 'show', 'deps', 'lint', '
 const WRITE_COMMANDS = new Set([
   'claim', 'unclaim', 'pause', 'resume', 'pending', 'reopen', 'complete', 'uncomplete',
   'request-approval', 'approve', 'clear-approval',
-  'block', 'unblock',
+  'block', 'unblock', 'verdict',
   'add', 'spawn', 'edit', 'batch-edit', 'bulk-add', 'decompose',
   'assign-ids', 'validate', 'stop',
   'lock-acquire', 'lock-release', 'lock-status', 'lock-force-release',
@@ -95,7 +98,7 @@ const ALL_COMMANDS = new Set([...READ_COMMANDS, ...WRITE_COMMANDS]);
 const COMMANDS_NEEDING_TASK = new Set([
   'claim', 'unclaim', 'pause', 'resume', 'pending', 'reopen', 'complete', 'uncomplete',
   'request-approval', 'approve', 'clear-approval',
-  'block', 'unblock',
+  'block', 'unblock', 'verdict',
   'edit', 'decompose',
 ]);
 
@@ -103,7 +106,7 @@ const COMMANDS_NEEDING_REASON = new Set(['block']);
 const COMMANDS_NEEDING_PROJECT = new Set([
   'claim', 'unclaim', 'pause', 'resume', 'pending', 'reopen', 'complete', 'uncomplete',
   'request-approval', 'approve', 'clear-approval',
-  'block', 'unblock',
+  'block', 'unblock', 'verdict',
   'add', 'spawn', 'edit', 'batch-edit', 'bulk-add', 'decompose',
   'lock-acquire', 'lock-release', 'lock-force-release',
 ]);
@@ -133,6 +136,7 @@ const COMMAND_FLAG_ALLOWLIST: Record<string, Set<string>> = {
   approve: new Set([...COMMON_FLAGS, '--task']),
   'clear-approval': new Set([...COMMON_FLAGS, '--task']),
   block: new Set([...COMMON_FLAGS, '--task', '--reason']),
+  verdict: new Set([...COMMON_FLAGS, '--child', '--verdict', '--note']),
   unblock: new Set([...COMMON_FLAGS, '--task']),
   edit: new Set([
     ...COMMON_FLAGS, '--task', '--text', '--why', '--done-when', '--plan', '--priority',
@@ -196,6 +200,7 @@ const HELP_CONFIG = {
       commands: [
         { name: 'block', description: 'Block (--reason)' },
         { name: 'unblock', description: 'Unblock' },
+        { name: 'verdict', description: 'Record acceptance verdict for a child task (--task-id <parent> --child <id> --verdict accepted|rejected [--note]) — DR-0017 acceptance ledger' },
       ],
     },
     {
@@ -235,6 +240,8 @@ const HELP_CONFIG = {
     { flag: '--agent <name>', description: 'Agent identifier for claim', default: 'cortex-local' },
     { flag: '--note <text>', description: 'Completion note' },
     { flag: '--reason <text>', description: 'Block reason' },
+    { flag: '--child <id>', description: 'Child task id (for verdict)' },
+    { flag: '--verdict <accepted|rejected>', description: 'Acceptance verdict (for verdict)' },
     { flag: '--text <text>', description: 'Task text (for add / edit)' },
     { flag: '--why <text>', description: 'Task rationale (for add / edit)' },
     { flag: '--done-when <text>', description: 'Success criteria (for add / edit)' },
@@ -292,6 +299,8 @@ const STRING_OPT_KEYS: Record<string, keyof ParsedValues> = {
   '--file': 'bulkFile',
   '--status': 'status',
   '--skip-verify-reason': 'skipVerifyReason',
+  '--child': 'child',
+  '--verdict': 'verdict',
 };
 
 const APPEND_OPT_KEYS: Record<string, 'addDependsOn' | 'removeDependsOn'> = {
@@ -343,6 +352,8 @@ function createDefaults(): ParsedValues {
     keepParent: false,
     skipVerify: false,
     skipVerifyReason: null,
+    child: null,
+    verdict: null,
     force: false,
     showDeps: false,
     autoLock: false,
@@ -863,6 +874,22 @@ function handleLockForceRelease(v: ParsedValues) {
 
 type WriteHandler = (v: ParsedValues) => any;
 
+/** DR-0017: record the manager's acceptance verdict for a child into the task node's
+ *  acceptance ledger (context/projects/{project}/manager/{taskId}/ledger.json).
+ *  'accepted' children never re-deliver to future manager incarnations; 'rejected'
+ *  bumps rework_round and re-opens on the child's next completion. */
+function handleVerdict(v: ParsedValues): any {
+  if (!v.child) return { success: false, message: 'verdict requires --child <child task id>' };
+  if (v.verdict !== 'accepted' && v.verdict !== 'rejected') {
+    return { success: false, message: `--verdict must be 'accepted' or 'rejected' (got '${v.verdict ?? ''}')` };
+  }
+  const parent = scanAllTasks(v.project!).find((t) => t.id === v.taskId);
+  if (!parent) return { success: false, message: `Parent task ${v.taskId} not found in project '${v.project}'` };
+  recordVerdict(v.project!, v.taskId!, v.child, v.verdict, v.note || null);
+  const entry = readLedger(v.project!, v.taskId!).children[v.child];
+  return { success: true, task_id: v.taskId, child: v.child, verdict: v.verdict, rework_round: entry?.rework_round ?? 0 };
+}
+
 const WRITE_HANDLERS: Record<string, WriteHandler> = {
   claim: (v) => claimTask(v.task, v.project!, v.agent, v.taskId),
   unclaim: (v) => unclaimTask(v.task, v.project!, v.taskId),
@@ -876,6 +903,7 @@ const WRITE_HANDLERS: Record<string, WriteHandler> = {
   approve: (v) => approveTask(v.task, v.project!, v.taskId),
   'clear-approval': (v) => clearApprovalTask(v.task, v.project!, v.taskId),
   block: (v) => blockTask(v.task, v.project!, v.reason!, v.taskId),
+  verdict: handleVerdict,
   unblock: (v) => unblockTask(v.task, v.project!, v.taskId),
   add: (v) => addTask(v.project!, v.text, v.why, v.doneWhen, v.priority || 'medium', v.template, v.dependsOn.length > 0 ? v.dependsOn : null, v.plan, readOriginFromEnv(v.noNotify)),
   spawn: handleSpawn,

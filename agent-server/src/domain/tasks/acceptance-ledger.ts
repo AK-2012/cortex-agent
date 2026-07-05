@@ -11,7 +11,7 @@
 import { readFileSync, mkdirSync } from 'fs';
 import * as path from 'path';
 import { managerNodeDir } from '@core/task-node.js';
-import { atomicWrite } from '@core/atomic-write.js';
+import { atomicWriteSync } from '@core/atomic-write.js';
 
 export type LedgerVerdict = 'pending' | 'accepted' | 'rejected';
 
@@ -48,10 +48,10 @@ export function readLedger(project: string, taskId: string): AcceptanceLedger {
   }
 }
 
-async function writeLedger(ledger: AcceptanceLedger): Promise<void> {
+function writeLedger(ledger: AcceptanceLedger): void {
   const p = ledgerPath(ledger.project, ledger.parent);
   mkdirSync(path.dirname(p), { recursive: true });
-  await atomicWrite(p, JSON.stringify(ledger, null, 2));
+  atomicWriteSync(p, JSON.stringify(ledger, null, 2));
 }
 
 /** Record that a child result is being delivered to the parent task's manager.
@@ -71,14 +71,14 @@ export async function recordDelivered(project: string, taskId: string, childId: 
     verdict_note: existing?.verdict_note ?? null,
     rework_round: existing?.rework_round ?? 0,
   };
-  await writeLedger(ledger);
+  writeLedger(ledger);
   return true;
 }
 
 /** Record the manager's acceptance verdict for a delivered child. 'rejected' increments
  *  rework_round (the child is expected to be reworked and re-delivered). Upserts when
  *  the entry is missing (e.g. a verdict recorded for a delivery that predates the ledger). */
-export async function recordVerdict(project: string, taskId: string, childId: string, verdict: 'accepted' | 'rejected', note?: string | null): Promise<void> {
+export function recordVerdict(project: string, taskId: string, childId: string, verdict: 'accepted' | 'rejected', note?: string | null): void {
   const ledger = readLedger(project, taskId);
   const entry = ledger.children[childId] ?? {
     child: childId,
@@ -94,7 +94,7 @@ export async function recordVerdict(project: string, taskId: string, childId: st
   entry.verdict_note = note ?? entry.verdict_note ?? null;
   if (verdict === 'rejected') entry.rework_round += 1;
   ledger.children[childId] = entry;
-  await writeLedger(ledger);
+  writeLedger(ledger);
 }
 
 /** Entries delivered but not yet accepted/rejected — the rehydration prompt's
