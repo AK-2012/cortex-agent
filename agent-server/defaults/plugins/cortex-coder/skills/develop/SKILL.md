@@ -152,6 +152,38 @@ Never use "should work", "probably passes", or "looks correct". Evidence before 
 
 ---
 
+## Spec-Driven Implementation (Coder Discipline)
+
+When implementing against a specification (an experiment protocol or a scoped task), the TDD flow above is wrapped by these disciplines:
+
+### Spec fidelity
+- Implement exactly what the spec specifies. Do not refactor surrounding code "while you're in there"; do not add defensive checks, extra logging, or configurability the spec does not ask for.
+- If the spec appears wrong or incomplete, **stop and escalate** — do not invent a fix. Changing the spec is the spec author's decision, not yours.
+- Experiment-correctness code (sampling, metric computation, dataset splits, seed handling) **requires** a test regardless of size.
+
+### Config in-repo (reproducible from the SHA alone)
+- Parameters, seeds, and data paths live in committed files: a config file (YAML/JSON), argparse/CLI defaults, or named constants with clear names.
+- Runtime-only configuration (launch-line flags, shell env vars) is **not** an acceptable source of truth — the run must be reproducible from the committed SHA alone.
+
+### Full-suite pass before handoff
+- If the project has a test suite, run it after implementing and again after committing, using the project's own command (`npm test`, `pytest`, `make test`, …).
+- Run **every** configured stage — unit tests, linters or architecture checks, integration tests, regression suites. A single red test or lint violation means you are not done.
+- If failures pre-existed your change, note them explicitly in the summary; you must still confirm no NEW failures were introduced.
+
+### Commit & handoff
+- Commit **before** handing off (before downstream execution, before review, before the thread hands back). The SHA anchors the delivered code.
+- Commit messages reference the spec identifier (task ID, EXP ID, issue, plan section).
+- Do not amend or force-push shared branches without explicit user authorization; do not bypass pre-commit hooks (`--no-verify`); do not hardcode secrets in committed files.
+- Produce an implementation summary: changed files, commit SHAs, flagged ambiguities, environment changes, and test-suite pass/fail status.
+
+### Coder drift patterns
+- **Spec improvisation** — adding a parameter or changing a dataset split "for clarity". Escalate instead.
+- **Scope creep to execution** — "since it's already set up, I'll just run it end-to-end". Commit and stop; running is a downstream role.
+- **Runtime-only config** — passing the important knobs as CLI flags without landing defaults in the repo.
+- **Hook bypass** — using `--no-verify` when a pre-commit hook blocks. Root-cause the failure; do not bypass.
+
+---
+
 ## When TDD Does Not Apply
 
 TDD is mandatory for code changes. It does NOT apply to:
