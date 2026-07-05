@@ -181,11 +181,27 @@ export interface ThreadTemplate {
   hooks?: ThreadHooks;               // optional: lifecycle hooks (onStart, onTransition, onEnd)
 }
 
+// --- Shell template binding (DR-0017 D6 Phase 2) ---
+
+/** A compact template that inherits a named "shell" (a parameterized transition-graph
+ *  generator) instead of spelling out the full graph. The loader expands it to a full
+ *  `ThreadTemplate` at config-load time via `expandShellTemplate`. Lets the structurally
+ *  identical worker-review templates collapse to `{shell, worker, reviewer}` bindings. */
+export interface ShellTemplateBinding {
+  shell: string;                     // shell name, e.g. "worker-review"
+  worker: string;                    // worker agent name (produce stage derived from its entryStage)
+  reviewer: string;                  // reviewer agent name
+  description?: string;              // human-readable description (preserved onto the expanded template)
+  maxTotalSteps?: number;            // override the shell's default step budget
+}
+
 // --- Config file structure ---
 
 export interface ThreadConfigFile {
   agents: Record<string, AgentDefinition>;
-  templates: Record<string, ThreadTemplate>;
+  /** A template entry is either a full ThreadTemplate or a ShellTemplateBinding that the
+   *  loader expands to a full ThreadTemplate before use. */
+  templates: Record<string, ThreadTemplate | ShellTemplateBinding>;
 }
 
 /** @deprecated Use ThreadConfigFile */

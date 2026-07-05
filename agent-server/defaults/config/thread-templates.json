@@ -277,50 +277,10 @@
       }
     },
     "doc-review": {
-      "name": "doc-review",
-      "description": "Generic produce-then-audit for documents (status / digest / decision / report / knowledge entry). Stages: doc-writer(write) → doc-reviewer → (if not [APPROVED]) doc-writer(retry, write [REVISED] at end) → END",
-      "agents": [
-        "doc-writer",
-        "doc-reviewer"
-      ],
-      "transitions": [
-        {
-          "from": "doc-writer:write",
-          "to": "doc-reviewer",
-          "condition": {
-            "type": "always"
-          }
-        },
-        {
-          "from": "doc-reviewer",
-          "to": "doc-writer:retry",
-          "condition": {
-            "type": "convergence",
-            "marker": "[APPROVED]",
-            "maxIterations": 1
-          }
-        },
-        {
-          "from": "doc-writer:retry",
-          "to": "doc-reviewer",
-          "condition": {
-            "type": "output_not_contains",
-            "pattern": "\\[REVISED\\]"
-          }
-        }
-      ],
-      "entryAgent": "doc-writer",
-      "entryStage": "write",
-      "maxTotalSteps": 4,
-      "hooks": {
-        "onEnd": {
-          "command": "node ~/.cortex/hooks/post-task-hook.mjs",
-          "args": [
-            "doc-writer"
-          ],
-          "timeout": 10000
-        }
-      }
+      "shell": "worker-review",
+      "worker": "doc-writer",
+      "reviewer": "doc-reviewer",
+      "description": "Generic produce-then-audit for documents (status / digest / decision / report / knowledge entry). Stages: doc-writer(write) → doc-reviewer → (if not [APPROVED]) doc-writer(retry, write [REVISED] at end) → END"
     },
     "coder-review": {
       "name": "coder-review",
@@ -376,50 +336,10 @@
       }
     },
     "execute-review": {
-      "name": "execute-review",
-      "description": "Execute-then-review: executor executes task → executor-reviewer audits → at most 1 retry. Suitable for any verifiable task (code changes, config changes, file edits, script execution, etc.)",
-      "agents": [
-        "executor",
-        "executor-reviewer"
-      ],
-      "transitions": [
-        {
-          "from": "executor:execute",
-          "to": "executor-reviewer",
-          "condition": {
-            "type": "always"
-          }
-        },
-        {
-          "from": "executor-reviewer",
-          "to": "executor:retry",
-          "condition": {
-            "type": "convergence",
-            "marker": "[APPROVED]",
-            "maxIterations": 1
-          }
-        },
-        {
-          "from": "executor:retry",
-          "to": "executor-reviewer",
-          "condition": {
-            "type": "output_not_contains",
-            "pattern": "\\[REVISED\\]"
-          }
-        }
-      ],
-      "entryAgent": "executor",
-      "entryStage": "execute",
-      "maxTotalSteps": 4,
-      "hooks": {
-        "onEnd": {
-          "command": "node ~/.cortex/hooks/post-task-hook.mjs",
-          "args": [
-            "executor"
-          ],
-          "timeout": 10000
-        }
-      }
+      "shell": "worker-review",
+      "worker": "executor",
+      "reviewer": "executor-reviewer",
+      "description": "Execute-then-review: executor executes task → executor-reviewer audits → at most 1 retry. Suitable for any verifiable task (code changes, config changes, file edits, script execution, etc.)"
     },
     "manager": {
       "name": "manager",

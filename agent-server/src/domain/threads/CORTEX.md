@@ -7,7 +7,8 @@ External callers should import from index.ts, not reference sub-files directly.
 |---|---|---|
 | `utils.ts` | utility | isDefaultThread / isAdHocThread / getSessionKey / parseTarget / resolveStageName |
 | `artifact-io.ts` | I/O | readArtifact / cleanupWorkspace / getModifiedFilesFromSession / getSessionFileChanges / renderModifiedFilesWithDiff / FileChange |
-| `template-loader.ts` | config | loadConfig / startConfigWatcher / stopConfigWatcher / getTemplate / getAgent / listTemplates / listTemplateNames / listAgents / resolveFileRef |
+| `template-loader.ts` | config | loadConfig (expands shell-binding templates via shell-templates, fail-soft per entry) / startConfigWatcher / stopConfigWatcher / getTemplate / getAgent / listTemplates / listTemplateNames / listAgents / resolveFileRef |
+| `shell-templates.ts` | config | isShellBinding / expandShellTemplate — DR-0017 D6 Phase 2: expand `{shell, worker, reviewer}` bindings into full ThreadTemplates (worker-review convergence loop); collapses the structurally identical worker-review templates |
 | `prompt-builder.ts` | build | buildStepPrompt / buildConversationPrompt / resolveSystemVars / resolveAgentSlotConfig / resolveTemplateAgents / resolveTemplateProfiles (template→profile set, used by task-dispatch rate-limit gating) / formatEndpoint / pickStepTemplate / THREAD_PROTOCOL_PREAMBLE |
 | `state-machine.ts` | state machine | createThread (DR-0017 W1: manager-template dispatch threads anchor artifactPath on the task node via core/task-node ensureTaskArtifact — durable, never truncated) / addAgentToThread / resolveNextStep / evaluateTransitions / recordStepResult / completeThread / failThread / cancelThread / abortThread / tryEnterWaiting (thread + task children, §8) / peekPendingControl / clearPendingControl / detectSplitFromControl (DR-0015 out-of-band control plane — replaces the old artifact string-marker detectors) / isArtifactUnchangedSinceStepStart + step-start artifact-hash baseline in createThread/recordStepResult (DR-0017 W2 checkpoint gate) |
 | `runner.ts` | runtime | runThread / continueThread / resumeThread / buildThreadSummary — thread execution engine, registers handle via runningExecutions. Threads are created by task dispatch (and resumed via the `/webhook/thread-op` `control` bridge). The agent-facing `thread_start` spawn tool was removed: delegation is via the task system (`cortex-task spawn`/`add`). At each step boundary the runner reads metadata.pendingControl (written out-of-band by the thread_abort/split/wait tools, DR-0015) and dispatches abort / split / wait — no artifact scanning. |
@@ -21,7 +22,8 @@ External callers should import from index.ts, not reference sub-files directly.
 ```
 utils.ts          → threadStore, thread-types
 artifact-io.ts    → threadStore, REPO_ROOT, fs, diff
-template-loader.ts → DATA_DIR, REPO_ROOT, template-resolver, thread-types
+shell-templates.ts → thread-types (pure)
+template-loader.ts → DATA_DIR, REPO_ROOT, template-resolver, shell-templates, thread-types
 prompt-builder.ts  → template-loader, artifact-io, threadStore, thread-types, memory/user-context
 contract.ts        → thread-types (pure)
 tree.ts            → threadStore, thread-types

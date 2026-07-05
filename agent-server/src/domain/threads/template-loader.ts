@@ -8,6 +8,7 @@ import { CONFIG_DIR, DATA_DIR, PROMPTS_DIR } from '@core/utils.js';
 import { createLogger } from '@core/log.js';
 import { Icons } from '../../core/icons.js';
 import { resolveTemplate } from './template-resolver.js';
+import { isShellBinding, expandShellTemplate } from './shell-templates.js';
 import type { AgentDefinition, ThreadTemplate, ThreadConfigFile } from '@core/types/thread-types.js';
 
 const log = createLogger('thread-manager');
@@ -153,11 +154,24 @@ export function loadConfig(): { agents: Record<string, AgentDefinition>; templat
   try {
     const data: ThreadConfigFile = JSON.parse(readFileSync(CONFIG_FILE, 'utf8'));
     agents = data.agents || {};
-    templates = data.templates || {};
     for (const agent of Object.values(agents)) {
       resolveAgentFileRefs(agent);
       if (agent.pluginDirs) {
         agent.pluginDirs = agent.pluginDirs.map(resolvePluginDir);
+      }
+    }
+    // Expand shell-binding templates into full templates (agents must be loaded first).
+    // A single malformed binding is skipped (logged) so the rest of the config still loads.
+    templates = {};
+    for (const [name, entry] of Object.entries(data.templates || {})) {
+      if (isShellBinding(entry)) {
+        try {
+          templates[name] = expandShellTemplate(name, entry, agents);
+        } catch (e: any) {
+          log.error(`Skipping template "${name}": ${e.message}`);
+        }
+      } else {
+        templates[name] = entry as ThreadTemplate;
       }
     }
     log.info(`Loaded ${Object.keys(agents).length} agents, ${Object.keys(templates).length} templates`);
