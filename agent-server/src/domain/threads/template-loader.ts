@@ -1,18 +1,28 @@
 // Thread template config loading and hot-reload.
-// input:  DATA_DIR/thread-templates.json, prompts/ directory
-// output: loadConfig / startConfigWatcher / stopConfigWatcher / getTemplate / getAgent / listTemplates / listAgents / resolvePluginDir
+// input:  DATA_DIR/config/thread-templates/{agents,templates,shells}/ (directory form, preferred) or
+//         the legacy single file DATA_DIR/config/thread-templates.json (fallback), prompts/ directory
+// output: loadConfig / migrateThreadTemplatesToDir / mergeThreadTemplates / startConfigWatcher /
+//         stopConfigWatcher / getTemplate / getAgent / listTemplates / listAgents / resolvePluginDir
+// pos:    DR-0017 D6 Phase 2.5 — config is directory-based (one file per agent/template/shell); shell
+//         transition graphs are pure JSON (shells/*.json) expanded via the generic shell-templates
+//         engine. A legacy single file is auto-migrated to the directory on startup.
+// >>> If I am updated, update my header comment and the parent folder's CORTEX.md <<<
 
-import { readFileSync, writeFileSync, existsSync, mkdirSync, watch, type FSWatcher } from 'fs';
+import { readFileSync, writeFileSync, readdirSync, renameSync, existsSync, mkdirSync, watch, type FSWatcher } from 'fs';
 import * as path from 'path';
 import { CONFIG_DIR, DATA_DIR, PROMPTS_DIR } from '@core/utils.js';
 import { createLogger } from '@core/log.js';
 import { Icons } from '../../core/icons.js';
 import { resolveTemplate } from './template-resolver.js';
-import { isShellBinding, expandShellTemplate } from './shell-templates.js';
-import type { AgentDefinition, ThreadTemplate, ThreadConfigFile } from '@core/types/thread-types.js';
+import { isShellBinding, expandShell } from './shell-templates.js';
+import type { AgentDefinition, ThreadTemplate, ThreadConfigFile, ShellDefinition } from '@core/types/thread-types.js';
 
 const log = createLogger('thread-manager');
+/** Legacy single-file config (pre-Phase-2.5). Auto-migrated to CONFIG_TEMPLATES_DIR on startup. */
 const CONFIG_FILE = path.join(CONFIG_DIR, 'thread-templates.json');
+/** Directory-based config root (preferred). */
+const CONFIG_TEMPLATES_DIR = path.join(CONFIG_DIR, 'thread-templates');
+const ENTITY_SUBDIRS = ['agents', 'templates', 'shells'] as const;
 export const FILE_REF_PREFIX = 'file:';
 const FIELD_DIRS: Record<string, string> = {
   directive: 'directives',
@@ -70,110 +80,188 @@ export function resolvePluginDir(dir: string): string {
   return path.join(DATA_DIR, dir);
 }
 
-// --- Config merging (init) ---
+/** In-place: resolve an agent's file refs and plugin dirs (shared by both load paths). */
+function processAgent(agent: AgentDefinition): void {
+  resolveAgentFileRefs(agent);
+  if (agent.pluginDirs) agent.pluginDirs = agent.pluginDirs.map(resolvePluginDir);
+}
+
+/** Expand one template entry to a full ThreadTemplate, or null (logged) if it must be skipped.
+ *  A shell binding whose shell is unknown or whose expansion fails is fail-soft skipped. */
+function expandTemplateEntry(
+  name: string,
+  entry: unknown,
+  shells: Record<string, ShellDefinition>,
+  agentsMap: Record<string, AgentDefinition>,
+): ThreadTemplate | null {
+  if (isShellBinding(entry)) {
+    const shell = shells[entry.shell];
+    if (!shell) {
+      log.error(`Skipping template "${name}": unknown shell "${entry.shell}"`);
+      return null;
+    }
+    try {
+      return expandShell(name, entry, shell, agentsMap);
+    } catch (e: any) {
+      log.error(`Skipping template "${name}": ${e.message}`);
+      return null;
+    }
+  }
+  return entry as ThreadTemplate;
+}
+
+// --- Config merging (defaults → user, directory form) ---
+
+/** Recursively list every relative file path under `dir` (empty if dir is missing). */
+function listFilesRecursive(dir: string, base = dir): string[] {
+  if (!existsSync(dir)) return [];
+  const out: string[] = [];
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const full = path.join(dir, entry.name);
+    if (entry.isDirectory()) out.push(...listFilesRecursive(full, base));
+    else if (entry.isFile()) out.push(path.relative(base, full));
+  }
+  return out;
+}
 
 /**
- * Merge defaults thread-templates.json into the user's config.
- * - Agents/templates not in user config → added from defaults.
- * - Agents/templates already in user config → preserved as-is (never overwritten).
- * - If user config doesn't exist → copy defaults in full.
- * - Malformed user config → replace with defaults.
+ * Merge the shipped defaults thread-templates directory into the user's config directory with
+ * per-file copy-if-missing semantics (aligned with plugin-sync): a defaults entity file that the
+ * user does not yet have is copied in; existing user files are never overwritten. Runs at startup
+ * so new default agents/templates/shells (e.g. a new shell definition) reach existing installs.
  *
- * @returns true if the user config file was written, false if no changes were needed.
+ * @returns true if any file was written, false otherwise.
  */
-export function mergeThreadTemplates(defaultsPath: string, userConfigPath: string): boolean {
-  // 1. Read defaults
-  let defaults: ThreadConfigFile;
-  try {
-    const raw = readFileSync(defaultsPath, 'utf8');
-    defaults = JSON.parse(raw);
-  } catch (e: any) {
-    log.warn(`Cannot read default thread-templates.json from ${defaultsPath}: ${e.message}`);
+export function mergeThreadTemplates(defaultsDir: string, userDir: string): boolean {
+  if (!existsSync(defaultsDir)) {
+    log.warn(`Cannot read default thread-templates dir from ${defaultsDir}`);
     return false;
   }
-
-  const defaultAgents = defaults.agents || {};
-  const defaultTemplates = defaults.templates || {};
-
-  // 2. User config doesn't exist yet — copy defaults as-is
-  if (!existsSync(userConfigPath)) {
-    const dir = path.dirname(userConfigPath);
-    if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-    writeFileSync(userConfigPath, JSON.stringify(defaults, null, 2) + '\n', 'utf8');
-    log.info('thread-templates.json created from defaults');
-    return true;
-  }
-
-  // 3. Parse existing user config
-  let userConfig: ThreadConfigFile;
-  try {
-    const raw = readFileSync(userConfigPath, 'utf8');
-    userConfig = JSON.parse(raw);
-  } catch (e: any) {
-    log.warn(`Failed to parse existing thread-templates.json (${e.message}), falling back to defaults`);
-    writeFileSync(userConfigPath, JSON.stringify(defaults, null, 2) + '\n', 'utf8');
-    return true;
-  }
-
-  const userAgents: Record<string, any> = { ...(userConfig.agents || {}) };
-  const userTemplates: Record<string, any> = { ...(userConfig.templates || {}) };
-
   let changed = false;
-
-  // 4. Add new agents from defaults that don't exist in user config
-  for (const [name, agent] of Object.entries(defaultAgents)) {
-    if (!userAgents[name]) {
-      userAgents[name] = agent;
-      log.info(`Added new agent to thread-templates.json: ${name}`);
+  for (const rel of listFilesRecursive(defaultsDir)) {
+    const dst = path.join(userDir, rel);
+    if (existsSync(dst)) continue;
+    try {
+      mkdirSync(path.dirname(dst), { recursive: true });
+      writeFileSync(dst, readFileSync(path.join(defaultsDir, rel), 'utf8'), 'utf8');
+      log.info(`Added thread-templates file from defaults: ${rel}`);
       changed = true;
+    } catch (e: any) {
+      log.error(`Failed to copy default thread-templates file ${rel}: ${e.message}`);
     }
   }
-
-  // 5. Add new templates from defaults that don't exist in user config
-  for (const [name, template] of Object.entries(defaultTemplates)) {
-    if (!userTemplates[name]) {
-      userTemplates[name] = template;
-      log.info(`Added new template to thread-templates.json: ${name}`);
-      changed = true;
-    }
-  }
-
-  // 6. Only write if something changed
-  if (changed) {
-    const merged: ThreadConfigFile = { agents: userAgents, templates: userTemplates };
-    writeFileSync(userConfigPath, JSON.stringify(merged, null, 2) + '\n', 'utf8');
-    log.info('thread-templates.json merged with defaults');
-  }
-
   return changed;
+}
+
+// --- One-time migration: legacy single file → directory ---
+
+function writeEntityFile(dir: string, name: string, data: unknown): void {
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(path.join(dir, `${name}.json`), JSON.stringify(data, null, 2) + '\n', 'utf8');
+}
+
+/**
+ * One-time startup migration: if the legacy single file exists and the directory does not,
+ * split the single file into per-entity files under CONFIG_TEMPLATES_DIR (one file per agent /
+ * template / shell) and rename the old file to `thread-templates.json.migrated-bak` (content
+ * preserved, never deleted). Idempotent: no-op once the directory exists or the file is gone.
+ *
+ * @returns true if a migration was performed.
+ */
+export function migrateThreadTemplatesToDir(): boolean {
+  if (!existsSync(CONFIG_FILE) || existsSync(CONFIG_TEMPLATES_DIR)) return false;
+  let data: ThreadConfigFile;
+  try {
+    data = JSON.parse(readFileSync(CONFIG_FILE, 'utf8'));
+  } catch (e: any) {
+    log.warn(`Migration skipped: cannot parse ${CONFIG_FILE}: ${e.message}`);
+    return false;
+  }
+  const agentsDir = path.join(CONFIG_TEMPLATES_DIR, 'agents');
+  const templatesDir = path.join(CONFIG_TEMPLATES_DIR, 'templates');
+  const shellsDir = path.join(CONFIG_TEMPLATES_DIR, 'shells');
+  for (const [name, agent] of Object.entries(data.agents || {})) writeEntityFile(agentsDir, name, agent);
+  for (const [name, tpl] of Object.entries(data.templates || {})) writeEntityFile(templatesDir, name, tpl);
+  for (const [name, shell] of Object.entries(data.shells || {})) writeEntityFile(shellsDir, name, shell);
+  mkdirSync(shellsDir, { recursive: true }); // ensure the (possibly empty) shells dir exists
+  renameSync(CONFIG_FILE, `${CONFIG_FILE}.migrated-bak`);
+  log.info(
+    `Migrated thread-templates.json → thread-templates/ ` +
+    `(${Object.keys(data.agents || {}).length} agents, ${Object.keys(data.templates || {}).length} templates); ` +
+    `original preserved as thread-templates.json.migrated-bak`,
+  );
+  return true;
 }
 
 // --- Config loading ---
 
+interface LoadedConfig { agents: Record<string, AgentDefinition>; templates: Record<string, ThreadTemplate>; }
+
+/** Read every `<name>.json` in a subdir as { name, data }, fail-soft skipping unparseable files. */
+function readEntityDir(dir: string): Array<{ name: string; data: any }> {
+  if (!existsSync(dir)) return [];
+  const out: Array<{ name: string; data: any }> = [];
+  for (const file of readdirSync(dir)) {
+    if (!file.endsWith('.json')) continue;
+    const name = file.slice(0, -'.json'.length);
+    try {
+      out.push({ name, data: JSON.parse(readFileSync(path.join(dir, file), 'utf8')) });
+    } catch (e: any) {
+      log.warn(`Skipping malformed thread-templates file ${path.basename(dir)}/${file}: ${e.message}`);
+    }
+  }
+  return out;
+}
+
+/** Load config from the directory form (one file per entity; merged across files). */
+function loadConfigFromDir(dir: string): LoadedConfig {
+  const a: Record<string, AgentDefinition> = {};
+  for (const { name, data } of readEntityDir(path.join(dir, 'agents'))) {
+    if (!data.name || data.name !== name) {
+      log.warn(`Skipping agent file agents/${name}.json: name field "${data.name}" ≠ filename`);
+      continue;
+    }
+    processAgent(data);
+    a[name] = data;
+  }
+
+  const shells: Record<string, ShellDefinition> = {};
+  for (const { name, data } of readEntityDir(path.join(dir, 'shells'))) shells[name] = data;
+
+  const t: Record<string, ThreadTemplate> = {};
+  for (const { name, data } of readEntityDir(path.join(dir, 'templates'))) {
+    if (data.name !== undefined && data.name !== name) {
+      log.warn(`Skipping template file templates/${name}.json: name field "${data.name}" ≠ filename`);
+      continue;
+    }
+    const expanded = expandTemplateEntry(name, data, shells, a);
+    if (expanded) t[name] = expanded;
+  }
+  return { agents: a, templates: t };
+}
+
+/** Load config from the legacy single file. Shell bindings here have no shell defs to resolve
+ *  against (shells only exist in the directory form) and are fail-soft skipped. */
+function loadConfigFromFile(file: string): LoadedConfig {
+  const data: ThreadConfigFile = JSON.parse(readFileSync(file, 'utf8'));
+  const a = data.agents || {};
+  for (const agent of Object.values(a)) processAgent(agent);
+  const shells = data.shells || {};
+  const t: Record<string, ThreadTemplate> = {};
+  for (const [name, entry] of Object.entries(data.templates || {})) {
+    const expanded = expandTemplateEntry(name, entry, shells, a);
+    if (expanded) t[name] = expanded;
+  }
+  return { agents: a, templates: t };
+}
+
 export function loadConfig(): { agents: Record<string, AgentDefinition>; templates: Record<string, ThreadTemplate> } {
   try {
-    const data: ThreadConfigFile = JSON.parse(readFileSync(CONFIG_FILE, 'utf8'));
-    agents = data.agents || {};
-    for (const agent of Object.values(agents)) {
-      resolveAgentFileRefs(agent);
-      if (agent.pluginDirs) {
-        agent.pluginDirs = agent.pluginDirs.map(resolvePluginDir);
-      }
-    }
-    // Expand shell-binding templates into full templates (agents must be loaded first).
-    // A single malformed binding is skipped (logged) so the rest of the config still loads.
-    templates = {};
-    for (const [name, entry] of Object.entries(data.templates || {})) {
-      if (isShellBinding(entry)) {
-        try {
-          templates[name] = expandShellTemplate(name, entry, agents);
-        } catch (e: any) {
-          log.error(`Skipping template "${name}": ${e.message}`);
-        }
-      } else {
-        templates[name] = entry as ThreadTemplate;
-      }
-    }
+    const loaded = existsSync(CONFIG_TEMPLATES_DIR)
+      ? loadConfigFromDir(CONFIG_TEMPLATES_DIR)
+      : loadConfigFromFile(CONFIG_FILE);
+    agents = loaded.agents;
+    templates = loaded.templates;
     log.info(`Loaded ${Object.keys(agents).length} agents, ${Object.keys(templates).length} templates`);
   } catch (e: any) {
     log.error(`Failed to load config: ${e.message}`);
@@ -184,33 +272,46 @@ export function loadConfig(): { agents: Record<string, AgentDefinition>; templat
 }
 
 // --- Config hot-reload ---
-// Watches thread-templates.json for external changes and reloads on modification.
-// Re-creates watcher on 'rename' events because atomic file replacement
-// (temp+rename, used by Claude Code's Write tool) changes the inode,
-// causing the old fs.watch to stop receiving events.
+// Watches the config dir (or legacy single file) for external changes and reloads on modification.
+// Directory form: watch each entity subdir (agents/templates/shells) — flat dirs, so a plain watch
+// catches file adds/edits/removes. Single-file form: re-create the watcher on 'rename' events
+// because atomic file replacement (temp+rename) changes the inode.
 
-let _watcher: FSWatcher | null = null;
+let _watchers: FSWatcher[] = [];
 let _reloadTimer: ReturnType<typeof setTimeout> | null = null;
 
-function scheduleConfigReload(): void {
+function scheduleConfigReload(label: string): void {
   if (_reloadTimer) clearTimeout(_reloadTimer);
   _reloadTimer = setTimeout(() => {
     _reloadTimer = null;
-    log.info('Detected change in thread-templates.json, reloading...');
-    _adminNotifier?.(`${Icons.refresh} \`thread-templates.json\` hot-reloaded`);
+    log.info(`Detected change in ${label}, reloading...`);
+    _adminNotifier?.(`${Icons.refresh} \`${label}\` hot-reloaded`);
     loadConfig();
   }, 300);
 }
 
+function closeConfigWatchers(): void {
+  for (const w of _watchers) w.close();
+  _watchers = [];
+}
+
 function setupConfigWatch(): void {
+  closeConfigWatchers();
   try {
-    if (_watcher) _watcher.close();
-    _watcher = watch(CONFIG_FILE, (eventType) => {
-      if (eventType === 'rename') setTimeout(() => setupConfigWatch(), 100);
-      scheduleConfigReload();
-    });
+    if (existsSync(CONFIG_TEMPLATES_DIR)) {
+      for (const sub of ENTITY_SUBDIRS) {
+        const dir = path.join(CONFIG_TEMPLATES_DIR, sub);
+        if (!existsSync(dir)) continue;
+        _watchers.push(watch(dir, () => scheduleConfigReload(`thread-templates/${sub}`)));
+      }
+    } else if (existsSync(CONFIG_FILE)) {
+      _watchers.push(watch(CONFIG_FILE, (eventType) => {
+        if (eventType === 'rename') setTimeout(() => setupConfigWatch(), 100);
+        scheduleConfigReload('thread-templates.json');
+      }));
+    }
   } catch (e: any) {
-    log.error(`Failed to watch ${CONFIG_FILE}: ${e.message}`);
+    log.error(`Failed to watch thread-templates config: ${e.message}`);
   }
 }
 
@@ -258,10 +359,7 @@ export function startConfigWatcher(): void {
 }
 
 export function stopConfigWatcher(): void {
-  if (_watcher) {
-    _watcher.close();
-    _watcher = null;
-  }
+  closeConfigWatchers();
   if (_reloadTimer) {
     clearTimeout(_reloadTimer);
     _reloadTimer = null;

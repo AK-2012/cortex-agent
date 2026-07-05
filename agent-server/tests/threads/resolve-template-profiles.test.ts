@@ -15,15 +15,15 @@ before(() => {
   // Self-sufficient template fixture: ensure defaults templates exist in the isolated
   // CORTEX_HOME even when this file is run standalone (empty-skeleton home).
   mergeThreadTemplates(
-    path.resolve(process.cwd(), 'defaults/config/thread-templates.json'),
-    path.join(CONFIG_DIR, 'thread-templates.json'),
+    path.resolve(process.cwd(), 'defaults/config/thread-templates'),
+    path.join(CONFIG_DIR, 'thread-templates'),
   );
   loadConfig();
 });
 
 test('resolveTemplateProfiles collects hardcoded agent profiles in slot order', () => {
-  // defaults: plan-review = planner(plan) + reviewer(execute)
-  assert.deepEqual(resolveTemplateProfiles('plan-review', 'dispatch-prof'), ['plan', 'execute']);
+  // defaults: coder-review = coder(plan) + coder-reviewer(execute)
+  assert.deepEqual(resolveTemplateProfiles('coder-review', 'dispatch-prof'), ['plan', 'execute']);
 });
 
 test('resolveTemplateProfiles dedupes repeated profiles', () => {

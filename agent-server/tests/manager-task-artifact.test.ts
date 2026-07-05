@@ -17,11 +17,11 @@ const createdThreadIds = new Set<string>();
 const projectDirs: string[] = [];
 
 before(() => {
-  // The isolated test home has no thread-templates.json — seed from shipped defaults
+  // The isolated test home has no thread-templates config — seed from shipped defaults dir
   // (same path app startup takes) so 'manager' / 'coder-review' resolve.
   mergeThreadTemplates(
-    path.join(DEFAULTS_DIR, 'config', 'thread-templates.json'),
-    path.join(CONFIG_DIR, 'thread-templates.json'),
+    path.join(DEFAULTS_DIR, 'config', 'thread-templates'),
+    path.join(CONFIG_DIR, 'thread-templates'),
   );
   loadConfig();
 });

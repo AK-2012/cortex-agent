@@ -1,0 +1,25 @@
+{
+  "name": "coder-reviewer",
+  "description": "Coder Reviewer — works in two stages (planReview / implReview) in the coder-review template, transition graph determines stage rather than artifact inference",
+  "profile": "execute",
+  "persistSession": true,
+  "directive": "file:coder-reviewer.md",
+  "systemPrompt": "file:coder.md",
+  "entryStage": "planReview",
+  "stages": {
+    "planReview": {
+      "description": "Read `## Plan` and append `## Plan Review (iteration N)` — no approval marker here.",
+      "promptTemplate": "Task:\n{{input}}\n\nRead {{artifactPath}} end-to-end and review the latest `## Plan (iteration N)` section. Confirm Coder only touched the artifact file (no premature implementation). Append `## Plan Review (iteration N)` to {{artifactPath}}. Do NOT write any approval marker in Plan Review — Coder decides per-Blocker what to accept/reject."
+    },
+    "implReview": {
+      "description": "Read `## Implementation Summary` + diff and append `## Impl Review (iteration M)` — must end with `[IMPL-APPROVED]` or list Blockers.",
+      "continuesSession": true,
+      "promptTemplate": "Original task:\n{{input}}\n\nAudit Coder's project-file changes (changes by other agents in the same files may appear — ignore those):\n{{modifiedFiles}}\n\nRead the latest `## Implementation Summary (iteration M)` in {{artifactPath}} (and the following `## Response to Impl Review` if present). Append `## Impl Review (iteration M)` to {{artifactPath}}. **Remember: you MUST write your review to {{artifactPath}}.** If approved, end with `[IMPL-APPROVED]`; otherwise list the Blockers. Coder gets only 1 retry after the first block; beyond that the pipeline ends. Do not fabricate approval markers.\n\nBefore writing your review, run the project's full test suite (`npm test` or equivalent). Check that every stage passes: architecture linter, unit tests, integration tests. Any failure is a Blocker — do not write [IMPL-APPROVED] until the full suite is green."
+    }
+  },
+  "tools": "Agent,Bash,Edit,Glob,Grep,Read,Skill,TaskStop,TodoWrite,WebFetch,WebSearch,Write",
+  "pluginDirs": [
+    "plugins/cortex-common",
+    "plugins/cortex-coder"
+  ]
+}

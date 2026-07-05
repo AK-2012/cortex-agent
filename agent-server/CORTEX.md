@@ -21,7 +21,7 @@ Source code in src/, configuration/data in root directory, logs in logs/.
 | `executions.json` | Data | Unified execution registry |
 | `channel-registry.json` | Data | Project to Slack channel mapping |
 | `project-dirs.json` | Data | Project to machine external code directory mapping |
-| `thread-templates.json` | Configuration | Thread agent definitions and orchestration templates |
+| `config/thread-templates/` | Configuration | Thread agent definitions, orchestration templates, and shell definitions — directory form, one JSON file per entity under `agents/`, `templates/`, `shells/` (DR-0017 D6 Phase 2.5; legacy single `thread-templates.json` auto-migrated on startup) |
 | `session-hooks.json` | Configuration | session-level hook configuration (gitignored; template at `session-hooks.example.json`) |
 | `session-hooks.example.json` | Configuration | Copyable example of session-hooks.json (committed) |
 | `threads.json` | Data | Active and historical Thread state (gitignored) |

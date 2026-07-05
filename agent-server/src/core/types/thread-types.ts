@@ -181,27 +181,54 @@ export interface ThreadTemplate {
   hooks?: ThreadHooks;               // optional: lifecycle hooks (onStart, onTransition, onEnd)
 }
 
-// --- Shell template binding (DR-0017 D6 Phase 2) ---
+// --- Shell template binding (DR-0017 D6 Phase 2 / 2.5) ---
 
 /** A compact template that inherits a named "shell" (a parameterized transition-graph
  *  generator) instead of spelling out the full graph. The loader expands it to a full
- *  `ThreadTemplate` at config-load time via `expandShellTemplate`. Lets the structurally
- *  identical worker-review templates collapse to `{shell, worker, reviewer}` bindings. */
+ *  `ThreadTemplate` at config-load time via `expandShell`, interpolating the binding's
+ *  parameter values into the shell's placeholder graph. Lets the structurally identical
+ *  worker-review templates collapse to `{shell, worker, reviewer}` bindings.
+ *
+ *  Parameter values (e.g. `worker`, `reviewer`) live alongside the reserved keys via the
+ *  index signature; which of them name agents is declared by the shell's `agents` list. */
 export interface ShellTemplateBinding {
   shell: string;                     // shell name, e.g. "worker-review"
-  worker: string;                    // worker agent name (produce stage derived from its entryStage)
-  reviewer: string;                  // reviewer agent name
   description?: string;              // human-readable description (preserved onto the expanded template)
   maxTotalSteps?: number;            // override the shell's default step budget
+  worker?: string;                   // worker-review param: worker agent name (produce stage = its entryStage)
+  reviewer?: string;                 // worker-review param: reviewer agent name
+  [param: string]: unknown;          // arbitrary shell parameter values
+}
+
+/** A named "shell": a parameterized transition-graph generator defined as pure JSON data
+ *  (DR-0017 D6 Phase 2.5 — shells live in config, not code). `params` declares the required
+ *  binding keys; the string-valued fields carry `{param}` (→ the param's value, an agent name)
+ *  and `{param.entryStage}` (→ that agent's entryStage) placeholders that `expandShell`
+ *  interpolates. `agents` lists which params name agents (those values are validated to exist). */
+export interface ShellDefinition {
+  params: string[];                  // required binding parameter names
+  agents: string[];                  // agent slots (placeholder strings like "{worker}") — declare which params are agents
+  transitions: TransitionRule[];     // transition graph with placeholder endpoints
+  entryAgent: string;                // placeholder string, e.g. "{worker}"
+  entryStage?: string;               // placeholder string, e.g. "{worker.entryStage}"
+  maxTotalSteps: number;             // default step budget (binding.maxTotalSteps overrides)
+  maxTotalCostUsd?: number;
+  hooks?: ThreadHooks;               // lifecycle hooks (placeholder strings allowed in args)
 }
 
 // --- Config file structure ---
 
+/** The thread config, whether loaded from a single `thread-templates.json` or merged across
+ *  the `thread-templates/{agents,templates,shells}/` directory. `shells` is only populated in
+ *  the directory form; a single-file config has no shells (shell bindings resolve against an
+ *  empty map and are fail-soft skipped). */
 export interface ThreadConfigFile {
   agents: Record<string, AgentDefinition>;
   /** A template entry is either a full ThreadTemplate or a ShellTemplateBinding that the
    *  loader expands to a full ThreadTemplate before use. */
   templates: Record<string, ThreadTemplate | ShellTemplateBinding>;
+  /** Named shell definitions (directory form only). */
+  shells?: Record<string, ShellDefinition>;
 }
 
 /** @deprecated Use ThreadConfigFile */

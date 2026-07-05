@@ -1,17 +1,29 @@
-// input:  Node test runner + domain/threads/shell-templates + template-loader
-// output: expandShellTemplate / isShellBinding coverage (expansion / validation / error branches) + loadConfig fail-soft
-// pos:    DR-0017 D6 Phase 2 — worker-review shell inheritance
+// input:  Node test runner + domain/threads/shell-templates (generic interpolation engine)
+// output: expandShell / isShellBinding coverage (interpolation / validation / error branches)
+// pos:    DR-0017 D6 Phase 2.5 — shells are pure JSON data; the loader does GENERIC placeholder
+//         interpolation + validation (no per-shell hardcoded expander). The worker-review shell
+//         fixture below mirrors defaults/config/thread-templates/shells/worker-review.json.
 // >>> If I am updated, update my header comment and the parent folder's CORTEX.md <<<
 
-import '../_test-home.js'; // MUST be first: isolate CORTEX_HOME before paths.ts loads
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
-import * as path from 'node:path';
-import { expandShellTemplate, isShellBinding } from '../../src/domain/threads/shell-templates.js';
-import { loadConfig } from '../../src/domain/threads/template-loader.js';
-import { CONFIG_DIR } from '../../src/core/paths.js';
-import type { AgentDefinition } from '../../src/core/types/thread-types.js';
+import { expandShell, isShellBinding } from '../../src/domain/threads/shell-templates.js';
+import type { AgentDefinition, ShellDefinition } from '../../src/core/types/thread-types.js';
+
+// --- worker-review shell fixture (mirrors the shipped shells/worker-review.json) ---
+const WORKER_REVIEW: ShellDefinition = {
+  params: ['worker', 'reviewer'],
+  agents: ['{worker}', '{reviewer}'],
+  transitions: [
+    { from: '{worker}:{worker.entryStage}', to: '{reviewer}', condition: { type: 'always' } },
+    { from: '{reviewer}', to: '{worker}:retry', condition: { type: 'convergence', marker: '[APPROVED]', maxIterations: 1 } },
+    { from: '{worker}:retry', to: '{reviewer}', condition: { type: 'output_not_contains', pattern: '\\[REVISED\\]' } },
+  ],
+  entryAgent: '{worker}',
+  entryStage: '{worker.entryStage}',
+  maxTotalSteps: 4,
+  hooks: { onEnd: { command: 'node ~/.cortex/hooks/post-task-hook.mjs', args: ['{worker}'], timeout: 10000 } },
+};
 
 // --- Fixture agents mirroring the real worker/reviewer agent shapes ---
 function workerAgent(name: string, produceStage: string): AgentDefinition {
@@ -52,7 +64,7 @@ test('isShellBinding distinguishes shell bindings from full templates', () => {
   assert.equal(isShellBinding('str'), false);
 });
 
-// --- Expansion: behavior equivalence (independent golden literals) ---
+// --- Interpolation: behavior equivalence (independent golden literals) ---
 // These two literals are the EXACT current defaults full templates (pre-conversion),
 // pinning that shell expansion is behavior-preserving.
 
@@ -86,31 +98,31 @@ const GOLDEN_EXECUTE_REVIEW = {
   hooks: { onEnd: { command: 'node ~/.cortex/hooks/post-task-hook.mjs', args: ['executor'], timeout: 10000 } },
 };
 
-test('expandShellTemplate(doc-review) equals the pre-conversion full template', () => {
-  const out = expandShellTemplate('doc-review', {
+test('expandShell(doc-review) equals the pre-conversion full template', () => {
+  const out = expandShell('doc-review', {
     shell: 'worker-review', worker: 'doc-writer', reviewer: 'doc-reviewer',
     description: GOLDEN_DOC_REVIEW.description,
-  }, AGENTS);
+  }, WORKER_REVIEW, AGENTS);
   assert.deepEqual(out, GOLDEN_DOC_REVIEW);
 });
 
-test('expandShellTemplate(execute-review) equals the pre-conversion full template', () => {
-  const out = expandShellTemplate('execute-review', {
+test('expandShell(execute-review) equals the pre-conversion full template', () => {
+  const out = expandShell('execute-review', {
     shell: 'worker-review', worker: 'executor', reviewer: 'executor-reviewer',
     description: GOLDEN_EXECUTE_REVIEW.description,
-  }, AGENTS);
+  }, WORKER_REVIEW, AGENTS);
   assert.deepEqual(out, GOLDEN_EXECUTE_REVIEW);
 });
 
-// --- Expansion: structural coverage for the live-only workers ---
+// --- Interpolation: structural coverage for the live-only workers ---
 
 for (const [name, worker, reviewer, produce] of [
   ['analyst-review', 'analyst', 'analyst-reviewer', 'analyze'],
   ['surveyor-review', 'surveyor', 'surveyor-reviewer', 'survey'],
   ['writer-review', 'writer', 'writer-reviewer', 'write'],
 ] as const) {
-  test(`expandShellTemplate(${name}) builds the standard convergence loop`, () => {
-    const out = expandShellTemplate(name, { shell: 'worker-review', worker, reviewer }, AGENTS);
+  test(`expandShell(${name}) builds the standard convergence loop`, () => {
+    const out = expandShell(name, { shell: 'worker-review', worker, reviewer }, WORKER_REVIEW, AGENTS);
     assert.equal(out.name, name);
     assert.deepEqual(out.agents, [worker, reviewer]);
     assert.equal(out.entryAgent, worker);
@@ -125,61 +137,46 @@ for (const [name, worker, reviewer, produce] of [
   });
 }
 
-test('expandShellTemplate honors a maxTotalSteps override', () => {
-  const out = expandShellTemplate('x-review', { shell: 'worker-review', worker: 'analyst', reviewer: 'analyst-reviewer', maxTotalSteps: 6 }, AGENTS);
+test('expandShell honors a maxTotalSteps override', () => {
+  const out = expandShell('x-review', { shell: 'worker-review', worker: 'analyst', reviewer: 'analyst-reviewer', maxTotalSteps: 6 }, WORKER_REVIEW, AGENTS);
   assert.equal(out.maxTotalSteps, 6);
 });
 
-// --- Error branches ---
-
-test('unknown shell name throws', () => {
-  assert.throws(() => expandShellTemplate('x', { shell: 'no-such-shell', worker: 'analyst', reviewer: 'analyst-reviewer' } as any, AGENTS), /unknown shell/i);
+test('expandShell falls back to a default description when the binding omits one', () => {
+  const out = expandShell('x-review', { shell: 'worker-review', worker: 'analyst', reviewer: 'analyst-reviewer' }, WORKER_REVIEW, AGENTS);
+  assert.equal(typeof out.description, 'string');
+  assert.ok(out.description.length > 0);
 });
 
-test('missing worker field throws', () => {
-  assert.throws(() => expandShellTemplate('x', { shell: 'worker-review', reviewer: 'analyst-reviewer' } as any, AGENTS), /worker/i);
+// --- Error branches (the 7 validation semantics preserved from the code-expander) ---
+
+test('missing worker param throws', () => {
+  assert.throws(() => expandShell('x', { shell: 'worker-review', reviewer: 'analyst-reviewer' } as any, WORKER_REVIEW, AGENTS), /worker/i);
 });
 
-test('missing reviewer field throws', () => {
-  assert.throws(() => expandShellTemplate('x', { shell: 'worker-review', worker: 'analyst' } as any, AGENTS), /reviewer/i);
+test('missing reviewer param throws', () => {
+  assert.throws(() => expandShell('x', { shell: 'worker-review', worker: 'analyst' } as any, WORKER_REVIEW, AGENTS), /reviewer/i);
 });
 
 test('worker agent not found throws', () => {
-  assert.throws(() => expandShellTemplate('x', { shell: 'worker-review', worker: 'ghost', reviewer: 'analyst-reviewer' }, AGENTS), /worker agent .*ghost.* not found/i);
+  assert.throws(() => expandShell('x', { shell: 'worker-review', worker: 'ghost', reviewer: 'analyst-reviewer' }, WORKER_REVIEW, AGENTS), /agent .*ghost.* not found/i);
 });
 
 test('reviewer agent not found throws', () => {
-  assert.throws(() => expandShellTemplate('x', { shell: 'worker-review', worker: 'analyst', reviewer: 'ghost' }, AGENTS), /reviewer agent .*ghost.* not found/i);
+  assert.throws(() => expandShell('x', { shell: 'worker-review', worker: 'analyst', reviewer: 'ghost' }, WORKER_REVIEW, AGENTS), /agent .*ghost.* not found/i);
 });
 
 test('worker agent without entryStage throws', () => {
   const agents = { ...AGENTS, noentry: { name: 'noentry', profile: '__active__', persistSession: true, stages: { retry: { promptTemplate: 'x' } } } as AgentDefinition };
-  assert.throws(() => expandShellTemplate('x', { shell: 'worker-review', worker: 'noentry', reviewer: 'analyst-reviewer' }, agents), /entryStage/i);
+  assert.throws(() => expandShell('x', { shell: 'worker-review', worker: 'noentry', reviewer: 'analyst-reviewer' }, WORKER_REVIEW, agents), /entryStage/i);
 });
 
 test('worker agent without retry stage throws', () => {
   const agents = { ...AGENTS, noretry: { name: 'noretry', profile: '__active__', persistSession: true, entryStage: 'go', stages: { go: { promptTemplate: 'x' } } } as AgentDefinition };
-  assert.throws(() => expandShellTemplate('x', { shell: 'worker-review', worker: 'noretry', reviewer: 'analyst-reviewer' }, agents), /retry/i);
+  assert.throws(() => expandShell('x', { shell: 'worker-review', worker: 'noretry', reviewer: 'analyst-reviewer' }, WORKER_REVIEW, agents), /retry/i);
 });
 
-// --- loadConfig integration: fail-soft (a broken shell binding is skipped, others load) ---
-
-test('loadConfig expands valid shell bindings and skips broken ones (fail-soft)', () => {
-  if (!existsSync(CONFIG_DIR)) mkdirSync(CONFIG_DIR, { recursive: true });
-  const config = {
-    agents: {
-      executor: workerAgent('executor', 'execute'),
-      'executor-reviewer': reviewerAgent('executor-reviewer'),
-    },
-    templates: {
-      'good-review': { shell: 'worker-review', worker: 'executor', reviewer: 'executor-reviewer', description: 'ok' },
-      'broken-review': { shell: 'worker-review', worker: 'ghost', reviewer: 'executor-reviewer', description: 'bad' },
-    },
-  };
-  writeFileSync(path.join(CONFIG_DIR, 'thread-templates.json'), JSON.stringify(config, null, 2), 'utf8');
-  const { templates } = loadConfig();
-  assert.ok(templates['good-review'], 'valid shell binding expanded');
-  assert.equal(templates['good-review'].entryAgent, 'executor');
-  assert.equal(templates['good-review'].transitions.length, 3);
-  assert.equal(templates['broken-review'], undefined, 'broken shell binding skipped');
+test('unknown placeholder param throws', () => {
+  const badShell: ShellDefinition = { ...WORKER_REVIEW, entryAgent: '{ghostParam}' };
+  assert.throws(() => expandShell('x', { shell: 'worker-review', worker: 'analyst', reviewer: 'analyst-reviewer' }, badShell, AGENTS), /ghostParam|unknown placeholder/i);
 });

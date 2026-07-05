@@ -5,7 +5,7 @@
 import test, { after } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn, type ChildProcess } from 'node:child_process';
-import { mkdtempSync, existsSync, readFileSync, writeFileSync, rmSync, statSync } from 'node:fs';
+import { mkdtempSync, existsSync, readFileSync, writeFileSync, rmSync, statSync, readdirSync } from 'node:fs';
 import * as path from 'node:path';
 import * as os from 'node:os';
 import { fileURLToPath } from 'node:url';
@@ -189,7 +189,9 @@ test('Test 1: cortex init creates valid directory structure (non-interactive)', 
       path.join(tempDir, 'config', '.env'),
       path.join(tempDir, 'config', 'mcp-config.json'),
       path.join(tempDir, 'data', 'mode.json'),
-      path.join(tempDir, 'config', 'thread-templates.json'),
+      // DR-0017 D6 Phase 2.5: thread-templates is a directory (one file per entity)
+      path.join(tempDir, 'config', 'thread-templates', 'templates', 'default.json'),
+      path.join(tempDir, 'config', 'thread-templates', 'shells', 'worker-review.json'),
     ];
     for (const f of files) {
       assert.ok(existsSync(f), `Expected file to exist: ${f}`);
@@ -322,16 +324,16 @@ test('Test 3: Initialized environment has correct config content', async () => {
       assert.ok(name !== 'qa', 'qa profile must not be generated');
     }
 
-    // Verify thread-templates.json is valid JSON with expected template names
-    const templates = JSON.parse(readFileSync(path.join(tempDir, 'config', 'thread-templates.json'), 'utf-8'));
-    assert.ok(templates.templates, 'thread-templates.json should have "templates" key');
-    assert.ok(Array.isArray(templates.templates) || typeof templates.templates === 'object',
-      'templates should be an array or object');
-    // Check for known template names
-    const templateNames = Array.isArray(templates.templates)
-      ? templates.templates.map((t: any) => t.name)
-      : Object.keys(templates.templates);
+    // Verify the thread-templates directory holds valid per-template JSON files.
+    const templatesDir = path.join(tempDir, 'config', 'thread-templates', 'templates');
+    const templateNames = readdirSync(templatesDir)
+      .filter((f) => f.endsWith('.json'))
+      .map((f) => f.slice(0, -'.json'.length));
     assert.ok(templateNames.length > 0, 'Should have at least one thread template');
+    // Each template file must be valid JSON.
+    for (const name of templateNames) {
+      JSON.parse(readFileSync(path.join(templatesDir, `${name}.json`), 'utf-8'));
+    }
 
     // Verify .env content
     const envContent = readFileSync(path.join(tempDir, 'config', '.env'), 'utf-8');

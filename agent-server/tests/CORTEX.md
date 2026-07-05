@@ -155,6 +155,8 @@ How to run tests without tripping it:
 | `template-resolver.test.ts` | Test | Template variables/block/conditional |
 | `threads/domain-threads-smoke.test.ts` | Test | domain/threads/ import smoke: parseTarget / resolveStageName / resolveSystemVars / THREAD_PROTOCOL_PREAMBLE |
 | `threads/resolve-template-profiles.test.ts` | Test | resolveTemplateProfiles: hardcoded profiles, `__active__` mapping, dedup, unknown template fail-open |
-| `threads/shell-template.test.ts` | Test | DR-0017 D6 Phase 2: isShellBinding + expandShellTemplate worker-review expansion (golden equivalence for doc/execute, structural for analyst/surveyor/writer), maxTotalSteps override, all validation error branches, loadConfig fail-soft skip |
+| `threads/shell-template.test.ts` | Test | DR-0017 D6 Phase 2.5: isShellBinding + generic expandShell interpolation (golden equivalence for doc/execute, structural for analyst/surveyor/writer), maxTotalSteps override, default description, all 7 validation error branches |
+| `threads/thread-config-dir.test.ts` | Test | DR-0017 D6 Phase 2.5: loadConfig directory form — golden equivalence (dir ≡ same-content single file), dir-over-file precedence, fail-soft (name≠filename / broken or unknown shell binding), migrateThreadTemplatesToDir (split + `.migrated-bak` + idempotent), mergeThreadTemplates per-file copy-if-missing |
+| `threads/template-merge.test.ts` | Test | DR-0017 D6 Phase 2.5: mergeThreadTemplates directory form — per-file copy-if-missing (defaults dir → user dir), preserves existing user files, no-op when complete / when defaults dir absent |
 | `threads/thread-rate-limit-resume.test.ts` | Test | rate-limit thread pause/resume contract: recordStepOutcome records resume + pauses (rate_limited) without advancing the step; markThreadRateLimited; buildThreadSummary paused headline; markRunningAsFailedOnStartup/cleanup treatment of rate_limited |
 | `module-loader.ts` | Utility | ESM fresh import + root path helper |

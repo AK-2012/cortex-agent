@@ -1,0 +1,25 @@
+{
+  "name": "executor",
+  "description": "Executor — general task executor, performs assigned work (edit files, run commands, modify code, config changes, etc.), writes results to artifact. Stages: execute → retry",
+  "profile": "execute",
+  "persistSession": true,
+  "directive": "file:executor.md",
+  "systemPrompt": "file:worker.md",
+  "entryStage": "execute",
+  "stages": {
+    "execute": {
+      "description": "Execute the task, write ## Execute Summary to artifact",
+      "promptTemplate": "Task:\n{{input}}\n\nExecute the task per the executor directive. After completion, append `## Execute Summary (iteration 1)` to {{artifactPath}} listing what you did, what changed, and any decisions made. Do NOT write `[APPROVED]` — only the reviewer writes that."
+    },
+    "retry": {
+      "description": "Address reviewer Blockers, write [REVISED] after fixing",
+      "continuesSession": true,
+      "promptTemplate": "The Reviewer's `## Review` has been written to {{artifactPath}}. First verify each Blocker against its cited source — the Reviewer is not infallible. Fix the issues per the feedback. When done, append `## Execute Summary (iteration N)` and MUST write `[REVISED]` to {{artifactPath}} on its own line."
+    }
+  },
+  "tools": "Agent,Bash,Edit,Glob,Grep,Read,Skill,TaskStop,Write,WebFetch,WebSearch",
+  "pluginDirs": [
+    "plugins/cortex-common",
+    "plugins/cortex-system"
+  ]
+}

@@ -1239,11 +1239,11 @@ function copyDefaults(paths: InitPaths, force: boolean): void {
   safeCopy(path.join(DEFAULTS_DIR, 'context', 'user', 'CORTEX.md'), path.join(paths.CONTEXT_DIR, 'user', 'CORTEX.md'), false, 'context/user/CORTEX.md');
 
   // Config defaults — budget and session-hooks overwrite only with --force;
-  // thread-templates are merged (new agents/templates added, existing preserved)
+  // thread-templates are merged per-file (new agents/templates/shells added, existing preserved)
   safeCopy(path.join(DEFAULTS_DIR, 'config', 'budget.json'), path.join(paths.CONFIG_DIR, 'budget.json'), force, 'budget.json');
   mergeThreadTemplates(
-    path.join(DEFAULTS_DIR, 'config', 'thread-templates.json'),
-    path.join(paths.CONFIG_DIR, 'thread-templates.json'),
+    path.join(DEFAULTS_DIR, 'config', 'thread-templates'),
+    path.join(paths.CONFIG_DIR, 'thread-templates'),
   );
   safeCopy(path.join(DEFAULTS_DIR, 'config', 'session-hooks.json'), path.join(paths.CONFIG_DIR, 'session-hooks.json'), force, 'session-hooks.json');
 

@@ -32,8 +32,8 @@ let seq = 0;
 
 before(() => {
   mergeThreadTemplates(
-    path.join(DEFAULTS_DIR, 'config', 'thread-templates.json'),
-    path.join(CONFIG_DIR, 'thread-templates.json'),
+    path.join(DEFAULTS_DIR, 'config', 'thread-templates'),
+    path.join(CONFIG_DIR, 'thread-templates'),
   );
   loadConfig();
 });

@@ -1,0 +1,25 @@
+{
+  "name": "doc-writer",
+  "description": "Doc Writer — general document producer, outputs structured documents such as status / digest / decision / report / knowledge entry, writes to project files",
+  "profile": "plan",
+  "persistSession": true,
+  "directive": "file:doc-writer.md",
+  "systemPrompt": "file:worker.md",
+  "entryStage": "write",
+  "stages": {
+    "write": {
+      "description": "Initial writing pass — produce or update the target document, then summarize changes in the artifact.",
+      "promptTemplate": "Task:\n{{input}}\n\nProduce or update the document(s) per the doc-writer directive. After writing, append `## Write Summary (iteration 1)` to {{artifactPath}} listing each file you modified and the key changes. Do NOT write `[APPROVED]` — only the reviewer writes that."
+    },
+    "retry": {
+      "description": "After a blocking `## Review`: fix and append `## Write Summary (iteration N)` + `[REVISED]`.",
+      "continuesSession": true,
+      "promptTemplate": "The Reviewer's `## Review` has been written to {{artifactPath}}. First verify each Blocker against its cited source — the Reviewer is not infallible. Then fix the document files per the feedback. When done, append `## Write Summary (iteration N)` and MUST write `[REVISED]` to {{artifactPath}} on its own line."
+    }
+  },
+  "tools": "Agent,Bash,Edit,Glob,Grep,Read,Skill,TaskStop,TodoWrite,WebFetch,WebSearch,Write",
+  "pluginDirs": [
+    "plugins/cortex-common",
+    "plugins/cortex-system"
+  ]
+}

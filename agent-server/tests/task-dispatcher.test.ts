@@ -20,8 +20,8 @@ before(() => {
   // CORTEX_HOME so template-dependent tests pass when run standalone (test:file
   // with an empty-skeleton home), not only under the seeded full-suite home.
   mergeThreadTemplates(
-    path.resolve(process.cwd(), 'defaults/config/thread-templates.json'),
-    path.join(CONFIG_DIR, 'thread-templates.json'),
+    path.resolve(process.cwd(), 'defaults/config/thread-templates'),
+    path.join(CONFIG_DIR, 'thread-templates'),
   );
 });
 

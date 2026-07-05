@@ -7,7 +7,7 @@ import { mkdirSync } from 'fs';
 import * as path from 'path';
 import { createAdapterFromEnv, extractTuiAdapter } from '@platform/index.js';
 import type { PlatformAdapter } from '@platform/index.js';
-import { WORKSPACE_DIR, CONFIG_DIR, DATA_DIR, STORE_DIR } from '@core/utils.js';
+import { WORKSPACE_DIR, CONFIG_DIR, DATA_DIR, STORE_DIR, DEFAULTS_DIR } from '@core/utils.js';
 import { tryAcquireSingletonLock, releaseSingletonLock } from '@core/singleton-lock.js';
 import { closeAllSessions, closeSession as closeClaudePooledSession, shutdownCodex } from '@domain/agents/index.js';
 import { closeAllAdapters } from '../agent-adapter/index.js';
@@ -31,7 +31,7 @@ import { sessionRepo, registerConduitProvider } from '@store/session-repo.js';
 import { conversationLedger } from '@store/conversation-ledger-repo.js';
 import { conversationHistory } from '@store/conversation-history-repo.js';
 import { executionRepo } from '@store/execution-repo.js';
-import { loadConfig as loadThreadConfig, startConfigWatcher as startThreadConfigWatcher, setAdminNotifier as setConfigNotifier } from '@domain/threads/index.js';
+import { loadConfig as loadThreadConfig, startConfigWatcher as startThreadConfigWatcher, setAdminNotifier as setConfigNotifier, migrateThreadTemplatesToDir, mergeThreadTemplates } from '@domain/threads/index.js';
 import { startMemoryWatcher } from '@domain/memory/watcher.js';
 import { getActiveBackend, configureEnvForMode, loadMode } from '@domain/agents/index.js';
 import { createEditHandler } from '@orch/routing/edit-handler.js';
@@ -337,6 +337,14 @@ process.on('SIGTERM', async () => {
   pendingTaskTracker.init(adapter);
   taskStore.load();
 
+  // DR-0017 D6 Phase 2.5: migrate a legacy single thread-templates.json to the directory form,
+  // then per-file copy-if-missing the shipped defaults dir (so new agents/templates/shells — e.g.
+  // a new shell definition — reach existing installs). Both run before loadThreadConfig.
+  migrateThreadTemplatesToDir();
+  mergeThreadTemplates(
+    path.join(DEFAULTS_DIR, 'config', 'thread-templates'),
+    path.join(CONFIG_DIR, 'thread-templates'),
+  );
   loadThreadConfig();
   startThreadConfigWatcher();
   _stopProfileWatcher = startProfileWatcher();
