@@ -94,7 +94,7 @@ export function isArtifactUnchangedSinceStepStart(threadId: string): boolean {
 /** Templates whose dispatch threads keep their artifact on the TASK node instead of the
  *  tmp workspace (DR-0017 W1): durable, git-versioned with the context repo, survives
  *  thread death/rotation/cleanup. Comma-separated env override. */
-function isTaskArtifactTemplate(templateName: string | null | undefined): boolean {
+export function isTaskArtifactTemplate(templateName: string | null | undefined): boolean {
   if (!templateName) return false;
   const raw = process.env.CORTEX_TASK_ARTIFACT_TEMPLATES ?? 'manager';
   return raw.split(',').map((s) => s.trim()).filter(Boolean).includes(templateName);

@@ -15,7 +15,8 @@ import { isTerminalStatus } from '@domain/threads/tree.js';
 import { runThreadDetached } from './thread-executor.js';
 import { createLogger } from '@core/log.js';
 import { scanAllTasks, type Task } from '@core/task-parser.js';
-import { recordDelivered } from '@domain/tasks/acceptance-ledger.js';
+import { recordDelivered, pendingDeliveries } from '@domain/tasks/acceptance-ledger.js';
+import { isTaskArtifactTemplate } from '@domain/threads/index.js';
 import type { ThreadRecord, RunThreadOptions } from '@core/types/thread-types.js';
 import type { PlatformAdapter } from '@platform/index.js';
 import type { IncomingMessage, Destination } from '@platform/index.js';
@@ -183,15 +184,76 @@ export function resumeManagerForQuestion(managerThreadId: string, resume?: Resum
   (resume ?? defaultResume)(managerThreadId);
 }
 
+// --- Manager session rotation (DR-0017 W3) ---
+
+/** CORTEX_MANAGER_ROTATE_STEPS (default 10) — steps per manager session before rotation. */
+function rotateStepsThreshold(): number {
+  const v = parseInt(process.env.CORTEX_MANAGER_ROTATE_STEPS || '', 10);
+  return Number.isFinite(v) && v > 0 ? v : 10;
+}
+
+/** Rehydration notice for a freshly rotated manager incarnation: durable artifact first,
+ *  tree reconcile second, ledger-pending acceptances third. Mirrors the disaster-join
+ *  path — rotation IS a deliberate kill test (DR-0017 D1/D2). */
+export function buildRehydrationNotice(parent: ThreadRecord, stepsSinceRotation: number): string {
+  const m = parent.metadata;
+  const project = m?.taskProject || parent.projectId;
+  const lines = [
+    `[Manager rotation — DR-0017] You are a FRESH incarnation of this composite task node's manager. Your predecessor's session was retired after ${stepsSinceRotation} steps (context hygiene). No work is lost — the durable state lives on the task node:`,
+    `1. Read your artifact FIRST — it holds the predecessor's checkpoint (seam map, delegations & acceptance criteria, decisions made, remaining plan, assumptions): ${parent.artifactPath}`,
+    m?.taskId
+      ? `2. Reconcile the tree: cortex-task tree --task-id ${m.taskId} (cross-check child states against the checkpoint).`
+      : '2. Reconcile your child tasks against the checkpoint.',
+  ];
+  if (m?.taskId && project) {
+    try {
+      const pend = pendingDeliveries(project, m.taskId);
+      if (pend.length > 0) {
+        lines.push(`3. Deliveries still awaiting YOUR acceptance verdict (acceptance ledger): ${pend.map((e) => `#${e.child} (${e.kind}${e.rework_round ? `, rework round ${e.rework_round}` : ''})`).join(', ')} — verify each against its done_when before trusting it.`);
+      }
+    } catch { /* ledger unreadable — the tree reconcile above covers it */ }
+  }
+  lines.push('Do NOT redo completed work and do NOT re-litigate decisions recorded in the artifact — continue from the remaining plan.');
+  return lines.join('\n');
+}
+
+/** Rotate an over-threshold manager session before re-entry: retire the persisted session
+ *  (clear every slot's sessionId → the next step runs on a FRESH session and gets the full
+ *  directive + contract prompt), reset the step base, and queue the rehydration notice.
+ *  Only task-artifact (manager) templates rotate; everything uncertain fails open (no
+ *  rotation). Returns true iff a rotation happened. */
+export async function maybeRotateManager(threadId: string): Promise<boolean> {
+  const parent = threadStore.get(threadId);
+  if (!parent) return false;
+  if (!isTaskArtifactTemplate(parent.templateName)) return false;
+  const base = parent.metadata?.rotationBaseStepIndex ?? 0;
+  const since = parent.steps.length - base;
+  if (since < rotateStepsThreshold()) return false;
+  const notice = buildRehydrationNotice(parent, since);
+  await threadStore.mutate(threadId, (t) => {
+    for (const slot of Object.values(t.agents)) slot.sessionId = null;
+    const m = (t.metadata ??= {});
+    m.rotationBaseStepIndex = t.steps.length;
+    if (!Array.isArray(m.pendingMessages)) m.pendingMessages = [];
+    if (m.pendingMessages.length >= 10) m.pendingMessages.shift();
+    m.pendingMessages.push(notice);
+  });
+  log.info(`rotated manager ${threadId}: fresh session after ${since} steps (threshold ${rotateStepsThreshold()})`);
+  return true;
+}
+
 /** Resume `parentId` if (and only if) it is suspended with nothing left to wait on —
- *  both thread children (waitingOn) and task children (waitingOnTasks, DR-0014 §8). */
-function maybeResumeParent(parentId: string, resume?: ResumeFn): void {
+ *  both thread children (waitingOn) and task children (waitingOnTasks, DR-0014 §8).
+ *  DR-0017 W3: an over-threshold manager is rotated to a fresh session just before
+ *  re-entry (rotation failure is non-fatal — resume proceeds on the old session). */
+async function maybeResumeParent(parentId: string, resume?: ResumeFn): Promise<void> {
   if (resuming.has(parentId)) return;
   const parent = threadStore.get(parentId);
   if (!parent || parent.status !== 'waiting') return;
   if (parent.metadata?.waitingOn?.length) return;
   if (parent.metadata?.waitingOnTasks?.length) return;
   resuming.add(parentId);
+  await maybeRotateManager(parentId).catch((e) => log.warn(`rotation check ${parentId}: ${(e as Error).message}`));
   (resume ?? defaultResume)(parentId);
 }
 
@@ -236,7 +298,7 @@ export async function notifyThreadParent(childId: string, deps: { resume?: Resum
     await postProjectNotice(child, buildNotice(childId)).catch(() => {});
   }
 
-  if (delivered) maybeResumeParent(parentId, deps.resume);
+  if (delivered) await maybeResumeParent(parentId, deps.resume);
 }
 
 // --- Task-children bridge (DR-0014 §8: resident manager waits on child TASKS) ---
@@ -299,7 +361,7 @@ async function deliverTaskResult(parentThreadId: string, task: Task, kind: 'comp
         const m = (t.metadata ??= {});
         m.waitingOnTasks = (m.waitingOnTasks ?? []).filter((id) => id !== task.id);
       });
-      maybeResumeParent(parentThreadId, deps.resume);
+      await maybeResumeParent(parentThreadId, deps.resume);
       return false;
     }
   }
@@ -319,7 +381,7 @@ async function deliverTaskResult(parentThreadId: string, task: Task, kind: 'comp
     if (m.pendingMessages.length >= 10) m.pendingMessages.shift();
     m.pendingMessages.push(buildTaskResultNotice(task, kind));
   });
-  if (delivered) maybeResumeParent(parentThreadId, deps.resume);
+  if (delivered) await maybeResumeParent(parentThreadId, deps.resume);
   return delivered;
 }
 
@@ -415,7 +477,7 @@ export async function reconcileWaitingTasks(threadId: string, deps: { resume?: R
   if (!thread || thread.status !== 'waiting') return;
   const ids = [...(thread.metadata?.waitingOnTasks ?? [])];
   if (!ids.length) {
-    maybeResumeParent(threadId, deps.resume);
+    await maybeResumeParent(threadId, deps.resume);
     return;
   }
   const project = thread.metadata?.taskProject || thread.projectId;
@@ -436,7 +498,7 @@ export async function reconcileWaitingTasks(threadId: string, deps: { resume?: R
     }
     // open/pending and unblocked → keep waiting (tasks survive restarts).
   }
-  maybeResumeParent(threadId, deps.resume);
+  await maybeResumeParent(threadId, deps.resume);
 }
 
 /** After a resumed task-dispatch thread settles TERMINAL, publish the task-tree event that the

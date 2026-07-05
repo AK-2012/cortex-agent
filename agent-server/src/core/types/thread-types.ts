@@ -317,6 +317,10 @@ export interface ThreadMetadata {
    *  wait action rejects thread_wait while the current artifact still matches this baseline —
    *  a manager must write its checkpoint before suspending. Absent → gate fails open. */
   stepStartArtifactHash?: string | null;
+  /** steps.length at the last manager-session rotation (DR-0017 W3). Rotation trigger:
+   *  steps.length - rotationBaseStepIndex >= CORTEX_MANAGER_ROTATE_STEPS (default 10).
+   *  Absent == 0 (never rotated). */
+  rotationBaseStepIndex?: number;
   /** Open questions a subtask asked this manager via ask_manager (DR-0016), for visibility /
    *  debugging. The authoritative pending-question state lives in orchestration/manager-qa's
    *  in-memory store; this is the manager-side mirror, cleared by answer_subtask. */
