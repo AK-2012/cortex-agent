@@ -171,6 +171,12 @@ cortex-task <command> [options]
 
 解除一个之前被阻塞的任务。
 
+### 验收命令
+
+**`verdict --project <name> --task-id <parent id> --child <child id> --verdict accepted|rejected [--note <text>]`**
+
+将 manager 对已交付子任务的验收结论记入父任务节点的验收台账（DR-0017）。必需：`--project`、`--task-id`（父/manager 任务）、`--child`（子任务 id）以及 `--verdict`，其值必须严格为 `accepted` 或 `rejected`（其他任何值都会报错）。`--note` 可选，用于记录原因。`accepted` 的子任务结果**不会再次投递**给未来的 manager 化身；`rejected` 结论会递增该子任务的 `rework_round`，并在其返工后再次完成时**重新打开**以进行下一次验收。该命令写入的是每个节点的台账，**不需要项目锁**。验收台账的数据模型见 [tasks.md](./tasks.md)。
+
 ### 修改命令
 
 这些命令需要项目锁（`cortex-task lock-acquire`）才能运行，以防止对同一 TASKS.yaml 的并发编辑。

@@ -229,6 +229,21 @@ Block a task with a reason. Blocked tasks are not dispatched.
 
 Unblock a previously blocked task.
 
+### Acceptance commands
+
+**`verdict --project <name> --task-id <parent id> --child <child id> --verdict accepted|rejected [--note <text>]`**
+
+Record a manager's acceptance verdict for a delivered child task into the
+parent task node's acceptance ledger (DR-0017). Required: `--project`,
+`--task-id` (the parent/manager task), `--child` (the child task id), and
+`--verdict`, which must be exactly `accepted` or `rejected` (any other value is
+an error). `--note` optionally records why. An `accepted` child result **never
+re-delivers** to future manager incarnations; a `rejected` verdict bumps the
+child's `rework_round` and **re-opens** the child for another verdict when it
+completes again after rework. This command writes a per-node ledger and does
+not require a project lock. For the acceptance-ledger data model, see
+[tasks.md](./tasks.md).
+
 ### Mutation commands
 
 These commands require a project lock (`cortex-task lock-acquire`) before
