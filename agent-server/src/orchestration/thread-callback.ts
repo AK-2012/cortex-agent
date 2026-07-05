@@ -15,6 +15,7 @@ import { isTerminalStatus } from '@domain/threads/tree.js';
 import { runThreadDetached } from './thread-executor.js';
 import { createLogger } from '@core/log.js';
 import { scanAllTasks, type Task } from '@core/task-parser.js';
+import { recordDelivered } from '@domain/tasks/acceptance-ledger.js';
 import type { ThreadRecord, RunThreadOptions } from '@core/types/thread-types.js';
 import type { PlatformAdapter } from '@platform/index.js';
 import type { IncomingMessage, Destination } from '@platform/index.js';
@@ -278,9 +279,30 @@ function readTaskFromDisk(project: string, taskId: string): Task | null {
 }
 
 /** Deliver one child-task result to one waiting manager thread. Returns true if delivered.
- *  Idempotency rides the same persistent deliveredChildResults array as thread children
- *  (4-hex task ids cannot collide with thr_ thread ids). */
+ *  Same-incarnation idempotency rides the persistent deliveredChildResults array (4-hex
+ *  task ids cannot collide with thr_ thread ids). Cross-incarnation idempotency (DR-0017
+ *  W1) rides the task-keyed acceptance ledger: an 'accepted' child never re-delivers,
+ *  even to a fresh manager thread; a pending/rejected-then-reworked child re-delivers
+ *  at-least-once per incarnation until a verdict is recorded — a result that reached a
+ *  dead session is re-delivered, never lost. Ledger errors fail open (deliver anyway).
+ *  Parents without task identity (thread_start-style) keep the legacy per-thread path. */
 async function deliverTaskResult(parentThreadId: string, task: Task, kind: 'completed' | 'blocked', deps: { resume?: ResumeFn }): Promise<boolean> {
+  const parent = threadStore.get(parentThreadId);
+  const parentTaskId = parent?.metadata?.taskId;
+  const parentProject = parent?.metadata?.taskProject || parent?.projectId;
+  if (parentTaskId && parentProject) {
+    const deliverable = await recordDelivered(parentProject, parentTaskId, task.id, kind)
+      .catch((e) => { log.warn(`acceptance-ledger record failed for ${parentTaskId}/${task.id}: ${(e as Error).message}`); return true; });
+    if (!deliverable) {
+      // Already accepted by a previous incarnation — drop from the wait set without re-queueing.
+      await threadStore.mutate(parentThreadId, (t) => {
+        const m = (t.metadata ??= {});
+        m.waitingOnTasks = (m.waitingOnTasks ?? []).filter((id) => id !== task.id);
+      });
+      maybeResumeParent(parentThreadId, deps.resume);
+      return false;
+    }
+  }
   let delivered = false;
   await threadStore.mutate(parentThreadId, (t) => {
     const m = (t.metadata ??= {});

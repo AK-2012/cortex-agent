@@ -8,6 +8,7 @@
 import { mkdirSync, writeFileSync, readFileSync } from 'fs';
 import * as path from 'path';
 import { WORKSPACE_DIR } from '@core/utils.js';
+import { ensureTaskArtifact } from '@core/task-node.js';
 import { createLogger } from '@core/log.js';
 import { threadStore } from '@store/thread-repo.js';
 
@@ -69,6 +70,15 @@ function createWorkspace(threadId: string): { workspacePath: string; artifactPat
   return { workspacePath, artifactPath };
 }
 
+/** Templates whose dispatch threads keep their artifact on the TASK node instead of the
+ *  tmp workspace (DR-0017 W1): durable, git-versioned with the context repo, survives
+ *  thread death/rotation/cleanup. Comma-separated env override. */
+function isTaskArtifactTemplate(templateName: string | null | undefined): boolean {
+  if (!templateName) return false;
+  const raw = process.env.CORTEX_TASK_ARTIFACT_TEMPLATES ?? 'manager';
+  return raw.split(',').map((s) => s.trim()).filter(Boolean).includes(templateName);
+}
+
 interface ThreadRecordInit {
   id: string;
   channel: string;
@@ -122,7 +132,14 @@ export function createThread(channel: string, options: {
     ? buildTemplateSlots(options.templateName!)
     : buildAdHocSlots(options.agentName!);
   const id = threadStore.generateId();
-  const { workspacePath, artifactPath } = createWorkspace(id);
+  const { workspacePath, artifactPath: workspaceArtifact } = createWorkspace(id);
+  // DR-0017 W1: a manager-template dispatch thread anchors its artifact on the task node
+  // (context/projects/{project}/manager/{taskId}/artifact.md). An existing artifact is
+  // inherited, never truncated — a new incarnation continues from the last checkpoint.
+  const m = options.metadata;
+  const artifactPath = (isTaskArtifactTemplate(options.templateName) && m?.taskId && m?.taskProject)
+    ? ensureTaskArtifact(m.taskProject, m.taskId)
+    : workspaceArtifact;
 
   const thread = makeThreadRecord({
     id, channel,
