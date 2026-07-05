@@ -81,104 +81,23 @@
         "plugins/cortex-feishu"
       ]
     },
-    "planner": {
-      "name": "planner",
-      "description": "Planner \u2014 draft plans and write to artifact",
-      "profile": "plan",
-      "persistSession": true,
-      "promptTemplate": "Write your plan to {{artifactPath}}.\n\nUser request:\n{{input}}",
-      "systemPrompt": "file:worker.md",
-      "tools": "Agent,Bash,Edit,Glob,Grep,Read,Skill,TaskStop,TodoWrite,WebFetch,WebSearch,Write",
-      "pluginDirs": [
-        "plugins/cortex-common",
-        "plugins/cortex-system"
-      ]
-    },
-    "reviewer": {
-      "name": "reviewer",
-      "description": "Reviewer \u2014 evaluate artifact content and give feedback, end with [APPROVED] or list Blockers",
-      "profile": "execute",
-      "persistSession": true,
-      "directive": "You are a strict reviewer. Evaluate the plan for correctness, completeness, and feasibility.",
-      "promptTemplate": "Read the content in {{artifactPath}} and perform a review. Append your review to the ## Review section at the end of the file. If the content passes, write [APPROVED] at the end of the review. Otherwise provide specific suggestions for improvement.",
-      "systemPrompt": "file:worker.md",
-      "tools": "Agent,Bash,Edit,Glob,Grep,Read,Skill,TaskStop,TodoWrite,WebFetch,WebSearch,Write",
-      "pluginDirs": [
-        "plugins/cortex-common",
-        "plugins/cortex-system"
-      ]
-    },
-    "plan-reviewer": {
-      "name": "plan-reviewer",
-      "description": "Plan Reviewer \u2014 audit one phase's output against the external plan's acceptance criteria in the plan-gate template, issue Approve / Revise / Reject on the last line",
-      "profile": "execute",
-      "persistSession": false,
-      "directive": "file:plan-reviewer.md",
-      "promptTemplate": "Execute the plan-phase audit per the plan-reviewer directive.\n\nTask / context (must declare plan path, phase under review, and where the phase's artifacts live):\n{{input}}\n\n---\n\nWrite the review to {{artifactPath}}. Walk every acceptance criterion of the phase explicitly (met / partially met / not met with a citation). End the artifact with a single line in the exact form: `Verdict: Approve | Revise | Reject` (one word, no modifiers).",
-      "systemPrompt": "file:worker.md",
-      "tools": "Agent,Bash,Edit,Glob,Grep,Read,Skill,TaskStop,TodoWrite,WebFetch,WebSearch,Write",
-      "pluginDirs": [
-        "plugins/cortex-common",
-        "plugins/cortex-stage-gate"
-      ]
-    },
-    "plan-executor": {
-      "name": "plan-executor",
-      "description": "Plan Executor \u2014 translate Plan Reviewer's verdict into task creation in the plan-gate template (Approve\u2192next phase / Revise\u2192patch+retry gate / Reject\u2192stop), do not modify plan file structure",
-      "profile": "plan",
-      "persistSession": false,
-      "directive": "file:plan-executor.md",
-      "promptTemplate": "Translate Plan Reviewer's verdict into operations per the plan-executor directive.\n\nPlan Reviewer's report (previous step):\n{{previousOutput}}\n\n---\n\nOriginal task / context:\n{{input}}\n\n---\n\nReviewer's full artifact is at {{artifactPath}} \u2014 read it end-to-end first, extract the `Verdict:` word, then run the matching branch (Approve / Revise / Reject). All new tasks MUST carry `template:plan-gate` and full metadata; gate tasks always start `PLAN-GATE: `. Do NOT modify the plan file's structure or acceptance criteria.",
-      "systemPrompt": "file:worker.md",
-      "tools": "Agent,Bash,Edit,Glob,Grep,Read,Skill,TaskStop,TodoWrite,WebFetch,WebSearch,Write",
-      "pluginDirs": [
-        "plugins/cortex-stage-gate"
-      ]
-    },
-    "milestone-reviewer": {
-      "name": "milestone-reviewer",
-      "description": "Milestone Reviewer \u2014 execute adversarial review in the milestone-gate template, check milestone output against roadmap.md success conditions, output Blocker / Nice-to-have, do not issue verdict (Director is responsible)",
-      "profile": "execute",
-      "persistSession": false,
-      "directive": "file:milestone-reviewer.md",
-      "promptTemplate": "Execute the milestone adversarial audit per the milestone-reviewer directive.\n\nTask / context:\n{{input}}\n\n---\n\nWrite the review to {{artifactPath}}. Cover every dimension the milestone's success criteria can be judged on. Each issue must carry a citation and a Blocker / Nice-to-have label. Do NOT issue a Director-style verdict \u2014 that belongs to Director.",
-      "systemPrompt": "file:worker.md",
-      "tools": "Agent,Bash,Edit,Glob,Grep,Read,Skill,TaskStop,TodoWrite,WebFetch,WebSearch,Write",
-      "pluginDirs": [
-        "plugins/cortex-common",
-        "plugins/cortex-stage-gate"
-      ]
-    },
     "director": {
       "name": "director",
-      "description": "Project Director \u2014 consume Milestone Reviewer report in the milestone-gate template and issue Proceed / Iterate / Pivot / Abort verdict; write result to artifact",
+      "description": "Project Director — consume Milestone Reviewer report in the milestone-gate template and issue Proceed / Iterate / Pivot / Abort verdict; write result to artifact",
       "profile": "execute",
       "persistSession": false,
       "directive": "file:director.md",
-      "promptTemplate": "Execute the milestone verdict per the director directive.\n\nMilestone Reviewer's report (previous step):\n{{previousOutput}}\n\n---\n\nOriginal task / context:\n{{input}}\n\n---\n\nReviewer's full artifact is at {{artifactPath}} \u2014 read it end-to-end first. Write your analysis and the final `Verdict:` line back to the same artifact. Artifact MUST agree on verdict word and top reasons.",
+      "promptTemplate": "Execute the milestone verdict per the director directive.\n\nMilestone Reviewer's report (previous step):\n{{previousOutput}}\n\n---\n\nOriginal task / context:\n{{input}}\n\n---\n\nReviewer's full artifact is at {{artifactPath}} — read it end-to-end first. Write your analysis and the final `Verdict:` line back to the same artifact. Artifact MUST agree on verdict word and top reasons.",
       "systemPrompt": "file:worker.md",
       "tools": "Agent,Bash,Edit,Glob,Grep,Read,Skill,TaskStop,TodoWrite,WebFetch,WebSearch,Write",
       "pluginDirs": [
         "plugins/cortex-common",
-        "plugins/cortex-stage-gate"
-      ]
-    },
-    "milestone-executor": {
-      "name": "milestone-executor",
-      "description": "Milestone Executor \u2014 translate Director's verdict into roadmap updates and task creation in the milestone-gate template, all writes go to project files",
-      "profile": "plan",
-      "persistSession": false,
-      "directive": "file:milestone-executor.md",
-      "promptTemplate": "Translate Director's verdict into operations per the milestone-executor directive.\n\nDirector's analysis (previous step):\n{{previousOutput}}\n\n---\n\nOriginal task / context:\n{{input}}\n\n---\n\nDirector's full artifact is at {{artifactPath}} \u2014 read it end-to-end first and extract the `Verdict:` word. Then execute the matching branch (Proceed / Iterate / Pivot / Abort) per directive.",
-      "systemPrompt": "file:worker.md",
-      "tools": "Agent,Bash,Edit,Glob,Grep,Read,Skill,TaskStop,TodoWrite,WebFetch,WebSearch,Write",
-      "pluginDirs": [
         "plugins/cortex-stage-gate"
       ]
     },
     "doc-writer": {
       "name": "doc-writer",
-      "description": "Doc Writer \u2014 general document producer, outputs structured documents such as status / digest / decision / report / knowledge entry, writes to project files",
+      "description": "Doc Writer — general document producer, outputs structured documents such as status / digest / decision / report / knowledge entry, writes to project files",
       "profile": "plan",
       "persistSession": true,
       "directive": "file:doc-writer.md",
@@ -186,13 +105,13 @@
       "entryStage": "write",
       "stages": {
         "write": {
-          "description": "Initial writing pass \u2014 produce or update the target document, then summarize changes in the artifact.",
-          "promptTemplate": "Task:\n{{input}}\n\nProduce or update the document(s) per the doc-writer directive. After writing, append `## Write Summary (iteration 1)` to {{artifactPath}} listing each file you modified and the key changes. Do NOT write `[APPROVED]` \u2014 only the reviewer writes that."
+          "description": "Initial writing pass — produce or update the target document, then summarize changes in the artifact.",
+          "promptTemplate": "Task:\n{{input}}\n\nProduce or update the document(s) per the doc-writer directive. After writing, append `## Write Summary (iteration 1)` to {{artifactPath}} listing each file you modified and the key changes. Do NOT write `[APPROVED]` — only the reviewer writes that."
         },
         "retry": {
           "description": "After a blocking `## Review`: fix and append `## Write Summary (iteration N)` + `[REVISED]`.",
           "continuesSession": true,
-          "promptTemplate": "The Reviewer's `## Review` has been written to {{artifactPath}}. First verify each Blocker against its cited source \u2014 the Reviewer is not infallible. Then fix the document files per the feedback. When done, append `## Write Summary (iteration N)` and MUST write `[REVISED]` to {{artifactPath}} on its own line."
+          "promptTemplate": "The Reviewer's `## Review` has been written to {{artifactPath}}. First verify each Blocker against its cited source — the Reviewer is not infallible. Then fix the document files per the feedback. When done, append `## Write Summary (iteration N)` and MUST write `[REVISED]` to {{artifactPath}} on its own line."
         }
       },
       "tools": "Agent,Bash,Edit,Glob,Grep,Read,Skill,TaskStop,TodoWrite,WebFetch,WebSearch,Write",
@@ -203,12 +122,12 @@
     },
     "doc-reviewer": {
       "name": "doc-reviewer",
-      "description": "Doc Reviewer \u2014 audit Doc Writer's changes to project documents, grade by original requirements + Blocker / Nice-to-have",
+      "description": "Doc Reviewer — audit Doc Writer's changes to project documents, grade by original requirements + Blocker / Nice-to-have",
       "profile": "execute",
       "persistSession": true,
       "directive": "file:doc-reviewer.md",
       "systemPrompt": "file:worker.md",
-      "promptTemplate": "Audit Doc Writer's project-file changes (changes by other agents in the same files may appear \u2014 ignore those):\n{{modifiedFiles}}\n\nOriginal task:\n{{input}}\n\nApply the doc-reviewer directive and append your review to {{artifactPath}} under `## Review (iteration N)`. End the section with `[APPROVED]` if no Blockers remain; otherwise list the Blockers so Doc Writer can revise.",
+      "promptTemplate": "Audit Doc Writer's project-file changes (changes by other agents in the same files may appear — ignore those):\n{{modifiedFiles}}\n\nOriginal task:\n{{input}}\n\nApply the doc-reviewer directive and append your review to {{artifactPath}} under `## Review (iteration N)`. End the section with `[APPROVED]` if no Blockers remain; otherwise list the Blockers so Doc Writer can revise.",
       "tools": "Agent,Bash,Edit,Glob,Grep,Read,Skill,TaskStop,TodoWrite,WebFetch,WebSearch,Write",
       "pluginDirs": [
         "plugins/cortex-common",
@@ -217,7 +136,7 @@
     },
     "coder": {
       "name": "coder",
-      "description": "Coder \u2014 code implementation executor. Works in multiple stages in the coder-review template: plan \u2192 implement \u2192 retry, driven by transition graph rather than artifact section inference",
+      "description": "Coder — code implementation executor. Works in multiple stages in the coder-review template: plan → implement → retry, driven by transition graph rather than artifact section inference",
       "profile": "plan",
       "persistSession": true,
       "directive": "file:coder.md",
@@ -231,7 +150,7 @@
         "implement": {
           "description": "After `## Plan Review`: exit plan mode, implement, append `## Implementation Summary (iteration 1)`.",
           "continuesSession": true,
-          "promptTemplate": "Begin implementation. When done, append `## Implementation Summary (iteration 1)` to the end of the artifact, listing changed files, commit short-SHAs, flagged ambiguities, env changes, and accept/reject with rationale for each plan-review item. Do NOT write `[IMPL-APPROVED]` \u2014 only the reviewer writes that. After committing, run the full test suite (`npm test` or equivalent) and confirm every stage passes before writing your summary."
+          "promptTemplate": "Begin implementation. When done, append `## Implementation Summary (iteration 1)` to the end of the artifact, listing changed files, commit short-SHAs, flagged ambiguities, env changes, and accept/reject with rationale for each plan-review item. Do NOT write `[IMPL-APPROVED]` — only the reviewer writes that. After committing, run the full test suite (`npm test` or equivalent) and confirm every stage passes before writing your summary."
         },
         "retry": {
           "description": "After a blocking `## Impl Review`: fix and append `## Implementation Summary (iteration 2)` + `[REVISED]`.",
@@ -247,7 +166,7 @@
     },
     "coder-reviewer": {
       "name": "coder-reviewer",
-      "description": "Coder Reviewer \u2014 works in two stages (planReview / implReview) in the coder-review template, transition graph determines stage rather than artifact inference",
+      "description": "Coder Reviewer — works in two stages (planReview / implReview) in the coder-review template, transition graph determines stage rather than artifact inference",
       "profile": "execute",
       "persistSession": true,
       "directive": "file:coder-reviewer.md",
@@ -255,13 +174,13 @@
       "entryStage": "planReview",
       "stages": {
         "planReview": {
-          "description": "Read `## Plan` and append `## Plan Review (iteration N)` \u2014 no approval marker here.",
-          "promptTemplate": "Task:\n{{input}}\n\nRead {{artifactPath}} end-to-end and review the latest `## Plan (iteration N)` section. Confirm Coder only touched the artifact file (no premature implementation). Append `## Plan Review (iteration N)` to {{artifactPath}}. Do NOT write any approval marker in Plan Review \u2014 Coder decides per-Blocker what to accept/reject."
+          "description": "Read `## Plan` and append `## Plan Review (iteration N)` — no approval marker here.",
+          "promptTemplate": "Task:\n{{input}}\n\nRead {{artifactPath}} end-to-end and review the latest `## Plan (iteration N)` section. Confirm Coder only touched the artifact file (no premature implementation). Append `## Plan Review (iteration N)` to {{artifactPath}}. Do NOT write any approval marker in Plan Review — Coder decides per-Blocker what to accept/reject."
         },
         "implReview": {
-          "description": "Read `## Implementation Summary` + diff and append `## Impl Review (iteration M)` \u2014 must end with `[IMPL-APPROVED]` or list Blockers.",
+          "description": "Read `## Implementation Summary` + diff and append `## Impl Review (iteration M)` — must end with `[IMPL-APPROVED]` or list Blockers.",
           "continuesSession": true,
-          "promptTemplate": "Original task:\n{{input}}\n\nAudit Coder's project-file changes (changes by other agents in the same files may appear \u2014 ignore those):\n{{modifiedFiles}}\n\nRead the latest `## Implementation Summary (iteration M)` in {{artifactPath}} (and the following `## Response to Impl Review` if present). Append `## Impl Review (iteration M)` to {{artifactPath}}. **Remember: you MUST write your review to {{artifactPath}}.** If approved, end with `[IMPL-APPROVED]`; otherwise list the Blockers. Coder gets only 1 retry after the first block; beyond that the pipeline ends. Do not fabricate approval markers.\n\nBefore writing your review, run the project's full test suite (`npm test` or equivalent). Check that every stage passes: architecture linter, unit tests, integration tests. Any failure is a Blocker \u2014 do not write [IMPL-APPROVED] until the full suite is green."
+          "promptTemplate": "Original task:\n{{input}}\n\nAudit Coder's project-file changes (changes by other agents in the same files may appear — ignore those):\n{{modifiedFiles}}\n\nRead the latest `## Implementation Summary (iteration M)` in {{artifactPath}} (and the following `## Response to Impl Review` if present). Append `## Impl Review (iteration M)` to {{artifactPath}}. **Remember: you MUST write your review to {{artifactPath}}.** If approved, end with `[IMPL-APPROVED]`; otherwise list the Blockers. Coder gets only 1 retry after the first block; beyond that the pipeline ends. Do not fabricate approval markers.\n\nBefore writing your review, run the project's full test suite (`npm test` or equivalent). Check that every stage passes: architecture linter, unit tests, integration tests. Any failure is a Blocker — do not write [IMPL-APPROVED] until the full suite is green."
         }
       },
       "tools": "Agent,Bash,Edit,Glob,Grep,Read,Skill,TaskStop,TodoWrite,WebFetch,WebSearch,Write",
@@ -272,7 +191,7 @@
     },
     "executor": {
       "name": "executor",
-      "description": "Executor \u2014 general task executor, performs assigned work (edit files, run commands, modify code, config changes, etc.), writes results to artifact. Stages: execute \u2192 retry",
+      "description": "Executor — general task executor, performs assigned work (edit files, run commands, modify code, config changes, etc.), writes results to artifact. Stages: execute → retry",
       "profile": "execute",
       "persistSession": true,
       "directive": "file:executor.md",
@@ -281,12 +200,12 @@
       "stages": {
         "execute": {
           "description": "Execute the task, write ## Execute Summary to artifact",
-          "promptTemplate": "Task:\n{{input}}\n\nExecute the task per the executor directive. After completion, append `## Execute Summary (iteration 1)` to {{artifactPath}} listing what you did, what changed, and any decisions made. Do NOT write `[APPROVED]` \u2014 only the reviewer writes that."
+          "promptTemplate": "Task:\n{{input}}\n\nExecute the task per the executor directive. After completion, append `## Execute Summary (iteration 1)` to {{artifactPath}} listing what you did, what changed, and any decisions made. Do NOT write `[APPROVED]` — only the reviewer writes that."
         },
         "retry": {
           "description": "Address reviewer Blockers, write [REVISED] after fixing",
           "continuesSession": true,
-          "promptTemplate": "The Reviewer's `## Review` has been written to {{artifactPath}}. First verify each Blocker against its cited source \u2014 the Reviewer is not infallible. Fix the issues per the feedback. When done, append `## Execute Summary (iteration N)` and MUST write `[REVISED]` to {{artifactPath}} on its own line."
+          "promptTemplate": "The Reviewer's `## Review` has been written to {{artifactPath}}. First verify each Blocker against its cited source — the Reviewer is not infallible. Fix the issues per the feedback. When done, append `## Execute Summary (iteration N)` and MUST write `[REVISED]` to {{artifactPath}} on its own line."
         }
       },
       "tools": "Agent,Bash,Edit,Glob,Grep,Read,Skill,TaskStop,Write,WebFetch,WebSearch",
@@ -297,7 +216,7 @@
     },
     "executor-reviewer": {
       "name": "executor-reviewer",
-      "description": "Executor Reviewer \u2014 audit Executor's execution results, check correctness, completeness, and safety against task requirements + diff",
+      "description": "Executor Reviewer — audit Executor's execution results, check correctness, completeness, and safety against task requirements + diff",
       "profile": "execute",
       "persistSession": true,
       "directive": "file:executor-reviewer.md",
@@ -311,7 +230,7 @@
     },
     "manager": {
       "name": "manager",
-      "description": "Resident manager of a composite task node (DR-0014 \u00a78): decomposes into child tasks (decompose --keep-parent), suspends via the thread_wait tool, re-enters its own session to verify deliverables, rework, or escalate. persistSession is load-bearing \u2014 re-entry resumes the SAME session with full memory.",
+      "description": "Resident manager of a composite task node (DR-0014 §8): decomposes into child tasks (decompose --keep-parent), suspends via the thread_wait tool, re-enters its own session to verify deliverables, rework, or escalate. persistSession is load-bearing — re-entry resumes the SAME session with full memory.",
       "profile": "__active__",
       "persistSession": true,
       "directive": "file:manager.md",
@@ -340,7 +259,7 @@
     },
     "scheduler": {
       "name": "scheduler",
-      "description": "Scheduled task \u2014 single agent + onEnd hook (compound + git commit)",
+      "description": "Scheduled task — single agent + onEnd hook (compound + git commit)",
       "agents": [
         "scheduler-main"
       ],
@@ -357,28 +276,9 @@
         }
       }
     },
-    "plan-review": {
-      "name": "plan-review",
-      "description": "Plan-then-review (no execution): planner drafts \u2192 reviewer audits \u2192 END. Use this when you want a multi-step plan adversarially reviewed before committing to execution.",
-      "agents": [
-        "planner",
-        "reviewer"
-      ],
-      "transitions": [
-        {
-          "from": "planner",
-          "to": "reviewer",
-          "condition": {
-            "type": "always"
-          }
-        }
-      ],
-      "entryAgent": "planner",
-      "maxTotalSteps": 2
-    },
     "doc-review": {
       "name": "doc-review",
-      "description": "Generic produce-then-audit for documents (status / digest / decision / report / knowledge entry). Stages: doc-writer(write) \u2192 doc-reviewer \u2192 (if not [APPROVED]) doc-writer(retry, write [REVISED] at end) \u2192 END",
+      "description": "Generic produce-then-audit for documents (status / digest / decision / report / knowledge entry). Stages: doc-writer(write) → doc-reviewer → (if not [APPROVED]) doc-writer(retry, write [REVISED] at end) → END",
       "agents": [
         "doc-writer",
         "doc-reviewer"
@@ -424,7 +324,7 @@
     },
     "coder-review": {
       "name": "coder-review",
-      "description": "Stage-driven coder loop: coder(plan) \u2192 coder(implement) \u2192 reviewer(implReview) \u2192 (if implReview lacks [IMPL-APPROVED]) coder(retry, write [REVISED] at end) \u2192 END. Each stage's prompt is selected by the transition graph in thread-engine, no longer inferred from artifact sections.",
+      "description": "Stage-driven coder loop: coder(plan) → coder(implement) → reviewer(implReview) → (if implReview lacks [IMPL-APPROVED]) coder(retry, write [REVISED] at end) → END. Each stage's prompt is selected by the transition graph in thread-engine, no longer inferred from artifact sections.",
       "agents": [
         "coder",
         "coder-reviewer"
@@ -475,73 +375,9 @@
         }
       }
     },
-    "plan-gate": {
-      "name": "plan-gate",
-      "description": "Plan-phase gate: plan-reviewer audits one phase against the externally-supplied plan's acceptance criteria and issues Approve / Revise / Reject; plan-executor dispatches the matching branch (next-phase tasks / patch tasks / stop). Does NOT touch roadmap.md or plan-file structure.",
-      "agents": [
-        "plan-reviewer",
-        "plan-executor"
-      ],
-      "transitions": [
-        {
-          "from": "plan-reviewer",
-          "to": "plan-executor",
-          "condition": {
-            "type": "always"
-          }
-        }
-      ],
-      "entryAgent": "plan-reviewer",
-      "maxTotalSteps": 3,
-      "hooks": {
-        "onEnd": {
-          "command": "node ~/.cortex/hooks/post-task-hook.mjs",
-          "args": [
-            "plan-executor"
-          ],
-          "timeout": 10000
-        }
-      }
-    },
-    "milestone-gate": {
-      "name": "milestone-gate",
-      "description": "Milestone evaluation: adversarial review \u2192 strategic verdict (Proceed/Iterate/Pivot/Abort) \u2192 operational follow-up. milestone-reviewer audits milestone output \u2192 director issues verdict \u2192 milestone-executor writes roadmap / creates next-phase tasks. Suitable for phase decisions in any mission-driven project.",
-      "agents": [
-        "milestone-reviewer",
-        "director",
-        "milestone-executor"
-      ],
-      "transitions": [
-        {
-          "from": "milestone-reviewer",
-          "to": "director",
-          "condition": {
-            "type": "always"
-          }
-        },
-        {
-          "from": "director",
-          "to": "milestone-executor",
-          "condition": {
-            "type": "always"
-          }
-        }
-      ],
-      "entryAgent": "milestone-reviewer",
-      "maxTotalSteps": 4,
-      "hooks": {
-        "onEnd": {
-          "command": "node ~/.cortex/hooks/post-task-hook.mjs",
-          "args": [
-            "milestone-executor"
-          ],
-          "timeout": 10000
-        }
-      }
-    },
     "execute-review": {
       "name": "execute-review",
-      "description": "Execute-then-review: executor executes task \u2192 executor-reviewer audits \u2192 at most 1 retry. Suitable for any verifiable task (code changes, config changes, file edits, script execution, etc.)",
+      "description": "Execute-then-review: executor executes task → executor-reviewer audits → at most 1 retry. Suitable for any verifiable task (code changes, config changes, file edits, script execution, etc.)",
       "agents": [
         "executor",
         "executor-reviewer"
@@ -587,7 +423,7 @@
     },
     "manager": {
       "name": "manager",
-      "description": "Composite-task node manager (DR-0014 \u00a78). Single resident agent: Phase A decomposes the task into children (keep-parent) and suspends via the thread_wait tool; woken per task.completed/task.blocked events, Phase B verifies deliverables against done_when, reworks or escalates, finally completes its own task. Assign this template at task creation to any task expected to span 2+ independently verifiable units.",
+      "description": "Composite-task node manager (DR-0014 §8). Single resident agent: Phase A decomposes the task into children (keep-parent) and suspends via the thread_wait tool; woken per task.completed/task.blocked events, Phase B verifies deliverables against done_when, reworks or escalates, finally completes its own task. Assign this template at task creation to any task expected to span 2+ independently verifiable units.",
       "agents": [
         "manager"
       ],
