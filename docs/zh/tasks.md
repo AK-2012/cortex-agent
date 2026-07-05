@@ -249,6 +249,7 @@ cortex-client（到服务器的 WebSocket 连接）
 | `reopen --task-id <id>` | 把卡住的 `pending` 任务还原为 `open`（挽救丢失的 cortex-run 回调） |
 | `complete --task-id <id>` | 标记完成（`--note`、`--skip-verify` 绕过验证） |
 | `uncomplete --task-id <id>` | 撤销已完成的任务回到 open |
+| `verdict --task-id <parent> --child <id> --verdict accepted\|rejected` | 将 manager 对已交付子任务的验收裁决记录到父任务的验收账本（见 [Manager 任务与验收账本](#manager-dr-0017)；完整语法见 [cli-reference.md](./cli-reference.md)） |
 
 ### 审批命令
 
@@ -296,6 +297,63 @@ cortex-client（到服务器的 WebSocket 连接）
 ## 一个标准，一个任务（DR-0006）
 
 每个任务应只有一个可验证的完成标准。具有多个独立标准的任务应使用 `decompose` 命令分解为子任务。这确保了清晰的分发、明确的所有权和无歧义的完成验证。
+
+## Manager 任务与验收账本（DR-0017）
+
+简单工作是分发给单个工作线程的叶子任务。**复合工作**——一个会分解为多个独立可验证单元、且需要协调、验收与返工的目标——则改用 **manager 任务**建模。
+
+### Manager 任务节点
+
+`template` 为 `manager` 的任务是一个**复合任务节点**，由一个常驻的 **manager 线程**拥有。manager 本身不做具体工作，它的生命周期是：
+
+1. **分解（Decompose）**——将任务拆分为子任务（通常用 `decompose --keep-parent`，让父任务作为依赖其子任务的汇合/验收节点保留下来）。
+2. **挂起（Suspend）**——调用 `thread_wait` 并在子任务运行期间休眠。
+3. **验证（Verify）**——子任务完成后，对照每个子任务自己的 `done-when` 验证其交付物（先验收再信任：读文件、跑测试——绝不把子任务的自我汇报当作证据）。
+4. **记录裁决（Record a verdict）**——对每个已交付的子任务给出接受或拒绝（见下方验收账本）。
+5. **整合并完成（Integrate and complete）**——当每个子任务都被接受后，整合结果并完成父任务。
+
+manager 线程的完整生命周期——其持久的按任务寻址的 artifact、`thread_wait` 检查点门、以及会话轮换/再水化——记录在 [threads.md](./threads.md)。
+
+### 验收账本
+
+验收账本是一份持久的、机器可读的记录，记载 manager 已收到并已裁决了哪些子任务结果。它位于：
+
+```
+context/projects/{project}/manager/{taskId}/ledger.json
+```
+
+与 manager 的按任务寻址 artifact 放在一起，以 JSON 形式同步原子写入。
+
+**为什么存在：** 对*任务型*子任务的结果交付做**跨化身（cross-incarnation）去重**。每线程的交付记录只能在单个 manager 化身内去重；账本则跨化身（会话轮换、服务器重启、manager 替换）去重，因此当 manager 的 LLM 会话被替换时，已交付的结果既不会丢失也不会被重复交付。
+
+**结构：** `{ parent, project, children: { <childId>: LedgerEntry } }`，其中每个 `LedgerEntry` 有以下字段：
+
+| 字段 | 含义 |
+|-------|---------|
+| `child` | 子任务 id |
+| `kind` | 子任务如何终止：`completed` 或 `blocked` |
+| `delivered_at` | 结果交付给 manager 的 ISO 时间戳 |
+| `verdict` | `pending` \| `accepted` \| `rejected` |
+| `verdict_at` | 裁决的 ISO 时间戳（记录前为 null） |
+| `verdict_note` | manager 对该裁决的备注 |
+| `rework_round` | 该子任务被拒绝并退回的次数 |
+
+**交付语义**（在裁决记录之前，每个化身内交付至少一次）：
+
+- **`accepted`** → 该子任务结果**永不再交付**给未来的 manager 化身。
+- **`pending`**（已交付但尚未裁决——包括化身在裁决前死亡的情况）→ **重新交付**给新的化身。这个偏向是刻意的：宁可重复交付也不丢失。
+- **`rejected`** → 重新打开为 `pending`，并在子任务返工后再次完成时重新交付，**并保留 `rework_round`**。
+
+**Fail-open（失败即放行）：** 缺失或损坏的账本降级为空账本——最坏情况是结果被重复交付，绝不会丢失结果。
+
+### 验收循环中的 `verdict` 命令
+
+manager 通过 `cortex-task verdict` 命令把裁决写入账本——它是账本的写入路径。在 manager 的验证阶段，对每个已交付的子任务：
+
+- **通过** → `verdict --verdict accepted`。该子任务结果不再重新交付。
+- **不通过** → `verdict --verdict rejected --note "<gap>"`。这会递增该子任务的 `rework_round`；子任务随后被返工（例如 `uncomplete` + 编辑，或新增一个修订子任务）并重新交付，此时它重新打开等待再次裁决。
+
+`--verdict` 必须恰好是 `accepted` 或 `rejected`，且 `--child` 为必填。命令的确切签名与标志见 [cli-reference.md](./cli-reference.md)。
 
 ## 任务分发并发
 
