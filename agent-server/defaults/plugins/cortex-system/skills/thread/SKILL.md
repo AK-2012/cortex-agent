@@ -1,6 +1,6 @@
 ---
 name: thread
-description: "Use when working with the Cortex thread system — understanding thread architecture, writing or modifying thread config (the per-entity JSON files under config/thread-templates/ — agents, templates, shells, transitions, hooks), debugging thread execution, or when the user asks about multi-agent pipelines, agent orchestration, or the !thread command. Also trigger when modifying prompts/directives/, prompts/systemPrompts/, or prompts/promptTemplates/ files that feed into threads."
+description: "Use when working with the Cortex thread system — understanding thread architecture, writing or modifying thread config (the per-entity JSON files under config/thread-templates/ — agents, templates, shells; plus transitions and hooks fields within templates), debugging thread execution, or when the user asks about multi-agent pipelines, agent orchestration, or the !thread command. Also trigger when modifying prompts/directives/, prompts/systemPrompts/, or prompts/promptTemplates/ files that feed into threads."
 author: Cortex
 version: 1.0.0
 allowed-tools:
@@ -458,7 +458,7 @@ Dispatch flow: `task-dispatcher.ts` selects a task → extracts template name �
 
 ## How to Add a New Agent
 
-1. Add the agent definition as a new file `config/thread-templates/agents/<name>.json` (the filename without `.json` is the agent name)
+1. Add the agent definition as a new file `~/.cortex/config/thread-templates/agents/<name>.json` (the filename without `.json` is the agent name)
 2. If using a `file:` directive, create the directive file in `prompts/directives/`
 3. If using a `file:` systemPrompt, create it in `prompts/systemPrompts/`
 4. Choose the right `profile` (plan/execute/qa/__active__)
@@ -467,8 +467,8 @@ Dispatch flow: `task-dispatcher.ts` selects a task → extracts template name �
 
 ## How to Add a New Template
 
-1. Define any new agents needed as files under `config/thread-templates/agents/`
-2. Add the template as a file `config/thread-templates/templates/<name>.json` (the filename without `.json` is the template name) with:
+1. Define any new agents needed as files under `~/.cortex/config/thread-templates/agents/`
+2. Add the template as a file `~/.cortex/config/thread-templates/templates/<name>.json` (the filename without `.json` is the template name) with:
    - `agents`: list of agent refs (simple strings or override objects)
    - `transitions`: rules connecting agents
    - `entryAgent`: the starting agent
