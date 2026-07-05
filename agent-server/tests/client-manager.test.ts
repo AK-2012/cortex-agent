@@ -13,6 +13,7 @@ import {
   startClientManager,
   stopClientManager,
   buildRemoteSpawnCommand,
+  buildRemoteInstallCommand,
   startRemoteClient,
   _setSshExecForTesting,
   _setMachineRegistryProviderForTesting,
@@ -218,6 +219,41 @@ test('buildRemoteSpawnCommand uses reg.clientCommand over the default on Windows
 test('buildRemoteSpawnCommand falls back to cortex-client when clientCommand is blank', () => {
   const cmd = buildRemoteSpawnCommand({ cortexPath: '/home/x', gpuCount: 0, ssh: 'user@host', clientCommand: '   ' });
   assert.match(cmd, /^nohup cortex-client > \/dev\/null/);
+});
+
+test('buildRemoteInstallCommand defaults to bare npm install -g <tgz> when unset', () => {
+  const cmd = buildRemoteInstallCommand({ cortexPath: '/home/x', gpuCount: 0, ssh: 'user@host' }, '/tmp/cortex-agent-client-2026.6.22.tgz');
+  assert.equal(cmd, 'npm install -g /tmp/cortex-agent-client-2026.6.22.tgz');
+});
+
+test('buildRemoteInstallCommand substitutes the {tgz} placeholder in a custom command', () => {
+  const cmd = buildRemoteInstallCommand(
+    { cortexPath: '/home/fangxm', gpuCount: 2, ssh: 'fangxm@lab', installCommand: "bash -lc 'source ~/.nvm/nvm.sh && npm install -g {tgz}'" },
+    '/tmp/cortex-agent-client-2026.6.22.tgz',
+  );
+  assert.equal(cmd, "bash -lc 'source ~/.nvm/nvm.sh && npm install -g /tmp/cortex-agent-client-2026.6.22.tgz'");
+  assert.doesNotMatch(cmd, /\{tgz\}/);
+});
+
+test('buildRemoteInstallCommand replaces every {tgz} occurrence', () => {
+  const cmd = buildRemoteInstallCommand(
+    { cortexPath: '/home/x', gpuCount: 0, ssh: 'user@host', installCommand: 'echo {tgz} && npm install -g {tgz}' },
+    '/tmp/c.tgz',
+  );
+  assert.equal(cmd, 'echo /tmp/c.tgz && npm install -g /tmp/c.tgz');
+});
+
+test('buildRemoteInstallCommand appends the tgz path when the template has no placeholder', () => {
+  const cmd = buildRemoteInstallCommand(
+    { cortexPath: '/home/x', gpuCount: 0, ssh: 'user@host', installCommand: '/home/x/.nvm/versions/node/v20.19.5/bin/npm install -g' },
+    '/tmp/c.tgz',
+  );
+  assert.equal(cmd, '/home/x/.nvm/versions/node/v20.19.5/bin/npm install -g /tmp/c.tgz');
+});
+
+test('buildRemoteInstallCommand falls back to the default when installCommand is blank', () => {
+  const cmd = buildRemoteInstallCommand({ cortexPath: '/home/x', gpuCount: 0, ssh: 'user@host', installCommand: '   ' }, '/tmp/c.tgz');
+  assert.equal(cmd, 'npm install -g /tmp/c.tgz');
 });
 
 // --- Regression: when SSH spawn returns an unparseable PID (the live failure mode

@@ -9,7 +9,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { execSync, execFile, spawn } from 'child_process';
 import { getMachineRegistry, type MachineEntry } from '../tasks/dispatch-utils.js';
-import { sshExec, clientPids, buildRemoteSpawnCommand } from './client-manager.js';
+import { sshExec, clientPids, buildRemoteSpawnCommand, buildRemoteInstallCommand } from './client-manager.js';
 import { STORE_DIR } from '@core/utils.js';
 import { createLogger } from '@core/log.js';
 import { Icons } from '../../core/icons.js';
@@ -297,8 +297,9 @@ async function updateClientDev(
     log.info(`  ${device}: SCP ${tgzName} → ${reg.ssh}:/tmp/`);
     await scpToRemote(reg.ssh, tgzPath, remoteTmpPath, 60000);
 
-    // 3. Install from tgz
-    const installCmd = `npm install -g ${remoteTmpPath} 2>&1`;
+    // 3. Install from tgz (command configurable per machine — machines.json `installCommand`,
+    //    e.g. wrap in a login/interactive shell on nvm hosts where npm is off the SSH PATH)
+    const installCmd = `${buildRemoteInstallCommand(reg, remoteTmpPath)} 2>&1`;
     const installOutput = await sshExec(reg.ssh, installCmd, 60000);
     log.info(`  ${device}: npm install -g output: ${installOutput.slice(0, 200)}`);
     res.updated = true;

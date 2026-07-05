@@ -111,7 +111,7 @@ How to run tests without tripping it:
 | `session.test.ts` | Test | session.ts backend:channel CRUD |
 | `session-hooks-profile-resolution.test.ts` | Test | resolveOnNewProfileName priority (registry > ledger) — regression for "Invalid signature in thinking block" caused by thread vs user session profile mismatch |
 | `session-hooks-inject-isolation.test.ts` | Test | onNewInjectSessionKey isolation + runHookInjection: onNew pre-close turn runs on an isolated pool key (≠ channel) and is closed after (incl. on failure); onMessageEnd stays on the channel live slot — regression for the `!new` + onNew memory-hook session-resurrection race |
-| `client-manager.test.ts` | Test | client-manager handshake/sendCommand + WS bearer-token verifyClient (reject no/wrong token, accept valid) + `buildRemoteSpawnCommand` cmd.exe-wrap + token-injection + retry-on-spawn-failure regressions |
+| `client-manager.test.ts` | Test | client-manager handshake/sendCommand + WS bearer-token verifyClient (reject no/wrong token, accept valid) + `buildRemoteSpawnCommand` cmd.exe-wrap + token-injection + retry-on-spawn-failure regressions + `buildRemoteInstallCommand` (dev hot-reload install cmd: default `npm install -g <tgz>` / `{tgz}` placeholder substitution / no-placeholder append / blank-fallback) |
 | `client-hot-reload.test.ts` | Test | `updateClientReleaseLocal` (release-mode local same-machine client update): already-at-latest no-op, kill→npmUpdate→restart ordering, unknown installed version, npmUpdate-throws error capture, restart-fail partial |
 | `cortex-run-callback-handler.test.ts` | Test | task-callback handler (DR-0011 §4.4): idempotency, skipVerify, ghost callback, blockTask note |
 | `mcp-server.test.ts` | Test | Import safety and startup hints |

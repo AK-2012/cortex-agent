@@ -27,6 +27,17 @@ export interface MachineEntry {
    * nohup/echo-$! (Linux) / cmd.exe-wrap WMI (Windows) machinery wraps this command.
    */
   clientCommand?: string;
+  /**
+   * Command the server runs (over SSH) to install the client tgz on this machine
+   * during a dev-mode hot-reload. Defaults to `npm install -g <tgz>`. Override for
+   * machines where a bare `npm` is not on the non-interactive SSH PATH (e.g. nvm
+   * installs, where npm is only sourced in a login/interactive profile).
+   * The template may contain the `{tgz}` placeholder for the remote tgz path; if the
+   * placeholder is absent, the path is appended. Examples:
+   *   "bash -lc 'source ~/.nvm/nvm.sh && npm install -g {tgz}'"
+   *   "/home/u/.nvm/versions/node/v20.19.5/bin/npm install -g"
+   */
+  installCommand?: string;
 }
 
 export type MachineRegistry = Record<string, MachineEntry>;

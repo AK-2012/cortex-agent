@@ -1,5 +1,5 @@
 // input:  WebSocket connections from cortex-client instances
-// output: start/stop/getOnlineDevices/sendCommand/isDeviceOnline/buildRemoteSpawnCommand
+// output: start/stop/getOnlineDevices/sendCommand/isDeviceOnline/buildRemoteSpawnCommand/buildRemoteInstallCommand
 // pos:    cortex-client WebSocket connection registration, command routing, and
 //         SSH-based remote client lifecycle (spawn / retry / PID tracking)
 // >>> If I am updated, update my header comment and the parent folder's CORTEX.md <<<
@@ -360,6 +360,27 @@ function buildRemoteSpawnCommand(reg: MachineEntry, clientToken?: string): strin
   return `${envPrefix}nohup ${launch} > /dev/null 2>&1 & echo $!`;
 }
 
+/**
+ * Build the shell command run over SSH to install the client tgz on a remote device
+ * during a dev-mode hot-reload.
+ *
+ * Defaults to a bare `npm install -g <tgz>`. Install command is configurable per machine
+ * (machines.json `installCommand`) for hosts where `npm` is not on the non-interactive
+ * SSH PATH — e.g. nvm installs, where node/npm are only sourced in a login/interactive
+ * profile, so a plain `ssh host 'npm install -g …'` fails with "command not found".
+ * The template may contain the `{tgz}` placeholder for the remote tgz path; if the
+ * placeholder is absent, the path is appended. Examples of an override:
+ *   "bash -lc 'source ~/.nvm/nvm.sh && npm install -g {tgz}'"
+ *   "/home/u/.nvm/versions/node/v20.19.5/bin/npm install -g"
+ */
+function buildRemoteInstallCommand(reg: MachineEntry, remoteTgzPath: string): string {
+  const tmpl = reg.installCommand?.trim();
+  if (!tmpl) return `npm install -g ${remoteTgzPath}`;
+  return tmpl.includes('{tgz}')
+    ? tmpl.replaceAll('{tgz}', remoteTgzPath)
+    : `${tmpl} ${remoteTgzPath}`;
+}
+
 async function isRemotePidAlive(device: string): Promise<boolean> {
   const reg = _getRegistryImpl()[device];
   if (!reg?.ssh) return false;
@@ -549,6 +570,7 @@ export {
   startRemoteClient,
   startAllRemoteClients,
   buildRemoteSpawnCommand,
+  buildRemoteInstallCommand,
   clientPids,
   sshExec,
   // Test-only hooks (prefixed with _ by convention).
