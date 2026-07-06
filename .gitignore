@@ -38,6 +38,7 @@ agent-server/hooks/
 site/
 
 client/dist/
+packages/*/dist/
 client/cortex-client-*.tgz
 agent-server/cortex-agent-server-*.tgz
 client/cortex-agent-client-*.tgz
