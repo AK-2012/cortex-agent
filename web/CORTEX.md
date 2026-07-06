@@ -14,11 +14,13 @@ hard-codes hex.
 | `postcss.config.js` | tailwindcss + autoprefixer |
 | `index.html` | SPA entry; `#root` + `/src/main.tsx` |
 | `src/main.tsx` | React root; wraps `Providers` + `RouterProvider` |
-| `src/providers.tsx` | `QueryClientProvider` + tRPC `TRPCProvider` |
+| `src/providers.tsx` | `QueryClientProvider` + tRPC `TRPCProvider` + `design/TooltipProvider` |
 | `src/lib/trpc.ts` | `@trpc/tanstack-react-query` context + vanilla client. `splitLink`: query/mutate → `httpBatchLink`, subscription → `httpSubscriptionLink` (SSE). Typed directly against the real `AppRouter` (task 3) — the old `AnyTRPCRouter` fallback seam was removed (a deferred conditional type does not auto-tighten and degraded every procedure to `any`) |
-| `src/router.tsx` | `createBrowserRouter`: `AppShell` layout; `/tasks` → `TasksPage` (task 5), other routes still `EmptyPane` |
-| `src/shell/` | `AppShell` (three-pane) · `LeftRail` (nav) · `RightPanel` · `EmptyPane` placeholder |
-| `src/features/tasks/` | Tasks tab vertical slice (design 4a, task 5) — see its CORTEX.md |
+| `src/router.tsx` | `createBrowserRouter`: `AppShell` layout; `/tasks` → `TasksPage` (task 5), `/kit` → `KitPage` (design demo, task e794), other routes still `EmptyPane` |
+| `src/design/` | Design-system core primitives (DR-0018 §5 Stage 2, task e794) — token-driven StatusPill/MonoText/ID/Card/SectionHeader/Button/Tabs/Tooltip/EmptyState. See its CORTEX.md |
+| `src/shell/` | `AppShell` (three-pane) · `LeftRail` (nav) · `RightPanel` · `EmptyPane` (wraps `design/EmptyState`) |
+| `src/features/tasks/` | Tasks tab vertical slice (design 4a, task 5) — see its CORTEX.md. `Pills.tsx` delegates to `design/StatusPill` |
+| `src/features/kit/` | `/kit` design-system demo surface (task e794) — every primitive in every variant/state, pure presentational |
 | `src/index.css` | Tailwind directives + base (canvas bg, system font) |
 
 ## Notes
@@ -26,5 +28,6 @@ hard-codes hex.
 - Depends on `@cortex-agent/ui-contract` (`workspace:*`) for the `AppRouter` type + zod schemas — type-only, no backend runtime coupling.
 - **Tasks tab live** (Stage-1 task 5): `/tasks` renders real `tasks.list` grouped by lifecycle·priority and live-updates via the tRPC subscription. Verified end-to-end against a running ui-http-server (real render + live update on a real Complete mutation). Other tabs remain scaffold.
 - Dev boots without agent-server (proxy engages only on `/trpc` request). Live data needs the port-3004 ui-http-server (task 3) and `CORTEX_CLIENT_TOKEN` set in the dev shell (proxy injects it).
-- `build` = `tsc --noEmit && vite build`; `typecheck` = `tsc --noEmit`; `test` = `vitest run` (`group-tasks` pure-logic unit test; broader component tests are Stage-2 primitives work).
+- `build` = `tsc --noEmit && vite build`; `typecheck` = `tsc --noEmit`; `test` = `vitest run` (`group-tasks` grouping + `design/tone` status→tone mapping pure-logic unit tests).
 - Tailwind pinned to v3.4 (config-file token contract; v4 moves tokens to CSS `@theme`).
+- Tabs/Tooltip use `@radix-ui/react-tabs` / `@radix-ui/react-tooltip` (approved primitive layer, DR-0018 §1); token-only styling.

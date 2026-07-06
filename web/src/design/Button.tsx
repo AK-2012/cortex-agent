@@ -1,0 +1,47 @@
+import type { ButtonHTMLAttributes } from 'react';
+
+// Button primitive with token-driven variants (DR-0018 §5). No hard-coded hex —
+// colors come from the state palette / surface tokens.
+
+export type ButtonVariant = 'primary' | 'secondary' | 'ghost' | 'danger';
+export type ButtonSize = 'sm' | 'md';
+
+const VARIANT_CLASS: Record<ButtonVariant, string> = {
+  primary: 'bg-state-run text-surface-card hover:bg-state-run/90',
+  secondary: 'border border-card bg-surface-card text-state-ink hover:bg-surface-canvas-alt',
+  ghost: 'text-state-ink/80 hover:bg-surface-canvas-alt',
+  danger: 'bg-state-fail text-surface-card hover:bg-state-fail/90',
+};
+
+const SIZE_CLASS: Record<ButtonSize, string> = {
+  sm: 'px-1g py-0.5g text-ui',
+  md: 'px-2g py-1g text-ui',
+};
+
+const BASE =
+  'inline-flex items-center justify-center gap-1g rounded-card font-medium transition-colors ' +
+  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-state-run/40 ' +
+  'disabled:cursor-not-allowed disabled:opacity-50';
+
+export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
+  variant?: ButtonVariant;
+  size?: ButtonSize;
+}
+
+export function Button({
+  variant = 'secondary',
+  size = 'md',
+  className,
+  type = 'button',
+  ...rest
+}: ButtonProps) {
+  return (
+    <button
+      type={type}
+      className={[BASE, VARIANT_CLASS[variant], SIZE_CLASS[size], className]
+        .filter(Boolean)
+        .join(' ')}
+      {...rest}
+    />
+  );
+}
