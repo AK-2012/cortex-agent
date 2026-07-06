@@ -11,7 +11,7 @@ filter. Renders real agent-server data over tRPC (sessions/threads/tasks); Tasks
 | `SessionList.tsx` | Left pane. `sessions.list` query → selectable rows (label/name · project · kind). Selecting drives the center pane. Loading/error/empty states. `data-session-id` for E2E. |
 | `ChatPlaceholder.tsx` | Center pane. **Placeholder** — the contract has no transcript/message scope (live chat = Stage 4, plan §2.1). Renders the selected session's metadata read-only (`Card` + `ID`/`MonoText`) + a "chat is read-only" note, or an empty prompt when none selected. |
 | `RightPanelTabs.tsx` | Right pane. Radix `TabsRoot` (Threads/Tasks/Machines) + a shared Active/History `ScopeToggle`. The scope drives Threads (`status[]`) and Tasks (`open`/`done`); Machines ignores it. |
-| `ThreadsPanel.tsx` | `threads.list` filtered by `threadScopeFilter(scope)` (server-side `status[]`), live-updating via `useThreadsLiveSync`. Rows: `ID` · template · step · `StatusPill`. `data-thread-id`/`data-status` for E2E. |
+| `ThreadsPanel.tsx` | `threads.list` filtered by `threadScopeFilter(scope)` (server-side `status[]`), live-updating via `useThreadsLiveSync`. Each row is a button that **expands** into `features/thread/InlineThreadCard` (design 11a, task 065f) — the interim host for the inline thread card until chat lands (Stage 4). `data-thread-id`/`data-status`/`aria-expanded` for E2E. |
 | `MachinesPanel.tsx` | Placeholder `EmptyState` — machines registry is a Stage-7 backend extension (§2.1). |
 | `scope.ts` | **Pure** Active/History → filter mapping: `threadScopeFilter(scope) → string[]`, `taskScopeFilter(scope) → 'open'\|'done'`. Single source of truth for the filter semantics. |
 | `scope.test.ts` | vitest unit test for `scope.ts` (TDD — the filter partition invariant). |
