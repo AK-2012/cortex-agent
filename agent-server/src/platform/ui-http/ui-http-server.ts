@@ -73,8 +73,17 @@ function serveSpaStub(req: http.IncomingMessage, res: http.ServerResponse, spaDi
     return;
   }
 
+  let urlPath: string;
+  try {
+    urlPath = decodeURIComponent((req.url ?? '/').split('?')[0]);
+  } catch {
+    // Malformed percent-encoding (e.g. `/%FF`) throws URIError — reject, never crash the process.
+    res.writeHead(400, { 'Content-Type': 'text/plain; charset=utf-8' });
+    res.end('Bad request');
+    return;
+  }
+
   const root = path.resolve(spaDir);
-  const urlPath = decodeURIComponent((req.url ?? '/').split('?')[0]);
   const requested = path.resolve(root, '.' + (urlPath === '/' ? '/index.html' : urlPath));
 
   // Path-traversal guard: the resolved target must stay inside the SPA root.
@@ -93,8 +102,14 @@ function serveSpaStub(req: http.IncomingMessage, res: http.ServerResponse, spaDi
   }
 
   const ext = path.extname(target).toLowerCase();
+  const stream = fs.createReadStream(target);
+  // A file removed between existsSync and read would emit 'error' — end the response, never crash.
+  stream.on('error', () => {
+    if (!res.headersSent) res.writeHead(500, { 'Content-Type': 'text/plain; charset=utf-8' });
+    res.end();
+  });
   res.writeHead(200, { 'Content-Type': CONTENT_TYPES[ext] ?? 'application/octet-stream' });
-  fs.createReadStream(target).pipe(res);
+  stream.pipe(res);
 }
 
 /**
@@ -112,7 +127,7 @@ export function createUiHttpServer(opts: UiHttpServerOptions): UiHttpServer {
     // Runs BEFORE the tRPC handler. tRPC paths are token-gated here; everything else is the SPA stub.
     middleware: (req, res, next) => {
       const url = req.url ?? '/';
-      if (url.startsWith('/trpc')) {
+      if (url.startsWith(TRPC_BASE_PATH)) {
         if (!isAuthorized(req, opts.getToken)) {
           log.warn(`ui-http auth rejected: ${req.method} ${url}`);
           res.writeHead(401, { 'Content-Type': 'text/plain; charset=utf-8' });

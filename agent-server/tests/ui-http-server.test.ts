@@ -1,6 +1,6 @@
 // input:  Node test runner + createUiHttpServer (transport-host) + a FAKE tRPC router
 // output: integration tests — 401 gate, HTTP query roundtrip, SSE subscription event,
-//         127.0.0.1 bind, SPA static stub (present/absent), clean close()
+//         127.0.0.1 bind, SPA static stub (present/absent/traversal/malformed-URL), clean close()
 // pos:    Regression guard for the Web UI tRPC HTTP+SSE transport-host (task d7c2, edf0/B).
 //         Generic over AnyRouter — builds its own tiny router, no dependency on the real AppRouter.
 // >>> If I am updated, update my header comment and the parent folder's CORTEX.md <<<
@@ -146,6 +146,19 @@ test('static stub: path traversal is rejected', async () => {
   const { port } = await boot({ spaDir: dir });
   const { statusCode } = await get(port, '/../../etc/passwd');
   assert.ok(statusCode === 403 || statusCode === 404, `expected 403/404, got ${statusCode}`);
+});
+
+test('static stub: a malformed percent-encoded URL is rejected 400 (no crash)', async () => {
+  const dir = mkdtempSync(path.join(os.tmpdir(), 'cortex-spa-'));
+  tmpDirs.push(dir);
+  writeFileSync(path.join(dir, 'index.html'), `<html>${INDEX_MARKER}</html>`);
+  const { port } = await boot({ spaDir: dir });
+  // `%FF` is invalid UTF-8 percent-encoding → decodeURIComponent throws URIError.
+  const { statusCode } = await get(port, '/%FF');
+  assert.equal(statusCode, 400);
+  // Server survived — a well-formed follow-up still works.
+  const ok = await get(port, '/');
+  assert.equal(ok.statusCode, 200);
 });
 
 test('close: shuts down cleanly (subsequent request refused)', async () => {
