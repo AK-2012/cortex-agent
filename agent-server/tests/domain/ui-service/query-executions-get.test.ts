@@ -23,8 +23,11 @@ const knownRecord = {
     endedAt: new Date(now - 1000).toISOString(),
   },
   metrics: { costUsd: 0.05, numTurns: 3, durationS: 119 },
+  gpu: { indices: [1], memoryMb: 49140 },
   text: { label: 'dispatch-task', finalOutput: 'done', error: null },
 };
+
+const noGpuRecord = { ...knownRecord, id: 'exec_nogpu', gpu: null };
 
 function makeDeps(overrides: Partial<UiServiceDeps> = {}): UiServiceDeps {
   return {
@@ -34,7 +37,7 @@ function makeDeps(overrides: Partial<UiServiceDeps> = {}): UiServiceDeps {
     taskStore: { getAll: () => [], getById: () => null, load: () => {}, refresh: () => {} },
     scheduler: { list: async () => [], get: async () => null, pause: async () => null, resume: async () => null, remove: async () => false },
     executionRegistry: {
-      getExecution: (id: string) => (id === 'exec_known' ? knownRecord : null),
+      getExecution: (id: string) => (id === 'exec_known' ? knownRecord : id === 'exec_nogpu' ? noGpuRecord : null),
       getAll: () => [knownRecord],
       cancelExecution: () => null,
     },
@@ -64,8 +67,13 @@ test('executions.get handler maps real ExecutionRecord fields into the detail DT
     tmuxName: 'tmux-1', sessionName: 'sess-1', scheduleTaskId: 'sch1', runName: 'run-known',
   });
   assert.deepEqual(dto.metrics, { costUsd: 0.05, numTurns: 3, durationS: 119 });
-  assert.equal(dto.gpu, null);
+  assert.deepEqual(dto.gpu, { indices: [1], memoryMb: 49140 });
   assert.deepEqual(dto.text, { label: 'dispatch-task', finalOutput: 'done', error: null });
+});
+
+test('executions.get handler returns gpu:null when the record has no GPU', async () => {
+  const dto = await handleExecutionsGet(makeDeps(), { executionId: 'exec_nogpu' });
+  assert.equal(dto.gpu, null);
 });
 
 test('executions.get handler throws not-found for an unknown id', async () => {

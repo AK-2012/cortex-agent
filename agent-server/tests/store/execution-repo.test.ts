@@ -317,6 +317,43 @@ test('dispatch — registerDispatchExecution persists runName (B2-C log-ref)', a
   assert.equal(r2?.dispatch?.runName, 'run-xyz', 'runName is not clobbered by a runName-less re-register');
 });
 
+// ── Group 5b: Per-execution GPU capture (DR-0018 §6.3 B2-followup) ──
+
+test('gpu — new records default gpu to null', async () => {
+  const repo = createRepo();
+  const local = repo.startLocalExecution({ kind: 'local', channel: 'C1', project: 'proj', label: 'g' });
+  const dispatch = repo.registerDispatchExecution({ taskId: 't-g', machine: 'lab', project: 'proj', taskText: 'd' });
+  assert.equal(local.gpu, null);
+  assert.equal(dispatch?.gpu, null);
+});
+
+test('gpu — setExecutionGpuByTaskId records the GPU on the dispatch record', async () => {
+  const repo = createRepo();
+  repo.registerDispatchExecution({ taskId: 't-gpu', machine: 'lab', project: 'proj', taskText: 'run', runName: 'r1' });
+
+  const updated = repo.setExecutionGpuByTaskId('t-gpu', { indices: [1], memoryMb: 49140 });
+  assert.deepEqual(updated?.gpu, { indices: [1], memoryMb: 49140 });
+
+  await repo.flush();
+  assert.deepEqual(repo.getExecutionByTaskId('t-gpu')?.gpu, { indices: [1], memoryMb: 49140 });
+});
+
+test('gpu — setExecutionGpuByTaskId records even on a terminal record (write-once metadata)', async () => {
+  const repo = createRepo();
+  repo.registerDispatchExecution({ taskId: 't-term', machine: 'lab', project: 'proj', taskText: 'run' });
+  repo.completeExecutionByTaskId('t-term', { costUsd: 0.1 });
+  assert.equal(repo.getExecutionByTaskId('t-term')?.status, 'completed');
+
+  const updated = repo.setExecutionGpuByTaskId('t-term', { indices: [0], memoryMb: null });
+  assert.deepEqual(updated?.gpu, { indices: [0], memoryMb: null });
+  assert.equal(updated?.status, 'completed', 'status is unchanged by a GPU backfill');
+});
+
+test('gpu — setExecutionGpuByTaskId returns null for an unknown taskId', async () => {
+  const repo = createRepo();
+  assert.equal(repo.setExecutionGpuByTaskId('nope', { indices: [0], memoryMb: null }), null);
+});
+
 // ── Group 6: Terminal state stickiness ──
 
 test('terminal stickiness — completed record resists fail/cancel', async () => {

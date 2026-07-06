@@ -14,6 +14,7 @@ import {
   startClientManager,
   stopClientManager,
 } from '../src/domain/remote/client-manager.js';
+import { registerDispatchExecution, getExecutionByTaskId } from '../src/domain/executions/registry.js';
 
 // ── Helpers ──
 
@@ -283,6 +284,88 @@ test('failure path — blockTask with note containing termination and logTail', 
   assert.match(task['blocked-by'], /remote.*result\.json/);
   assert.match(task['blocked-by'], /Error: OOM/);
   assert.doesNotMatch(task['blocked-by'], /idempotent/i);
+
+  ws.close();
+});
+
+test('gpu capture — records the callback GPU onto the dispatch execution (DR-0018 §6.3)', async (t) => {
+  const proj = nextProject();
+  const taskId = 'a555';
+  const { cleanup } = makeRepo(proj, BASE_TASK_YAML(taskId));
+  t.after(() => cleanup());
+
+  // A dispatch execution keyed by taskId exists (registered at cortex-run launch).
+  registerDispatchExecution({ taskId, machine: 'test-device', project: proj, runName: 'gpu-run' });
+  assert.equal(getExecutionByTaskId(taskId)?.gpu, null);
+
+  const port = await findEphemeralPort();
+  startClientManager(port);
+  t.after(() => stopClientManager());
+
+  const ws = new WebSocket(`ws://127.0.0.1:${port}`, { headers: authHeaders });
+  await new Promise<void>((resolve, reject) => {
+    ws.once('open', () => resolve());
+    ws.once('error', reject);
+  });
+
+  const ackPromise = new Promise<any>((resolve) => {
+    ws.once('message', (raw) => resolve(JSON.parse(raw.toString())));
+  });
+
+  ws.send(JSON.stringify({
+    type: 'task-callback',
+    device: 'test-device',
+    callbackId: 'test:gpu:555',
+    name: 'gpu-run',
+    taskProject: proj,
+    taskId,
+    termination: 'completed',
+    exitCode: 0,
+    gpu: { indices: [1], memoryMb: 49140 },
+  }));
+
+  await ackPromise;
+  assert.deepEqual(getExecutionByTaskId(taskId)?.gpu, { indices: [1], memoryMb: 49140 });
+
+  ws.close();
+});
+
+test('gpu capture — malformed gpu payload is ignored (record stays null)', async (t) => {
+  const proj = nextProject();
+  const taskId = 'a666';
+  const { cleanup } = makeRepo(proj, BASE_TASK_YAML(taskId));
+  t.after(() => cleanup());
+
+  registerDispatchExecution({ taskId, machine: 'test-device', project: proj, runName: 'bad-gpu-run' });
+
+  const port = await findEphemeralPort();
+  startClientManager(port);
+  t.after(() => stopClientManager());
+
+  const ws = new WebSocket(`ws://127.0.0.1:${port}`, { headers: authHeaders });
+  await new Promise<void>((resolve, reject) => {
+    ws.once('open', () => resolve());
+    ws.once('error', reject);
+  });
+
+  const ackPromise = new Promise<any>((resolve) => {
+    ws.once('message', (raw) => resolve(JSON.parse(raw.toString())));
+  });
+
+  ws.send(JSON.stringify({
+    type: 'task-callback',
+    device: 'test-device',
+    callbackId: 'test:gpu:666',
+    name: 'bad-gpu-run',
+    taskProject: proj,
+    taskId,
+    termination: 'completed',
+    exitCode: 0,
+    gpu: { indices: 'not-an-array', memoryMb: 'x' },
+  }));
+
+  await ackPromise;
+  assert.equal(getExecutionByTaskId(taskId)?.gpu, null);
 
   ws.close();
 });
