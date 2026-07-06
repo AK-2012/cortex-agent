@@ -3,14 +3,20 @@ import {
   Card,
   CardBody,
   CardHeader,
+  Drawer,
+  DrawerClose,
   EmptyState,
   ID,
+  Modal,
+  ModalClose,
   MonoText,
+  Popover,
   SectionHeader,
   StatusPill,
   Tabs,
   Tooltip,
   TONES,
+  useToast,
   type ButtonVariant,
 } from '@/design';
 import type { ReactNode } from 'react';
@@ -126,6 +132,65 @@ export function KitPage() {
           action={<Button variant="primary">Create one</Button>}
         />
       </section>
+
+      <Group title="Overlays — Modal / Drawer / Toast / Popover (esc closes, focus trapped)">
+        <OverlaysDemo />
+      </Group>
     </div>
+  );
+}
+
+function OverlaysDemo() {
+  const { toast } = useToast();
+  return (
+    <>
+      <Modal
+        title="Task detail"
+        description="Radix Dialog: focus is trapped while open, Esc closes, focus returns to the trigger."
+        trigger={<Button variant="primary">Open Modal</Button>}
+        footer={
+          <ModalClose asChild>
+            <Button variant="secondary">Close</Button>
+          </ModalClose>
+        }
+      >
+        <p>Body content on the white token surface. Try Tab / Shift-Tab and Esc.</p>
+      </Modal>
+
+      <Drawer
+        title="Details drawer"
+        description="Side sheet on Radix Dialog — slides in from the right, Esc closes."
+        trigger={<Button variant="secondary">Open Drawer</Button>}
+        footer={
+          <DrawerClose asChild>
+            <Button variant="secondary">Close</Button>
+          </DrawerClose>
+        }
+      >
+        <p>Full-height drawer content. Same a11y as Modal.</p>
+      </Drawer>
+
+      <Button
+        variant="secondary"
+        onClick={() =>
+          toast({
+            title: 'Task completed',
+            description: 'c407 moved open → done',
+            tone: 'done',
+          })
+        }
+      >
+        Fire Toast
+      </Button>
+
+      <Popover
+        trigger={<Button variant="secondary">Open Popover</Button>}
+      >
+        <div className="flex flex-col gap-1g">
+          <MonoText>popover content</MonoText>
+          <p className="text-state-ink/70">Positioned by Radix; Esc closes, focus returns.</p>
+        </div>
+      </Popover>
+    </>
   );
 }

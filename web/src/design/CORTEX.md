@@ -13,17 +13,26 @@ instead of hard-coding styles. **All** colors/spacing/radius/shadow/fonts come f
 | `ID.tsx` | `ID` — identifier in mono; `copyable` → click-to-copy with transient ✓. |
 | `Card.tsx` | `Card` (+ `CardHeader`, `CardBody`) — white surface, token border/radius/shadow; `padded`. |
 | `SectionHeader.tsx` | `SectionHeader` — title + optional mono count + right-aligned actions + description. |
-| `Button.tsx` | `Button` — variants `primary/secondary/ghost/danger` × sizes `sm/md`; token colors, focus ring, disabled. |
+| `Button.tsx` | `Button` — variants `primary/secondary/ghost/danger` × sizes `sm/md`; token colors, focus ring, disabled. **`forwardRef`** so it can be an `asChild` Radix trigger (Dialog/Popover restore focus to the trigger via its ref). |
 | `Tabs.tsx` | `Tabs` (data-driven) + parts `TabsRoot/TabsList/Tab/TabPanel` — token-styled Radix Tabs. |
 | `Tooltip.tsx` | `Tooltip` + `TooltipProvider` (mount once in `providers.tsx`) — token-styled Radix Tooltip. |
 | `EmptyState.tsx` | `EmptyState` — centered card, muted title/description, optional icon/action (design 10d). |
+| `Modal.tsx` | `Modal` (+ `ModalClose`) — token-styled Radix **Dialog**: centered card, overlay fade + content zoom in/out. Focus trap, Esc-close, focus-restore, aria-modal from Radix. Controlled (`open`/`onOpenChange`) or uncontrolled (`trigger`); requires a `title` (`hideTitle` → sr-only). |
+| `Drawer.tsx` | `Drawer` (+ `DrawerClose`) — side sheet on Radix Dialog; `side` `right`(default)`/left` with matching slide in/out. Same Dialog a11y as Modal. |
+| `Popover.tsx` | `Popover` (+ `PopoverClose`) — token-styled Radix **Popover**: positioned floating panel, fade/scale in-out, arrow. Esc-close + focus-return from Radix. |
+| `Toast.tsx` | `ToastProvider` (mount once in `providers.tsx`) + imperative `useToast()` hook (`toast()`/`dismiss()`) on Radix **Toast**. Tone accent from pill tokens; slide/fade enter-exit; role/announce/swipe/hotkey a11y from Radix. |
+| `toast-store.ts` | Pure toast-queue logic (`addToast`/`removeToast`/`MAX_TOASTS`) — framework-agnostic, unit-tested; the hook owns id/timers and delegates here. |
+| `toast-store.test.ts` | vitest unit test for the queue reducer (TDD — written first). |
 | `index.ts` | Barrel — public exports for all primitives + `Tone`/`statusTone`/`TONES`. |
 
 ## Notes
 
 - Demo surface: `web/src/features/kit/KitPage.tsx` → route `/kit` renders every primitive in
-  every variant/state (pure presentational, no agent-server needed).
-- Tabs/Tooltip wrap `@radix-ui/react-tabs` / `@radix-ui/react-tooltip` (approved primitive layer,
-  DR-0018 §1) for keyboard/a11y/positioning; styling is token-only.
+  every variant/state (pure presentational, no agent-server needed). The Overlays group has live
+  triggers for Modal/Drawer/Toast/Popover.
+- Tabs/Tooltip/Modal/Drawer/Popover/Toast wrap `@radix-ui/react-{tabs,tooltip,dialog,popover,toast}`
+  (approved primitive layer, DR-0018 §1) for keyboard/a11y/positioning; styling is token-only.
+- **Overlay motion** lives as `keyframes`/`animation` tokens in `tailwind.config.ts` (no extra dep),
+  driven off Radix `data-[state=open|closed]`; each overlay carries `motion-reduce:animate-none`.
 - `features/tasks/Pills.tsx` and `shell/EmptyPane` now delegate to `StatusPill` / `EmptyState`
   — one source of truth, appearance preserved.
