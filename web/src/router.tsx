@@ -1,6 +1,7 @@
 import { createBrowserRouter, Navigate } from 'react-router-dom';
 import { AppShell } from '@/shell/AppShell';
 import { EmptyPane } from '@/shell/EmptyPane';
+import { WorkbenchPage } from '@/features/workbench/WorkbenchPage';
 import { TasksPage } from '@/features/tasks/TasksPage';
 import { KitPage } from '@/features/kit/KitPage';
 
@@ -10,7 +11,7 @@ export const router = createBrowserRouter([
     element: <AppShell />,
     children: [
       { index: true, element: <Navigate to="/workbench" replace /> },
-      { path: 'workbench', element: <EmptyPane title="Workbench" /> },
+      { path: 'workbench', element: <WorkbenchPage /> },
       { path: 'tasks', element: <TasksPage /> },
       { path: 'threads', element: <EmptyPane title="Threads" /> },
       { path: 'overview', element: <EmptyPane title="Overview" /> },

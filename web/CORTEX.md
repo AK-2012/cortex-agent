@@ -16,10 +16,11 @@ hard-codes hex.
 | `src/main.tsx` | React root; wraps `Providers` + `RouterProvider` |
 | `src/providers.tsx` | `QueryClientProvider` + tRPC `TRPCProvider` + `design/TooltipProvider` |
 | `src/lib/trpc.ts` | `@trpc/tanstack-react-query` context + vanilla client. `splitLink`: query/mutate → `httpBatchLink`, subscription → `httpSubscriptionLink` (SSE). Typed directly against the real `AppRouter` (task 3) — the old `AnyTRPCRouter` fallback seam was removed (a deferred conditional type does not auto-tighten and degraded every procedure to `any`) |
-| `src/router.tsx` | `createBrowserRouter`: `AppShell` layout; `/tasks` → `TasksPage` (task 5), `/kit` → `KitPage` (design demo, task e794), other routes still `EmptyPane` |
+| `src/router.tsx` | `createBrowserRouter`: `AppShell` layout; `/workbench` → `WorkbenchPage` (design 3a, task 5b0f), `/tasks` → `TasksPage` (task 5), `/kit` → `KitPage` (design demo, task e794), other routes still `EmptyPane` |
 | `src/design/` | Design-system core primitives (DR-0018 §5 Stage 2, tasks e794/2add) — token-driven StatusPill/MonoText/ID/Card/SectionHeader/Button/Tabs/Tooltip/EmptyState/DegradedState (10c status language). See its CORTEX.md |
-| `src/shell/` | `AppShell` (three-pane; mounts the global ⌘K `CommandPalette`) · `LeftRail` (nav) · `RightPanel` · `EmptyPane` (wraps `design/EmptyState`) |
-| `src/features/tasks/` | Tasks tab vertical slice (design 4a, task 5) — see its CORTEX.md. `Pills.tsx` delegates to `design/StatusPill` |
+| `src/shell/` | `AppShell` (left rail nav + full-bleed routed content — no global right panel; mounts the global ⌘K `CommandPalette`) · `LeftRail` (nav) · `EmptyPane` (wraps `design/EmptyState`) |
+| `src/features/workbench/` | Workbench three-pane shell (design 3a, task 5b0f) — session list · chat placeholder · Threads/Tasks/Machines tabs + Active/History filter. See its CORTEX.md |
+| `src/features/tasks/` | Tasks tab vertical slice (design 4a, task 5) — see its CORTEX.md. `TasksPanel` = reusable data-driven body (also used by the workbench Tasks tab); `Pills.tsx` delegates to `design/StatusPill` |
 | `src/features/command-palette/` | ⌘K command palette (design 6c, task 051b) on `cmdk` — searches real sessions/threads/tasks over tRPC + section-nav commands, keyboard-reachable. See its CORTEX.md |
 | `src/features/kit/` | `/kit` design-system demo surface (tasks e794/2add) — every primitive in every variant/state + degraded-4 (10c) via `DegradedDemos.tsx` + empty-state next-action panels (10d), pure presentational |
 | `src/index.css` | Tailwind directives + base (canvas bg, system font) |
@@ -27,7 +28,8 @@ hard-codes hex.
 ## Notes
 
 - Depends on `@cortex-agent/ui-contract` (`workspace:*`) for the `AppRouter` type + zod schemas — type-only, no backend runtime coupling.
-- **Tasks tab live** (Stage-1 task 5): `/tasks` renders real `tasks.list` grouped by lifecycle·priority and live-updates via the tRPC subscription. Verified end-to-end against a running ui-http-server (real render + live update on a real Complete mutation). Other tabs remain scaffold.
+- **Tasks tab live** (Stage-1 task 5): `/tasks` renders real `tasks.list` grouped by lifecycle·priority and live-updates via the tRPC subscription. Verified end-to-end against a running ui-http-server (real render + live update on a real Complete mutation).
+- **Workbench live** (Stage-2 task 5b0f): `/workbench` renders real `sessions.list` (left) + `threads.list` / `tasks.list` (right tabs) with an Active/History filter and live subscriptions; center chat is a placeholder (no transcript scope yet — Stage 4), Machines is a placeholder (Stage 7).
 - Dev boots without agent-server (proxy engages only on `/trpc` request). Live data needs the port-3004 ui-http-server (task 3) and `CORTEX_CLIENT_TOKEN` set in the dev shell (proxy injects it).
 - `build` = `tsc --noEmit && vite build`; `typecheck` = `tsc --noEmit`; `test` = `vitest run` (`group-tasks` grouping + `design/tone` status→tone mapping pure-logic unit tests).
 - Tailwind pinned to v3.4 (config-file token contract; v4 moves tokens to CSS `@theme`).
