@@ -300,6 +300,23 @@ test('dispatch — registerDispatchExecution updates existing running record', a
   assert.equal(r2?.dispatch?.sessionName, 'new-session');
 });
 
+test('dispatch — registerDispatchExecution persists runName (B2-C log-ref)', async () => {
+  const repo = createRepo();
+
+  // Fresh registration carries the cortex-run --name onto dispatch.runName.
+  const r1 = repo.registerDispatchExecution({
+    taskId: 't-runname', machine: 'lab2', project: 'proj', taskText: 'tail me', runName: 'run-xyz',
+  });
+  assert.equal(r1?.dispatch?.runName, 'run-xyz');
+
+  // A later same-task registration without a runName preserves the existing one (idempotent merge).
+  const r2 = repo.registerDispatchExecution({
+    taskId: 't-runname', machine: 'lab2', project: 'proj', taskText: 'tail me',
+  });
+  assert.equal(r2?.id, r1?.id);
+  assert.equal(r2?.dispatch?.runName, 'run-xyz', 'runName is not clobbered by a runName-less re-register');
+});
+
 // ── Group 6: Terminal state stickiness ──
 
 test('terminal stickiness — completed record resists fail/cancel', async () => {

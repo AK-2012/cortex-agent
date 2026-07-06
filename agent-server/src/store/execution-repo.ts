@@ -21,6 +21,8 @@ export interface DispatchInfo {
   sessionName: string | null;
   tmuxName: string | null;
   pid: string | null;
+  /** cortex-run `--name` (log-ref): resolves the run's output.log for the live log tailer (B2-C). */
+  runName: string | null;
 }
 
 export interface ExecutionRecord {
@@ -238,10 +240,10 @@ class ExecutionRepo {
     return record;
   }
 
-  registerDispatchExecution({ taskId, machine, channel, project, scheduleTaskId, taskText, taskHash, sessionName, tmuxName, pid, backend, billingMode }: {
+  registerDispatchExecution({ taskId, machine, channel, project, scheduleTaskId, taskText, taskHash, sessionName, tmuxName, pid, runName, backend, billingMode }: {
     taskId: string; machine?: string | null; channel?: string | null; project?: string;
     scheduleTaskId?: string | null; taskText?: string | null; taskHash?: string | null;
-    sessionName?: string | null; tmuxName?: string | null; pid?: string | null;
+    sessionName?: string | null; tmuxName?: string | null; pid?: string | null; runName?: string | null;
     backend?: string; billingMode?: string;
   }): ExecutionRecord | null {
     const existing = this.getExecutionByTaskId(taskId);
@@ -263,6 +265,7 @@ class ExecutionRepo {
           sessionName: sessionName || record.dispatch?.sessionName || null,
           tmuxName: tmuxName || record.dispatch?.tmuxName || null,
           pid: pid || record.dispatch?.pid || null,
+          runName: runName || record.dispatch?.runName || null,
         },
       }));
     }
@@ -285,6 +288,7 @@ class ExecutionRepo {
       sessionName: sessionName || null,
       tmuxName: tmuxName || null,
       pid: pid || null,
+      runName: runName || null,
     };
     this.map.set(record.id, record);
     this.queuePersist();

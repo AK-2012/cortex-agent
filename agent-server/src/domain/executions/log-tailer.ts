@@ -91,14 +91,13 @@ function makeDefaultReader(maxReadBytes: number): LogReader {
 }
 
 /**
- * Best-effort resolution of a running execution's log location from the execution registry.
- * The cortex-run run name is NOT persisted in ExecutionRecord, so callers supply `runName`; the
- * registry decides local-vs-remote from `dispatch.machine`. Returns null for an unknown id.
- * (Full registry-only resolution would require persisting the run name — deferred to child C.)
+ * Registry-only resolution of a running execution's log location (B2-C). The cortex-run run name
+ * is persisted on `dispatch.runName` at launch, so the executionId alone is sufficient: the run's
+ * output.log is `<tmpBaseDir>/<runName>/output.log`, and local-vs-remote is decided by
+ * `dispatch.machine`. Returns null for an unknown id or one with no runName (nothing to tail).
  */
 export function resolveExecutionLogLocation(
   executionId: string,
-  runName: string,
   opts: {
     getExecution?: (id: string) => Pick<ExecutionRecord, 'dispatch'> | null;
     localMachine?: string;
@@ -107,7 +106,8 @@ export function resolveExecutionLogLocation(
 ): LogLocation | null {
   const get = opts.getExecution ?? registryGetExecution;
   const rec = get(executionId);
-  if (!rec) return null;
+  const runName = rec?.dispatch?.runName ?? null;
+  if (!runName) return null;
   const base = opts.tmpBaseDir ?? path.join(DATA_DIR, 'tmp', 'cortex-run');
   const logPath = path.join(base, runName, 'output.log');
   const machine = rec.dispatch?.machine ?? null;
