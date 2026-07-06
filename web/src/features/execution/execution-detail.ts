@@ -16,7 +16,8 @@ export function logStreamEnabled(detail: ExecutionDetailInfo): boolean {
   return detail.dispatch?.runName != null;
 }
 
-// gpu is always null today (no per-execution GPU persisted — B2 followup 032e); renders as a dash.
+// gpu is the real per-execution GPU captured via the cortex-run watcher → task-callback chain
+// (task 032e/7578): "GPU <indices> · <memoryMb> MB" when known, "—" when the run resolved none.
 export function formatGpu(gpu: ExecutionDetailInfo['gpu']): string {
   if (!gpu || gpu.indices.length === 0) return DASH;
   const idx = `GPU ${gpu.indices.join(',')}`;
