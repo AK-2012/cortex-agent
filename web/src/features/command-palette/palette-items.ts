@@ -2,9 +2,9 @@ import type { SessionInfo, ThreadInfo, TaskInfo } from '@cortex-agent/ui-contrac
 
 // Pure mapping from the three real tRPC query results (sessions.list / threads.list /
 // tasks.list) into flat, searchable command-palette items (design 6c). cmdk fuzzy-matches
-// on the item's rendered text + `keywords`; the palette navigates via React Router to the
-// entity's section route (detail routes are Stage 3/4 — see feature CORTEX.md), carrying the
-// entity id in `focusId` so a future detail surface can consume it via location.state.
+// on the item's rendered text + `keywords`; the palette navigates via React Router. Threads
+// route to their detail page `/threads/:id` (F2, DR-0018 §6.3); sessions/tasks still target
+// their section route (detail surfaces are Stage 4/5), carrying the entity id in `focusId`.
 
 export type PaletteGroup = 'Sessions' | 'Threads' | 'Tasks';
 
@@ -51,7 +51,7 @@ export function buildPaletteItems({ sessions, threads, tasks }: PaletteSources):
     group: 'Threads',
     label: `${t.id} · ${t.templateName}`,
     keywords: tokens(t.id, t.templateName, t.status, t.projectId),
-    route: '/threads',
+    route: `/threads/${t.id}`,
     focusId: t.id,
   }));
 

@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react';
 import type {
   ThreadDetail,
   ThreadStepDetail,
@@ -95,12 +96,14 @@ function ActiveStep({
   dispatches,
   subthreads,
   agentFlow,
+  renderSubthreads,
 }: {
   step: ThreadStepDetail;
   totalSteps: number;
   dispatches: ThreadDispatchInfo[];
   subthreads: ThreadChildNode[];
   agentFlow: ThreadAgentFlow | null;
+  renderSubthreads?: (subthreads: ThreadChildNode[]) => ReactNode;
 }) {
   return (
     <div
@@ -129,14 +132,18 @@ function ActiveStep({
           </div>
         )}
 
-        {subthreads.length > 0 && (
-          <div className="flex flex-col gap-0.5g">
-            <span className="text-ui text-state-ink/45">Subthreads</span>
-            {subthreads.map((n) => (
-              <SubthreadRow key={n.id} node={n} />
-            ))}
-          </div>
-        )}
+        {subthreads.length > 0 &&
+          (renderSubthreads ? (
+            // Slot owns the whole SUB-THREADS section incl. its own header (11b nested panel 2b).
+            renderSubthreads(subthreads)
+          ) : (
+            <div className="flex flex-col gap-0.5g">
+              <span className="text-ui text-state-ink/45">Subthreads</span>
+              {subthreads.map((n) => (
+                <SubthreadRow key={n.id} node={n} />
+              ))}
+            </div>
+          ))}
 
         {!agentFlow && dispatches.length === 0 && subthreads.length === 0 && (
           <span className="text-ui text-state-ink/40">No active work yet.</span>
@@ -148,9 +155,12 @@ function ActiveStep({
 
 export interface ThreadStepListProps {
   detail: ThreadDetail;
+  // Optional slot for the active step's SUB-THREADS region. Default = a flat list of one-line
+  // subthread rows (11a inline card). The 11b detail page passes the nested-thread panel (2b).
+  renderSubthreads?: (subthreads: ThreadChildNode[]) => ReactNode;
 }
 
-export function ThreadStepList({ detail }: ThreadStepListProps) {
+export function ThreadStepList({ detail, renderSubthreads }: ThreadStepListProps) {
   const active = selectActiveStep(detail);
   const children = activeStepChildren(detail);
 
@@ -171,6 +181,7 @@ export function ThreadStepList({ detail }: ThreadStepListProps) {
                 dispatches={children.dispatches}
                 subthreads={children.subthreads}
                 agentFlow={children.agentFlow}
+                renderSubthreads={renderSubthreads}
               />
             ) : (
               <CollapsedStep step={step} totalSteps={detail.totalSteps} />
