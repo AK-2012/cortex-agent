@@ -442,6 +442,7 @@ describe('flushPendingCallbacks', () => {
         termination: opts.termination, exit_code: opts.exitCode,
         started_at: '2026-01-01T00:00:00.000Z', ended_at: '2026-01-01T01:00:00.000Z',
         duration_seconds: 3600, duration_human: '1h', last_output_line: 'test output line 2',
+        gpu: opts.gpu ?? null,
       }));
     }
 
@@ -486,6 +487,25 @@ describe('flushPendingCallbacks', () => {
     assert.strictEqual(msg.termination, 'completed');
     assert.strictEqual(msg.exitCode, 0);
     assert.ok(msg.logTail);
+  });
+
+  it('carries the resolved gpu from result.json into the callback payload', async () => {
+    createRunDir('gpu-run', { gpu: { indices: [1], memoryMb: 49140 } });
+    const ws = createMockWs();
+    await flushPendingCallbacks(ws, 'test-device');
+
+    assert.strictEqual(sentMessages.length, 1);
+    const msg = JSON.parse(sentMessages[0]);
+    assert.deepStrictEqual(msg.gpu, { indices: [1], memoryMb: 49140 });
+  });
+
+  it('sends gpu:null when result.json has no gpu', async () => {
+    createRunDir('no-gpu-run', { gpu: null });
+    const ws = createMockWs();
+    await flushPendingCallbacks(ws, 'test-device');
+
+    const msg = JSON.parse(sentMessages[0]);
+    assert.strictEqual(msg.gpu, null);
   });
 
   it('sends task-callback for each pending dir', async () => {

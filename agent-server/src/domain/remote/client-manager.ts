@@ -15,6 +15,7 @@ import { AUTH_HEADER, getClientToken, timingSafeEqualStr } from '@core/auth.js';
 import { createLogger } from '@core/log.js';
 import { readTasks, findTask } from '../tasks/system/task-lifecycle-edit.js';
 import { taskMutator } from '../tasks/mutator.js';
+import { setExecutionGpuByTaskId, type ExecutionGpuInfo } from '../executions/registry.js';
 
 const log = createLogger('client-manager');
 
@@ -513,9 +514,34 @@ function sendAck(ws: WebSocket, callbackId: string, ok: boolean, message?: strin
   }
 }
 
+/** Validate an untrusted `gpu` field from a task-callback into a persistable ExecutionGpuInfo,
+ *  or null if absent/malformed. Requires a non-empty numeric `indices` array. */
+function normalizeGpuPayload(raw: unknown): ExecutionGpuInfo | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const obj = raw as Record<string, unknown>;
+  const indices = Array.isArray(obj.indices)
+    ? obj.indices.filter((n): n is number => typeof n === 'number' && Number.isFinite(n))
+    : [];
+  if (indices.length === 0) return null;
+  const memoryMb = typeof obj.memoryMb === 'number' && Number.isFinite(obj.memoryMb) ? obj.memoryMb : null;
+  return { indices, memoryMb };
+}
+
 async function handleTaskCallback(ws: WebSocket, msg: any): Promise<void> {
   const { taskProject, taskId, termination, exitCode, durationHuman,
-          remoteResultPath, remoteLogPath, device, callbackId, logTail } = msg;
+          remoteResultPath, remoteLogPath, device, callbackId, logTail, gpu } = msg;
+
+  // Capture the per-execution GPU onto the dispatch execution record (DR-0018 §6.3 B2-followup).
+  // Keyed by taskId, independent of task status, and done BEFORE the idempotency short-circuits so
+  // it lands even on an "already done" callback. No-op when no execution is registered for the task
+  // (non-webhook-launched run) or the payload is absent/malformed.
+  if (taskId) {
+    const normalizedGpu = normalizeGpuPayload(gpu);
+    if (normalizedGpu) {
+      try { setExecutionGpuByTaskId(taskId, normalizedGpu); }
+      catch (e) { log.warn(`task-callback: failed to record GPU for task ${taskId}: ${(e as Error).message}`); }
+    }
+  }
 
   // No task linkage: ack-true immediately (client doesn't need to retry)
   if (!taskProject || !taskId) {

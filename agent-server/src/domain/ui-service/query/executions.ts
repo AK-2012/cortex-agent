@@ -94,7 +94,7 @@ export async function handleExecutionsGet(
       numTurns: e.metrics?.numTurns ?? null,
       durationS: e.metrics?.durationS ?? null,
     },
-    gpu: null,
+    gpu: e.gpu ?? null,
     text: {
       label: e.text?.label ?? null,
       finalOutput: e.text?.finalOutput ?? null,

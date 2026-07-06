@@ -27,9 +27,9 @@ cortex-run-watcher --name NAME [--stall 10m] [--gpu auto] --state-dir DIR -- COM
 
 | File | Writer | Contents |
 |------|--------|----------|
-| `state.json` | Watcher (every 5s / on exit) | Running state heartbeat: `status`, `pid`, `started_at`, `ended_at`, `exit_code`, `termination` |
+| `state.json` | Watcher (every 5s / on exit) | Running state heartbeat: `status`, `pid`, `started_at`, `ended_at`, `exit_code`, `termination`, `gpu` |
 | `output.log` | Watcher (streaming) | stdout+stderr of user command |
-| `result.json` | Watcher (on completion) | Full result: name, command, timestamps, duration, exit code, termination, last output line, log path |
+| `result.json` | Watcher (on completion) | Full result: name, command, timestamps, duration, exit code, termination, last output line, log path, gpu |
 | `callback.pending` | Watcher (on completion) | Empty marker file — signals cortex-client to push `task-callback` to server |
 
 ### Termination values
@@ -61,8 +61,14 @@ Scans `~/.cortex/tmp/cortex-run/*/callback.pending` and sends `task-callback` WS
 ```
 { type: 'task-callback', device, callbackId, name, taskProject, taskId,
   termination, exitCode, durationSeconds, durationHuman,
-  startedAt, endedAt, lastOutputLine, remoteResultPath, remoteLogPath, logTail }
+  startedAt, endedAt, lastOutputLine, remoteResultPath, remoteLogPath, logTail,
+  gpu }
 ```
+
+`gpu` (DR-0018 §6.3 B2-followup): the per-execution GPU the watcher actually selected —
+`{ indices: number[], memoryMb: number | null } | null`. Sourced from `result.json.gpu`
+(watcher `resolveGpuSelection`, incl. `--gpu auto` pick). The server records it onto the
+dispatch `ExecutionRecord.gpu` (keyed by taskId), surfacing on `executions.get`.
 
 Triggered on connect and every 60s. Orphan detection: if `state.json` says `running` but PID is dead, synthesizes `result.json` with `termination=orphaned` and touches `callback.pending`.
 

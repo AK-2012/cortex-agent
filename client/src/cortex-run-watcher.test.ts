@@ -8,11 +8,18 @@ import { spawnSync } from 'node:child_process';
 import {
   parseDuration,
   pickBestGpu,
+  resolveGpuSelection,
   checkStallConditions,
   writeStateFile,
   computeResult,
   killProcessGroup,
 } from './cortex-run-watcher.js';
+
+function mockNvidiaSmi(stdout: string, status = 0): typeof spawnSync {
+  return ((() => ({
+    status, stdout, stderr: '', pid: 0, output: [], signal: null, error: undefined,
+  })) as unknown) as typeof spawnSync;
+}
 
 // --- parseDuration ---
 
@@ -58,46 +65,18 @@ describe('parseDuration', () => {
 // --- pickBestGpu ---
 
 describe('pickBestGpu', () => {
-  it('picks GPU with lowest memory usage', () => {
-    const mockSpawn = ((() => ({
-      status: 0,
-      stdout: '0, 1024\n1, 512\n2, 2048\n',
-      stderr: '',
-      pid: 0,
-      output: [],
-      signal: null,
-      error: undefined,
-    })) as unknown) as typeof spawnSync;
-
-    assert.strictEqual(pickBestGpu(mockSpawn), '1');
+  // CSV columns: index, memory.used, memory.total (nounits → MiB)
+  it('picks GPU with lowest memory usage and returns its total memory', () => {
+    const picked = pickBestGpu(mockNvidiaSmi('0, 1024, 49140\n1, 512, 49140\n2, 2048, 49140\n'));
+    assert.deepStrictEqual(picked, { index: 1, memoryMb: 49140 });
   });
 
   it('returns null when nvidia-smi fails', () => {
-    const mockSpawn = ((() => ({
-      status: 1,
-      stdout: '',
-      stderr: '',
-      pid: 0,
-      output: [],
-      signal: null,
-      error: undefined,
-    })) as unknown) as typeof spawnSync;
-
-    assert.strictEqual(pickBestGpu(mockSpawn), null);
+    assert.strictEqual(pickBestGpu(mockNvidiaSmi('', 1)), null);
   });
 
   it('returns null on empty GPU list', () => {
-    const mockSpawn = ((() => ({
-      status: 0,
-      stdout: '',
-      stderr: '',
-      pid: 0,
-      output: [],
-      signal: null,
-      error: undefined,
-    })) as unknown) as typeof spawnSync;
-
-    assert.strictEqual(pickBestGpu(mockSpawn), null);
+    assert.strictEqual(pickBestGpu(mockNvidiaSmi('')), null);
   });
 
   it('returns null when spawn throws', () => {
@@ -106,31 +85,57 @@ describe('pickBestGpu', () => {
   });
 
   it('handles single GPU', () => {
-    const mockSpawn = ((() => ({
-      status: 0,
-      stdout: '0, 256\n',
-      stderr: '',
-      pid: 0,
-      output: [],
-      signal: null,
-      error: undefined,
-    })) as unknown) as typeof spawnSync;
-
-    assert.strictEqual(pickBestGpu(mockSpawn), '0');
+    assert.deepStrictEqual(pickBestGpu(mockNvidiaSmi('0, 256, 24576\n')), { index: 0, memoryMb: 24576 });
   });
 
   it('picks first GPU when memory is tied', () => {
-    const mockSpawn = ((() => ({
-      status: 0,
-      stdout: '0, 1024\n1, 1024\n',
-      stderr: '',
-      pid: 0,
-      output: [],
-      signal: null,
-      error: undefined,
-    })) as unknown) as typeof spawnSync;
+    assert.deepStrictEqual(pickBestGpu(mockNvidiaSmi('0, 1024, 49140\n1, 1024, 49140\n')), { index: 0, memoryMb: 49140 });
+  });
 
-    assert.strictEqual(pickBestGpu(mockSpawn), '0');
+  it('tolerates a missing memory.total column (memoryMb=null)', () => {
+    assert.deepStrictEqual(pickBestGpu(mockNvidiaSmi('0, 256\n')), { index: 0, memoryMb: null });
+  });
+});
+
+// --- resolveGpuSelection ---
+
+describe('resolveGpuSelection', () => {
+  it('auto: uses pickBestGpu → CUDA index + gpu info', () => {
+    const pick = () => ({ index: 1, memoryMb: 49140 });
+    assert.deepStrictEqual(resolveGpuSelection('auto', pick), {
+      cudaVisibleDevices: '1',
+      gpu: { indices: [1], memoryMb: 49140 },
+    });
+  });
+
+  it('auto with no GPU available: no CUDA, gpu null', () => {
+    const pick = () => null;
+    assert.deepStrictEqual(resolveGpuSelection('auto', pick), {
+      cudaVisibleDevices: null,
+      gpu: null,
+    });
+  });
+
+  it('none: no CUDA, gpu null', () => {
+    assert.deepStrictEqual(resolveGpuSelection('none'), { cudaVisibleDevices: null, gpu: null });
+  });
+
+  it('explicit single index: passthrough, memoryMb null', () => {
+    assert.deepStrictEqual(resolveGpuSelection('2'), {
+      cudaVisibleDevices: '2',
+      gpu: { indices: [2], memoryMb: null },
+    });
+  });
+
+  it('explicit multi index: passthrough verbatim, parsed indices', () => {
+    assert.deepStrictEqual(resolveGpuSelection('0,1'), {
+      cudaVisibleDevices: '0,1',
+      gpu: { indices: [0, 1], memoryMb: null },
+    });
+  });
+
+  it('malformed explicit value: env passthrough, gpu null', () => {
+    assert.deepStrictEqual(resolveGpuSelection('xyz'), { cudaVisibleDevices: 'xyz', gpu: null });
   });
 });
 
@@ -284,6 +289,7 @@ describe('computeResult', () => {
       'hello world',
       '/tmp/test-run/output.log',
       '10m',
+      null,
     );
 
     assert.strictEqual(result.name, 'test-run');
@@ -295,6 +301,24 @@ describe('computeResult', () => {
     assert.strictEqual(result.last_output_line, 'hello world');
     assert.strictEqual(result.log_file, '/tmp/test-run/output.log');
     assert.strictEqual(result.stall_limit, '10m');
+    assert.strictEqual(result.gpu, null);
+  });
+
+  it('passes through the resolved gpu selection', () => {
+    const result = computeResult(
+      'gpu-run',
+      ['python', 'train.py'],
+      '2026-01-01T00:00:00.000Z',
+      '2026-01-01T00:05:00.000Z',
+      0,
+      'completed',
+      'done',
+      '/tmp/gpu-run/output.log',
+      '10m',
+      { indices: [1], memoryMb: 49140 },
+    );
+
+    assert.deepStrictEqual(result.gpu, { indices: [1], memoryMb: 49140 });
   });
 
   it('produces duration_human in hours for long runs', () => {
@@ -308,6 +332,7 @@ describe('computeResult', () => {
       'done',
       '/tmp/long-run/output.log',
       '30m',
+      null,
     );
 
     assert.strictEqual(result.duration_human, '3.5h');
@@ -325,6 +350,7 @@ describe('computeResult', () => {
       'last line',
       '/tmp/stall-run/output.log',
       '5m',
+      null,
     );
 
     assert.strictEqual(result.termination, 'output_stall');
@@ -343,6 +369,7 @@ describe('computeResult', () => {
       longLine,
       '/tmp/test/output.log',
       '10m',
+      null,
     );
 
     assert.strictEqual(result.last_output_line.length, 500);
@@ -390,6 +417,7 @@ describe('signal handler registration', () => {
     // Verify all exported functions exist and are callable
     assert.strictEqual(typeof parseDuration, 'function');
     assert.strictEqual(typeof pickBestGpu, 'function');
+    assert.strictEqual(typeof resolveGpuSelection, 'function');
     assert.strictEqual(typeof checkStallConditions, 'function');
     assert.strictEqual(typeof writeStateFile, 'function');
     assert.strictEqual(typeof computeResult, 'function');

@@ -25,6 +25,15 @@ export interface DispatchInfo {
   runName: string | null;
 }
 
+/** The GPU actually selected for a cortex-run/dispatch execution (DR-0018 §6.3 B2-followup).
+ *  Captured by the client watcher (`resolveGpuSelection`, incl. `--gpu auto`) and delivered via
+ *  task-callback. `indices` = CUDA device ordinals; `memoryMb` = the selected GPU's total memory
+ *  (auto-pick only — null for an explicit `--gpu N`). Null on the record ⇒ unknown / not captured. */
+export interface ExecutionGpuInfo {
+  indices: number[];
+  memoryMb: number | null;
+}
+
 export interface ExecutionRecord {
   id: string;
   kind: string;
@@ -40,6 +49,7 @@ export interface ExecutionRecord {
   scheduleTaskId: string | null;
   runtime: { startedAt: string; updatedAt: string; endedAt: string | null };
   metrics: { costUsd: number | null; numTurns: number | null; durationS: number | null };
+  gpu: ExecutionGpuInfo | null;
   text: { label: string | null; finalOutput: string | null; error: string | null };
 }
 
@@ -96,6 +106,7 @@ function createBaseRecord({ kind, channel, project, trigger, backend, billingMod
       numTurns: null,
       durationS: null,
     },
+    gpu: null,
     text: {
       label: label || null,
       finalOutput: null,
@@ -310,6 +321,20 @@ class ExecutionRepo {
       dispatch: patch.dispatch ? { ...(record.dispatch || {} as DispatchInfo), ...patch.dispatch } : record.dispatch,
       session: patch.session ? { ...record.session, ...patch.session } : record.session,
     }));
+  }
+
+  /** Record the per-execution GPU onto the dispatch record keyed by taskId (DR-0018 §6.3
+   *  B2-followup). GPU is write-once metadata delivered by the terminal task-callback, so —
+   *  unlike touchExecution — this bypasses the terminal-status guard (the dispatch record is
+   *  usually still 'running' at callback time, but a re-dispatched/terminal one must still learn
+   *  its GPU). Returns null when no execution is registered for the task. */
+  setExecutionGpuByTaskId(taskId: string, gpu: ExecutionGpuInfo | null): ExecutionRecord | null {
+    const record = this.getExecutionByTaskId(taskId);
+    if (!record) return null;
+    const next: ExecutionRecord = { ...record, gpu };
+    this.map.set(record.id, next);
+    this.queuePersist();
+    return next;
   }
 
   completeExecution(id: string, metrics: { costUsd?: number | null; numTurns?: number | null; durationS?: number | null; finalOutput?: string | null; error?: string | null } = {}): ExecutionRecord | null {

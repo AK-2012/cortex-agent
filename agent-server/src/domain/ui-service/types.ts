@@ -291,8 +291,9 @@ export interface ExecutionInfo {
 
 // Full single-execution detail for the execution detail screen (F3/8b right pane).
 // Superset of ExecutionInfo's identifying fields plus nested lifecycle / dispatch /
-// metrics / text. `gpu` is best-effort: no GPU field is persisted on ExecutionRecord,
-// so it is always null for now (the shape documents the contract for a future source).
+// metrics / text. `gpu` is the real per-execution GPU captured by the cortex-run watcher
+// and delivered via task-callback (DR-0018 §6.3 B2-followup); null when unknown / not captured
+// (e.g. `--gpu none`, nvidia-smi unavailable, or a non-task-linked run).
 export interface ExecutionDetailInfo {
   id: string;
   type: 'local' | 'dispatch';
