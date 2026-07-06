@@ -4,6 +4,7 @@ import { EmptyPane } from '@/shell/EmptyPane';
 import { WorkbenchPage } from '@/features/workbench/WorkbenchPage';
 import { TasksPage } from '@/features/tasks/TasksPage';
 import { KitPage } from '@/features/kit/KitPage';
+import { BaseDemoPage } from '@/features/base-demo/BaseDemoPage';
 import { ThreadDetailPage } from '@/features/thread/ThreadDetailPage';
 import { ExecutionDetailPage } from '@/features/execution/ExecutionDetailPage';
 
@@ -21,6 +22,7 @@ export const router = createBrowserRouter([
       { path: 'overview', element: <EmptyPane title="Overview" /> },
       { path: 'settings', element: <EmptyPane title="Settings" /> },
       { path: 'kit', element: <KitPage /> },
+      { path: 'base', element: <BaseDemoPage /> },
     ],
   },
 ]);
