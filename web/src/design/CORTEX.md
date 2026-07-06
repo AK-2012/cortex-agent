@@ -17,7 +17,10 @@ instead of hard-coding styles. **All** colors/spacing/radius/shadow/fonts come f
 | `Tabs.tsx` | `Tabs` (data-driven) + parts `TabsRoot/TabsList/Tab/TabPanel` — token-styled Radix Tabs. |
 | `Tooltip.tsx` | `Tooltip` + `TooltipProvider` (mount once in `providers.tsx`) — token-styled Radix Tooltip. |
 | `EmptyState.tsx` | `EmptyState` — centered card, muted title/description, optional icon/action (design 10d). |
-| `index.ts` | Barrel — public exports for all primitives + `Tone`/`statusTone`/`TONES`. |
+| `degraded.ts` | Pure `severityTone(severity) → Tone` mapping the 3 degraded severities onto pill tones. `DEGRADED_SEVERITIES` canonical list. Color-language invariant: amber `waiting`, red `human`→failed, blue `info`→running. |
+| `degraded.test.ts` | vitest unit test for `severityTone` (TDD — written first). |
+| `DegradedState.tsx` | `DegradedState` — exception/degraded card (design 10c): severity-tinted header (dot + title + mono meta) + body (detail/children/actions). Tokens only via `pill-<tone>-{bg,fg}` / `state-{run,wait,fail}`; `pulse` for live dot. |
+| `index.ts` | Barrel — public exports for all primitives + `Tone`/`statusTone`/`TONES` + `DegradedState`/`severityTone`/`DEGRADED_SEVERITIES`. |
 
 ## Notes
 
@@ -27,3 +30,7 @@ instead of hard-coding styles. **All** colors/spacing/radius/shadow/fonts come f
   DR-0018 §1) for keyboard/a11y/positioning; styling is token-only.
 - `features/tasks/Pills.tsx` and `shell/EmptyPane` now delegate to `StatusPill` / `EmptyState`
   — one source of truth, appearance preserved.
+- Status language 10c/10d (task 2add): `DegradedState` + the 3-severity `degraded.ts` map power the
+  four degraded variants; `EmptyState` powers the 10d next-action panels. Both demoed at `/kit`
+  (`features/kit/DegradedDemos.tsx` + KitPage sections). No real-data consumer yet (Machines/threads/
+  budget wiring are Stage 3/5/7) — `/kit` is the current consumer.

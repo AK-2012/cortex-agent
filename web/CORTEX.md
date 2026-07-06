@@ -17,10 +17,10 @@ hard-codes hex.
 | `src/providers.tsx` | `QueryClientProvider` + tRPC `TRPCProvider` + `design/TooltipProvider` |
 | `src/lib/trpc.ts` | `@trpc/tanstack-react-query` context + vanilla client. `splitLink`: query/mutate → `httpBatchLink`, subscription → `httpSubscriptionLink` (SSE). Typed directly against the real `AppRouter` (task 3) — the old `AnyTRPCRouter` fallback seam was removed (a deferred conditional type does not auto-tighten and degraded every procedure to `any`) |
 | `src/router.tsx` | `createBrowserRouter`: `AppShell` layout; `/tasks` → `TasksPage` (task 5), `/kit` → `KitPage` (design demo, task e794), other routes still `EmptyPane` |
-| `src/design/` | Design-system core primitives (DR-0018 §5 Stage 2, task e794) — token-driven StatusPill/MonoText/ID/Card/SectionHeader/Button/Tabs/Tooltip/EmptyState. See its CORTEX.md |
+| `src/design/` | Design-system core primitives (DR-0018 §5 Stage 2, tasks e794/2add) — token-driven StatusPill/MonoText/ID/Card/SectionHeader/Button/Tabs/Tooltip/EmptyState/DegradedState (10c status language). See its CORTEX.md |
 | `src/shell/` | `AppShell` (three-pane) · `LeftRail` (nav) · `RightPanel` · `EmptyPane` (wraps `design/EmptyState`) |
 | `src/features/tasks/` | Tasks tab vertical slice (design 4a, task 5) — see its CORTEX.md. `Pills.tsx` delegates to `design/StatusPill` |
-| `src/features/kit/` | `/kit` design-system demo surface (task e794) — every primitive in every variant/state, pure presentational |
+| `src/features/kit/` | `/kit` design-system demo surface (tasks e794/2add) — every primitive in every variant/state + degraded-4 (10c) via `DegradedDemos.tsx` + empty-state next-action panels (10d), pure presentational |
 | `src/index.css` | Tailwind directives + base (canvas bg, system font) |
 
 ## Notes
