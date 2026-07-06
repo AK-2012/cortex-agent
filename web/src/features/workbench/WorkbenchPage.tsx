@@ -1,25 +1,26 @@
-import { useState } from 'react';
-import type { SessionInfo } from '@cortex-agent/ui-contract';
-import { SessionList } from './SessionList';
-import { ChatPlaceholder } from './ChatPlaceholder';
-import { RightPanelTabs } from './RightPanelTabs';
+import { LeftRail } from './LeftRail';
+import { CenterChat } from './CenterChat';
+import { RightPanel } from './RightPanel';
 
-// Workbench (design 3a): three-pane core screen — session list (left) · chat placeholder
-// (center) · Threads/Tasks/Machines tabs + Active/History filter (right). Renders full-bleed
-// inside the app shell's content area; owns the selected-session state shared left↔center.
-export function WorkbenchPage() {
-  const [selected, setSelected] = useState<SessionInfo | null>(null);
-
+// Workbench app-shell frame — 1:1 from prototype.dc.html L39 (Stage-R RB, task f528). The outer
+// flex row is the load-bearing seam every workbench pane composes into: 240px LeftRail (flex:none)
+// / fluid CenterChat (flex:1;min-width:0) / 400px RightPanel (flex:none). CenterChat + RightPanel
+// are Stage-R sibling B/C stubs that render just their pane container so the proportions are exact.
+export function WorkbenchPage(): JSX.Element {
   return (
-    <div className="flex h-full w-full">
-      <SessionList
-        selectedId={selected?.sessionId ?? null}
-        onSelect={(s: SessionInfo) => setSelected(s)}
-      />
-      <main className="min-w-0 flex-1 overflow-hidden">
-        <ChatPlaceholder session={selected} />
-      </main>
-      <RightPanelTabs />
+    <div
+      style={{
+        height: '100vh',
+        minHeight: 640,
+        minWidth: 1180,
+        display: 'flex',
+        background: '#fff',
+        overflow: 'hidden',
+      }}
+    >
+      <LeftRail />
+      <CenterChat />
+      <RightPanel />
     </div>
   );
 }
