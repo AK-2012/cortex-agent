@@ -66,14 +66,18 @@ describe('buildPaletteItems', () => {
     expect(items[0].label).toContain('command palette');
   });
 
-  it('maps a thread to a Threads item routed to /threads', () => {
+  it('maps a thread to a Threads item routed to its detail page /threads/:id', () => {
     const items = buildPaletteItems({
       sessions: [],
       threads: [thread({ id: 'thr_abc', templateName: 'manager' })],
       tasks: [],
     });
     expect(items).toHaveLength(1);
-    expect(items[0]).toMatchObject({ group: 'Threads', route: '/threads', focusId: 'thr_abc' });
+    expect(items[0]).toMatchObject({
+      group: 'Threads',
+      route: '/threads/thr_abc',
+      focusId: 'thr_abc',
+    });
   });
 
   it('maps a session to a Sessions item routed to /workbench', () => {
