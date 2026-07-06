@@ -1,29 +1,46 @@
+import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import type { ThreadInfo } from '@cortex-agent/ui-contract';
 import { useTRPC } from '@/lib/trpc';
 import { ID, StatusPill } from '@/design';
+import { InlineThreadCard } from '@/features/thread/InlineThreadCard';
 import { threadScopeFilter, type Scope } from './scope';
 import { useThreadsLiveSync } from './useThreadsLiveSync';
 
-function ThreadRow({ thread }: { thread: ThreadInfo }) {
+function ThreadRow({
+  thread,
+  expanded,
+  onToggle,
+}: {
+  thread: ThreadInfo;
+  expanded: boolean;
+  onToggle: () => void;
+}) {
   return (
-    <div
-      data-thread-id={thread.id}
-      data-status={thread.status}
-      className="flex items-center gap-1.5g rounded-card border border-card bg-surface-card px-1.5g py-1g shadow-card"
-    >
-      <ID value={thread.id} />
-      <div className="min-w-0 flex-1">
-        <div className="truncate text-ui text-state-ink" title={thread.templateName}>
-          {thread.templateName}
-        </div>
-        {thread.currentStep && (
-          <div className="truncate font-mono text-ui text-state-ink/45">
-            {thread.currentStep.index + 1}/{thread.totalSteps} · {thread.currentStep.name}
+    <div className="flex flex-col gap-1g">
+      <button
+        type="button"
+        data-thread-id={thread.id}
+        data-status={thread.status}
+        aria-expanded={expanded}
+        onClick={onToggle}
+        className="flex items-center gap-1.5g rounded-card border border-card bg-surface-card px-1.5g py-1g text-left shadow-card transition-colors hover:bg-surface-canvas-alt focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-state-run/40"
+      >
+        <span className="shrink-0 font-mono text-ui text-state-ink/40">{expanded ? '▾' : '▸'}</span>
+        <ID value={thread.id} />
+        <div className="min-w-0 flex-1">
+          <div className="truncate text-ui text-state-ink" title={thread.templateName}>
+            {thread.templateName}
           </div>
-        )}
-      </div>
-      <StatusPill status={thread.status} />
+          {thread.currentStep && (
+            <div className="truncate font-mono text-ui text-state-ink/45">
+              {thread.currentStep.index + 1}/{thread.totalSteps} · {thread.currentStep.name}
+            </div>
+          )}
+        </div>
+        <StatusPill status={thread.status} />
+      </button>
+      {expanded && <InlineThreadCard threadId={thread.id} />}
     </div>
   );
 }
@@ -39,6 +56,7 @@ export function ThreadsPanel({ scope }: ThreadsPanelProps) {
   const threadsQuery = useQuery(
     trpc.threads.list.queryOptions({ status: threadScopeFilter(scope) }),
   );
+  const [expandedId, setExpandedId] = useState<string | null>(null);
 
   useThreadsLiveSync();
 
@@ -65,7 +83,12 @@ export function ThreadsPanel({ scope }: ThreadsPanelProps) {
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-1g overflow-auto">
       {threadsQuery.data.map((t) => (
-        <ThreadRow key={t.id} thread={t} />
+        <ThreadRow
+          key={t.id}
+          thread={t}
+          expanded={expandedId === t.id}
+          onToggle={() => setExpandedId((cur) => (cur === t.id ? null : t.id))}
+        />
       ))}
     </div>
   );
