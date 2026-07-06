@@ -20,3 +20,5 @@ export {
 } from './Tabs';
 export { Tooltip, TooltipProvider, type TooltipProps } from './Tooltip';
 export { EmptyState, type EmptyStateProps } from './EmptyState';
+export { DegradedState, type DegradedStateProps } from './DegradedState';
+export { DEGRADED_SEVERITIES, severityTone, type DegradedSeverity } from './degraded';
