@@ -6,6 +6,7 @@ Specific SDK calls are encapsulated in the adapters/ subdirectory.
 | filename | role | function |
 |---|---|---|
 | `adapters/` | subdirectory | Concrete platform adapter implementations |
+| `ui-http/` | subdirectory | Web UI transport-host: tRPC HTTP+SSE standalone server + x-cortex-token gate + SPA static stub (`createUiHttpServer`) |
 | `index.ts` | export | Re-export interfaces, types, and factory |
 | `adapter.ts` | interface | PlatformAdapter interface + capability declaration (`openOutputStream`, project conduit methods, `ownsConduit` for multi-platform routing) |
 | `types.ts` | types | MessageRef/RichBlock/ModalDefinition, etc. |
