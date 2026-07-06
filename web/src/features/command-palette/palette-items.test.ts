@@ -131,7 +131,7 @@ describe('NAV_COMMANDS', () => {
   it('covers every app section with a route and label', () => {
     const routes = NAV_COMMANDS.map((c) => c.route);
     expect(routes).toEqual(
-      expect.arrayContaining(['/workbench', '/tasks', '/threads', '/overview', '/settings']),
+      expect.arrayContaining(['/workbench', '/tasks', '/threads', '/overview', '/settings', '/kit']),
     );
     for (const cmd of NAV_COMMANDS) {
       expect(cmd.label.length).toBeGreaterThan(0);

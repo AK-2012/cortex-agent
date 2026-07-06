@@ -49,6 +49,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
   );
 
   const loading = sessionsQuery.isFetching || threadsQuery.isFetching || tasksQuery.isFetching;
+  const hasError = sessionsQuery.isError || threadsQuery.isError || tasksQuery.isError;
 
   const go = (route: string, focusId?: string) => {
     navigate(route, focusId ? { state: { focusId } } : undefined);
@@ -74,6 +75,11 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
           <Command.Loading className="px-1.5g py-1g text-ui text-state-ink/40">
             Loading…
           </Command.Loading>
+        )}
+        {hasError && (
+          <div className="px-1.5g py-1g text-ui text-pill-failed-fg">
+            Failed to load some results — try again.
+          </div>
         )}
         <Command.Empty className="px-1.5g py-2g text-center text-ui text-state-ink/40">
           No results.
