@@ -11,6 +11,7 @@ export {
   projectsListInput,
   sessionsListInput,
   threadsListInput,
+  threadsGetInput,
   tasksListInput,
   schedulesListInput,
   executionsListInput,

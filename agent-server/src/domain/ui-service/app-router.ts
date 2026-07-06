@@ -16,6 +16,7 @@ import {
   projectsListInput,
   sessionsListInput,
   threadsListInput,
+  threadsGetInput,
   tasksListInput,
   schedulesListInput,
   executionsListInput,
@@ -107,6 +108,7 @@ export function createAppRouter(uiService: UiService) {
     }),
     threads: router({
       list: makeQuery(uiService, 'threads.list', threadsListInput),
+      get: makeQuery(uiService, 'threads.get', threadsGetInput),
       cancel: makeMutation(uiService, 'threads.cancel', threadsCancelInput),
     }),
     tasks: router({
