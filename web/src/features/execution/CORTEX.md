@@ -10,7 +10,7 @@ B2-A)** for one execution — lifecycle / watchdog / GPU / cost right rail — w
 |---|---|
 | `log-buffer.ts` | **Pure** bounded-log reducer (TDD): `appendLog(state, frame, cap)` accumulates `execution.log` frames into a ring capped at `cap` lines; folds backend flood drops (`frame.dropped`) + client cap eviction into one `dropped` total; ignores replayed frames (`seq ≤ lastSeq`). `EMPTY_LOG` seed. Framework-free. |
 | `log-buffer.test.ts` | vitest unit tests for the reducer (TDD — written first, 8 tests). |
-| `execution-detail.ts` | **Pure** presentational derivations (TDD): `isStoppable` (running only), `logStreamEnabled` (dispatch.runName present), `formatGpu` (null→"—"; always null today — B2 followup 032e), `formatCost`/`formatNum`/`formatDuration`. |
+| `execution-detail.ts` | **Pure** presentational derivations (TDD): `isStoppable` (running only), `logStreamEnabled` (dispatch.runName present), `formatGpu` ("GPU &lt;indices&gt; · &lt;memoryMb&gt; MB" when captured, null→"—" — real per-exec GPU landed via task 032e/7578), `formatCost`/`formatNum`/`formatDuration`. |
 | `execution-detail.test.ts` | vitest unit tests for the derivations (TDD — written first, 8 tests). |
 | `useExecutionLogStream.ts` | Thin React/SSE glue: opens one `executions.log` subscription (gated on `enabled`), reads each UiEvent's `payload.{lines,seq,dropped}`, folds into `appendLog` (`LOG_CAP`=2000). Resets on executionId change; closes on unmount. |
 | `LogStreamView.tsx` | **Presentational** log viewer: mono scroll pane, sticky-bottom auto-scroll (unless the user scrolled up), "…N lines dropped" marker, `EmptyState` when no `runName`, waiting placeholder while running. `data-log-stream` for E2E. |
@@ -28,8 +28,10 @@ B2-A)** for one execution — lifecycle / watchdog / GPU / cost right rail — w
   registered a `runName` for the dispatch (`logStreamEnabled`). Otherwise the location can't be
   resolved and the rail shows a "No live log" empty state.
 - **Extend-cap has no backend op** (`MutateOp` = `*.cancel` / `tasks.*` / `schedules.*`): rendered
-  as a disabled affordance with a native-title explanation. Real cap extension is a follow-up
-  (same class as B2 gpu / 032e). done_when requires only Stop (`executions.cancel`), which is real.
-- **gpu is always null today** (no per-execution GPU persisted — B2 followup task 032e) → renders "—".
+  as a disabled affordance with a native-title explanation. Real cap extension is a follow-up.
+  done_when requires only Stop (`executions.cancel`), which is real.
+- **gpu is the real per-execution GPU** — captured via the cortex-run watcher (`resolveGpuSelection`,
+  incl. `--gpu auto`) → task-callback → `ExecutionRecord.gpu` → `executions.get` (task 032e/7578).
+  `formatGpu` renders "GPU &lt;indices&gt; · &lt;memoryMb&gt; MB"; "—" only when the run resolved no GPU.
 - **Status/metrics live-refresh** is a poll (`refetchInterval` while running), not a subscription:
   no `execution.*` lifecycle event exists (only `execution.log`). The log itself is push (SSE).

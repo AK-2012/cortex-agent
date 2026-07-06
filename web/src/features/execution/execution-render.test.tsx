@@ -49,6 +49,17 @@ describe('ExecutionDetailRail (8b right rail)', () => {
     expect(html).toContain('1m 23s'); // duration
   });
 
+  it('renders the real GPU (index + memory) when captured (task 032e/7578)', () => {
+    const html = renderToStaticMarkup(
+      <ExecutionDetailRail
+        detail={detail({ gpu: { indices: [1], memoryMb: 49140 } })}
+        onStop={noop}
+        stopping={false}
+      />,
+    );
+    expect(html).toContain('GPU 1 · 49140 MB'); // real per-execution GPU, no longer the "—" placeholder
+  });
+
   it('enables Stop when running', () => {
     const html = renderToStaticMarkup(
       <ExecutionDetailRail detail={detail({ status: 'running' })} onStop={noop} stopping={false} />,
