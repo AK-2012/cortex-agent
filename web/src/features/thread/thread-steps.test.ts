@@ -167,6 +167,11 @@ describe('stepSummaryParts', () => {
     expect(stepSummaryParts(s)).toEqual(['42s']);
   });
 
+  it('rounds fractional duration seconds (real threads.get emits floats)', () => {
+    expect(stepSummaryParts(step({ durationS: 206.807 }))).toEqual(['3m 27s']);
+    expect(stepSummaryParts(step({ durationS: 41.4 }))).toEqual(['41s']);
+  });
+
   it('returns an empty array when nothing is available', () => {
     expect(stepSummaryParts(step({}))).toEqual([]);
   });

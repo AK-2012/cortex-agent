@@ -46,9 +46,10 @@ export function activeStepChildren(detail: ThreadDetail): ActiveStepChildren | n
 }
 
 function formatDuration(durationS: number): string {
-  if (durationS < 60) return `${durationS}s`;
-  const m = Math.floor(durationS / 60);
-  const s = durationS % 60;
+  const total = Math.round(durationS);
+  if (total < 60) return `${total}s`;
+  const m = Math.floor(total / 60);
+  const s = total % 60;
   return s === 0 ? `${m}m` : `${m}m ${s}s`;
 }
 
