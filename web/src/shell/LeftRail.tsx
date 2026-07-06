@@ -6,6 +6,7 @@ const NAV = [
   { to: '/threads', label: 'Threads' },
   { to: '/overview', label: 'Overview' },
   { to: '/settings', label: 'Settings' },
+  { to: '/kit', label: 'Kit' },
 ] as const;
 
 export function LeftRail() {

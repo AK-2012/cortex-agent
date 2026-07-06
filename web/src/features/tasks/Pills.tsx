@@ -1,24 +1,20 @@
 import type { TaskInfo } from '@cortex-agent/ui-contract';
+import { StatusPill as DesignStatusPill, type Tone } from '@/design';
 
-// Token-driven pills (DR-0018 §5 palette in tailwind.config.ts) — no hard-coded hex.
+// Task-specific pills built on the design-system StatusPill primitive (DR-0018 §5).
+// Appearance preserved from the Stage-1 slice: priority high/med/low → failed/waiting/
+// cancelled tone; status open/done → running/done tone.
 
-const BASE = 'inline-flex items-center rounded-card px-1g py-0.5g font-mono text-ui leading-none';
-
-const PRIORITY_STYLES: Record<TaskInfo['priority'], string> = {
-  high: 'bg-pill-failed-bg text-pill-failed-fg',
-  medium: 'bg-pill-waiting-bg text-pill-waiting-fg',
-  low: 'bg-pill-cancelled-bg text-pill-cancelled-fg',
-};
-
-const STATUS_STYLES: Record<TaskInfo['status'], string> = {
-  open: 'bg-pill-running-bg text-pill-running-fg',
-  done: 'bg-pill-done-bg text-pill-done-fg',
+const PRIORITY_TONE: Record<TaskInfo['priority'], Tone> = {
+  high: 'failed',
+  medium: 'waiting',
+  low: 'cancelled',
 };
 
 export function PriorityPill({ priority }: { priority: TaskInfo['priority'] }) {
-  return <span className={`${BASE} ${PRIORITY_STYLES[priority]}`}>{priority}</span>;
+  return <DesignStatusPill tone={PRIORITY_TONE[priority]} label={priority} />;
 }
 
 export function StatusPill({ status }: { status: TaskInfo['status'] }) {
-  return <span className={`${BASE} ${STATUS_STYLES[status]}`}>{status}</span>;
+  return <DesignStatusPill status={status} />;
 }

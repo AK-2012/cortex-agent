@@ -2,6 +2,7 @@ import { createBrowserRouter, Navigate } from 'react-router-dom';
 import { AppShell } from '@/shell/AppShell';
 import { EmptyPane } from '@/shell/EmptyPane';
 import { TasksPage } from '@/features/tasks/TasksPage';
+import { KitPage } from '@/features/kit/KitPage';
 
 export const router = createBrowserRouter([
   {
@@ -14,6 +15,7 @@ export const router = createBrowserRouter([
       { path: 'threads', element: <EmptyPane title="Threads" /> },
       { path: 'overview', element: <EmptyPane title="Overview" /> },
       { path: 'settings', element: <EmptyPane title="Settings" /> },
+      { path: 'kit', element: <KitPage /> },
     ],
   },
 ]);
