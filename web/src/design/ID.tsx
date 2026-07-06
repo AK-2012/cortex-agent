@@ -14,10 +14,17 @@ export function ID({ value, copyable, className }: IDProps) {
   const [copied, setCopied] = useState(false);
 
   const copy = useCallback(() => {
-    void navigator.clipboard?.writeText(value).then(() => {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1200);
-    });
+    const written = navigator.clipboard?.writeText(value);
+    if (written) {
+      written
+        .then(() => {
+          setCopied(true);
+          setTimeout(() => setCopied(false), 1200);
+        })
+        .catch(() => {
+          // clipboard unavailable / permission denied — fail silently, no feedback flip
+        });
+    }
   }, [value]);
 
   if (!copyable) {
