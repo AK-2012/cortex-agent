@@ -63,7 +63,10 @@ export class TaskMutator {
       const task = this.store.getById(taskId);
       if (!task) return { success: false, message: `Task not found: ${taskId}` };
       const result = lifecycleUnclaimTask(task.text, task.project, taskId);
-      if (result.success) { this.store.refresh(); this.store.commitAndPush(`task-store: unclaim ${taskId}`); }
+      if (result.success) {
+        this.store.refresh(); this.store.commitAndPush(`task-store: unclaim ${taskId}`);
+        this.bus?.publish({ type: 'task.unclaimed', taskId });
+      }
       return result;
     });
   }
@@ -111,7 +114,10 @@ export class TaskMutator {
       const task = this.store.getById(taskId);
       if (!task) return { success: false, message: `Task not found: ${taskId}` };
       const result = lifecycleUnblockTask(task.text, task.project, taskId);
-      if (result.success) { this.store.refresh(); this.store.commitAndPush(`task-store: unblock ${taskId}`); }
+      if (result.success) {
+        this.store.refresh(); this.store.commitAndPush(`task-store: unblock ${taskId}`);
+        this.bus?.publish({ type: 'task.unblocked', taskId });
+      }
       return result;
     });
   }

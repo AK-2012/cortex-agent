@@ -25,6 +25,30 @@ test('subscribe receives published events matching filter', async () => {
   sub.close();
 });
 
+test('subscribe passes through task.unclaimed / task.unblocked events', async () => {
+  const bus = new EventBus();
+  const sub = createSubscription(bus, {
+    events: ['task.unclaimed', 'task.unblocked'],
+  });
+
+  bus.publish({ type: 'task.unclaimed', taskId: 't1' });
+  bus.publish({ type: 'task.unblocked', taskId: 't2' });
+
+  const iter = sub[Symbol.asyncIterator]();
+  const event1 = await iter.next();
+  assert.equal(event1.done, false);
+  assert.equal(event1.value.type, 'task.unclaimed');
+  assert.ok(event1.value.ts);
+  assert.equal((event1.value.payload as any).taskId, 't1');
+
+  const event2 = await iter.next();
+  assert.equal(event2.done, false);
+  assert.equal(event2.value.type, 'task.unblocked');
+  assert.equal((event2.value.payload as any).taskId, 't2');
+
+  sub.close();
+});
+
 test('subscribe filters out non-matching event types', async () => {
   const bus = new EventBus();
   const sub = createSubscription(bus, {

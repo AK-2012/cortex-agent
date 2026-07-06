@@ -5,7 +5,7 @@ Only depends on core/, constructed and connected by entry/app.ts, not yet connec
 
 | filename | role | function |
 |---|---|---|
-| `event-types.ts` | types | CortexEvent union type (22 user events + 2 meta events) + CortexEventInput (distributive Omit) |
+| `event-types.ts` | types | CortexEvent union type (24 user events + 2 meta events) + CortexEventInput (distributive Omit) |
 | `event-bus.ts` | core | EventBus: subscribe / publish (synchronous fan-out) / registerCloseHook / close() |
 | `event-logger.ts` | observability | createEventLogger: ring buffer 1024, 100ms flush, daily rolling jsonl, 14-day retention, CORTEX_EVENT_LOG=off escape hatch |
 | `event-replay.ts` | debug | CLI: `node events/event-replay.ts --date YYYY-MM-DD [--type xxx]` |
