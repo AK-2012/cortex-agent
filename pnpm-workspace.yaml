@@ -1,0 +1,5 @@
+packages:
+  - agent-server
+  - client
+  - packages/*
+  - web
