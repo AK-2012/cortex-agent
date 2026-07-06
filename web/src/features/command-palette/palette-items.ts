@@ -74,4 +74,5 @@ export const NAV_COMMANDS: PaletteCommand[] = [
   { id: 'nav:threads', label: 'Go to Threads', route: '/threads', keywords: ['runs'] },
   { id: 'nav:overview', label: 'Go to Overview', route: '/overview', keywords: ['dashboard'] },
   { id: 'nav:settings', label: 'Go to Settings', route: '/settings', keywords: ['config'] },
+  { id: 'nav:kit', label: 'Go to Kit', route: '/kit', keywords: ['components', 'design', 'demo'] },
 ];
