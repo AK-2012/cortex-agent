@@ -18,8 +18,9 @@ hard-codes hex.
 | `src/lib/trpc.ts` | `@trpc/tanstack-react-query` context + vanilla client. `splitLink`: query/mutate → `httpBatchLink`, subscription → `httpSubscriptionLink` (SSE). Typed directly against the real `AppRouter` (task 3) — the old `AnyTRPCRouter` fallback seam was removed (a deferred conditional type does not auto-tighten and degraded every procedure to `any`) |
 | `src/router.tsx` | `createBrowserRouter`: `AppShell` layout; `/tasks` → `TasksPage` (task 5), `/kit` → `KitPage` (design demo, task e794), other routes still `EmptyPane` |
 | `src/design/` | Design-system core primitives (DR-0018 §5 Stage 2, tasks e794/2add) — token-driven StatusPill/MonoText/ID/Card/SectionHeader/Button/Tabs/Tooltip/EmptyState/DegradedState (10c status language). See its CORTEX.md |
-| `src/shell/` | `AppShell` (three-pane) · `LeftRail` (nav) · `RightPanel` · `EmptyPane` (wraps `design/EmptyState`) |
+| `src/shell/` | `AppShell` (three-pane; mounts the global ⌘K `CommandPalette`) · `LeftRail` (nav) · `RightPanel` · `EmptyPane` (wraps `design/EmptyState`) |
 | `src/features/tasks/` | Tasks tab vertical slice (design 4a, task 5) — see its CORTEX.md. `Pills.tsx` delegates to `design/StatusPill` |
+| `src/features/command-palette/` | ⌘K command palette (design 6c, task 051b) on `cmdk` — searches real sessions/threads/tasks over tRPC + section-nav commands, keyboard-reachable. See its CORTEX.md |
 | `src/features/kit/` | `/kit` design-system demo surface (tasks e794/2add) — every primitive in every variant/state + degraded-4 (10c) via `DegradedDemos.tsx` + empty-state next-action panels (10d), pure presentational |
 | `src/index.css` | Tailwind directives + base (canvas bg, system font) |
 
@@ -31,3 +32,9 @@ hard-codes hex.
 - `build` = `tsc --noEmit && vite build`; `typecheck` = `tsc --noEmit`; `test` = `vitest run` (`group-tasks` grouping + `design/tone` status→tone mapping pure-logic unit tests).
 - Tailwind pinned to v3.4 (config-file token contract; v4 moves tokens to CSS `@theme`).
 - Tabs/Tooltip use `@radix-ui/react-tabs` / `@radix-ui/react-tooltip` (approved primitive layer, DR-0018 §1); token-only styling.
+- **⌘K command palette live** (Stage-2 task 051b): `features/command-palette/` on `cmdk` (`^1.1.1`),
+  mounted globally in `AppShell`. Searches real `sessions.list`/`threads.list`/`tasks.list` over
+  tRPC + section-nav command items; navigates via React Router. Verified against a live
+  ui-http-server (real task + thread matches rendered by search; ⌘K open, keyboard nav/Enter/Esc,
+  navigation all driven headless-Chrome, zero console errors). File search deferred to Stage 6 (no
+  fs-read tRPC scope yet).
