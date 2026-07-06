@@ -9,7 +9,7 @@ live in the transport-host). Consumed by M5 TUI dashboard and the Web UI (tRPC A
 | `types.ts` | types | Result, QueryScope, MutateOp, SubscribeFilter, UiEvent, UiService interface, DTOs |
 | `input-schemas.ts` | schemas | Source-of-truth zod input schema per QueryScope / MutateOp + `queryInputSchemas` / `mutateInputSchemas` keyed maps. Consumed by the AppRouter; re-exported (runtime) by `@cortex-agent/ui-contract` for the browser. Kept here (not in ui-contract) so the router can consume it without agent-server importing ui-contract, which would close a workspace build cycle |
 | `trpc.ts` | tRPC init | Shared `initTRPC.create()` — exports `router` / `publicProcedure` / `createCallerFactory` (transport-agnostic) |
-| `app-router.ts` | tRPC router | `createAppRouter(uiService): AppRouter` — mirrors the full contract (8 query + 10 mutation + 1 subscription) over the injected UiService; unwraps `Result`, maps `Err`→`TRPCError`. `AppRouter` type re-exported by `@cortex-agent/ui-contract` |
+| `app-router.ts` | tRPC router | `createAppRouter(uiService): AppRouter` — mirrors the full contract (9 query + 10 mutation + 1 subscription) over the injected UiService; unwraps `Result`, maps `Err`→`TRPCError`. `AppRouter` type re-exported by `@cortex-agent/ui-contract` |
 | `ui-service.ts` | facade | createUiService(deps) — routes scope/op strings to per-module handlers |
 | `subscribe.ts` | subscribe | EventBus → AsyncIterable&lt;UiEvent&gt; with bounded queue |
 | `index.ts` | barrel | re-exports createUiService and public types |
@@ -18,7 +18,7 @@ live in the transport-host). Consumed by M5 TUI dashboard and the Web UI (tRPC A
 | `query/threads.ts` | query | threads.list + threads.get (detail: steps/agent-flow/dispatches/child-tree≤5/artifacts, DR-0018 §6.3 B1) handlers |
 | `query/tasks.ts` | query | tasks.list handler |
 | `query/schedules.ts` | query | schedules.list handler |
-| `query/executions.ts` | query | executions.list handler |
+| `query/executions.ts` | query | executions.list + executions.get handlers |
 | `query/cost.ts` | query | cost.summary handler |
 | `mutate/threads.ts` | mutate | threads.cancel handler |
 | `mutate/executions.ts` | mutate | executions.cancel handler |

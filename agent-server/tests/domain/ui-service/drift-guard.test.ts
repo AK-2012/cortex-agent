@@ -82,6 +82,7 @@ const queryScopes = [
   'tasks.list',
   'schedules.list',
   'executions.list',
+  'executions.get',
   'cost.summary',
 ] as const;
 
