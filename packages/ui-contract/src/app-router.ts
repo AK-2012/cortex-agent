@@ -1,9 +1,6 @@
 // AppRouter type re-export point (single stable edit site).
 //
-// The real AppRouter is defined by the tRPC backend adapter (Stage-1 task 3),
-// which does not exist yet. Until then this is a placeholder so the package
-// typechecks green and downstream (web) has a stable import path.
-//
-// Task 3 replaces the line below with:
-//   export type { AppRouter } from '@cortex-agent/server/dist/<router path>.js';
-export type AppRouter = unknown;
+// The real AppRouter is defined by the tRPC backend adapter in agent-server. This
+// re-export is type-only (erased at build) — the frontend imports the AppRouter type
+// for its @trpc/client, never the backend runtime code.
+export type { AppRouter } from '@cortex-agent/server/dist/domain/ui-service/app-router.js';

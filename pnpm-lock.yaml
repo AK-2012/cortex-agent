@@ -22,6 +22,9 @@ importers:
       '@slack/web-api':
         specifier: ^7.14.1
         version: 7.18.0
+      '@trpc/server':
+        specifier: ^11
+        version: 11.18.0(typescript@5.9.3)
       aistatus:
         specifier: ^0.0.7
         version: 0.0.7
@@ -49,6 +52,9 @@ importers:
       yaml:
         specifier: ^2.8.3
         version: 2.9.0
+      zod:
+        specifier: ^4.4.3
+        version: 4.4.3
     devDependencies:
       '@sinclair/typebox':
         specifier: ^0.34.49
@@ -484,6 +490,12 @@ packages:
   '@slack/web-api@7.18.0':
     resolution: {integrity: sha512-EWBsKUhOFFp87beQg/ToSC+asWB7BrGHuh7uPC1ZI9vr41GjS+3WmmyWIMqs+mF6U+mh4d6HhtFlv67TrJFsvw==}
     engines: {node: '>= 18', npm: '>= 8.6.0'}
+
+  '@trpc/server@11.18.0':
+    resolution: {integrity: sha512-JAvXOuNTxgXjIDfQaOvDq1j66LMNfDJUH1IU7Slfn8EvRv2EkH6ehu3A7zpYhjO0syHHiYg77v2lG2JFJgvw7Q==}
+    hasBin: true
+    peerDependencies:
+      typescript: '>=5.7.2'
 
   '@types/body-parser@1.19.6':
     resolution: {integrity: sha512-HLFeCYgz89uk22N5Qg3dvGvsv46B8GLvKKo1zKG4NybA8U2DiEO3w9lqGg29t/tfLRJpJ6iQxnVw4OnB7MoM9g==}
@@ -1936,6 +1948,10 @@ snapshots:
     transitivePeerDependencies:
       - debug
       - supports-color
+
+  '@trpc/server@11.18.0(typescript@5.9.3)':
+    dependencies:
+      typescript: 5.9.3
 
   '@types/body-parser@1.19.6':
     dependencies:
