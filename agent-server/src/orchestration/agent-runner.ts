@@ -5,7 +5,7 @@
 
 import * as path from 'path';
 import type { Destination, PlatformAdapter, MessageRef, DownloadedFile, IncomingMessage, PlatformFileRef, OutputStream } from '@platform/index.js';
-import { resolveDestinationConduit } from '@platform/types.js';
+import { resolveDestinationConduit, SYNTHETIC_CALLBACK_SENDER } from '@platform/types.js';
 import type { AgentResult } from '@core/types/agent-types.js';
 import { conduitQueues, enqueue } from './conduit-queue.js';
 import { trackPendingTask } from './busy-tracker.js';
@@ -88,7 +88,10 @@ export class AgentRunner {
     // DR-0016 top-level fallback: if this channel has a pending human-escalated subtask question,
     // consume this message as the answer and short-circuit normal turn handling. Scope is narrow —
     // tryAnswerFromHuman returns false unless this exact channel is awaiting a human reply.
-    if (tryAnswerFromHuman(channel, ctx.userMessage || '')) {
+    // Synthetic wake/callback messages (wakeSession) are exempt: askManager arms this backstop and
+    // then wakes the origin session THROUGH route(), so without the exemption the backstop consumed
+    // the question notice itself as "the human's answer" (2026-07-05 self-consumption bug).
+    if (message.senderId !== SYNTHETIC_CALLBACK_SENDER && tryAnswerFromHuman(channel, ctx.userMessage || '')) {
       const dest: Destination = { type: 'interactive-reply', conduit: channel, sessionId: '' };
       await adapter.postMessage(dest, { text: `${Icons.ok} ${t('subtask.replyDelivered')}` }).catch(() => {});
       return;

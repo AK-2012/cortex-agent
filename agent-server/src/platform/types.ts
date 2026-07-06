@@ -21,6 +21,11 @@ export interface MessageRef {
 
 // --- Inbound Types ---
 
+/** senderId used by internally synthesized wake/callback messages (thread-callback wakeSession).
+ *  Consumers that intercept HUMAN input on a channel (e.g. the manager-qa human-answer backstop)
+ *  must skip messages carrying this sender — a synthetic notice is never a human reply. */
+export const SYNTHETIC_CALLBACK_SENDER = 'cortex-thread-callback';
+
 export interface IncomingMessage {
   ref: MessageRef;
   text: string;
