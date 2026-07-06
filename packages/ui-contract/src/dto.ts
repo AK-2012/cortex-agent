@@ -15,6 +15,7 @@ export type {
   // Subscribe
   SubscribeFilter,
   UiEvent,
+  ExecutionsLogParams,
   // Query params
   SessionsListParams,
   ThreadsListParams,

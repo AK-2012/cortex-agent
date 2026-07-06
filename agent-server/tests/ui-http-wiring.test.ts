@@ -31,20 +31,24 @@ function makeFakeUiService(): UiService {
       if (op === 'threads.cancel') return { ok: true, data: { cancelled: true } };
       return { ok: false, code: 'not-found', message: `unexpected op ${op}` };
     }) as UiService['mutate'],
-    subscribe: () => {
-      let done = false;
-      const iterator: AsyncIterator<UiEvent> = {
-        async next() {
-          if (done) return { value: undefined as unknown as UiEvent, done: true };
-          done = true;
-          return { value: { type: SSE_MARKER, ts: new Date().toISOString(), payload: { n: 1 } }, done: false };
-        },
-      };
-      return {
-        [Symbol.asyncIterator]: () => iterator,
-        close: () => { done = true; },
-      };
+    subscribe: () => makeOneShotStream(),
+    subscribeExecutionLog: () => makeOneShotStream(),
+  };
+}
+
+/** One-shot subscription stub: yields a single SSE marker event, then ends. */
+function makeOneShotStream(): AsyncIterable<UiEvent> & { close(): void } {
+  let done = false;
+  const iterator: AsyncIterator<UiEvent> = {
+    async next() {
+      if (done) return { value: undefined as unknown as UiEvent, done: true };
+      done = true;
+      return { value: { type: SSE_MARKER, ts: new Date().toISOString(), payload: { n: 1 } }, done: false };
     },
+  };
+  return {
+    [Symbol.asyncIterator]: () => iterator,
+    close: () => { done = true; },
   };
 }
 

@@ -28,6 +28,7 @@ import {
   taskActionInput,
   taskCompleteInput,
   taskBlockInput,
+  executionsLogInput,
 } from './input-schemas.js';
 import type {
   UiService,
@@ -98,7 +99,8 @@ function makeMutation<O extends MutateOp, Sch extends z.ZodType>(
 }
 
 // ── AppRouter ─────────────────────────────────────────────────────────────────────
-// 9 QueryScope + 10 MutateOp + 1 subscription, mirroring the ui-service contract.
+// 9 QueryScope + 10 MutateOp + 2 subscriptions (generic `subscribe` + `executions.log`),
+// mirroring the ui-service contract.
 export function createAppRouter(uiService: UiService) {
   return router({
     projects: router({
@@ -130,6 +132,21 @@ export function createAppRouter(uiService: UiService) {
       list: makeQuery(uiService, 'executions.list', executionsListInput),
       get: makeQuery(uiService, 'executions.get', executionsGetInput),
       cancel: makeMutation(uiService, 'executions.cancel', executionsCancelInput),
+      // B2-C: live log stream for one running execution. Opening resolves the log location and
+      // ref-counts the tailer up; closing/aborting rolls it back down (subscribeExecutionLog).
+      log: publicProcedure
+        .input(executionsLogInput)
+        .subscription(async function* ({ input, signal }) {
+          const sub = uiService.subscribeExecutionLog(input.executionId);
+          signal?.addEventListener('abort', () => sub.close());
+          try {
+            for await (const event of sub) {
+              yield event;
+            }
+          } finally {
+            sub.close();
+          }
+        }),
     }),
     cost: router({
       summary: makeQuery(uiService, 'cost.summary', costSummaryInput),

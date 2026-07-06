@@ -47,6 +47,7 @@ function makeMinimalDeps(): UiServiceDeps {
       getAll: () => [],
       cancelExecution: () => null,
     },
+    executionLogTailer: { startTail: () => {}, stopTail: () => {}, refCount: () => 0 },
     runningExecutions: {
       register: () => {},
       getByKey: () => null,
