@@ -151,6 +151,7 @@ export function synthesizeOrphanResult(runDir: string, state: Record<string, any
     started_at: state.started_at ?? null,
     ended_at: now,
     last_output_line: lastLine,
+    gpu: state.gpu ?? null,
   };
 
   fs.writeFileSync(resultPath, JSON.stringify(result, null, 2));
@@ -346,6 +347,7 @@ export async function flushPendingCallbacks(
         remoteResultPath: path.join(runDir, 'result.json'),
         remoteLogPath: path.join(runDir, 'output.log'),
         logTail,
+        gpu: result.gpu ?? null,
       };
 
       ws.send(JSON.stringify(callbackMsg));

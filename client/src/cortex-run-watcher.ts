@@ -34,6 +34,21 @@ interface StateFile {
   ended_at?: string;
   exit_code?: number;
   termination?: string;
+  gpu?: GpuInfo | null;
+}
+
+/** The GPU actually selected for this execution. `indices` are the CUDA device ordinals
+ *  (from `CUDA_VISIBLE_DEVICES`); `memoryMb` is the selected GPU's total memory (auto-pick
+ *  only — best-effort, null for explicit `--gpu N`). */
+export interface GpuInfo {
+  indices: number[];
+  memoryMb: number | null;
+}
+
+/** Result of an nvidia-smi auto-pick: the chosen device ordinal + its total memory (MiB). */
+export interface PickedGpu {
+  index: number;
+  memoryMb: number | null;
 }
 
 const DEFAULT_STALL_SECONDS = 600; // 10 minutes
@@ -53,10 +68,10 @@ export function parseDuration(s: string): number {
 
 export function pickBestGpu(
   spawnSyncFn: typeof spawnSync = spawnSync,
-): string | null {
+): PickedGpu | null {
   try {
     const result = spawnSyncFn('nvidia-smi', [
-      '--query-gpu=index,memory.used',
+      '--query-gpu=index,memory.used,memory.total',
       '--format=csv,noheader,nounits',
     ], { encoding: 'utf8' as const, timeout: 10_000 });
 
@@ -65,17 +80,55 @@ export function pickBestGpu(
     const gpus = result.stdout.trim().split('\n')
       .map(line => {
         const parts = line.split(',');
-        if (parts.length !== 2) return null;
-        return { index: parseInt(parts[0].trim(), 10), memUsed: parseInt(parts[1].trim(), 10) };
+        if (parts.length < 2) return null;
+        const index = parseInt(parts[0].trim(), 10);
+        const memUsed = parseInt(parts[1].trim(), 10);
+        if (Number.isNaN(index) || Number.isNaN(memUsed)) return null;
+        const memTotal = parts[2] !== undefined ? parseInt(parts[2].trim(), 10) : NaN;
+        return { index, memUsed, memoryMb: Number.isNaN(memTotal) ? null : memTotal };
       })
-      .filter((v): v is { index: number; memUsed: number } => v !== null);
+      .filter((v): v is { index: number; memUsed: number; memoryMb: number | null } => v !== null);
 
     if (gpus.length === 0) return null;
     const best = gpus.reduce((a, b) => a.memUsed <= b.memUsed ? a : b);
-    return String(best.index);
+    return { index: best.index, memoryMb: best.memoryMb };
   } catch {
     return null;
   }
+}
+
+/**
+ * Resolve the `--gpu` argument into the concrete `CUDA_VISIBLE_DEVICES` string to export and the
+ * `GpuInfo` to persist for this execution (DR-0018 §6.3 B2-followup — per-execution GPU capture).
+ *
+ * - `auto`  → nvidia-smi pick (lowest memory.used); its total memory populates `memoryMb`.
+ * - `none`  → no CUDA env, gpu null.
+ * - `N` / `0,1` → passed through verbatim to `CUDA_VISIBLE_DEVICES`; indices parsed; `memoryMb` null
+ *   (we don't shell out to nvidia-smi for an explicit selection).
+ * A malformed explicit value keeps the legacy behaviour (set env verbatim) but records no gpu.
+ */
+export function resolveGpuSelection(
+  gpuArg: string,
+  pick: typeof pickBestGpu = pickBestGpu,
+): { cudaVisibleDevices: string | null; gpu: GpuInfo | null } {
+  if (gpuArg === 'none') {
+    return { cudaVisibleDevices: null, gpu: null };
+  }
+  if (gpuArg === 'auto') {
+    const picked = pick();
+    if (picked === null) return { cudaVisibleDevices: null, gpu: null };
+    return {
+      cudaVisibleDevices: String(picked.index),
+      gpu: { indices: [picked.index], memoryMb: picked.memoryMb },
+    };
+  }
+  const indices = gpuArg.split(',')
+    .map(s => parseInt(s.trim(), 10))
+    .filter(n => !Number.isNaN(n));
+  if (indices.length === 0) {
+    return { cudaVisibleDevices: gpuArg, gpu: null };
+  }
+  return { cudaVisibleDevices: gpuArg, gpu: { indices, memoryMb: null } };
 }
 
 // --- Stall detection ---
@@ -123,6 +176,7 @@ export function computeResult(
   lastLineContent: string,
   logPath: string,
   stallLimit: string,
+  gpu: GpuInfo | null,
 ): Record<string, any> {
   const duration = (new Date(endedAt).getTime() - new Date(startedAt).getTime()) / 1000;
   const durationHuman = duration > 3600
@@ -141,6 +195,7 @@ export function computeResult(
     last_output_line: lastLineContent.slice(0, 500),
     log_file: logPath,
     stall_limit: stallLimit,
+    gpu,
   };
 }
 
@@ -224,24 +279,16 @@ export function run(args: WatcherArgs): Promise<number> {
 
     mkdirSync(stateDir, { recursive: true });
 
-    // Resolve GPU selection
+    // Resolve GPU selection (pure) → CUDA env + per-execution GpuInfo to persist (B2-followup)
     const env: Record<string, string> = { ...process.env as Record<string, string> };
-    let gpuValue: string | null = args.gpu;
-    if (gpuValue === 'auto') {
-      const picked = pickBestGpu();
-      if (picked !== null) {
-        gpuValue = picked;
-        console.log(`[cortex-run] GPU auto-select: picked GPU ${picked} (lowest memory usage)`);
-      } else {
-        gpuValue = null;
-        console.log('[cortex-run] GPU auto-select: nvidia-smi unavailable, not setting CUDA_VISIBLE_DEVICES');
-      }
-    } else if (gpuValue === 'none') {
-      gpuValue = null;
+    const { cudaVisibleDevices, gpu } = resolveGpuSelection(args.gpu);
+    if (args.gpu === 'auto') {
+      if (gpu) console.log(`[cortex-run] GPU auto-select: picked GPU ${gpu.indices.join(',')} (lowest memory usage)`);
+      else console.log('[cortex-run] GPU auto-select: nvidia-smi unavailable, not setting CUDA_VISIBLE_DEVICES');
     }
 
-    if (gpuValue !== null) {
-      env.CUDA_VISIBLE_DEVICES = String(gpuValue);
+    if (cudaVisibleDevices !== null) {
+      env.CUDA_VISIBLE_DEVICES = cudaVisibleDevices;
     }
 
     const startTime = Date.now();
@@ -250,7 +297,7 @@ export function run(args: WatcherArgs): Promise<number> {
     console.log(`[cortex-run] Starting: ${args.name}`);
     console.log(`[cortex-run] Command: ${args.command.join(' ')}`);
     console.log(`[cortex-run] Stall timeout: ${args.stall} (${args.stallSeconds}s)`);
-    if (gpuValue !== null) console.log(`[cortex-run] GPU: CUDA_VISIBLE_DEVICES=${gpuValue}`);
+    if (cudaVisibleDevices !== null) console.log(`[cortex-run] GPU: CUDA_VISIBLE_DEVICES=${cudaVisibleDevices}`);
     console.log(`[cortex-run] State dir: ${stateDir}`);
     console.log(`[cortex-run] Started at: ${startDt}`);
 
@@ -265,6 +312,7 @@ export function run(args: WatcherArgs): Promise<number> {
       status: 'running',
       pid: proc.pid!,
       started_at: startDt,
+      gpu,
     });
 
     let termination = 'completed';
@@ -331,7 +379,7 @@ export function run(args: WatcherArgs): Promise<number> {
 
       const result = computeResult(
         args.name, args.command, startDt, endDt,
-        exitCode, termination, lastLineContent, logPath, args.stall,
+        exitCode, termination, lastLineContent, logPath, args.stall, gpu,
       );
 
       writeFileSync(resultPath, JSON.stringify(result, null, 2));
@@ -345,6 +393,7 @@ export function run(args: WatcherArgs): Promise<number> {
         ended_at: endDt,
         exit_code: exitCode,
         termination: termination,
+        gpu,
       });
 
       // Touch callback.pending — signals cortex-client that this run needs a callback
