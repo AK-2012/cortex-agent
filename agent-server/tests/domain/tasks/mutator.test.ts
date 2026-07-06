@@ -682,6 +682,86 @@ test('complete — does not publish when bus is not wired', async () => {
   }
 });
 
+// ─── 17b. EventBus publication — unclaim ──────────────────────────
+
+test('unclaim — publishes task.unclaimed event when bus is wired', async () => {
+  const fx = makeFixtureRepo();
+  try {
+    const repo = createRepo();
+    const published: any[] = [];
+    const mockBus = { publish: (e: any) => { published.push(e); }, subscribe: () => ({ unsubscribe: () => {} }) };
+    const mutator = new TaskMutator(repo, mockBus as any);
+    await mutator.claim(fx.seedTaskId, 'agent');
+    published.length = 0; // clear claim event
+
+    const result = await mutator.unclaim(fx.seedTaskId);
+    assert.equal(result.success, true);
+
+    assert.equal(published.length, 1);
+    assert.equal(published[0].type, 'task.unclaimed');
+    assert.equal(published[0].taskId, fx.seedTaskId);
+    assert.equal('ts' in published[0], false);
+  } finally {
+    fx.cleanup();
+  }
+});
+
+test('unclaim — does not publish on failure', async () => {
+  const fx = makeFixtureRepo();
+  try {
+    const repo = createRepo();
+    const published: any[] = [];
+    const mockBus = { publish: (e: any) => { published.push(e); }, subscribe: () => ({ unsubscribe: () => {} }) };
+    const mutator = new TaskMutator(repo, mockBus as any);
+    // seed task is not in-progress → unclaim fails, no event
+    const result = await mutator.unclaim(fx.seedTaskId);
+    assert.equal(result.success, false);
+    assert.equal(published.length, 0);
+  } finally {
+    fx.cleanup();
+  }
+});
+
+// ─── 17c. EventBus publication — unblock ──────────────────────────
+
+test('unblock — publishes task.unblocked event when bus is wired', async () => {
+  const fx = makeFixtureRepo();
+  try {
+    const repo = createRepo();
+    const published: any[] = [];
+    const mockBus = { publish: (e: any) => { published.push(e); }, subscribe: () => ({ unsubscribe: () => {} }) };
+    const mutator = new TaskMutator(repo, mockBus as any);
+    await mutator.block(fx.seedTaskId, 'blocker');
+    published.length = 0; // clear block event
+
+    const result = await mutator.unblock(fx.seedTaskId);
+    assert.equal(result.success, true);
+
+    assert.equal(published.length, 1);
+    assert.equal(published[0].type, 'task.unblocked');
+    assert.equal(published[0].taskId, fx.seedTaskId);
+    assert.equal('ts' in published[0], false);
+  } finally {
+    fx.cleanup();
+  }
+});
+
+test('unblock — does not publish on failure', async () => {
+  const fx = makeFixtureRepo();
+  try {
+    const repo = createRepo();
+    const published: any[] = [];
+    const mockBus = { publish: (e: any) => { published.push(e); }, subscribe: () => ({ unsubscribe: () => {} }) };
+    const mutator = new TaskMutator(repo, mockBus as any);
+    // nonexistent task → unblock fails, no event (unblock is idempotent for existing tasks)
+    const result = await mutator.unblock('zzzz');
+    assert.equal(result.success, false);
+    assert.equal(published.length, 0);
+  } finally {
+    fx.cleanup();
+  }
+});
+
 // ─── 18. EventBus publication — setBus wiring ─────────────────────
 
 test('setBus — wires event bus after construction', async () => {
