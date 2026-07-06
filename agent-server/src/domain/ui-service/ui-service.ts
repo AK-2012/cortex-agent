@@ -5,7 +5,7 @@
 import type { UiServiceDeps, UiService, QueryScope, MutateOp, Result } from './types.js';
 import { handleProjectsList } from './query/projects.js';
 import { handleSessionsList } from './query/sessions.js';
-import { handleThreadsList } from './query/threads.js';
+import { handleThreadsList, handleThreadsGet } from './query/threads.js';
 import { handleTasksList } from './query/tasks.js';
 import { handleSchedulesList } from './query/schedules.js';
 import { handleExecutionsList } from './query/executions.js';
@@ -33,6 +33,7 @@ const queryHandlers: Record<string, QueryHandler> = {
   'projects.list': (deps) => handleProjectsList(deps),
   'sessions.list': (deps, params) => handleSessionsList(deps, params),
   'threads.list': (deps, params) => handleThreadsList(deps, params),
+  'threads.get': (deps, params) => handleThreadsGet(deps, params),
   'tasks.list': (deps, params) => handleTasksList(deps, params),
   'schedules.list': (deps, params) => handleSchedulesList(deps, params),
   'executions.list': (deps, params) => handleExecutionsList(deps, params),

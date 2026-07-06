@@ -11,6 +11,7 @@ import type {
   projectsListInput,
   sessionsListInput,
   threadsListInput,
+  threadsGetInput,
   tasksListInput,
   schedulesListInput,
   executionsListInput,
@@ -38,6 +39,7 @@ type MutateParity<O extends keyof MutateArgsMap, Schema extends z.ZodType> = Exa
 const _projectsList: QueryParity<'projects.list', typeof projectsListInput> = true;
 const _sessionsList: QueryParity<'sessions.list', typeof sessionsListInput> = true;
 const _threadsList: QueryParity<'threads.list', typeof threadsListInput> = true;
+const _threadsGet: QueryParity<'threads.get', typeof threadsGetInput> = true;
 const _tasksList: QueryParity<'tasks.list', typeof tasksListInput> = true;
 const _schedulesList: QueryParity<'schedules.list', typeof schedulesListInput> = true;
 const _executionsList: QueryParity<'executions.list', typeof executionsListInput> = true;
@@ -58,7 +60,7 @@ const _tasksUnblock: MutateParity<'tasks.unblock', typeof taskActionInput> = tru
 // Reference the guards so noUnusedLocals (if enabled) stays quiet and the
 // checks are not tree-shaken away by the type checker.
 export const _contractParityChecked = [
-  _projectsList, _sessionsList, _threadsList, _tasksList, _schedulesList,
+  _projectsList, _sessionsList, _threadsList, _threadsGet, _tasksList, _schedulesList,
   _executionsList, _costSummary, _threadsCancel, _executionsCancel,
   _schedulesPause, _schedulesResume, _schedulesRemove, _tasksClaim,
   _tasksUnclaim, _tasksComplete, _tasksBlock, _tasksUnblock,

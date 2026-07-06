@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { queryInputSchemas, mutateInputSchemas } from './schemas.js';
 
 const QUERY_SCOPES = [
-  'projects.list', 'sessions.list', 'threads.list', 'tasks.list',
+  'projects.list', 'sessions.list', 'threads.list', 'threads.get', 'tasks.list',
   'schedules.list', 'executions.list', 'cost.summary',
 ] as const;
 
@@ -39,11 +39,14 @@ test('query schemas accept valid input', () => {
   );
   // cost.summary projectId is nullable
   assert.deepEqual(queryInputSchemas['cost.summary'].parse({ projectId: null }), { projectId: null });
+  // threads.get requires a threadId
+  assert.deepEqual(queryInputSchemas['threads.get'].parse({ threadId: 'thr_a' }), { threadId: 'thr_a' });
 });
 
 test('query schemas reject invalid input', () => {
   assert.throws(() => queryInputSchemas['tasks.list'].parse({ status: 'nope' }));
   assert.throws(() => queryInputSchemas['executions.list'].parse({ limit: 'ten' }));
+  assert.throws(() => queryInputSchemas['threads.get'].parse({}));
   assert.throws(() => queryInputSchemas['sessions.list'].parse({ resumable: 'yes' }));
 });
 

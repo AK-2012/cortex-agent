@@ -25,6 +25,10 @@ export const threadsListInput = z.object({
   status: z.array(z.string()).optional(),
 });
 
+export const threadsGetInput = z.object({
+  threadId: z.string(),
+});
+
 export const tasksListInput = z.object({
   projectId: z.string().optional(),
   status: z.enum(['open', 'done']).optional(),
@@ -82,6 +86,7 @@ export const queryInputSchemas = {
   'projects.list': projectsListInput,
   'sessions.list': sessionsListInput,
   'threads.list': threadsListInput,
+  'threads.get': threadsGetInput,
   'tasks.list': tasksListInput,
   'schedules.list': schedulesListInput,
   'executions.list': executionsListInput,

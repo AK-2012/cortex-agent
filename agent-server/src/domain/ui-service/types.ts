@@ -23,6 +23,7 @@ export type QueryScope =
   | 'projects.list'
   | 'sessions.list'
   | 'threads.list'
+  | 'threads.get'
   | 'tasks.list'
   | 'schedules.list'
   | 'executions.list'
@@ -65,6 +66,10 @@ export interface SessionsListParams {
 export interface ThreadsListParams {
   projectId?: string;
   status?: string[];
+}
+
+export interface ThreadsGetParams {
+  threadId: string;
 }
 
 export interface TasksListParams {
@@ -148,6 +153,90 @@ export interface ThreadInfo {
   artifactPath: string | null;
 }
 
+// ── threads.get detail DTO (DR-0018 §6.3 B1) ─────────────────────
+
+export interface ThreadStepDetail {
+  stepIndex: number;
+  agentSlotId: string;
+  stage: string | null;
+  status: 'completed' | 'running' | 'pending';
+  executionId: string | null;
+  sessionId: string | null;
+  sessionName: string | null;
+  costUsd: number | null;
+  numTurns: number | null;
+  durationS: number | null;
+  startedAt: string | null;
+  endedAt: string | null;
+  outputSummary: string | null;
+}
+
+export interface ThreadAgentFlow {
+  slotId: string;
+  profile: string;
+  status: 'idle' | 'running' | 'completed';
+  stage: string | null;
+  sessionId: string | null;
+  sessionName: string | null;
+  lastOutput: string | null;
+}
+
+export interface ThreadDispatchInfo {
+  executionId: string;
+  status: string;
+  machine: string | null;
+  type: 'local' | 'dispatch';
+  agentSlotId: string | null;
+  taskId: string | null;
+  startedAt: string;
+  finishedAt: string | null;
+  durationMs: number | null;
+  cost: number | null;
+}
+
+export interface ThreadChildNode {
+  id: string;
+  templateName: string | null;
+  status: ThreadInfo['status'];
+  activeAgent: string | null;
+  costUsd: number;
+  depth: number;
+  createdAt: string;
+  taskId: string | null;
+  children: ThreadChildNode[];
+  truncated: boolean;
+}
+
+export interface ThreadArtifactRefs {
+  artifactPath: string | null;
+  workspacePath: string | null;
+  taskId: string | null;
+  taskProject: string | null;
+}
+
+export interface ThreadDetail {
+  id: string;
+  templateName: string;
+  currentStep: { index: number; name: string } | null;
+  status: ThreadInfo['status'];
+  projectId: string;
+  createdAt: string;
+  updatedAt: string;
+  totalSteps: number;
+  artifactPath: string | null;
+  endedAt: string | null;
+  error: string | null;
+  abortReason: string | null;
+  activeAgent: string | null;
+  activeStage: string | null;
+  totalCostUsd: number;
+  steps: ThreadStepDetail[];
+  agentFlow: ThreadAgentFlow | null;
+  dispatches: ThreadDispatchInfo[];
+  children: ThreadChildNode[];
+  artifacts: ThreadArtifactRefs;
+}
+
 export interface TaskInfo {
   id: string;
   text: string;
@@ -203,6 +292,7 @@ export interface QueryParamMap {
   'projects.list': Record<string, never>;
   'sessions.list': SessionsListParams;
   'threads.list': ThreadsListParams;
+  'threads.get': ThreadsGetParams;
   'tasks.list': TasksListParams;
   'schedules.list': SchedulesListParams;
   'executions.list': ExecutionsListParams;
@@ -213,6 +303,7 @@ export interface QueryReturnMap {
   'projects.list': ProjectConduitInfo[];
   'sessions.list': SessionInfo[];
   'threads.list': ThreadInfo[];
+  'threads.get': ThreadDetail;
   'tasks.list': TaskInfo[];
   'schedules.list': ScheduleInfo[];
   'executions.list': ExecutionInfo[];
