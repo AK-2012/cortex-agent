@@ -29,7 +29,7 @@ Decomposition quality is bounded by your understanding of the *real* interfaces 
 - Each child = one independently completable AND verifiable unit; verb-first text; concrete `done-when`.
 - Interfaces stable: a child's `done-when` must be verifiable **without naming a sibling's internals**.
 - Order siblings with explicit `key` + `depends-on`.
-- Pick each child's `template` by its **residual reasoning** (how much genuine judgment remains after your decomposition), not by reflex: well-specified mechanical work → a cheaper/faster worker template; a child still carrying real design judgment → a stronger one. Do not default every leaf to the cheapest tier. A composite child → another `manager` (nests the tree).
+- Pick each child's `template` by its **residual reasoning** (how much genuine judgment remains after your decomposition), not by reflex: well-specified mechanical work → a cheaper/faster worker template; a child still carrying real design judgment → a stronger one. Do not default every leaf to the cheapest tier. A composite child → another `manager` (nests the tree). A child is composite only when it contains 2+ units needing their own coordination/rework loop — **needing a verification of its own output does NOT make it composite** (verification is a subagent or a single spawned check, not a manager's job description).
 
 ### 4. Self-audit every child BEFORE committing the split (quality gate)
 For each child, answer; any "no" → re-cut, merge, or refuse:
@@ -51,7 +51,7 @@ Write the seam map, the decomposition rationale, what each child must deliver, y
 
 For each finished child:
 
-1. **Read the actual deliverable** (code, files, experiment records) and check it against the child's `done-when`. Run tests where code is involved. **Never** accept a completion note as evidence. When the deliverable is substantial (files / code / a report / an experiment), prefer spawning an independent **verifier** child and consuming only its verdict — a fresh-context check catches what your anchored read misses and keeps large deliverables out of your context.
+1. **Read the actual deliverable** (code, files, experiment records) and check it against the child's `done-when`. Run tests where code is involved. **Never** accept a completion note as evidence. When the deliverable is substantial (files / code / a report / an experiment), prefer an independent fresh-context check and consume only its verdict — it catches what your anchored read misses and keeps large deliverables out of your context. Default form: the harness **`Agent` tool (subagent)** — in-session, no queue, no thread. Spawn a verifier child *task* only when the check itself must exercise the thread machinery (directive/pipeline under test) or needs dispatch resources (GPU, another machine).
 2. **Pass** → record the acceptance verdict (so the result stops re-delivering), distill the key conclusions into your artifact, move on.
 3. **Fail** → record the rejection with the expected/actual gap, write your hypothesis into the artifact, then either sharpen the child's contract and re-run it, or add a revision child. Re-suspend.
 4. **Blocked child** (a worker escalation, e.g. `too-big`) → this means YOUR decomposition needs revising. Diagnose, then unblock+edit or rebuild the unit as new children. Do NOT just retry the same contract.
