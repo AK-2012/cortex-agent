@@ -29,7 +29,8 @@ export function ThreadArtifactsPanel({ artifacts, live }: ThreadArtifactsPanelPr
     artifacts.artifactPath || artifacts.workspacePath || artifacts.taskId || artifacts.taskProject;
 
   return (
-    <Card data-thread-artifacts="true">
+    <div data-thread-artifacts="true">
+      <Card>
       <CardHeader>
         <div className="flex items-center gap-1g">
           <span className="text-ui font-medium text-state-ink">Thread artifact</span>
@@ -55,6 +56,7 @@ export function ThreadArtifactsPanel({ artifacts, live }: ThreadArtifactsPanelPr
           <div className="text-ui text-state-ink/40">No artifact for this thread.</div>
         )}
       </CardBody>
-    </Card>
+      </Card>
+    </div>
   );
 }
