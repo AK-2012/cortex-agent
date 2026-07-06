@@ -72,6 +72,7 @@ const QUERY_CASES: Array<{ scope: QueryScope; call: (c: any) => Promise<unknown>
   { scope: 'tasks.list', call: (c) => c.tasks.list({}), input: {} },
   { scope: 'schedules.list', call: (c) => c.schedules.list({}), input: {} },
   { scope: 'executions.list', call: (c) => c.executions.list({}), input: {} },
+  { scope: 'executions.get', call: (c) => c.executions.get({ executionId: 'e1' }), input: {} },
   { scope: 'cost.summary', call: (c) => c.cost.summary({}), input: {} },
 ];
 
@@ -112,8 +113,8 @@ test('every mutation routes to the correct op and unwraps Result.data', async ()
   }
 });
 
-test('coverage: exactly 7 queries + 10 mutations exercised', () => {
-  assert.equal(QUERY_CASES.length, 7);
+test('coverage: exactly 8 queries + 10 mutations exercised', () => {
+  assert.equal(QUERY_CASES.length, 8);
   assert.equal(MUTATE_CASES.length, 10);
 });
 

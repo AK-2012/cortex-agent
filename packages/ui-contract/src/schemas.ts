@@ -14,6 +14,7 @@ export {
   tasksListInput,
   schedulesListInput,
   executionsListInput,
+  executionsGetInput,
   costSummaryInput,
   threadsCancelInput,
   executionsCancelInput,

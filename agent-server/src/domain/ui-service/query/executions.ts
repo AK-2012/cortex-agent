@@ -1,8 +1,14 @@
-// input:  UiServiceDeps + ExecutionsListParams
-// output: handleExecutionsList → ExecutionInfo[]
-// pos:    query handler for 'executions.list'
+// input:  UiServiceDeps + ExecutionsListParams / ExecutionsGetParams
+// output: handleExecutionsList → ExecutionInfo[]; handleExecutionsGet → ExecutionDetailInfo
+// pos:    query handlers for 'executions.list' and 'executions.get'
 
-import type { UiServiceDeps, ExecutionInfo, ExecutionsListParams } from '../types.js';
+import type {
+  UiServiceDeps,
+  ExecutionInfo,
+  ExecutionsListParams,
+  ExecutionDetailInfo,
+  ExecutionsGetParams,
+} from '../types.js';
 
 export async function handleExecutionsList(
   deps: UiServiceDeps,
@@ -46,4 +52,52 @@ export async function handleExecutionsList(
       cost: e.metrics?.costUsd ?? null,
     };
   });
+}
+
+export async function handleExecutionsGet(
+  deps: UiServiceDeps,
+  params: ExecutionsGetParams,
+): Promise<ExecutionDetailInfo> {
+  const e = deps.executionRegistry.getExecution(params.executionId);
+  if (!e) {
+    throw Object.assign(new Error(`Execution not found: ${params.executionId}`), {
+      code: 'not-found',
+    });
+  }
+
+  return {
+    id: e.id,
+    type: e.kind === 'dispatch' ? 'dispatch' : 'local',
+    kind: e.kind,
+    status: e.status,
+    projectId: e.project ?? null,
+    sessionId: e.session?.sessionId ?? null,
+    threadId: e.thread?.threadId ?? null,
+    runtime: {
+      startedAt: e.runtime?.startedAt ?? '',
+      updatedAt: e.runtime?.updatedAt ?? '',
+      endedAt: e.runtime?.endedAt ?? null,
+    },
+    dispatch: e.dispatch
+      ? {
+          taskId: e.dispatch.taskId ?? null,
+          machine: e.dispatch.machine ?? null,
+          pid: e.dispatch.pid ?? null,
+          tmuxName: e.dispatch.tmuxName ?? null,
+          sessionName: e.dispatch.sessionName ?? null,
+          scheduleTaskId: e.dispatch.scheduleTaskId ?? null,
+        }
+      : null,
+    metrics: {
+      costUsd: e.metrics?.costUsd ?? null,
+      numTurns: e.metrics?.numTurns ?? null,
+      durationS: e.metrics?.durationS ?? null,
+    },
+    gpu: null,
+    text: {
+      label: e.text?.label ?? null,
+      finalOutput: e.text?.finalOutput ?? null,
+      error: e.text?.error ?? null,
+    },
+  };
 }

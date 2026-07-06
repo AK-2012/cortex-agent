@@ -8,7 +8,7 @@ import { handleSessionsList } from './query/sessions.js';
 import { handleThreadsList } from './query/threads.js';
 import { handleTasksList } from './query/tasks.js';
 import { handleSchedulesList } from './query/schedules.js';
-import { handleExecutionsList } from './query/executions.js';
+import { handleExecutionsList, handleExecutionsGet } from './query/executions.js';
 import { handleCostSummary } from './query/cost.js';
 import { handleCancelThread } from './mutate/threads.js';
 import { handleCancelExecution } from './mutate/executions.js';
@@ -36,6 +36,7 @@ const queryHandlers: Record<string, QueryHandler> = {
   'tasks.list': (deps, params) => handleTasksList(deps, params),
   'schedules.list': (deps, params) => handleSchedulesList(deps, params),
   'executions.list': (deps, params) => handleExecutionsList(deps, params),
+  'executions.get': (deps, params) => handleExecutionsGet(deps, params),
   'cost.summary': (deps, params) => handleCostSummary(deps, params),
 };
 
@@ -63,7 +64,8 @@ export function createUiService(deps: UiServiceDeps): UiService {
         const data = await handler(deps, params);
         return { ok: true, data };
       } catch (err: any) {
-        return { ok: false, code: 'internal', message: err?.message || String(err) };
+        const code = typeof err?.code === 'string' ? err.code : 'internal';
+        return { ok: false, code, message: err?.message || String(err) };
       }
     },
 

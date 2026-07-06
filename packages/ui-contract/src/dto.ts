@@ -21,6 +21,7 @@ export type {
   TasksListParams,
   SchedulesListParams,
   ExecutionsListParams,
+  ExecutionsGetParams,
   CostSummaryParams,
   // Mutate args
   ThreadsCancelArgs,
@@ -36,6 +37,7 @@ export type {
   TaskInfo,
   ScheduleInfo,
   ExecutionInfo,
+  ExecutionDetailInfo,
   ThreadsCancelReturn,
   ExecutionsCancelReturn,
   // Mapped contract

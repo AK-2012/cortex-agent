@@ -4,7 +4,7 @@ import { queryInputSchemas, mutateInputSchemas } from './schemas.js';
 
 const QUERY_SCOPES = [
   'projects.list', 'sessions.list', 'threads.list', 'tasks.list',
-  'schedules.list', 'executions.list', 'cost.summary',
+  'schedules.list', 'executions.list', 'executions.get', 'cost.summary',
 ] as const;
 
 const MUTATE_OPS = [
@@ -36,6 +36,10 @@ test('query schemas accept valid input', () => {
   assert.deepEqual(
     queryInputSchemas['executions.list'].parse({ status: ['running'], limit: 5 }),
     { status: ['running'], limit: 5 },
+  );
+  assert.deepEqual(
+    queryInputSchemas['executions.get'].parse({ executionId: 'exec_1' }),
+    { executionId: 'exec_1' },
   );
   // cost.summary projectId is nullable
   assert.deepEqual(queryInputSchemas['cost.summary'].parse({ projectId: null }), { projectId: null });

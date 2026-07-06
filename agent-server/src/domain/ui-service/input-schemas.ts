@@ -41,6 +41,10 @@ export const executionsListInput = z.object({
   limit: z.number().optional(),
 });
 
+export const executionsGetInput = z.object({
+  executionId: z.string(),
+});
+
 export const costSummaryInput = z.object({
   projectId: z.string().nullish(),
 });
@@ -85,6 +89,7 @@ export const queryInputSchemas = {
   'tasks.list': tasksListInput,
   'schedules.list': schedulesListInput,
   'executions.list': executionsListInput,
+  'executions.get': executionsGetInput,
   'cost.summary': costSummaryInput,
 } satisfies Record<QueryScope, z.ZodType>;
 

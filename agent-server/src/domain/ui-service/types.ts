@@ -26,6 +26,7 @@ export type QueryScope =
   | 'tasks.list'
   | 'schedules.list'
   | 'executions.list'
+  | 'executions.get'
   | 'cost.summary';
 
 // ── Mutate ops ────────────────────────────────────────────────────
@@ -81,6 +82,10 @@ export interface SchedulesListParams {
 export interface ExecutionsListParams {
   status?: string[];
   limit?: number;
+}
+
+export interface ExecutionsGetParams {
+  executionId: string;
 }
 
 export interface CostSummaryParams {
@@ -187,6 +192,32 @@ export interface ExecutionInfo {
   cost: number | null;
 }
 
+// Full single-execution detail for the execution detail screen (F3/8b right pane).
+// Superset of ExecutionInfo's identifying fields plus nested lifecycle / dispatch /
+// metrics / text. `gpu` is best-effort: no GPU field is persisted on ExecutionRecord,
+// so it is always null for now (the shape documents the contract for a future source).
+export interface ExecutionDetailInfo {
+  id: string;
+  type: 'local' | 'dispatch';
+  kind: string;
+  status: 'running' | 'completed' | 'failed' | 'cancelled' | 'stale';
+  projectId: string | null;
+  sessionId: string | null;
+  threadId: string | null;
+  runtime: { startedAt: string; updatedAt: string; endedAt: string | null };
+  dispatch: {
+    taskId: string | null;
+    machine: string | null;
+    pid: string | null;
+    tmuxName: string | null;
+    sessionName: string | null;
+    scheduleTaskId: string | null;
+  } | null;
+  metrics: { costUsd: number | null; numTurns: number | null; durationS: number | null };
+  gpu: { indices: number[]; memoryMb: number | null } | null;
+  text: { label: string | null; finalOutput: string | null; error: string | null };
+}
+
 // ── Mutate return types ───────────────────────────────────────────
 
 export interface ThreadsCancelReturn {
@@ -206,6 +237,7 @@ export interface QueryParamMap {
   'tasks.list': TasksListParams;
   'schedules.list': SchedulesListParams;
   'executions.list': ExecutionsListParams;
+  'executions.get': ExecutionsGetParams;
   'cost.summary': CostSummaryParams;
 }
 
@@ -216,6 +248,7 @@ export interface QueryReturnMap {
   'tasks.list': TaskInfo[];
   'schedules.list': ScheduleInfo[];
   'executions.list': ExecutionInfo[];
+  'executions.get': ExecutionDetailInfo;
   'cost.summary': CostSummary;
 }
 

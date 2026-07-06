@@ -1,0 +1,100 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { TRPCError } from '@trpc/server';
+import { handleExecutionsGet } from '../../../src/domain/ui-service/query/executions.js';
+import { createUiService } from '../../../src/domain/ui-service/ui-service.js';
+import { createAppRouter } from '../../../src/domain/ui-service/app-router.js';
+import { createCallerFactory } from '../../../src/domain/ui-service/trpc.js';
+import type { UiServiceDeps } from '../../../src/domain/ui-service/types.js';
+
+const now = Date.now();
+const knownRecord = {
+  id: 'exec_known', kind: 'dispatch', status: 'completed', channel: 'C2', project: 'proj2',
+  source: { trigger: 'dispatch' }, backend: 'codex', billingMode: 'api',
+  session: { sessionId: 's2' }, thread: { threadId: 'thr_9', agentSlotId: 'main' },
+  dispatch: {
+    taskId: 't1', taskHash: 'h1', machine: 'server1', scheduleTaskId: 'sch1',
+    sessionName: 'sess-1', tmuxName: 'tmux-1', pid: '4242',
+  },
+  scheduleTaskId: 'sch1',
+  runtime: {
+    startedAt: new Date(now - 120000).toISOString(),
+    updatedAt: new Date(now - 1000).toISOString(),
+    endedAt: new Date(now - 1000).toISOString(),
+  },
+  metrics: { costUsd: 0.05, numTurns: 3, durationS: 119 },
+  text: { label: 'dispatch-task', finalOutput: 'done', error: null },
+};
+
+function makeDeps(overrides: Partial<UiServiceDeps> = {}): UiServiceDeps {
+  return {
+    projectStore: { list: () => [], get: () => undefined, exists: () => false, getDefault: () => ({ id: 'general', name: 'general', kind: 'general' as const, contextDir: '/g' }) },
+    sessionStore: { listByProject: async () => [], listResumable: async () => [], getById: async () => null },
+    threadStore: { getAll: () => [], get: () => null },
+    taskStore: { getAll: () => [], getById: () => null, load: () => {}, refresh: () => {} },
+    scheduler: { list: async () => [], get: async () => null, pause: async () => null, resume: async () => null, remove: async () => false },
+    executionRegistry: {
+      getExecution: (id: string) => (id === 'exec_known' ? knownRecord : null),
+      getAll: () => [knownRecord],
+      cancelExecution: () => null,
+    },
+    runningExecutions: { getAll: () => [] } as any,
+    costSummary: async () => ({ today: 0, week: 0, month: 0, total: 0, byMode: {} as any, byProject: {}, byTrigger: {}, bySource: {}, byBackend: {}, tokens: {} as any, entryCount: 0 }),
+    bus: { subscribe: () => ({ unsubscribe: () => {} }), publish: () => {} } as any,
+    adapter: { getProjectConduits: async () => ({}) } as any,
+    ...overrides,
+  };
+}
+
+test('executions.get handler maps real ExecutionRecord fields into the detail DTO', async () => {
+  const dto = await handleExecutionsGet(makeDeps(), { executionId: 'exec_known' });
+  assert.equal(dto.id, 'exec_known');
+  assert.equal(dto.type, 'dispatch');
+  assert.equal(dto.kind, 'dispatch');
+  assert.equal(dto.status, 'completed');
+  assert.equal(dto.projectId, 'proj2');
+  assert.equal(dto.sessionId, 's2');
+  assert.equal(dto.threadId, 'thr_9');
+  assert.equal(dto.runtime.startedAt, knownRecord.runtime.startedAt);
+  assert.equal(dto.runtime.updatedAt, knownRecord.runtime.updatedAt);
+  assert.equal(dto.runtime.endedAt, knownRecord.runtime.endedAt);
+  assert.deepEqual(dto.dispatch, {
+    taskId: 't1', machine: 'server1', pid: '4242',
+    tmuxName: 'tmux-1', sessionName: 'sess-1', scheduleTaskId: 'sch1',
+  });
+  assert.deepEqual(dto.metrics, { costUsd: 0.05, numTurns: 3, durationS: 119 });
+  assert.equal(dto.gpu, null);
+  assert.deepEqual(dto.text, { label: 'dispatch-task', finalOutput: 'done', error: null });
+});
+
+test('executions.get handler throws not-found for an unknown id', async () => {
+  await assert.rejects(
+    () => handleExecutionsGet(makeDeps(), { executionId: 'missing' }),
+    (e: any) => e?.code === 'not-found',
+  );
+});
+
+test('executions.get via facade returns real data for a known id', async () => {
+  const ui = createUiService(makeDeps());
+  const result = await ui.query('executions.get', { executionId: 'exec_known' });
+  assert.ok(result.ok);
+  assert.equal(result.data.id, 'exec_known');
+  assert.equal(result.data.metrics.costUsd, 0.05);
+});
+
+test('executions.get via facade returns not-found Err for a missing id', async () => {
+  const ui = createUiService(makeDeps());
+  const result = await ui.query('executions.get', { executionId: 'missing' });
+  assert.equal(result.ok, false);
+  assert.equal((result as any).code, 'not-found');
+});
+
+test('executions.get via app-router rejects with TRPCError NOT_FOUND for a missing id', async () => {
+  const caller = createCallerFactory(createAppRouter(createUiService(makeDeps())))({});
+  await assert.rejects(
+    () => caller.executions.get({ executionId: 'missing' }),
+    (e: unknown) => e instanceof TRPCError && e.code === 'NOT_FOUND',
+  );
+  const dto = await caller.executions.get({ executionId: 'exec_known' });
+  assert.equal(dto.id, 'exec_known');
+});

@@ -14,6 +14,7 @@ import type {
   tasksListInput,
   schedulesListInput,
   executionsListInput,
+  executionsGetInput,
   costSummaryInput,
   threadsCancelInput,
   executionsCancelInput,
@@ -41,6 +42,7 @@ const _threadsList: QueryParity<'threads.list', typeof threadsListInput> = true;
 const _tasksList: QueryParity<'tasks.list', typeof tasksListInput> = true;
 const _schedulesList: QueryParity<'schedules.list', typeof schedulesListInput> = true;
 const _executionsList: QueryParity<'executions.list', typeof executionsListInput> = true;
+const _executionsGet: QueryParity<'executions.get', typeof executionsGetInput> = true;
 const _costSummary: QueryParity<'cost.summary', typeof costSummaryInput> = true;
 
 // ── Mutate ops ────────────────────────────────────────────────────
@@ -59,7 +61,7 @@ const _tasksUnblock: MutateParity<'tasks.unblock', typeof taskActionInput> = tru
 // checks are not tree-shaken away by the type checker.
 export const _contractParityChecked = [
   _projectsList, _sessionsList, _threadsList, _tasksList, _schedulesList,
-  _executionsList, _costSummary, _threadsCancel, _executionsCancel,
+  _executionsList, _executionsGet, _costSummary, _threadsCancel, _executionsCancel,
   _schedulesPause, _schedulesResume, _schedulesRemove, _tasksClaim,
   _tasksUnclaim, _tasksComplete, _tasksBlock, _tasksUnblock,
 ] as const;

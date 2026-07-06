@@ -19,6 +19,7 @@ import {
   tasksListInput,
   schedulesListInput,
   executionsListInput,
+  executionsGetInput,
   costSummaryInput,
   threadsCancelInput,
   executionsCancelInput,
@@ -96,7 +97,7 @@ function makeMutation<O extends MutateOp, Sch extends z.ZodType>(
 }
 
 // ── AppRouter ─────────────────────────────────────────────────────────────────────
-// 7 QueryScope + 10 MutateOp + 1 subscription, mirroring the ui-service contract.
+// 8 QueryScope + 10 MutateOp + 1 subscription, mirroring the ui-service contract.
 export function createAppRouter(uiService: UiService) {
   return router({
     projects: router({
@@ -125,6 +126,7 @@ export function createAppRouter(uiService: UiService) {
     }),
     executions: router({
       list: makeQuery(uiService, 'executions.list', executionsListInput),
+      get: makeQuery(uiService, 'executions.get', executionsGetInput),
       cancel: makeMutation(uiService, 'executions.cancel', executionsCancelInput),
     }),
     cost: router({
