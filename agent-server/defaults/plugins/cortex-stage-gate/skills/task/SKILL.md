@@ -1,14 +1,14 @@
 ---
 name: task
-description: "MUST Use when adding, editing, querying, or managing cortex tasks — includes task creation conventions (format, tagging, decomposition rules). MUST use before using cortex-task CLI."
+description: "MUST Use when adding, editing, querying, or managing cortex tasks — includes the execution-form triage (inline vs Agent-tool subagent vs task vs manager), task creation conventions (format, tagging, decomposition rules). MUST use before using cortex-task CLI."
 author: Cortex
-version: 2.0.0
+version: 2.1.0
 allowed-tools:
   - Read
   - Write
   - Edit
   - Bash
-date: 2026-04-25
+date: 2026-07-05
 ---
 
 # Task
@@ -19,14 +19,119 @@ You are Cortex, managing the TASKS.yaml task system.
 $ARGUMENTS
 
 The task system has a single canonical CLI: `cortex-task`
-(source: `agent-server/src/task-system/task-cli.ts`). Both read and write
+(source: `agent-server/src/domain/tasks/system/task-cli.ts`). Both read and write
 operations live behind subcommands. Run `cortex-task --help` for
 the full reference. Use this CLI as the source of truth for task operations
 instead of manually editing `TASKS.yaml` when a canonical command exists.
 
 ---
 
+## Step 0 — Choose the Execution Form (not every job is a task)
+
+Creating a task dispatches a full thread pipeline (agents, artifact, review, callbacks,
+queue latency). That machinery buys durability and independent verification — and costs
+tokens, wall time, and tree depth. Match the form to the work BEFORE reaching for
+`cortex-task add`:
+
+| Work shape | Form | Why |
+|---|---|---|
+| Minutes-level, verifiable on the spot (query state, read code, small edit + check) | **Do it inline** | Delegation overhead exceeds the work |
+| Small scoped unit whose result YOU consume immediately: a verification run, recon/search, log audit, one-shot analysis, scratch build | **Harness `Agent` tool (subagent)** | In-session, no queue, no thread; it is available in agent sessions and NOT forbidden; you audit the output yourself |
+| A persistent, independently verifiable unit: needs the dispatch queue, a review pipeline, GPU scheduling, or must survive your session | **Leaf task** — `cortex-task add` + a worker review template | Thread machinery earns its cost |
+| Composite: 2+ units needing coordination / acceptance / rework loops | **Manager task** — `--template manager` | Resident join node decomposes just-in-time and verifies children |
+
+Rules that fall out of this ladder:
+
+- **A verification step is NOT a reason to create a task.** When you (manager or worker)
+  need to check something — re-derive a metric, audit a session log, probe an environment,
+  smoke-test an output — spawn a subagent with the `Agent` tool and audit its answer
+  yourself. Create a validation *task* only when the validation must itself exercise the
+  thread machinery end-to-end (e.g. verifying a thread directive/pipeline behavior).
+- **"Self-execute + verify" is a LEAF, not a composite.** A single unit of work plus its
+  own verification does not justify a manager node. Do the work; verify via subagent. If
+  the verification genuinely requires a dispatched child task, `cortex-task spawn` +
+  `thread_wait` also works from worker templates (the wait/wake machinery is
+  template-agnostic) — becoming a manager is not the price of waiting once.
+- **The `default` / `scheduler` templates remain forbidden for task creation** (rejected at
+  creation time). The escape hatch for small unreviewed work is the `Agent` tool in your
+  own session — not a bare, unaudited thread.
+
+---
+
 ## Canonical CLI Usage
+
+### Read (no mutation)
+
+```bash
+cortex-task --help
+cortex-task list                                  # actionable, sorted by project priority
+cortex-task list --all --json                     # all tasks (incl. completed) as JSON
+cortex-task stats                                 # supply statistics per project
+cortex-task query --project <project> [--status <status>] [--priority <p>] [--text <s>] [--task-id <id>] [--has-deps] [--no-deps] [--json]
+cortex-task show --task-id <id> [--json]
+cortex-task deps --task-id <id> [--json]
+cortex-task lint [--project <p>] [--json]
+```
+
+### Write (mutates TASKS.yaml)
+
+```bash
+# State
+cortex-task claim --project <p> (--task-id <id> | --task <text>) [--agent <name>]
+cortex-task unclaim --project <p> --task-id <id>
+cortex-task pause --project <p> --task-id <id>
+cortex-task resume --project <p> --task-id <id>
+cortex-task complete --project <p> --task-id <id> [--note <text>] [--skip-verify --skip-verify-reason <text>]
+cortex-task uncomplete --project <p> --task-id <id>
+
+# Approval
+cortex-task request-approval --project <p> --task-id <id>
+cortex-task approve --project <p> --task-id <id>
+cortex-task clear-approval --project <p> --task-id <id>
+
+# Blocking
+cortex-task block --project <p> --task-id <id> --reason <text>
+cortex-task unblock --project <p> --task-id <id>
+
+# Acceptance verdict (DR-0017 — the manager MUST record a verdict after verifying each child;
+# accepted children are never re-delivered, rejected ones count rework rounds)
+cortex-task verdict --project <p> --task-id <parent-id> --child <child-id> --verdict accepted|rejected [--note <text>]
+
+# Mutation
+cortex-task add --project <p> --text <t> --why <w> --done-when <c> --plan <path> --template <name> [--priority high|medium|low] [--depends-on <id> [...]]
+cortex-task spawn --text <t> --done-when <c> --template <name> [...]   # child of current task (CORTEX_TASK_ID); pair with thread_wait
+cortex-task edit --project <p> --task-id <id> [--text <t>] [--why <w>] [--done-when <c>] [--plan <path>] [--priority <p>] \
+  [--depends-on <id> [...]] [--add-depends-on <id>] [--remove-depends-on <id>] [--clear-depends-on]
+cortex-task batch-edit --project <p> --task-ids <id1,id2,...> [<edit flags>]
+cortex-task decompose --project <p> --task-id <id> --subtasks-file <path|->
+
+# Maintenance
+cortex-task assign-ids [--project <p>]
+cortex-task validate
+cortex-task stop --task-id <dispatch-id-or-hash> [--dry-run]
+```
+
+### Flag semantics (set vs incremental)
+
+`--depends-on` is a **set / replace** flag:
+- On `add`: define the initial value.
+- On `edit`: replace the entire current list (use `--clear-depends-on` to clear).
+
+For incremental edits (only on `edit` / `batch-edit`):
+- Dependencies: `--add-depends-on <id>`, `--remove-depends-on <id>` (each repeatable).
+
+`--depends-on` accepts **both** space-separated and repeatable forms:
+```bash
+--depends-on a111 a112              # space-separated
+--depends-on a111 --depends-on a112 # repeatable
+```
+
+### Other notes
+
+- `--dry-run` previews `stop` and `decompose` without mutating.
+- `decompose --subtasks-file -` reads JSON from stdin (pipeline-friendly).
+- All mutation commands return JSON (`task_id`, `agent`, `claimed_at`, …) on success.
+- `stop` accepts either the dispatch ID (`dispatch_xxx`) or the TASKS.yaml hash; project is auto-resolved from `pending-tasks.json`.
 
 ## Lock Rules
 
@@ -75,110 +180,17 @@ cortex-task lock-release --project foo
 
 ---
 
-### Read (no mutation)
+## Workflow
 
-```bash
-cortex-task --help
-cortex-task list                                  # actionable, sorted by project priority
-cortex-task list --all --json                     # all tasks (incl. completed) as JSON
-cortex-task stats                                 # supply statistics per project
-cortex-task query --project <project> [--status <status>] [--priority <p>] [--text <s>] [--task-id <id>] [--has-deps] [--no-deps] [--json]
-cortex-task show --task-id <id> [--json]
-cortex-task deps --task-id <id> [--json]
-cortex-task lint [--project <p>] [--json]
-```
-
-### Write (mutates TASKS.md)
-
-```bash
-# State
-cortex-task claim --project <p> (--task-id <id> | --task <text>) [--agent <name>]
-cortex-task unclaim --project <p> --task-id <id>
-cortex-task pause --project <p> --task-id <id>
-cortex-task resume --project <p> --task-id <id>
-cortex-task complete --project <p> --task-id <id> [--note <text>] [--skip-verify --skip-verify-reason <text>]
-cortex-task uncomplete --project <p> --task-id <id>
-
-# Approval
-cortex-task request-approval --project <p> --task-id <id>
-cortex-task approve --project <p> --task-id <id>
-cortex-task clear-approval --project <p> --task-id <id>
-
-# Blocking
-cortex-task block --project <p> --task-id <id> --reason <text>
-cortex-task unblock --project <p> --task-id <id>
-
-
-# Mutation
-cortex-task add --project <p> --text <t> --why <w> --done-when <c> --plan <path> --template <name> [--priority high|medium|low] [--depends-on <id> [...]]
-cortex-task edit --project <p> --task-id <id> [--text <t>] [--why <w>] [--done-when <c>] [--plan <path>] [--priority <p>] \
-  [--depends-on <id> [...]] [--add-depends-on <id>] [--remove-depends-on <id>] [--clear-depends-on]
-cortex-task batch-edit --project <p> --task-ids <id1,id2,...> [<edit flags>]
-cortex-task decompose --project <p> --task-id <id> --subtasks-file <path|->
-
-# Maintenance
-cortex-task assign-ids [--project <p>]
-cortex-task validate
-cortex-task stop --task-id <dispatch-id-or-hash> [--dry-run]
-```
-
-### Flag semantics (set vs incremental)
-
-`--depends-on` is a **set / replace** flag:
-- On `add`: define the initial value.
-- On `edit`: replace the entire current list (use `--clear-depends-on` to clear).
-
-For incremental edits (only on `edit` / `batch-edit`):
-- Dependencies: `--add-depends-on <id>`, `--remove-depends-on <id>` (each repeatable).
-
-`--depends-on` accepts **both** space-separated and repeatable forms:
-```bash
---depends-on a111 a112              # space-separated
---depends-on a111 --depends-on a112 # repeatable
-```
-
-### Other notes
-
-- `--dry-run` previews `stop` and `decompose` without mutating.
-- `decompose --subtasks-file -` reads JSON from stdin (pipeline-friendly).
-- All mutation commands return JSON (`task_id`, `agent`, `claimed_at`, …) on success.
-- `stop` accepts either the dispatch ID (`dispatch_xxx`) or the TASKS.yaml hash; project is auto-resolved from `pending-tasks.json`.
-
----
-
-## Step 1: Read Current State
-
-Common starting points:
-- Actionable list: `cortex-task list --json`
-- Full list (incl. completed): `cortex-task list --all --project <project> --json`
-- Project-scoped filtered query: `cortex-task query --project <project> --json`
-- Supply stats: `cortex-task stats --json`
-- Single task details: `cortex-task show --task-id <id> --json`
-- Dependency view: `cortex-task deps --task-id <id> --json`
-
+**Step 1 — Read current state.** Start from `cortex-task list --json` (actionable),
+`list --all --project <p> --json` (full), `query`/`show`/`deps`/`stats`/`lint` as needed.
 Use `--json` when you need structured data for follow-up actions.
 
----
-
-## Step 2: Determine Action
-
-Parse `$ARGUMENTS` and map the request to the right subcommand.
-
-### Path A — List / Query Tasks
-
-Use `list` / `query` / `show` / `deps` / `lint` / `stats`.
-
-Examples:
-- Actionable list: `cortex-task list --json`
-- All tasks in one project: `cortex-task list --all --project <project> --json`
-- Filter: `cortex-task query --project <project> --status actionable --priority high --json`
-- One task: `cortex-task show --task-id <id> --json`
-- Dependencies: `cortex-task deps --task-id <id> --json`
-- Lint a project: `cortex-task lint --project <project> --json`
-
-### Path B — Mutate Task Lifecycle
-
-Prefer `--task-id` when you have an ID. Use `--task <text>` only as fuzzy fallback (not allowed for `add`).
+**Step 2 — Act.** Parse `$ARGUMENTS` and map the request to the right subcommand.
+Prefer `--task-id` when you have an ID; use `--task <text>` only as fuzzy fallback (not
+allowed for `add`). For decomposition, prepare the subtasks JSON first, then call
+`decompose`. Subtasks inherit the parent task's `plan`; each subtask can override via
+`"plan": "<path>"`.
 
 Examples:
 - Claim: `cortex-task claim --project <project> --task-id <id> --agent cortex-<machine>`
@@ -187,19 +199,12 @@ Examples:
 - Add: `cortex-task add --project <project> --text "Run ablation" --why "Isolate tactile contribution" --done-when "Results in EXP-017.md" --plan context/projects/<project>/experiments/EXP-017.md --priority high --template <name>`
 - Set deps: `cortex-task edit --project <project> --task-id <id> --depends-on a111 a112` (replaces full list)
 - Append a dep: `cortex-task edit --project <project> --task-id <id> --add-depends-on a113`
-- Append a dep: `cortex-task edit --project <project> --task-id <id> --add-depends-on a114`
 - Assign IDs: `cortex-task assign-ids --project <project>`
 - Stop preview: `cortex-task stop --task-id <id> --dry-run`
 
-If the user asks to decompose a task, prepare the subtasks JSON file first, then call `decompose`. Subtasks inherit the parent task's `[plan: ...]` tag; each subtask can override via `"plan": "<path>"`.
-
----
-
-## Step 3: Report Result
-
-Summarize the result briefly and include the canonical CLI response when useful.
-
-If the CLI reports an error, surface it directly instead of inferring a different outcome.
+**Step 3 — Report.** Summarize the result briefly and include the canonical CLI response
+when useful. If the CLI reports an error, surface it directly instead of inferring a
+different outcome.
 
 ---
 
@@ -211,6 +216,7 @@ If the CLI reports an error, surface it directly instead of inferring a differen
 - `assign-ids` is the canonical way to backfill missing task IDs.
 - **`add` required**: `--text`, `--why`, `--done-when`, `--plan`, `--template`. Omitting `--text` or `--template` is rejected.
 - **Manual Task ID is prohibited**: New tasks must be created via the `add` command; directly editing TASKS.yaml to write IDs is forbidden.
+- **The `default` and `scheduler` templates are forbidden for task creation** and rejected at creation time. Small work that doesn't warrant a review pipeline belongs in the `Agent` tool (Step 0), not in a bare single-agent thread.
 
 ---
 
@@ -255,6 +261,7 @@ tasks:
 | `gpu` | string? | GPU machine name |
 | `gpu-count` | number | Number of GPUs, default 1 |
 | `depends-on` | string[] | List of prerequisite task IDs |
+| `parent` | string? | Parent task ID (set by `spawn` / `decompose --keep-parent`) |
 | `plan` | string | Design document path (required) |
 | `not-before` | string? | Earliest executable date |
 | `completed-at` | string? | Completion date |
@@ -264,7 +271,7 @@ tasks:
 
 #### Template Field (Required)
 
-`template` — Specifies the thread template used for dispatch. **Every task must have this field**, no default value. Run `cortex-task add --help` or `!thread templates` to see the current list of available templates.
+`template` — Specifies the thread template used for dispatch. **Every task must have this field**, no default value. Run `cortex-task add --help` or `!thread templates` to see the current list of available templates. `default` and `scheduler` are rejected at creation time (see Step 0 for the right form for small work).
 
 ### Plan Reference Requirements
 
@@ -292,6 +299,33 @@ The `gpu` field specifies that a task needs to use GPU on a particular machine. 
 - The dispatcher detects free GPU slots via `nvidia-smi`, only dispatches when sufficient slots are free
 - Automatically sets `CUDA_VISIBLE_DEVICES` during dispatch
 - Corresponding GPU slot is released after task completion
+
+### Recursive Execution & Manager Nodes (DR-0014 / DR-0017)
+
+The task tree is recursive: **task = persistent work node, thread = one ephemeral execution
+attempt**. Before creating, classify the node (Step 0 gives the full ladder):
+
+- **Leaf task**: a single independently verifiable unit → pick a suitable worker review
+  template and create normally. A leaf that needs its own verification stays a leaf —
+  verify via the `Agent` tool, or spawn ONE child + `thread_wait` (works from worker
+  templates too).
+- **Composite task**: 2+ independent units needing coordination / acceptance / rework
+  loops, or a decomposition that itself needs judgment → `--template manager`. The manager
+  thread decomposes (`decompose --keep-parent`, parent becomes the join/acceptance node),
+  suspends (`thread_wait`), verifies each child result, records verdicts, and completes
+  itself when everything passes.
+
+**Just-in-time decomposition**: when creating a composite task, do NOT pre-split it to
+leaves on the manager's behalf. Each layer decomposes only its own next layer; a child that
+is itself composite gets the `manager` template and its manager splits it later with better
+information. Flattening the whole tree at planning time is an anti-pattern (DR-0014 §1:
+planning happens at the moment of least information). Keep depth at 2-3 levels in practice
+(DR-0014 §5).
+
+**Worker escalation**: a worker that discovers its task is mis-scoped or too big does NOT
+decompose it — it calls the `thread_abort` tool (kind `too-big`, with a diagnosis); the
+task gets blocked with the diagnosis and the owning manager (or a human) re-plans
+(DR-0015 control plane).
 
 ### Task Decomposition
 
@@ -458,23 +492,9 @@ count is never sufficient justification to cut. Split only if the self-audit pas
 - Mixes blocked and unblocked work
 - Mixes mechanical work and judgment-based work *and* the two have a clean handoff
 
-#### Composite Tasks: Assign the `manager` Template (DR-0014 §8)
-
-Decomposition does NOT have to happen at creation time. When a task is clearly composite —
-it would trigger the conditions above, but the right split is only knowable after some
-investigation — do not force a premature decomposition. Instead create ONE task with
-`template: manager`:
-
-- A manager thread (strong model, persistent session) is dispatched for it: it orients,
-  decomposes into child tasks (`decompose --keep-parent`, children carry `parent`), suspends
-  via the `thread_wait` tool, and is woken to verify each child's deliverable against its done_when
-  before completing the parent. Acceptance is part of the node, not an afterthought.
-- Rule of thumb: expected to span 2+ independently verifiable units, or the decomposition
-  itself needs judgment → `manager`. A single well-scoped unit → a worker template
-  (coder-review / execute-review / ...).
-- Worker escalation: a worker that discovers its task is mis-scoped calls the `thread_abort`
-  tool (kind `too-big`, with a diagnosis); the task gets blocked with the diagnosis and the owning
-  manager (or a human) re-plans. Workers never decompose tasks themselves.
+When a split does happen and a child is itself composite (it would trigger these signals
+again), give that child the `manager` template as a single node — do not keep splitting
+downward; that is its manager's job (just-in-time decomposition).
 
 ### Stage Boundary Constraints
 

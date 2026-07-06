@@ -1,5 +1,5 @@
 {
   "name": "cortex-stage-gate",
-  "version": "0.1.1",
-  "description": "Cortex stage-gate skill bundle — reorient / task creation / approval primitives"
+  "version": "0.1.2",
+  "description": "Cortex stage-gate skill bundle \u2014 reorient / task creation / approval primitives"
 }
