@@ -1,0 +1,44 @@
+import * as RadixPopover from '@radix-ui/react-popover';
+import type { ReactNode } from 'react';
+
+// Token-styled wrapper over Radix Popover (approved primitive layer, DR-0018 §1):
+// positioning, esc-to-close and focus return to the trigger come from Radix.
+// Supports controlled (`open`/`onOpenChange`) and uncontrolled usage.
+
+const CONTENT_CLASS =
+  'z-50 min-w-[12rem] rounded-card border border-card bg-surface-card p-2g text-ui text-state-ink shadow-overlay ' +
+  'focus:outline-none ' +
+  'data-[state=open]:animate-popover-in data-[state=closed]:animate-popover-out ' +
+  'motion-reduce:animate-none';
+
+export interface PopoverProps {
+  trigger: ReactNode;
+  children: ReactNode;
+  side?: RadixPopover.PopoverContentProps['side'];
+  align?: RadixPopover.PopoverContentProps['align'];
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
+}
+
+export function Popover({
+  trigger,
+  children,
+  side = 'bottom',
+  align = 'center',
+  open,
+  onOpenChange,
+}: PopoverProps) {
+  return (
+    <RadixPopover.Root open={open} onOpenChange={onOpenChange}>
+      <RadixPopover.Trigger asChild>{trigger}</RadixPopover.Trigger>
+      <RadixPopover.Portal>
+        <RadixPopover.Content className={CONTENT_CLASS} side={side} align={align} sideOffset={6}>
+          {children}
+          <RadixPopover.Arrow className="fill-surface-card" />
+        </RadixPopover.Content>
+      </RadixPopover.Portal>
+    </RadixPopover.Root>
+  );
+}
+
+export const PopoverClose = RadixPopover.Close;

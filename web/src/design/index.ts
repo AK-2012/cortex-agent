@@ -22,3 +22,7 @@ export { Tooltip, TooltipProvider, type TooltipProps } from './Tooltip';
 export { EmptyState, type EmptyStateProps } from './EmptyState';
 export { DegradedState, type DegradedStateProps } from './DegradedState';
 export { DEGRADED_SEVERITIES, severityTone, type DegradedSeverity } from './degraded';
+export { Modal, ModalClose, type ModalProps } from './Modal';
+export { Drawer, DrawerClose, type DrawerProps, type DrawerSide } from './Drawer';
+export { Popover, PopoverClose, type PopoverProps } from './Popover';
+export { ToastProvider, useToast, type ToastInput } from './Toast';

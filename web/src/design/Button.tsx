@@ -1,7 +1,8 @@
-import type { ButtonHTMLAttributes } from 'react';
+import { forwardRef, type ButtonHTMLAttributes } from 'react';
 
 // Button primitive with token-driven variants (DR-0018 §5). No hard-coded hex —
-// colors come from the state palette / surface tokens.
+// colors come from the state palette / surface tokens. Forwards its ref so it can
+// be an `asChild` Radix trigger (Dialog/Popover restore focus via the trigger ref).
 
 export type ButtonVariant = 'primary' | 'secondary' | 'ghost' | 'danger';
 export type ButtonSize = 'sm' | 'md';
@@ -28,15 +29,13 @@ export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   size?: ButtonSize;
 }
 
-export function Button({
-  variant = 'secondary',
-  size = 'md',
-  className,
-  type = 'button',
-  ...rest
-}: ButtonProps) {
+export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button(
+  { variant = 'secondary', size = 'md', className, type = 'button', ...rest },
+  ref,
+) {
   return (
     <button
+      ref={ref}
       type={type}
       className={[BASE, VARIANT_CLASS[variant], SIZE_CLASS[size], className]
         .filter(Boolean)
@@ -44,4 +43,4 @@ export function Button({
       {...rest}
     />
   );
-}
+});
