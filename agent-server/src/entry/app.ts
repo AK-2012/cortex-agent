@@ -74,6 +74,8 @@ import { startDispatchReconciler } from '@orch/dispatch-reconciler.js';
 import { ensurePIAgentDirs } from '../agent-adapter/pi/agent-dir.js';
 import { initOutboundQueue, getOutboundQueue } from '@store/outbound-queue.js';
 import { createUiService } from '@domain/ui-service/index.js';
+import { startUiHttpServer } from './start-ui-http.js';
+import type { UiHttpServer } from '@platform/ui-http/ui-http-server.js';
 import { createTuiSessionService } from '@domain/tui-session/index.js';
 import { enqueue, conduitQueues } from '@orch/conduit-queue.js';
 import { getCostSummary } from '@domain/costs/cost-tracker.js';
@@ -242,10 +244,12 @@ registerMessageHandler(adapter, { dispatchCommand, handleMessageEdit });
 
 // --- Profile watcher (hot-reload profiles.json without restart) ---
 let _stopProfileWatcher: (() => void) | null = null;
+let _uiHttpServer: UiHttpServer | null = null;
 
 // --- Graceful shutdown ---
 process.on('SIGTERM', async () => {
   closeAllSessions(); shutdownCodex(); closeAllAdapters().catch(() => {}); stopClientManager(); stopMachineRegistryWatcher(); _stopProfileWatcher?.();
+  await _uiHttpServer?.close().catch(() => {});
   stopDiskMonitor();
   // Stop scheduler timers BEFORE draining repo writes — otherwise a late-firing
   // timer can enqueue a mutate() after scheduleRepo.flush() resolves, losing that write.
@@ -313,6 +317,12 @@ process.on('SIGTERM', async () => {
     adapter,
   });
   extractTuiAdapter(adapter)?.setUiService(uiService);
+
+  // ── Web UI tRPC HTTP+SSE transport-host (opt-in via CORTEX_UI_HTTP) ──────
+  // Builds the AppRouter over the same uiService and serves it on 127.0.0.1:CORTEX_UI_PORT
+  // (default 3004) behind the x-cortex-token gate (getClientToken). Returns null (clean skip)
+  // when the env gate is off; closed on SIGTERM.
+  _uiHttpServer = startUiHttpServer({ uiService });
 
   await adapter.start();
 

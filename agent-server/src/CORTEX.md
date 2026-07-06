@@ -61,7 +61,7 @@ Project→conduit mapping (formerly `channel-repo.ts`) has moved into `platform/
 | `status-helpers.ts` | execution / status-message / streaming-VM helpers (pure subset has been sunk to `core/status-format.ts`) |
 
 ### L5: entry/
-`app.ts` (composition root, S13: <200 lines) `daemon.ts` `startup-helpers.ts` `startup-notify.ts`
+`app.ts` (composition root, S13: <200 lines) `daemon.ts` `startup-helpers.ts` `startup-notify.ts` `start-ui-http.ts` (Web UI wiring: build createAppRouter(uiService) + start createUiHttpServer on CORTEX_UI_PORT/3004 behind getClientToken, opt-in via CORTEX_UI_HTTP; null when off)
 
 ### Other static directories
 | Directory | Contents |
