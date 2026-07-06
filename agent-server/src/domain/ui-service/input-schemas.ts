@@ -53,6 +53,14 @@ export const costSummaryInput = z.object({
   projectId: z.string().nullish(),
 });
 
+// ── Subscription input schemas ────────────────────────────────────
+// Subscriptions are not part of the query/mutate keyed maps; their input schemas live here too so
+// the AppRouter and the browser (@cortex-agent/ui-contract) share one source of truth (B2-C).
+
+export const executionsLogInput = z.object({
+  executionId: z.string(),
+});
+
 // ── Mutate input schemas ──────────────────────────────────────────
 
 export const threadsCancelInput = z.object({

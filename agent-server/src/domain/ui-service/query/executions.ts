@@ -86,6 +86,7 @@ export async function handleExecutionsGet(
           tmuxName: e.dispatch.tmuxName ?? null,
           sessionName: e.dispatch.sessionName ?? null,
           scheduleTaskId: e.dispatch.scheduleTaskId ?? null,
+          runName: e.dispatch.runName ?? null,
         }
       : null,
     metrics: {

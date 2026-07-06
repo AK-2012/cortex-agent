@@ -313,6 +313,7 @@ process.on('SIGTERM', async () => {
     taskStore,
     scheduler,
     executionRegistry,
+    executionLogTailer,
     runningExecutions,
     costSummary: getCostSummary,
     bus,

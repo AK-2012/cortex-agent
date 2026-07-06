@@ -10,6 +10,7 @@ import type { RunningExecutions } from '@core/running-executions.js';
 import type { PlatformAdapter } from '@platform/adapter.js';
 import type { Session } from '@store/session-registry-repo.js';
 import type { ScheduleTask } from '@store/schedule-repo.js';
+import type { LogLocation } from '@domain/executions/log-tailer.js';
 
 // ── Result ────────────────────────────────────────────────────────
 
@@ -49,12 +50,19 @@ export type MutateOp =
 export interface SubscribeFilter {
   events: string[];
   projectId?: string | null;
+  /** Scope `execution.log` events to a single execution (B2-C live log stream). */
+  executionId?: string | null;
 }
 
 export interface UiEvent {
   type: string;
   ts: string;
   payload: unknown;
+}
+
+/** Input for the `executions.log` subscription (B2-C). Parity-guarded in @cortex-agent/ui-contract. */
+export interface ExecutionsLogParams {
+  executionId: string;
 }
 
 // ── Query params / return types ───────────────────────────────────
@@ -301,6 +309,8 @@ export interface ExecutionDetailInfo {
     tmuxName: string | null;
     sessionName: string | null;
     scheduleTaskId: string | null;
+    /** cortex-run `--name`; non-null ⇒ a live `execution.log` stream is subscribable (B2-C 8b). */
+    runName: string | null;
   } | null;
   metrics: { costUsd: number | null; numTurns: number | null; durationS: number | null };
   gpu: { indices: number[]; memoryMb: number | null } | null;
@@ -380,6 +390,12 @@ export interface UiService {
   query<S extends QueryScope>(scope: S, params: QueryParams<S>): Promise<Result<QueryReturn<S>>>;
   mutate<O extends MutateOp>(op: O, args: MutateArgs<O>): Promise<Result<MutateReturn<O>>>;
   subscribe(filter: SubscribeFilter): AsyncIterable<UiEvent> & { close(): void };
+  /**
+   * Live `execution.log` stream for one running execution (B2-C). Resolves the log location from
+   * the executionId, ref-counts the shared tailer (first subscriber starts it, last stops it), and
+   * delivers lines over the same bounded queue as `subscribe`. A closed stream when unresolvable.
+   */
+  subscribeExecutionLog(executionId: string): AsyncIterable<UiEvent> & { close(): void };
 }
 
 // ── Deps ──────────────────────────────────────────────────────────
@@ -417,6 +433,12 @@ export interface UiServiceDeps {
     getExecution(id: string): any | null;
     getAll(): any[];
     cancelExecution(id: string, metrics?: any): any | null;
+  };
+  /** Ref-counted live log tailer (B2-C). Started/stopped around each execution.log subscription. */
+  executionLogTailer: {
+    startTail(executionId: string, location: LogLocation): void;
+    stopTail(executionId: string): void;
+    refCount(executionId: string): number;
   };
   runningExecutions: RunningExecutions;
   costSummary: (projectId?: string | null) => Promise<CostSummary>;

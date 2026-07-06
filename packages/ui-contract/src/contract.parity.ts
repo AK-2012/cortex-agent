@@ -6,7 +6,7 @@
 // contract package.
 
 import type { z } from 'zod';
-import type { QueryParamMap, MutateArgsMap } from './dto.js';
+import type { QueryParamMap, MutateArgsMap, ExecutionsLogParams } from './dto.js';
 import type {
   projectsListInput,
   sessionsListInput,
@@ -23,6 +23,7 @@ import type {
   taskActionInput,
   taskCompleteInput,
   taskBlockInput,
+  executionsLogInput,
 } from './schemas.js';
 
 // Mutual assignability: true only when A and B are structurally equivalent.
@@ -59,11 +60,16 @@ const _tasksComplete: MutateParity<'tasks.complete', typeof taskCompleteInput> =
 const _tasksBlock: MutateParity<'tasks.block', typeof taskBlockInput> = true;
 const _tasksUnblock: MutateParity<'tasks.unblock', typeof taskActionInput> = true;
 
+// ── Subscriptions ─────────────────────────────────────────────────
+// Subscriptions have no query/mutate map entry; guard the input schema against its backend
+// param type directly (B2-C executions.log).
+const _executionsLog: Exact<z.infer<typeof executionsLogInput>, ExecutionsLogParams> = true;
+
 // Reference the guards so noUnusedLocals (if enabled) stays quiet and the
 // checks are not tree-shaken away by the type checker.
 export const _contractParityChecked = [
   _projectsList, _sessionsList, _threadsList, _threadsGet, _tasksList, _schedulesList,
   _executionsList, _executionsGet, _costSummary, _threadsCancel, _executionsCancel,
   _schedulesPause, _schedulesResume, _schedulesRemove, _tasksClaim,
-  _tasksUnclaim, _tasksComplete, _tasksBlock, _tasksUnblock,
+  _tasksUnclaim, _tasksComplete, _tasksBlock, _tasksUnblock, _executionsLog,
 ] as const;

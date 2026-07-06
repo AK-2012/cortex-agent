@@ -14,7 +14,7 @@ const knownRecord = {
   session: { sessionId: 's2' }, thread: { threadId: 'thr_9', agentSlotId: 'main' },
   dispatch: {
     taskId: 't1', taskHash: 'h1', machine: 'server1', scheduleTaskId: 'sch1',
-    sessionName: 'sess-1', tmuxName: 'tmux-1', pid: '4242',
+    sessionName: 'sess-1', tmuxName: 'tmux-1', pid: '4242', runName: 'run-known',
   },
   scheduleTaskId: 'sch1',
   runtime: {
@@ -38,6 +38,7 @@ function makeDeps(overrides: Partial<UiServiceDeps> = {}): UiServiceDeps {
       getAll: () => [knownRecord],
       cancelExecution: () => null,
     },
+    executionLogTailer: { startTail: () => {}, stopTail: () => {}, refCount: () => 0 },
     runningExecutions: { getAll: () => [] } as any,
     costSummary: async () => ({ today: 0, week: 0, month: 0, total: 0, byMode: {} as any, byProject: {}, byTrigger: {}, bySource: {}, byBackend: {}, tokens: {} as any, entryCount: 0 }),
     bus: { subscribe: () => ({ unsubscribe: () => {} }), publish: () => {} } as any,
@@ -60,7 +61,7 @@ test('executions.get handler maps real ExecutionRecord fields into the detail DT
   assert.equal(dto.runtime.endedAt, knownRecord.runtime.endedAt);
   assert.deepEqual(dto.dispatch, {
     taskId: 't1', machine: 'server1', pid: '4242',
-    tmuxName: 'tmux-1', sessionName: 'sess-1', scheduleTaskId: 'sch1',
+    tmuxName: 'tmux-1', sessionName: 'sess-1', scheduleTaskId: 'sch1', runName: 'run-known',
   });
   assert.deepEqual(dto.metrics, { costUsd: 0.05, numTurns: 3, durationS: 119 });
   assert.equal(dto.gpu, null);

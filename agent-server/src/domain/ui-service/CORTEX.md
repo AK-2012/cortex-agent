@@ -9,9 +9,9 @@ live in the transport-host). Consumed by M5 TUI dashboard and the Web UI (tRPC A
 | `types.ts` | types | Result, QueryScope, MutateOp, SubscribeFilter, UiEvent, UiService interface, DTOs |
 | `input-schemas.ts` | schemas | Source-of-truth zod input schema per QueryScope / MutateOp + `queryInputSchemas` / `mutateInputSchemas` keyed maps. Consumed by the AppRouter; re-exported (runtime) by `@cortex-agent/ui-contract` for the browser. Kept here (not in ui-contract) so the router can consume it without agent-server importing ui-contract, which would close a workspace build cycle |
 | `trpc.ts` | tRPC init | Shared `initTRPC.create()` — exports `router` / `publicProcedure` / `createCallerFactory` (transport-agnostic) |
-| `app-router.ts` | tRPC router | `createAppRouter(uiService): AppRouter` — mirrors the full contract (9 query + 10 mutation + 1 subscription) over the injected UiService; unwraps `Result`, maps `Err`→`TRPCError`. `AppRouter` type re-exported by `@cortex-agent/ui-contract` |
-| `ui-service.ts` | facade | createUiService(deps) — routes scope/op strings to per-module handlers |
-| `subscribe.ts` | subscribe | EventBus → AsyncIterable&lt;UiEvent&gt; with bounded queue |
+| `app-router.ts` | tRPC router | `createAppRouter(uiService): AppRouter` — mirrors the full contract (9 query + 10 mutation + 2 subscriptions: generic `subscribe` + `executions.log`) over the injected UiService; unwraps `Result`, maps `Err`→`TRPCError`. `AppRouter` type re-exported by `@cortex-agent/ui-contract` |
+| `ui-service.ts` | facade | createUiService(deps) — routes scope/op strings to per-module handlers; `subscribeExecutionLog(executionId)` (B2-C) resolves the run's log location, ref-counts the tailer, streams `execution.log` over the bounded queue |
+| `subscribe.ts` | subscribe | EventBus → AsyncIterable&lt;UiEvent&gt; with bounded queue (cap 256, drop-oldest + synthetic `ui-subscribe.dropped`); post-filters by projectId and (B2-C) executionId |
 | `index.ts` | barrel | re-exports createUiService and public types |
 | `query/projects.ts` | query | projects.list handler |
 | `query/sessions.ts` | query | sessions.list handler |

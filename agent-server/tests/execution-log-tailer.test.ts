@@ -147,27 +147,31 @@ test('ref-counted start/stop: last stop tears down the underlying tail', async (
   assert.doesNotThrow(() => tailer.stopTail('never-started'));
 });
 
-test('resolveExecutionLogLocation maps an ExecutionRecord to a local/remote location', () => {
-  const rec = (machine: string | null) => ({ dispatch: machine ? { machine } : null }) as any;
+test('resolveExecutionLogLocation resolves from persisted dispatch.runName (executionId only)', () => {
+  const rec = (machine: string | null, runName: string | null) =>
+    ({ dispatch: machine || runName ? { machine, runName } : null }) as any;
   const getExecution = (id: string) => {
-    if (id === 'local-id') return rec(null);
-    if (id === 'self-id') return rec('lab2');
-    if (id === 'remote-id') return rec('lab');
+    if (id === 'local-id') return rec(null, 'run1');
+    if (id === 'self-id') return rec('lab2', 'run1');
+    if (id === 'remote-id') return rec('lab', 'run1');
+    if (id === 'no-runname') return rec('lab2', null); // registered but never got a run name
     return null;
   };
   const opts = { getExecution, localMachine: 'lab2', tmpBaseDir: '/base' } as const;
 
   assert.deepEqual(
-    resolveExecutionLogLocation('local-id', 'run1', opts),
+    resolveExecutionLogLocation('local-id', opts),
     { kind: 'local', path: '/base/run1/output.log' },
   );
   assert.deepEqual(
-    resolveExecutionLogLocation('self-id', 'run1', opts),
+    resolveExecutionLogLocation('self-id', opts),
     { kind: 'local', path: '/base/run1/output.log' },
   );
   assert.deepEqual(
-    resolveExecutionLogLocation('remote-id', 'run1', opts),
+    resolveExecutionLogLocation('remote-id', opts),
     { kind: 'remote', device: 'lab', path: '/base/run1/output.log' },
   );
-  assert.equal(resolveExecutionLogLocation('missing', 'run1', opts), null);
+  // Unknown id and a record without a runName both resolve to null (nothing to tail).
+  assert.equal(resolveExecutionLogLocation('no-runname', opts), null);
+  assert.equal(resolveExecutionLogLocation('missing', opts), null);
 });
