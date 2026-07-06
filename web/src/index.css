@@ -2,14 +2,194 @@
 @tailwind components;
 @tailwind utilities;
 
+/*
+ * Prototype 1:1 base (DR-0018 §8.6 RA / task 6d21).
+ * The reset + the 16 `cx*` keyframes are copied VERBATIM from the prototype
+ * `<style>` block (design/ref/prototype.dc.html lines 14-36). The keyframe
+ * NAMES are literal — the prototype's inline `animation:cx…` shorthand across
+ * the DOM depends on these exact global names. Do not rename.
+ */
 @layer base {
   html,
-  body,
+  body {
+    margin: 0;
+    height: 100%;
+    background: #e9e7e2;
+    font-family: -apple-system, 'Segoe UI', 'Helvetica Neue', Helvetica, Arial,
+      'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+
   #root {
     height: 100%;
   }
 
-  body {
-    @apply bg-surface-canvas font-sans text-body text-state-ink antialiased;
+  input {
+    outline: none;
+    border: none;
+    background: transparent;
+  }
+
+  .sess-row .sess-more {
+    opacity: 0;
+    transition: opacity 0.12s;
+  }
+  .sess-row:hover .sess-more {
+    opacity: 1;
+  }
+  .sess-row {
+    transition: background 0.12s;
+  }
+}
+
+@keyframes cxblink {
+  0%,
+  55% {
+    opacity: 1;
+  }
+  56%,
+  100% {
+    opacity: 0;
+  }
+}
+@keyframes cxpulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.3;
+  }
+}
+@keyframes cxtoast {
+  from {
+    opacity: 0;
+    transform: translate(-50%, 10px);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
+}
+@keyframes cxfade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@keyframes cxmodal {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -46%) scale(0.975);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+  }
+}
+@keyframes cxcmdk {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -12px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, 0) scale(1);
+  }
+}
+@keyframes cxpop {
+  from {
+    opacity: 0;
+    transform: translateY(-6px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+@keyframes cxpopup {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+@keyframes cxpopover {
+  from {
+    opacity: 0;
+    transform: translateY(-10px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+@keyframes cxdrawer {
+  from {
+    transform: translateX(100%);
+  }
+  to {
+    transform: translateX(0);
+  }
+}
+@keyframes cxmodalout {
+  from {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: translate(-50%, -48%) scale(0.975);
+  }
+}
+@keyframes cxcmdkout {
+  from {
+    opacity: 1;
+    transform: translate(-50%, 0) scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: translate(-50%, -12px) scale(0.98);
+  }
+}
+@keyframes cxdrawerout {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(100%);
+  }
+}
+@keyframes cxfadeout {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+@keyframes cxmsg {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+@keyframes cxrise {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
   }
 }

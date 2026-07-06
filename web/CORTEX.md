@@ -9,7 +9,9 @@ hard-codes hex.
 
 | path | role |
 |---|---|
-| `tailwind.config.ts` | **All** §5 design tokens: state palette, status-pill bg/fg pairs, surfaces, fonts (system sans + IBM Plex Mono), 8px grid, radius, shadow |
+| `tailwind.config.ts` | **All** design tokens: §5 state palette / status-pill bg/fg pairs / surfaces / 8px grid / radius / shadow, **plus the prototype 1:1 base (DR-0018 §8.6 RA, task 6d21)** — `fontFamily.sans`/`mono` match the prototype exactly, the audited `proto.*` color scale (ink/line/accent/amber tints), and the 16 `cx*` animation utilities. No screen hard-codes hex |
+| `index.html` | SPA entry; `#root` + `/src/main.tsx`; loads **IBM Plex Mono** (Google Fonts, wght 400;500;600) matching the prototype helmet |
+| `src/index.css` | Tailwind directives + the prototype `<style>` base **verbatim** (§8.6 RA): html/body reset (base `#E9E7E2` + exact system-sans stack), `input{}` reset, `.sess-row` hover, and the 16 raw `@keyframes cx*` (literal names — inline `animation:cx…` in prototype-1:1 markup depends on them) |
 | `vite.config.ts` | React plugin; `@` → `src` alias; dev proxy `/trpc` → `127.0.0.1:3004`. Proxy injects `x-cortex-token` (from `CORTEX_CLIENT_TOKEN`) so the token-gated ui-http-server is reachable in dev without the browser holding the secret (SSE cannot set headers) |
 | `postcss.config.js` | tailwindcss + autoprefixer |
 | `index.html` | SPA entry; `#root` + `/src/main.tsx` |
@@ -23,7 +25,7 @@ hard-codes hex.
 | `src/features/tasks/` | Tasks tab vertical slice (design 4a, task 5) — see its CORTEX.md. `TasksPanel` = reusable data-driven body (also used by the workbench Tasks tab); `Pills.tsx` delegates to `design/StatusPill` |
 | `src/features/command-palette/` | ⌘K command palette (design 6c, task 051b) on `cmdk` — searches real sessions/threads/tasks over tRPC + section-nav commands, keyboard-reachable. See its CORTEX.md |
 | `src/features/kit/` | `/kit` design-system demo surface (tasks e794/2add) — every primitive in every variant/state + degraded-4 (10c) via `DegradedDemos.tsx` + empty-state next-action panels (10d), pure presentational |
-| `src/index.css` | Tailwind directives + base (canvas bg, system font) |
+| `src/features/base-demo/` | `/base` prototype 1:1 base specimen (§8.6 RA, task 6d21) — type specimens (sans + IBM Plex Mono), the audited `proto.*` palette swatches, and the 16 `cx*` animations live; pure presentational, for visual diff vs the prototype |
 
 ## Notes
 
