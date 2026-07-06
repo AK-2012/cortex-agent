@@ -53,7 +53,7 @@ function Group({ title, children }: { title: string; children: ReactNode }) {
 
 export function KitPage() {
   return (
-    <div className="flex flex-col gap-4g pb-6g">
+    <div className="flex h-full flex-col gap-4g overflow-auto p-2g pb-6g">
       <SectionHeader
         title="Design Kit"
         description="Token-driven core primitives (DR-0018 §5). All colors from tailwind tokens."
