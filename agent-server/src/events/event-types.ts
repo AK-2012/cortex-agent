@@ -20,6 +20,7 @@ export type CortexEvent =
   | { type: 'agent.completed';        ts: string; executionId: string; cost: number; durationMs: number }
   | { type: 'agent.failed';           ts: string; executionId: string; error: string }
   | { type: 'agent.superseded';       ts: string; executionId: string; reason: string }
+  | { type: 'execution.log';          ts: string; executionId: string; seq: number; lines: string[]; dropped?: number }
 
   // Thread lifecycle
   | { type: 'thread.created';         ts: string; threadId: string; templateName: string }

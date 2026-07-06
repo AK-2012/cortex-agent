@@ -15,6 +15,7 @@ import { recoverTuiOrphans } from '../agent-adapter/claude/adapter.js';
 import { startWebhookServer } from '@orch/routing/webhook.js';
 import * as pendingTaskTracker from '@domain/tasks/pending-tracker.js';
 import * as executionRegistry from '@domain/executions/registry.js';
+import { executionLogTailer } from '@domain/executions/log-tailer.js';
 import { initHookBridge } from '@orch/routing/hook-bridge.js';
 import { registerCommands } from '@orch/routing/commands/index.js';
 import { taskStore } from '@domain/tasks/store.js';
@@ -155,6 +156,7 @@ runningExecutions.setBus(bus);   // S6-A: wire lifecycle events
 planApprovals.setBus(bus);  // S6-A: wire plan.approved events
 busyTracker.setBus(bus);    // S6-C: wire busy/idle IPC through event bus
 taskMutator.setBus(bus);    // c39d: wire task lifecycle events
+executionLogTailer.setBus(bus); // 342f: wire execution.log live log-tail stream
 initInteractionHandlers(bus); // BLK-1: wire ask-user.answered publisher
 
 const TEMP_DIR = WORKSPACE_DIR;
