@@ -22,6 +22,8 @@ hard-codes hex.
 | `src/features/workbench/` | Workbench three-pane shell (design 3a, task 5b0f) — session list · chat placeholder · Threads/Tasks/Machines tabs + Active/History filter. See its CORTEX.md |
 | `src/features/tasks/` | Tasks tab vertical slice (design 4a, task 5) — see its CORTEX.md. `TasksPanel` = reusable data-driven body (also used by the workbench Tasks tab); `Pills.tsx` delegates to `design/StatusPill` |
 | `src/features/command-palette/` | ⌘K command palette (design 6c, task 051b) on `cmdk` — searches real sessions/threads/tasks over tRPC + section-nav commands, keyboard-reachable. See its CORTEX.md |
+| `src/features/thread/` | Thread surface (design 11a/11b/2b, tasks 065f/0f25) — inline thread card + detail page + nested threads over `threads.get` (B1). See its CORTEX.md |
+| `src/features/execution/` | Execution detail 8b (task 2198) — `executions.get` rail + live `executions.log` stream + Stop (`executions.cancel`), route `/executions/:executionId`. See its CORTEX.md |
 | `src/features/kit/` | `/kit` design-system demo surface (tasks e794/2add) — every primitive in every variant/state + degraded-4 (10c) via `DegradedDemos.tsx` + empty-state next-action panels (10d), pure presentational |
 | `src/index.css` | Tailwind directives + base (canvas bg, system font) |
 

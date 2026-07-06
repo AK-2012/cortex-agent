@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react';
+import { Link } from 'react-router-dom';
 import type {
   ThreadDetail,
   ThreadStepDetail,
@@ -54,7 +55,13 @@ function DispatchRow({ dispatch }: { dispatch: ThreadDispatchInfo }) {
       <MonoText muted className="shrink-0">
         {dispatch.type}
       </MonoText>
-      <ID value={dispatch.executionId} className="ml-auto shrink-0" />
+      {/* Drill into the execution detail (8b) — the only in-app entry to F3 until chat (Stage 4). */}
+      <Link
+        to={`/executions/${dispatch.executionId}`}
+        className="ml-auto shrink-0 rounded-card hover:bg-surface-canvas-alt focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-state-run/40"
+      >
+        <ID value={dispatch.executionId} />
+      </Link>
     </div>
   );
 }
