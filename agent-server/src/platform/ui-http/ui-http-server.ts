@@ -1,11 +1,14 @@
 // input:  an AnyRouter (injected) + a token accessor + @core/auth + @trpc/server standalone adapter
-// output: createUiHttpServer({ router, getToken, port, host?, spaDir? }) -> { server, close() }
+// output: createUiHttpServer({ router, getToken, port, host?, spaDir?, corsOrigins? }) -> { server, close() }
 // pos:    Web UI transport-host (platform layer, L3). Mounts the injected tRPC router on the
 //         standalone HTTP adapter (query/mutate over HTTP, subscription over SSE — tRPC v11),
 //         gated by an x-cortex-token bearer check BEFORE tRPC (mirrors webhook + WS-upgrade),
 //         and serves a minimal SPA static stub for non-tRPC paths. Generic over AnyRouter — the
 //         concrete AppRouter is injected by the entry-layer wiring, keeping this file router-
 //         agnostic and layer-clean (platform -> core only). Bound 127.0.0.1 by default.
+//         CORS allow-list (task 1b60): optional corsOrigins[] lets the Tauri desktop webview
+//         (cross-origin, e.g. tauri://localhost) reach tRPC endpoints directly without a proxy.
+//         Non-wildcard only — the origin is echoed verbatim when it's in the allow-list.
 // >>> If I am updated, update CORTEX.md and the parent folder's CORTEX.md <<<
 
 import * as http from 'http';
@@ -21,6 +24,11 @@ const log = createLogger('ui-http');
 /** tRPC is mounted under this base path (matches the web client `httpBatchLink({ url: '/trpc' })`). */
 const TRPC_BASE_PATH = '/trpc/';
 
+/** CORS headers emitted for both preflight and regular responses from an allowed origin. */
+const CORS_ALLOW_METHODS = 'GET, POST, OPTIONS';
+const CORS_ALLOW_HEADERS = `${AUTH_HEADER}, content-type`;
+const CORS_MAX_AGE = '86400'; // 24 h preflight cache
+
 export interface UiHttpServerOptions {
   /** The tRPC router to host (query/mutate/subscribe). Injected — kept generic over AnyRouter. */
   router: AnyRouter;
@@ -32,6 +40,15 @@ export interface UiHttpServerOptions {
   host?: string;
   /** Directory of the built SPA to serve for non-tRPC paths. When absent/missing → 404 stub. */
   spaDir?: string;
+  /**
+   * Explicit allow-list of origins permitted for cross-origin tRPC requests.
+   * Designed for the Tauri desktop webview (e.g. `tauri://localhost`) that connects
+   * directly to a remote server without a same-origin proxy. When present, a matching
+   * `Origin` request header causes `Access-Control-Allow-Origin` to be echoed back
+   * (non-wildcard). OPTIONS preflight is answered 204 with CORS headers (no auth required).
+   * When absent or empty, no CORS headers are emitted — backward-compatible default.
+   */
+  corsOrigins?: string[];
 }
 
 export interface UiHttpServer {
@@ -58,6 +75,32 @@ function isAuthorized(req: http.IncomingMessage, getToken: () => string): boolea
   const provided = req.headers[AUTH_HEADER];
   const headerVal = Array.isArray(provided) ? provided[0] : provided;
   return timingSafeEqualStr(getToken(), headerVal);
+}
+
+/**
+ * If the request `Origin` is in the allow-list, add CORS headers to `res` via `setHeader`.
+ * Using `setHeader` (not `writeHead`) ensures the headers survive any downstream `writeHead` call
+ * that sets its own headers — Node.js merges `setHeader` values with `writeHead` headers, and
+ * `writeHead` only overrides the same-name entries. Returns the matched origin (or undefined).
+ */
+function applyCorsHeaders(
+  req: http.IncomingMessage,
+  res: http.ServerResponse,
+  corsOrigins: string[] | undefined,
+): string | undefined {
+  if (!corsOrigins || corsOrigins.length === 0) return undefined;
+  const origin = Array.isArray(req.headers['origin'])
+    ? req.headers['origin'][0]
+    : req.headers['origin'];
+  if (!origin || !corsOrigins.includes(origin)) return undefined;
+
+  // Non-wildcard: echo the exact origin so the response is origin-specific and cacheable.
+  res.setHeader('Access-Control-Allow-Origin', origin);
+  res.setHeader('Vary', 'Origin');
+  res.setHeader('Access-Control-Allow-Methods', CORS_ALLOW_METHODS);
+  res.setHeader('Access-Control-Allow-Headers', CORS_ALLOW_HEADERS);
+  res.setHeader('Access-Control-Max-Age', CORS_MAX_AGE);
+  return origin;
 }
 
 /**
@@ -116,6 +159,11 @@ function serveSpaStub(req: http.IncomingMessage, res: http.ServerResponse, spaDi
  * Build (but do not stop) an HTTP server exposing the injected tRPC router over HTTP+SSE behind
  * an x-cortex-token bearer gate, plus a minimal SPA static stub. The server is already listening
  * when this returns. Call `close()` for a clean shutdown (force-closes live SSE sockets).
+ *
+ * CORS: if `corsOrigins` is provided, a matching `Origin` header causes non-wildcard CORS headers
+ * to be set on all responses (including 401s, so the browser can read the error body). OPTIONS
+ * preflight for tRPC paths is answered 204 without requiring the auth token — the token is the
+ * header being pre-flighted.
  */
 export function createUiHttpServer(opts: UiHttpServerOptions): UiHttpServer {
   const host = opts.host ?? '127.0.0.1';
@@ -127,6 +175,25 @@ export function createUiHttpServer(opts: UiHttpServerOptions): UiHttpServer {
     // Runs BEFORE the tRPC handler. tRPC paths are token-gated here; everything else is the SPA stub.
     middleware: (req, res, next) => {
       const url = req.url ?? '/';
+
+      // ── CORS ──────────────────────────────────────────────────────────────────
+      // Apply headers early so they survive all downstream writeHead/write calls.
+      // Node.js merges setHeader entries with any explicit headers map passed to
+      // writeHead later — the ACAO header we set here will appear on 200, 401, and 204.
+      applyCorsHeaders(req, res, opts.corsOrigins);
+
+      // ── CORS preflight ────────────────────────────────────────────────────────
+      // OPTIONS for a tRPC path is answered 204 here WITHOUT an auth check.
+      // The browser sends the preflight BEFORE attaching x-cortex-token to learn
+      // whether the server allows it — requiring the token on the preflight itself
+      // would create a bootstrapping impossibility.
+      if (req.method === 'OPTIONS' && url.startsWith(TRPC_BASE_PATH)) {
+        res.writeHead(204);
+        res.end();
+        return;
+      }
+
+      // ── tRPC paths ────────────────────────────────────────────────────────────
       if (url.startsWith(TRPC_BASE_PATH)) {
         if (!isAuthorized(req, opts.getToken)) {
           log.warn(`ui-http auth rejected: ${req.method} ${url}`);
@@ -137,6 +204,8 @@ export function createUiHttpServer(opts: UiHttpServerOptions): UiHttpServer {
         next();
         return;
       }
+
+      // ── Non-tRPC (SPA static files) ───────────────────────────────────────────
       serveSpaStub(req, res, opts.spaDir);
     },
   });

@@ -107,7 +107,7 @@ How to run tests without tripping it:
 | `output-stream.test.ts` | Test | SlackOutputStream/FeishuOutputStream/MockOutputStream unit tests (46 cases) |
 | `feishu-client.test.ts` | Test | stderrLogger routes all lark SDK logs to stderr (MCP stdout protocol safety) |
 | `composite-adapter.test.ts` | Test | CompositeAdapter fan-out routing, interactive-reply isolation, capability merging, extractTuiAdapter, FanOutOutputStream, project-report all-primary fan-out + per-platform DM fallback (18 cases) |
-| `ui-http-server.test.ts` | Test | Web UI transport-host `createUiHttpServer` (platform/ui-http): 127.0.0.1 bind, x-cortex-token gate (401 no/wrong token), HTTP query roundtrip, SSE one-event, SPA static stub (present/absent/traversal/malformed-URL→400), clean close() — fake tRPC router, ephemeral port |
+| `ui-http-server.test.ts` | Test | Web UI transport-host `createUiHttpServer` (platform/ui-http): 127.0.0.1 bind, x-cortex-token gate (401 no/wrong token), HTTP query roundtrip, SSE one-event, SPA static stub (present/absent/traversal/malformed-URL→400), clean close(); **CORS allow-list** (task 1b60): allowed origin gets non-wildcard ACAO, disallowed/unconfigured origin gets none, OPTIONS preflight 204 without auth, 401 carries ACAO — fake tRPC router, ephemeral port |
 | `message-router.test.ts` | Test | Message routing branches |
 | `session.test.ts` | Test | session.ts backend:channel CRUD |
 | `session-hooks-profile-resolution.test.ts` | Test | resolveOnNewProfileName priority (registry > ledger) — regression for "Invalid signature in thinking block" caused by thread vs user session profile mismatch |
