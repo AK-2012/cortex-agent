@@ -72,6 +72,12 @@ export const executionsLogInput = z.object({
 
 // ── Mutate input schemas ──────────────────────────────────────────
 
+// Presence/type guard only; deep name validation (traversal / reserved / separators) lives in
+// ProjectStore.createProject so the rule has one source of truth.
+export const projectsCreateInput = z.object({
+  name: z.string(),
+});
+
 export const threadsCancelInput = z.object({
   threadId: z.string(),
 });
@@ -118,6 +124,7 @@ export const queryInputSchemas = {
 } satisfies Record<QueryScope, z.ZodType>;
 
 export const mutateInputSchemas = {
+  'projects.create': projectsCreateInput,
   'threads.cancel': threadsCancelInput,
   'executions.cancel': executionsCancelInput,
   'schedules.pause': scheduleActionInput,

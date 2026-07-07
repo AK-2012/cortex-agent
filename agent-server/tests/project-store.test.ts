@@ -388,6 +388,71 @@ test('ProjectStore - scaffolding does not overwrite existing general', async (t)
   assert.equal(content, '# custom');
 });
 
+// ── createProject ──
+
+test('ProjectStore - createProject creates dir + STATUS.md + CORTEX.md and returns project', async (t) => {
+  const { baseDir, cleanup } = makeTempProjectsDir();
+  t.after(cleanup);
+
+  const { store } = await makeStore(baseDir);
+  t.after(() => store.destroy());
+
+  const result = store.createProject('nimbus');
+  assert.equal(result.ok, true);
+  if (!result.ok) return;
+  assert.equal(result.project.id, 'nimbus');
+  assert.equal(result.project.kind, 'user');
+  assert.equal(result.project.contextDir, path.join(baseDir, 'nimbus'));
+
+  const projectDir = path.join(baseDir, 'nimbus');
+  assert.ok(fs.existsSync(projectDir));
+  assert.ok(fs.existsSync(path.join(projectDir, 'STATUS.md')));
+  assert.ok(fs.existsSync(path.join(projectDir, 'CORTEX.md')));
+  const status = fs.readFileSync(path.join(projectDir, 'STATUS.md'), 'utf8');
+  assert.ok(status.includes('# nimbus'));
+
+  // New project appears in the cache
+  assert.equal(store.exists('nimbus'), true);
+  assert.ok(store.list().some((p: any) => p.id === 'nimbus'));
+});
+
+test('ProjectStore - createProject rejects invalid names (traversal / separators / empty / reserved)', async (t) => {
+  const { baseDir, cleanup } = makeTempProjectsDir();
+  t.after(cleanup);
+
+  const { store } = await makeStore(baseDir);
+  t.after(() => store.destroy());
+
+  for (const bad of ['..', '../evil', 'a/b', 'a\\b', '', '   ', '.hidden', 'general', '/abs', 'a b']) {
+    const result = store.createProject(bad);
+    assert.equal(result.ok, false, `expected reject for ${JSON.stringify(bad)}`);
+    if (!result.ok) assert.equal(result.code, 'invalid-name', `expected invalid-name for ${JSON.stringify(bad)}`);
+  }
+
+  // No new project directory was created by any rejected name (only 'general' scaffold exists)
+  const ids = store.list().map((p: any) => p.id).sort();
+  assert.deepEqual(ids, ['general']);
+});
+
+test('ProjectStore - createProject rejects a duplicate without overwriting', async (t) => {
+  const { baseDir, cleanup } = makeTempProjectsDir(['orchard']);
+  t.after(cleanup);
+
+  // Pre-existing project with custom content
+  fs.writeFileSync(path.join(baseDir, 'orchard', 'STATUS.md'), '# preserve-me', 'utf8');
+
+  const { store } = await makeStore(baseDir);
+  t.after(() => store.destroy());
+
+  const result = store.createProject('orchard');
+  assert.equal(result.ok, false);
+  if (!result.ok) assert.equal(result.code, 'already-exists');
+
+  // Existing content untouched (no overwrite)
+  const content = fs.readFileSync(path.join(baseDir, 'orchard', 'STATUS.md'), 'utf8');
+  assert.equal(content, '# preserve-me');
+});
+
 // ── Dotfile handling ──
 
 test('ProjectStore - ignore dotfiles in project enumeration', async (t) => {

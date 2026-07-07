@@ -3,7 +3,7 @@
 // pos:    leaf types module, depends only on domain types pulled in by query/mutate handlers
 // >>> If I am updated, update CORTEX.md and the parent folder's CORTEX.md <<<
 
-import type { Project } from '@domain/projects/index.js';
+import type { Project, CreateProjectResult } from '@domain/projects/index.js';
 import type { CostSummary } from '@domain/costs/cost-tracker.js';
 import type { EventBus } from '@events/index.js';
 import type { RunningExecutions } from '@core/running-executions.js';
@@ -36,6 +36,7 @@ export type QueryScope =
 // ── Mutate ops ────────────────────────────────────────────────────
 
 export type MutateOp =
+  | 'projects.create'
   | 'threads.cancel'
   | 'executions.cancel'
   | 'schedules.pause'
@@ -118,6 +119,10 @@ export interface CostSummaryParams {
 }
 
 // ── Mutate args ───────────────────────────────────────────────────
+
+export interface ProjectCreateArgs {
+  name: string;
+}
 
 export interface ThreadsCancelArgs {
   threadId: string;
@@ -363,6 +368,11 @@ export interface MemoryFile {
 
 // ── Mutate return types ───────────────────────────────────────────
 
+export interface ProjectCreateReturn {
+  /** The id of the newly created project (equals its directory name). */
+  id: string;
+}
+
 export interface ThreadsCancelReturn {
   cancelled: boolean;
 }
@@ -402,6 +412,7 @@ export interface QueryReturnMap {
 }
 
 export interface MutateArgsMap {
+  'projects.create': ProjectCreateArgs;
   'threads.cancel': ThreadsCancelArgs;
   'executions.cancel': ExecutionsCancelArgs;
   'schedules.pause': ScheduleActionArgs;
@@ -415,6 +426,7 @@ export interface MutateArgsMap {
 }
 
 export interface MutateReturnMap {
+  'projects.create': ProjectCreateReturn;
   'threads.cancel': ThreadsCancelReturn;
   'executions.cancel': ExecutionsCancelReturn;
   'schedules.pause': void;
@@ -454,6 +466,7 @@ export interface UiServiceDeps {
     get(id: string): Project | undefined;
     exists(id: string): boolean;
     getDefault(): Project;
+    createProject(name: string): CreateProjectResult;
   };
   sessionStore: {
     listByProject(projectId: string): Promise<Session[]>;

@@ -13,6 +13,7 @@ function makeDeps(overrides: Partial<UiServiceDeps> = {}): UiServiceDeps {
       get: () => undefined,
       exists: () => false,
       getDefault: () => ({ id: 'general', name: 'general', kind: 'general' as const, contextDir: '/projects/general' }),
+      createProject: () => ({ ok: false, code: 'invalid-name' as const, message: 'stub' }),
     },
     sessionStore: { listByProject: async () => [], listResumable: async () => [], getById: async () => null },
     threadStore: { getAll: () => [], get: () => null },

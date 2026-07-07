@@ -28,6 +28,7 @@ export type {
   MemoryFileParams,
   CostSummaryParams,
   // Mutate args
+  ProjectCreateArgs,
   ThreadsCancelArgs,
   ExecutionsCancelArgs,
   ScheduleActionArgs,
@@ -52,6 +53,7 @@ export type {
   MemoryFileEntry,
   MemoryDirEntry,
   MemoryFile,
+  ProjectCreateReturn,
   ThreadsCancelReturn,
   ExecutionsCancelReturn,
   // Mapped contract

@@ -1,5 +1,6 @@
 // input:  PROJECTS_DIR (from @core/paths.js or constructor arg)
 // output: ProjectStore — list / get / exists / getDefault / resolveFromMessage / refresh
+//         + createProject(name) (validated scaffold of a new user project)
 //         + auto-scaffold of general/ project on first initialize()
 // pos:    Read-only project registry with fs.watch cache invalidation
 //         "general" is always synthesized; never persisted.
@@ -23,6 +24,14 @@ const GENERAL_SCAFFOLD_CORTEX = `# general
 
 Synthetic umbrella project — always present. Created automatically by the system.
 `;
+
+/** A single safe path segment: no separators, no '..', no leading dot. */
+const VALID_PROJECT_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
+
+/** Result of a createProject attempt (local to the store; the ui-service handler maps it). */
+export type CreateProjectResult =
+  | { ok: true; project: Project }
+  | { ok: false; code: 'invalid-name' | 'already-exists'; message: string };
 
 export interface ProjectStoreOptions {
   /** Overrideable for tests. Defaults to PROJECTS_DIR from @core/paths. */
@@ -123,6 +132,43 @@ export class ProjectStore {
     this.scan();
   }
 
+  /**
+   * Create a new user project directory under PROJECTS_DIR with a standard scaffold
+   * (STATUS.md + CORTEX.md). Validates the name (rejects path traversal, separators,
+   * empty/whitespace, leading-dot, and the reserved 'general'). Never overwrites an
+   * existing project directory — returns an `already-exists` error instead.
+   */
+  createProject(name: string): CreateProjectResult {
+    const id = typeof name === 'string' ? name.trim() : '';
+    if (!id || id === 'general' || !VALID_PROJECT_NAME.test(id) || path.basename(id) !== id) {
+      return {
+        ok: false,
+        code: 'invalid-name',
+        message: `Invalid project name: ${JSON.stringify(name)}`,
+      };
+    }
+
+    const projectDir = path.join(this.projectsDir, id);
+    if (this.exists(id) || fs.existsSync(projectDir)) {
+      return { ok: false, code: 'already-exists', message: `Project already exists: ${id}` };
+    }
+
+    this.scaffoldProject(
+      projectDir,
+      `# ${id}\n\nStatus: active\n\n`,
+      `# ${id}\n\n${id} project.\n`,
+    );
+    log.info(`Created project at ${projectDir}`);
+
+    // Refresh the cache so the new project is immediately visible.
+    this.scan();
+    const project = this.get(id);
+    if (!project) {
+      return { ok: false, code: 'invalid-name', message: `Project not registered after creation: ${id}` };
+    }
+    return { ok: true, project };
+  }
+
   /** Stop the fs.watch watcher and release resources. */
   destroy(): void {
     if (this.debounceTimer) {
@@ -143,10 +189,15 @@ export class ProjectStore {
     const generalDir = path.join(this.projectsDir, 'general');
     if (fs.existsSync(generalDir)) return;
 
-    fs.mkdirSync(generalDir, { recursive: true });
-    fs.writeFileSync(path.join(generalDir, 'STATUS.md'), GENERAL_SCAFFOLD_STATUS, 'utf8');
-    fs.writeFileSync(path.join(generalDir, 'CORTEX.md'), GENERAL_SCAFFOLD_CORTEX, 'utf8');
+    this.scaffoldProject(generalDir, GENERAL_SCAFFOLD_STATUS, GENERAL_SCAFFOLD_CORTEX);
     log.info(`Scaffolded general project at ${generalDir}`);
+  }
+
+  /** Create a project directory and write the standard scaffold files (STATUS.md + CORTEX.md). */
+  private scaffoldProject(dir: string, statusContent: string, cortexContent: string): void {
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'STATUS.md'), statusContent, 'utf8');
+    fs.writeFileSync(path.join(dir, 'CORTEX.md'), cortexContent, 'utf8');
   }
 
   /** Read PROJECTS_DIR and rebuild the in-memory cache. */

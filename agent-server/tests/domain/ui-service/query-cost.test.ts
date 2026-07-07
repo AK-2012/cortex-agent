@@ -13,7 +13,7 @@ test('cost.summary delegates to costSummary and returns CostSummary', async () =
   };
 
   const deps: UiServiceDeps = {
-    projectStore: { list: () => [], get: () => undefined, exists: () => false, getDefault: () => ({ id: 'general', name: 'general', kind: 'general' as const, contextDir: '/g' }) },
+    projectStore: { list: () => [], get: () => undefined, exists: () => false, getDefault: () => ({ id: 'general', name: 'general', kind: 'general' as const, contextDir: '/g' }), createProject: () => ({ ok: false, code: 'invalid-name' as const, message: 'stub' }) },
     sessionStore: { listByProject: async () => [], listResumable: async () => [], getById: async () => null },
     threadStore: { getAll: () => [], get: () => null },
     taskStore: { getAll: () => [], getById: () => null, load: () => {}, refresh: () => {} },
@@ -36,7 +36,7 @@ test('cost.summary delegates to costSummary and returns CostSummary', async () =
 test('cost.summary passes projectId filter', async () => {
   let capturedProjectId: string | null | undefined = undefined;
   const deps: UiServiceDeps = {
-    projectStore: { list: () => [], get: () => undefined, exists: () => false, getDefault: () => ({ id: 'general', name: 'general', kind: 'general' as const, contextDir: '/g' }) },
+    projectStore: { list: () => [], get: () => undefined, exists: () => false, getDefault: () => ({ id: 'general', name: 'general', kind: 'general' as const, contextDir: '/g' }), createProject: () => ({ ok: false, code: 'invalid-name' as const, message: 'stub' }) },
     sessionStore: { listByProject: async () => [], listResumable: async () => [], getById: async () => null },
     threadStore: { getAll: () => [], get: () => null },
     taskStore: { getAll: () => [], getById: () => null, load: () => {}, refresh: () => {} },

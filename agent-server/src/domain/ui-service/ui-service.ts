@@ -11,6 +11,7 @@ import { handleSchedulesList } from './query/schedules.js';
 import { handleExecutionsList, handleExecutionsGet } from './query/executions.js';
 import { handleMemoryTree, handleMemoryFile } from './query/memory.js';
 import { handleCostSummary } from './query/cost.js';
+import { handleCreateProject } from './mutate/projects.js';
 import { handleCancelThread } from './mutate/threads.js';
 import { handleCancelExecution } from './mutate/executions.js';
 import {
@@ -46,6 +47,7 @@ const queryHandlers: Record<string, QueryHandler> = {
 };
 
 const mutateHandlers: Record<string, MutateHandler> = {
+  'projects.create': (deps, args) => handleCreateProject(deps, args),
   'threads.cancel': (deps, args) => handleCancelThread(deps, args),
   'executions.cancel': (deps, args) => handleCancelExecution(deps, args),
   'schedules.pause': (deps, args) => handlePauseSchedule(deps, args),

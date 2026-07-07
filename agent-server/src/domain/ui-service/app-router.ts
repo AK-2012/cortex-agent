@@ -14,6 +14,7 @@ import { z } from 'zod';
 import { router, publicProcedure } from './trpc.js';
 import {
   projectsListInput,
+  projectsCreateInput,
   sessionsListInput,
   threadsListInput,
   threadsGetInput,
@@ -50,12 +51,14 @@ const subscribeFilterInput = z.object({
 
 // ── Result → value / Err → TRPCError ─────────────────────────────────────────────
 // Domain Err.code strings emitted by ui-service handlers: 'not-found', 'invalid-args',
-// 'already-terminal', 'task-lock-busy', 'internal'. Map each to the closest tRPC code;
+// 'invalid-name', 'already-terminal', 'already-exists', 'task-lock-busy', 'internal'. Map each to the closest tRPC code;
 // preserve the original domain code as `cause` for downstream diagnostics.
 const ERR_CODE_MAP: Record<string, TRPCError['code']> = {
   'not-found': 'NOT_FOUND',
   'invalid-args': 'BAD_REQUEST',
+  'invalid-name': 'BAD_REQUEST',
   'already-terminal': 'CONFLICT',
+  'already-exists': 'CONFLICT',
   'task-lock-busy': 'CONFLICT',
   'internal': 'INTERNAL_SERVER_ERROR',
 };
@@ -101,12 +104,13 @@ function makeMutation<O extends MutateOp, Sch extends z.ZodType>(
 }
 
 // ── AppRouter ─────────────────────────────────────────────────────────────────────
-// 11 QueryScope + 10 MutateOp + 2 subscriptions (generic `subscribe` + `executions.log`),
+// 11 QueryScope + 11 MutateOp + 2 subscriptions (generic `subscribe` + `executions.log`),
 // mirroring the ui-service contract.
 export function createAppRouter(uiService: UiService) {
   return router({
     projects: router({
       list: makeQuery(uiService, 'projects.list', projectsListInput),
+      create: makeMutation(uiService, 'projects.create', projectsCreateInput),
     }),
     sessions: router({
       list: makeQuery(uiService, 'sessions.list', sessionsListInput),
