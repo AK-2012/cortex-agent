@@ -9,6 +9,7 @@ import { handleThreadsList, handleThreadsGet } from './query/threads.js';
 import { handleTasksList } from './query/tasks.js';
 import { handleSchedulesList } from './query/schedules.js';
 import { handleExecutionsList, handleExecutionsGet } from './query/executions.js';
+import { handleMemoryTree, handleMemoryFile } from './query/memory.js';
 import { handleCostSummary } from './query/cost.js';
 import { handleCancelThread } from './mutate/threads.js';
 import { handleCancelExecution } from './mutate/executions.js';
@@ -39,6 +40,8 @@ const queryHandlers: Record<string, QueryHandler> = {
   'schedules.list': (deps, params) => handleSchedulesList(deps, params),
   'executions.list': (deps, params) => handleExecutionsList(deps, params),
   'executions.get': (deps, params) => handleExecutionsGet(deps, params),
+  'memory.tree': (deps, params) => handleMemoryTree(deps, params),
+  'memory.file': (deps, params) => handleMemoryFile(deps, params),
   'cost.summary': (deps, params) => handleCostSummary(deps, params),
 };
 
