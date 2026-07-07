@@ -6,6 +6,7 @@ import { TasksPage } from '@/features/tasks/TasksPage';
 import { KitPage } from '@/features/kit/KitPage';
 import { BaseDemoPage } from '@/features/base-demo/BaseDemoPage';
 import { ThreadDetailRoute } from '@/features/thread/ThreadDetailRoute';
+import { OverviewPage } from '@/features/overview/OverviewPage';
 
 export const router = createBrowserRouter([
   {
@@ -17,7 +18,7 @@ export const router = createBrowserRouter([
       { path: 'tasks', element: <TasksPage /> },
       { path: 'threads', element: <EmptyPane title="Threads" /> },
       { path: 'threads/:threadId', element: <ThreadDetailRoute /> },
-      { path: 'overview', element: <EmptyPane title="Overview" /> },
+      { path: 'overview', element: <OverviewPage /> },
       { path: 'settings', element: <EmptyPane title="Settings" /> },
       { path: 'kit', element: <KitPage /> },
       { path: 'base', element: <BaseDemoPage /> },
