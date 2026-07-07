@@ -4,6 +4,7 @@ import type { TaskInfo } from '@cortex-agent/ui-contract';
 import { useTRPC } from '@/lib/trpc';
 import { groupTasks, type TaskGroup } from './group-tasks';
 import { TaskRow } from './TaskRow';
+import { TaskModal } from './TaskModal';
 import { useTasksLiveSync } from './useTasksLiveSync';
 
 function GroupSection({
@@ -12,12 +13,14 @@ function GroupSection({
   pendingId,
   onClaim,
   onComplete,
+  onOpen,
 }: {
   title: string;
   groups: TaskGroup[];
   pendingId: string | null;
   onClaim: (t: TaskInfo) => void;
   onComplete: (t: TaskInfo) => void;
+  onOpen: (t: TaskInfo) => void;
 }) {
   const count = groups.reduce((n, g) => n + g.tasks.length, 0);
   return (
@@ -41,6 +44,7 @@ function GroupSection({
                   pending={pendingId === task.id}
                   onClaim={onClaim}
                   onComplete={onComplete}
+                  onOpen={onOpen}
                 />
               ))}
             </div>
@@ -66,6 +70,7 @@ export function TasksPanel({ lifecycle }: TasksPanelProps) {
     trpc.tasks.list.queryOptions(lifecycle ? { status: lifecycle } : {}),
   );
   const [pendingId, setPendingId] = useState<string | null>(null);
+  const [openTaskId, setOpenTaskId] = useState<string | null>(null);
 
   useTasksLiveSync();
 
@@ -83,6 +88,15 @@ export function TasksPanel({ lifecycle }: TasksPanelProps) {
     trpc.tasks.complete.mutationOptions({
       onSettled: () => {
         setPendingId(null);
+        setOpenTaskId(null);
+        invalidate();
+      },
+    }),
+  );
+  const unblock = useMutation(
+    trpc.tasks.unblock.mutationOptions({
+      onSettled: () => {
+        setPendingId(null);
         invalidate();
       },
     }),
@@ -96,6 +110,11 @@ export function TasksPanel({ lifecycle }: TasksPanelProps) {
     setPendingId(t.id);
     complete.mutate({ projectId: t.project, taskId: t.id, note: 'completed via Web UI' });
   };
+  const onUnblock = (t: TaskInfo) => {
+    setPendingId(t.id);
+    unblock.mutate({ projectId: t.project, taskId: t.id });
+  };
+  const onOpen = (t: TaskInfo) => setOpenTaskId(t.id);
 
   if (tasksQuery.isPending) {
     return <div className="text-ui text-state-ink/40">Loading tasks…</div>;
@@ -116,6 +135,7 @@ export function TasksPanel({ lifecycle }: TasksPanelProps) {
   const grouped = groupTasks(tasksQuery.data);
   const showOpen = lifecycle !== 'done';
   const showDone = lifecycle !== 'open';
+  const openTask = openTaskId ? tasksQuery.data.find((t) => t.id === openTaskId) : undefined;
 
   return (
     <div className="min-h-0 flex-1 overflow-auto">
@@ -126,6 +146,7 @@ export function TasksPanel({ lifecycle }: TasksPanelProps) {
           pendingId={pendingId}
           onClaim={onClaim}
           onComplete={onComplete}
+          onOpen={onOpen}
         />
       )}
       {showDone && (
@@ -135,6 +156,17 @@ export function TasksPanel({ lifecycle }: TasksPanelProps) {
           pendingId={pendingId}
           onClaim={onClaim}
           onComplete={onComplete}
+          onOpen={onOpen}
+        />
+      )}
+      {openTask && (
+        <TaskModal
+          task={openTask}
+          allTasks={tasksQuery.data}
+          pending={pendingId === openTask.id}
+          onClose={() => setOpenTaskId(null)}
+          onComplete={onComplete}
+          onUnblock={onUnblock}
         />
       )}
     </div>

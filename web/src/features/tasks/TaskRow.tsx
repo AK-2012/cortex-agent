@@ -6,6 +6,7 @@ export interface TaskRowProps {
   pending: boolean;
   onClaim: (task: TaskInfo) => void;
   onComplete: (task: TaskInfo) => void;
+  onOpen: (task: TaskInfo) => void;
 }
 
 const ACTION_BTN =
@@ -14,13 +15,20 @@ const ACTION_BTN =
 
 // One task line: id (mono) · text · priority/status pills · claim/block state · one action.
 // Claim (actionable) or Complete (open, routed through the daemon) — the mutation that
-// proves live update. Done tasks carry no action.
-export function TaskRow({ task, pending, onClaim, onComplete }: TaskRowProps) {
+// proves live update. Done tasks carry no action. The row itself opens the task detail
+// modal (10a); action buttons stopPropagation so they don't also open it.
+export function TaskRow({ task, pending, onClaim, onComplete, onOpen }: TaskRowProps) {
+  const stop =
+    (fn: (t: TaskInfo) => void) => (e: React.MouseEvent) => {
+      e.stopPropagation();
+      fn(task);
+    };
   return (
     <div
       data-task-id={task.id}
       data-status={task.status}
-      className="flex items-center gap-1.5g rounded-card border border-card bg-surface-card px-1.5g py-1g shadow-card"
+      onClick={() => onOpen(task)}
+      className="flex cursor-pointer items-center gap-1.5g rounded-card border border-card bg-surface-card px-1.5g py-1g shadow-card hover:bg-surface-canvas-alt"
     >
       <span className="shrink-0 font-mono text-ui text-state-ink/50">{task.id}</span>
       <span className="min-w-0 flex-1 truncate text-ui text-state-ink" title={task.text}>
@@ -37,11 +45,11 @@ export function TaskRow({ task, pending, onClaim, onComplete }: TaskRowProps) {
       {task.status === 'open' && (
         <div className="flex shrink-0 gap-1g">
           {task.actionable && (
-            <button className={ACTION_BTN} disabled={pending} onClick={() => onClaim(task)}>
+            <button className={ACTION_BTN} disabled={pending} onClick={stop(onClaim)}>
               Claim
             </button>
           )}
-          <button className={ACTION_BTN} disabled={pending} onClick={() => onComplete(task)}>
+          <button className={ACTION_BTN} disabled={pending} onClick={stop(onComplete)}>
             Complete
           </button>
         </div>
