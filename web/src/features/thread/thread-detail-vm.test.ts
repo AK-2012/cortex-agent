@@ -202,9 +202,41 @@ describe('buildThreadDetailVm', () => {
     expect(running.subs[0].line).toBe('analyst');
     expect(running.subs[1]).toMatchObject({ name: 'check-claims', level: 'L2' });
     expect(running.subs[1].pill.text).toBe('Done');
+    // childless leaves (no subtree) are not drillable — matches proto-shot 04 (check-claims: no `open ›`)
+    expect(running.subs[0].drillable).toBe(false);
+    expect(running.subs[1].drillable).toBe(false);
     // non-running steps carry no agent / subs
     expect(vm.steps[0].agent).toBeUndefined();
     expect(vm.steps[0].subs).toHaveLength(0);
+  });
+
+  it('marks a sub-thread drillable when it has a subtree, regardless of its agent/status', () => {
+    // A *terminal* sub-thread (completed, activeAgent null) that still owns children must stay
+    // drillable — drillability is a property of the subtree (2b ≤5-level nesting), not the agent.
+    const d = detail({
+      status: 'running',
+      steps: [step({ stepIndex: 0, stage: 'Review', status: 'running', agentSlotId: 'slot-0' })],
+      totalSteps: 1,
+      children: [
+        // completed, no activeAgent, BUT has a child → drillable (the Blocker case)
+        child({
+          id: 'thr_done_parent',
+          templateName: 'sub-audit',
+          status: 'completed',
+          activeAgent: null,
+          depth: 0,
+          children: [child({ id: 'thr_gc', templateName: 'unit-check', status: 'completed', depth: 1 })],
+        }),
+        // truncated leaf → drillable even with no returned children
+        child({ id: 'thr_trunc', templateName: 'deep', status: 'completed', depth: 0, truncated: true }),
+        // terminal leaf, no children, not truncated → NOT drillable
+        child({ id: 'thr_leaf', templateName: 'leaf', status: 'completed', depth: 0 }),
+      ],
+    });
+    const subs = buildThreadDetailVm(d, [], NOW).steps[0].subs;
+    expect(subs[0]).toMatchObject({ id: 'thr_done_parent', hasLine: false, drillable: true });
+    expect(subs[1]).toMatchObject({ id: 'thr_trunc', drillable: true });
+    expect(subs[2]).toMatchObject({ id: 'thr_leaf', hasLine: false, drillable: false });
   });
 
   it('maps the artifact refs header + written-by from steps (content is a Stage-6 gap)', () => {

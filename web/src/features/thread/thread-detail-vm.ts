@@ -94,6 +94,13 @@ export interface DetailStepSub {
   hasLine: boolean;
   line: string;
   isMax: boolean;
+  /** Show the `open ›` drill link: the sub-thread has a subtree to re-root into (children/truncated).
+   *  Decoupled from `hasLine` so a *terminal* sub-thread that still has children stays drillable (the
+   *  task's ≤5-level 2b nesting). The prototype nests `open ›` inside `hasLine`, but that mirrors mock
+   *  semantics where the only drillable sub was also the running one; with real data drillability is a
+   *  property of the subtree, not the active agent. The proto-shot's childless leaf (check-claims) has
+   *  no children → drillable false → no `open ›`, so the visual still matches. */
+  drillable: boolean;
 }
 
 export interface DetailStepAgent {
@@ -180,6 +187,7 @@ function mapSub(node: ThreadChildNode): DetailStepSub {
     hasLine: !!node.activeAgent,
     line: node.activeAgent ?? '',
     isMax: nodeLevel(node) >= MAX_LEVEL || node.truncated,
+    drillable: node.children.length > 0 || node.truncated,
   };
 }
 

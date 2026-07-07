@@ -133,6 +133,7 @@ export function ThreadArtifactPanel({ artifact, onOpen }: ThreadArtifactPanelPro
           </span>
           <span
             onClick={onOpen}
+            title="Opens in the Memory viewer — Stage 6"
             style={{ fontSize: 10.5, fontWeight: 600, color: '#4655D4', cursor: 'pointer', flex: 'none' }}
           >
             Open ↗

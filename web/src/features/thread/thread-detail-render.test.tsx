@@ -37,10 +37,14 @@ const runningVm: ThreadDetailVm = {
         streaming: true,
         live: true,
       },
-      subCount: 2,
+      subCount: 3,
       subs: [
-        { id: 'thr_b7f3', name: 'verify-metrics', level: 'L2', pill: { bg: '#EEF0FA', fg: '#4655D4', text: 'Running' }, hasLine: true, line: 'analyst', isMax: false },
-        { id: 'thr_cc', name: 'check-claims', level: 'L2', pill: { bg: '#E9F4EE', fg: '#23854F', text: 'Done' }, hasLine: false, line: '', isMax: false },
+        // running + drillable → line + `open ›`
+        { id: 'thr_b7f3', name: 'verify-metrics', level: 'L2', pill: { bg: '#EEF0FA', fg: '#4655D4', text: 'Running' }, hasLine: true, line: 'analyst', isMax: false, drillable: true },
+        // terminal (no agent line) BUT drillable → `open ›` only, no line (the decoupled-drill case)
+        { id: 'thr_done', name: 'sub-audit', level: 'L2', pill: { bg: '#E9F4EE', fg: '#23854F', text: 'Done' }, hasLine: false, line: '', isMax: false, drillable: true },
+        // terminal leaf, no subtree → NO `open ›` (matches proto-shot 04 check-claims)
+        { id: 'thr_cc', name: 'check-claims', level: 'L2', pill: { bg: '#E9F4EE', fg: '#23854F', text: 'Done' }, hasLine: false, line: '', isMax: false, drillable: false },
       ],
     },
     { kind: 'pending', title: '4 · Commit', note: 'safety class: repo write', meta: 'gated', hasConnector: true, subs: [], subCount: 0 },
@@ -64,10 +68,17 @@ describe('ThreadPipeline', () => {
     expect(html).toContain('agent: reviewer');
     expect(html).toContain('exec_31b0 · local');
     expect(html).toContain('Now checking the headline claim.');
-    expect(html).toContain('SUB-THREADS · 2');
+    expect(html).toContain('SUB-THREADS · 3');
     expect(html).toContain('verify-metrics');
+    expect(html).toContain('sub-audit');
     expect(html).toContain('check-claims');
-    expect(html).toContain('open ›');
+  });
+  it('renders `open ›` for EVERY drillable sub-thread (incl. terminal-with-subtree), not the leaf', () => {
+    // both drillable subs render a drill link; the childless leaf does not → exactly 2 links.
+    expect(html.match(/data-drill-thread-id/g) ?? []).toHaveLength(2);
+    expect(html).toContain('data-drill-thread-id="thr_b7f3"');
+    expect(html).toContain('data-drill-thread-id="thr_done"'); // terminal + drillable
+    expect(html).not.toContain('data-drill-thread-id="thr_cc"'); // childless leaf → no drill
   });
 });
 
