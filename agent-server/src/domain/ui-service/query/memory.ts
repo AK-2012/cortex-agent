@@ -89,7 +89,7 @@ export async function handleMemoryTree(
       return [];
     }
     const entryCount = entries.filter(
-      (e) => e.isFile() && e.name.endsWith('.md') && e.name !== 'index.md',
+      (e) => e.isFile() && e.name.endsWith('.md') && e.name !== 'index.md' && e.name !== 'CORTEX.md',
     ).length;
     return [{ name, entryCount }];
   });

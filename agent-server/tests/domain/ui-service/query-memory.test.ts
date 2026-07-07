@@ -24,6 +24,7 @@ function makeProject(): { root: string; outsideFile: string } {
   fs.writeFileSync(path.join(root, 'experiments', 'EXP-001.md'), 'exp1', 'utf8');
   fs.writeFileSync(path.join(root, 'experiments', 'EXP-002.md'), 'exp2', 'utf8');
   fs.writeFileSync(path.join(root, 'experiments', 'index.md'), 'auto', 'utf8'); // excluded from count
+  fs.writeFileSync(path.join(root, 'experiments', 'CORTEX.md'), '# index', 'utf8'); // excluded from count
   fs.mkdirSync(path.join(root, 'knowledge'), { recursive: true });
   fs.writeFileSync(path.join(root, 'knowledge', 'K-001.md'), 'k1', 'utf8');
   fs.mkdirSync(path.join(root, 'decisions'), { recursive: true });
@@ -71,7 +72,7 @@ test('memory.tree lists real top-level files and memory dirs with entry counts',
   assert.ok(typeof status.modifiedAt === 'string' && status.modifiedAt.length > 0);
 
   const dirByName = Object.fromEntries(tree.dirs.map((d) => [d.name, d.entryCount]));
-  assert.equal(dirByName['experiments'], 2); // index.md excluded
+  assert.equal(dirByName['experiments'], 2); // EXP-001/EXP-002 only — index.md AND CORTEX.md excluded
   assert.equal(dirByName['knowledge'], 1);
   assert.equal(dirByName['decisions'], 1);
   assert.ok(!('patterns' in dirByName)); // patterns/ absent → omitted
