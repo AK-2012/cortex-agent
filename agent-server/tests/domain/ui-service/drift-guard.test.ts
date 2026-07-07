@@ -85,6 +85,7 @@ const queryScopes = [
   'executions.list',
   'executions.get',
   'cost.summary',
+  'config.get',
 ] as const;
 
 const mutateOps = [
@@ -98,7 +99,13 @@ const mutateOps = [
   'tasks.complete',
   'tasks.block',
   'tasks.unblock',
+  'config.set',
 ] as const;
+
+// A missing/unregistered handler is signalled by the facade with code 'invalid-args' AND a
+// message prefixed "Unknown …". A REGISTERED handler that rejects bad input can also return
+// 'invalid-args' (e.g. config.set called with no section), so distinguish on the message.
+const UNREGISTERED = /^Unknown /;
 
 test('drift-guard: every QueryScope has a registered handler', async () => {
   const ui = createUiService(makeMinimalDeps());
@@ -111,7 +118,7 @@ test('drift-guard: every QueryScope has a registered handler', async () => {
     // But it should NOT return 'invalid-args' with "unknown query scope" message
     if (!result.ok) {
       const err = result as any;
-      if (err.code === 'invalid-args') {
+      if (err.code === 'invalid-args' && UNREGISTERED.test(err.message)) {
         assert.fail(`Handler for ${scope} returned invalid-args — likely no registered handler: ${err.message}`);
       }
     }
@@ -125,7 +132,7 @@ test('drift-guard: every MutateOp has a registered handler', async () => {
     assert.ok(result.ok !== undefined, `Handler for ${op} should exist and return a Result`);
     if (!result.ok) {
       const err = result as any;
-      if (err.code === 'invalid-args') {
+      if (err.code === 'invalid-args' && UNREGISTERED.test(err.message)) {
         assert.fail(`Handler for ${op} returned invalid-args — likely no registered handler: ${err.message}`);
       }
     }

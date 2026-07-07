@@ -24,6 +24,8 @@ import type {
   taskCompleteInput,
   taskBlockInput,
   executionsLogInput,
+  configGetInput,
+  configSetInput,
 } from './schemas.js';
 
 // Mutual assignability: true only when A and B are structurally equivalent.
@@ -47,6 +49,7 @@ const _schedulesList: QueryParity<'schedules.list', typeof schedulesListInput> =
 const _executionsList: QueryParity<'executions.list', typeof executionsListInput> = true;
 const _executionsGet: QueryParity<'executions.get', typeof executionsGetInput> = true;
 const _costSummary: QueryParity<'cost.summary', typeof costSummaryInput> = true;
+const _configGet: QueryParity<'config.get', typeof configGetInput> = true;
 
 // ── Mutate ops ────────────────────────────────────────────────────
 const _threadsCancel: MutateParity<'threads.cancel', typeof threadsCancelInput> = true;
@@ -59,6 +62,7 @@ const _tasksUnclaim: MutateParity<'tasks.unclaim', typeof taskActionInput> = tru
 const _tasksComplete: MutateParity<'tasks.complete', typeof taskCompleteInput> = true;
 const _tasksBlock: MutateParity<'tasks.block', typeof taskBlockInput> = true;
 const _tasksUnblock: MutateParity<'tasks.unblock', typeof taskActionInput> = true;
+const _configSet: MutateParity<'config.set', typeof configSetInput> = true;
 
 // ── Subscriptions ─────────────────────────────────────────────────
 // Subscriptions have no query/mutate map entry; guard the input schema against its backend
@@ -69,7 +73,7 @@ const _executionsLog: Exact<z.infer<typeof executionsLogInput>, ExecutionsLogPar
 // checks are not tree-shaken away by the type checker.
 export const _contractParityChecked = [
   _projectsList, _sessionsList, _threadsList, _threadsGet, _tasksList, _schedulesList,
-  _executionsList, _executionsGet, _costSummary, _threadsCancel, _executionsCancel,
+  _executionsList, _executionsGet, _costSummary, _configGet, _threadsCancel, _executionsCancel,
   _schedulesPause, _schedulesResume, _schedulesRemove, _tasksClaim,
-  _tasksUnclaim, _tasksComplete, _tasksBlock, _tasksUnblock, _executionsLog,
+  _tasksUnclaim, _tasksComplete, _tasksBlock, _tasksUnblock, _configSet, _executionsLog,
 ] as const;

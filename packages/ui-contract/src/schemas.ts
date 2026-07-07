@@ -24,6 +24,8 @@ export {
   taskCompleteInput,
   taskBlockInput,
   executionsLogInput,
+  configGetInput,
+  configSetInput,
   queryInputSchemas,
   mutateInputSchemas,
 } from '@cortex-agent/server/dist/domain/ui-service/input-schemas.js';

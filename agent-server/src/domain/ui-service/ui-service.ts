@@ -10,6 +10,8 @@ import { handleTasksList } from './query/tasks.js';
 import { handleSchedulesList } from './query/schedules.js';
 import { handleExecutionsList, handleExecutionsGet } from './query/executions.js';
 import { handleCostSummary } from './query/cost.js';
+import { handleConfigGet } from './query/config.js';
+import { handleConfigSet } from './mutate/config.js';
 import { handleCancelThread } from './mutate/threads.js';
 import { handleCancelExecution } from './mutate/executions.js';
 import {
@@ -40,6 +42,7 @@ const queryHandlers: Record<string, QueryHandler> = {
   'executions.list': (deps, params) => handleExecutionsList(deps, params),
   'executions.get': (deps, params) => handleExecutionsGet(deps, params),
   'cost.summary': (deps, params) => handleCostSummary(deps, params),
+  'config.get': (deps, params) => handleConfigGet(deps, params),
 };
 
 const mutateHandlers: Record<string, MutateHandler> = {
@@ -53,6 +56,7 @@ const mutateHandlers: Record<string, MutateHandler> = {
   'tasks.complete': (deps, args) => handleCompleteTask(deps, args),
   'tasks.block': (deps, args) => handleBlockTask(deps, args),
   'tasks.unblock': (deps, args) => handleUnblockTask(deps, args),
+  'config.set': (deps, args) => handleConfigSet(deps, args),
 };
 
 export function createUiService(deps: UiServiceDeps): UiService {

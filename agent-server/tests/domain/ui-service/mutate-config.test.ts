@@ -1,0 +1,100 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import { TRPCError } from '@trpc/server';
+import { writeBudget, handleConfigSet } from '../../../src/domain/ui-service/mutate/config.js';
+import { configSetInput } from '../../../src/domain/ui-service/input-schemas.js';
+import { createUiService } from '../../../src/domain/ui-service/ui-service.js';
+import { createAppRouter } from '../../../src/domain/ui-service/app-router.js';
+import { createCallerFactory } from '../../../src/domain/ui-service/trpc.js';
+import type { UiServiceDeps } from '../../../src/domain/ui-service/types.js';
+
+function makeMinimalDeps(): UiServiceDeps {
+  return {
+    projectStore: { list: () => [], get: () => undefined, exists: () => false, getDefault: () => ({ id: 'general', name: 'general', kind: 'general' as const, contextDir: '/tmp' }) },
+    sessionStore: { listByProject: async () => [], listResumable: async () => [], getById: async () => null },
+    threadStore: { getAll: () => [], get: () => null },
+    taskStore: { getAll: () => [], getById: () => null, load: () => {}, refresh: () => {} },
+    scheduler: { list: async () => [], get: async () => null, pause: async () => null, resume: async () => null, remove: async () => false },
+    executionRegistry: { getExecution: () => null, getAll: () => [], cancelExecution: () => null },
+    executionLogTailer: { startTail: () => {}, stopTail: () => {}, refCount: () => 0 },
+    runningExecutions: { getAll: () => [] } as any,
+    costSummary: async () => ({ today: 0, week: 0, month: 0, total: 0, byMode: {} as any, byProject: {}, byTrigger: {}, bySource: {}, byBackend: {}, tokens: {} as any, entryCount: 0 }),
+    bus: { subscribe: () => ({ unsubscribe: () => {} }), publish: () => {} } as any,
+    adapter: { getProjectConduits: async () => ({}) } as any,
+  };
+}
+
+// ── pure writer: atomic write proof ─────────────────────────────────
+test('writeBudget persists a valid budget atomically (re-read equals input)', async () => {
+  const configDir = await fs.mkdtemp(path.join(os.tmpdir(), 'cfg-write-'));
+  await writeBudget(configDir, { daily_usd: 42, monthly_usd: 900 });
+  const raw = await fs.readFile(path.join(configDir, 'budget.json'), 'utf8');
+  assert.deepEqual(JSON.parse(raw), { daily_usd: 42, monthly_usd: 900 });
+  // no tmp file left behind
+  const leftovers = (await fs.readdir(configDir)).filter((f) => f.includes('.tmp.'));
+  assert.deepEqual(leftovers, []);
+});
+
+test('writeBudget rejects invalid values without writing', async () => {
+  const configDir = await fs.mkdtemp(path.join(os.tmpdir(), 'cfg-write-bad-'));
+  await assert.rejects(() => writeBudget(configDir, { daily_usd: -1, monthly_usd: 900 } as any));
+  await assert.rejects(() => writeBudget(configDir, { daily_usd: 0, monthly_usd: 900 } as any));
+  await assert.rejects(() => writeBudget(configDir, { daily_usd: Number.NaN, monthly_usd: 900 } as any));
+  await assert.rejects(() => writeBudget(configDir, { daily_usd: Number.POSITIVE_INFINITY, monthly_usd: 900 } as any));
+  const files = await fs.readdir(configDir);
+  assert.deepEqual(files, [], 'no file should be written on invalid input');
+});
+
+// ── zod schema validation ───────────────────────────────────────────
+test('configSetInput accepts a valid budget mutation', () => {
+  const parsed = configSetInput.parse({ section: 'budget', value: { daily_usd: 100, monthly_usd: 2000 } });
+  assert.equal(parsed.section, 'budget');
+  assert.deepEqual(parsed.value, { daily_usd: 100, monthly_usd: 2000 });
+});
+
+test('configSetInput rejects illegal values / shapes', () => {
+  assert.throws(() => configSetInput.parse({ section: 'budget', value: { daily_usd: -5, monthly_usd: 2000 } }));
+  assert.throws(() => configSetInput.parse({ section: 'budget', value: { daily_usd: 0, monthly_usd: 2000 } }));
+  assert.throws(() => configSetInput.parse({ section: 'budget', value: { daily_usd: Number.POSITIVE_INFINITY, monthly_usd: 2000 } }));
+  assert.throws(() => configSetInput.parse({ section: 'budget', value: { daily_usd: 100, monthly_usd: Number.NaN } }));
+  assert.throws(() => configSetInput.parse({ section: 'budget', value: { daily_usd: 100 } }));
+  assert.throws(() => configSetInput.parse({ section: 'budget', value: { daily_usd: 'x', monthly_usd: 2000 } }));
+  assert.throws(() => configSetInput.parse({ section: 'profiles', value: {} }));
+  assert.throws(() => configSetInput.parse({ value: { daily_usd: 100, monthly_usd: 2000 } }));
+});
+
+// ── handler section guard (defensive: direct calls bypass the router) ─
+test('handleConfigSet rejects a non-budget section with invalid-args', async () => {
+  const result = await handleConfigSet(makeMinimalDeps(), { section: 'profiles' as any, value: {} as any });
+  assert.equal(result.ok, false);
+  assert.equal((result as any).code, 'invalid-args');
+});
+
+test('handleConfigSet rejects an invalid budget with invalid-args (no write)', async () => {
+  const result = await handleConfigSet(makeMinimalDeps(), { section: 'budget', value: { daily_usd: -1, monthly_usd: 5 } });
+  assert.equal(result.ok, false);
+  assert.equal((result as any).code, 'invalid-args');
+});
+
+// ── facade + app-router wiring ──────────────────────────────────────
+test('config.set via facade writes to the isolated CONFIG_DIR and returns written', async () => {
+  const ui = createUiService(makeMinimalDeps());
+  const result = await ui.mutate('config.set', { section: 'budget', value: { daily_usd: 55, monthly_usd: 1234 } });
+  assert.ok(result.ok);
+  assert.deepEqual(result.data, { written: true, section: 'budget' });
+  // read it back through config.get (same isolated CONFIG_DIR)
+  const got = await ui.query('config.get', {});
+  assert.ok(got.ok);
+  assert.deepEqual(got.data.budget, { daily_usd: 55, monthly_usd: 1234 });
+});
+
+test('config.set via app-router caller maps invalid input to TRPCError BAD_REQUEST', async () => {
+  const caller = createCallerFactory(createAppRouter(createUiService(makeMinimalDeps())))({});
+  await assert.rejects(
+    () => caller.config.set({ section: 'budget', value: { daily_usd: -1, monthly_usd: 2000 } } as any),
+    (e: unknown) => e instanceof TRPCError && e.code === 'BAD_REQUEST',
+  );
+});

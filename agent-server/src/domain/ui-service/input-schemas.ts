@@ -53,6 +53,8 @@ export const costSummaryInput = z.object({
   projectId: z.string().nullish(),
 });
 
+export const configGetInput = z.object({});
+
 // ── Subscription input schemas ────────────────────────────────────
 // Subscriptions are not part of the query/mutate keyed maps; their input schemas live here too so
 // the AppRouter and the browser (@cortex-agent/ui-contract) share one source of truth (B2-C).
@@ -92,6 +94,17 @@ export const taskBlockInput = z.object({
   reason: z.string(),
 });
 
+// config.set: only the whitelisted `budget` section is writable (Stage 7). Numbers must be
+// finite and > 0 — rejects NaN / Infinity / non-positive / non-number. The discriminated union
+// leaves room for future safely-writable sections without loosening budget validation.
+export const configSetInput = z.object({
+  section: z.literal('budget'),
+  value: z.object({
+    daily_usd: z.number().finite().positive(),
+    monthly_usd: z.number().finite().positive(),
+  }),
+});
+
 // ── Keyed maps (one entry per QueryScope / MutateOp) ──────────────
 
 export const queryInputSchemas = {
@@ -104,6 +117,7 @@ export const queryInputSchemas = {
   'executions.list': executionsListInput,
   'executions.get': executionsGetInput,
   'cost.summary': costSummaryInput,
+  'config.get': configGetInput,
 } satisfies Record<QueryScope, z.ZodType>;
 
 export const mutateInputSchemas = {
@@ -117,4 +131,5 @@ export const mutateInputSchemas = {
   'tasks.complete': taskCompleteInput,
   'tasks.block': taskBlockInput,
   'tasks.unblock': taskActionInput,
+  'config.set': configSetInput,
 } satisfies Record<MutateOp, z.ZodType>;
