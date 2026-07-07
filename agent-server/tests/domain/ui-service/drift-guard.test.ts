@@ -50,6 +50,7 @@ function makeMinimalDeps(): UiServiceDeps {
       cancelExecution: () => null,
     },
     executionLogTailer: { startTail: () => {}, stopTail: () => {}, refCount: () => 0 },
+    approvalsPath: '/tmp/nonexistent-approvals.md',
     runningExecutions: {
       register: () => {},
       getByKey: () => null,
@@ -86,6 +87,7 @@ const queryScopes = [
   'schedules.list',
   'executions.list',
   'executions.get',
+  'approvals.list',
   'cost.summary',
   'config.get',
 ] as const;
@@ -103,6 +105,8 @@ const mutateOps = [
   'tasks.complete',
   'tasks.block',
   'tasks.unblock',
+  'approvals.approve',
+  'approvals.reject',
   'config.set',
 ] as const;
 

@@ -26,6 +26,7 @@ export type {
   ExecutionsGetParams,
   MemoryTreeParams,
   MemoryFileParams,
+  ApprovalsListParams,
   CostSummaryParams,
   ConfigGetParams,
   // Mutate args
@@ -39,6 +40,8 @@ export type {
   TaskBlockArgs,
   BudgetValue,
   ConfigSetArgs,
+  ApprovalsApproveArgs,
+  ApprovalsRejectArgs,
   // Output DTOs
   ProjectConduitInfo,
   SessionInfo,
@@ -69,6 +72,9 @@ export type {
   ThreadsCancelReturn,
   ExecutionsCancelReturn,
   ConfigSetReturn,
+  ApprovalStatus,
+  ApprovalInfo,
+  ApprovalMutateReturn,
   // Mapped contract
   QueryParamMap,
   QueryReturnMap,

@@ -24,6 +24,9 @@ import {
   executionsGetInput,
   memoryTreeInput,
   memoryFileInput,
+  approvalsListInput,
+  approvalsApproveInput,
+  approvalsRejectInput,
   costSummaryInput,
   threadsCancelInput,
   executionsCancelInput,
@@ -107,7 +110,7 @@ function makeMutation<O extends MutateOp, Sch extends z.ZodType>(
 }
 
 // ── AppRouter ─────────────────────────────────────────────────────────────────────
-// 12 QueryScope + 13 MutateOp + 2 subscriptions (generic `subscribe` + `executions.log`),
+// 13 QueryScope + 15 MutateOp + 2 subscriptions (generic `subscribe` + `executions.log`),
 // mirroring the ui-service contract.
 export function createAppRouter(uiService: UiService) {
   return router({
@@ -161,6 +164,11 @@ export function createAppRouter(uiService: UiService) {
     memory: router({
       tree: makeQuery(uiService, 'memory.tree', memoryTreeInput),
       file: makeQuery(uiService, 'memory.file', memoryFileInput),
+    }),
+    approvals: router({
+      list: makeQuery(uiService, 'approvals.list', approvalsListInput),
+      approve: makeMutation(uiService, 'approvals.approve', approvalsApproveInput),
+      reject: makeMutation(uiService, 'approvals.reject', approvalsRejectInput),
     }),
     cost: router({
       summary: makeQuery(uiService, 'cost.summary', costSummaryInput),

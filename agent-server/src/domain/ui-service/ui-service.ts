@@ -10,6 +10,7 @@ import { handleTasksList } from './query/tasks.js';
 import { handleSchedulesList } from './query/schedules.js';
 import { handleExecutionsList, handleExecutionsGet } from './query/executions.js';
 import { handleMemoryTree, handleMemoryFile } from './query/memory.js';
+import { handleApprovalsList } from './query/approvals.js';
 import { handleCostSummary } from './query/cost.js';
 import { handleConfigGet } from './query/config.js';
 import { handleConfigSet } from './mutate/config.js';
@@ -29,6 +30,7 @@ import {
   handleBlockTask,
   handleUnblockTask,
 } from './mutate/tasks.js';
+import { handleApproveApproval, handleRejectApproval } from './mutate/approvals.js';
 import { createSubscription } from './subscribe.js';
 import { resolveExecutionLogLocation } from '@domain/executions/log-tailer.js';
 
@@ -46,6 +48,7 @@ const queryHandlers: Record<string, QueryHandler> = {
   'executions.get': (deps, params) => handleExecutionsGet(deps, params),
   'memory.tree': (deps, params) => handleMemoryTree(deps, params),
   'memory.file': (deps, params) => handleMemoryFile(deps, params),
+  'approvals.list': (deps, params) => handleApprovalsList(deps, params),
   'cost.summary': (deps, params) => handleCostSummary(deps, params),
   'config.get': (deps, params) => handleConfigGet(deps, params),
 };
@@ -63,6 +66,8 @@ const mutateHandlers: Record<string, MutateHandler> = {
   'tasks.complete': (deps, args) => handleCompleteTask(deps, args),
   'tasks.block': (deps, args) => handleBlockTask(deps, args),
   'tasks.unblock': (deps, args) => handleUnblockTask(deps, args),
+  'approvals.approve': (deps, args) => handleApproveApproval(deps, args),
+  'approvals.reject': (deps, args) => handleRejectApproval(deps, args),
   'config.set': (deps, args) => handleConfigSet(deps, args),
 };
 

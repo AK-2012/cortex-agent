@@ -5,13 +5,13 @@ import { queryInputSchemas, mutateInputSchemas } from './schemas.js';
 const QUERY_SCOPES = [
   'projects.list', 'sessions.list', 'threads.list', 'threads.get', 'tasks.list',
   'schedules.list', 'executions.list', 'executions.get', 'memory.tree', 'memory.file',
-  'cost.summary', 'config.get',
+  'approvals.list', 'cost.summary', 'config.get',
 ] as const;
 
 const MUTATE_OPS = [
   'projects.create', 'threads.cancel', 'executions.cancel', 'schedules.pause', 'schedules.resume',
   'schedules.remove', 'schedules.add', 'tasks.claim', 'tasks.unclaim', 'tasks.complete',
-  'tasks.block', 'tasks.unblock', 'config.set',
+  'tasks.block', 'tasks.unblock', 'approvals.approve', 'approvals.reject', 'config.set',
 ] as const;
 
 test('every QueryScope has an input schema', () => {
@@ -53,6 +53,12 @@ test('query schemas accept valid input', () => {
     queryInputSchemas['memory.file'].parse({ projectId: 'p', path: 'STATUS.md' }),
     { projectId: 'p', path: 'STATUS.md' },
   );
+  // approvals.list: status optional + enum
+  assert.deepEqual(queryInputSchemas['approvals.list'].parse({}), {});
+  assert.deepEqual(
+    queryInputSchemas['approvals.list'].parse({ status: 'pending' }),
+    { status: 'pending' },
+  );
 });
 
 test('query schemas reject invalid input', () => {
@@ -62,6 +68,7 @@ test('query schemas reject invalid input', () => {
   assert.throws(() => queryInputSchemas['sessions.list'].parse({ resumable: 'yes' }));
   assert.throws(() => queryInputSchemas['memory.tree'].parse({}));
   assert.throws(() => queryInputSchemas['memory.file'].parse({ projectId: 'p' }));
+  assert.throws(() => queryInputSchemas['approvals.list'].parse({ status: 'nope' }));
 });
 
 test('mutate schemas require their mandatory fields', () => {
@@ -81,6 +88,13 @@ test('mutate schemas require their mandatory fields', () => {
   // missing required id
   assert.throws(() => mutateInputSchemas['threads.cancel'].parse({}));
   assert.throws(() => mutateInputSchemas['tasks.claim'].parse({ projectId: 'p' }));
+  // approvals.approve requires id; approvals.reject id + optional feedback
+  assert.deepEqual(mutateInputSchemas['approvals.approve'].parse({ id: 'a1' }), { id: 'a1' });
+  assert.deepEqual(
+    mutateInputSchemas['approvals.reject'].parse({ id: 'a1', feedback: 'no' }),
+    { id: 'a1', feedback: 'no' },
+  );
+  assert.throws(() => mutateInputSchemas['approvals.approve'].parse({}));
 });
 
 test('config.get accepts an empty object', () => {

@@ -20,6 +20,7 @@ test('cost.summary delegates to costSummary and returns CostSummary', async () =
     scheduler: { list: async () => [], get: async () => null, pause: async () => null, resume: async () => null, remove: async () => false, add: async () => ({ id: 'sch_new' } as any) },
     executionRegistry: { getExecution: () => null, getAll: () => [], cancelExecution: () => null },
     executionLogTailer: { startTail: () => {}, stopTail: () => {}, refCount: () => 0 },
+    approvalsPath: '/tmp/nonexistent-approvals.md',
     runningExecutions: { getAll: () => [] } as any,
     costSummary: async (projectId?: string | null) => {
       assert.equal(projectId, null);
@@ -43,6 +44,7 @@ test('cost.summary passes projectId filter', async () => {
     scheduler: { list: async () => [], get: async () => null, pause: async () => null, resume: async () => null, remove: async () => false, add: async () => ({ id: 'sch_new' } as any) },
     executionRegistry: { getExecution: () => null, getAll: () => [], cancelExecution: () => null },
     executionLogTailer: { startTail: () => {}, stopTail: () => {}, refCount: () => 0 },
+    approvalsPath: '/tmp/nonexistent-approvals.md',
     runningExecutions: { getAll: () => [] } as any,
     costSummary: async (projectId?: string | null) => {
       capturedProjectId = projectId;

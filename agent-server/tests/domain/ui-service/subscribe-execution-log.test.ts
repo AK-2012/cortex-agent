@@ -26,6 +26,7 @@ function makeDeps(bus: EventBus, tailer: ExecutionLogTailer, records: Record<str
       cancelExecution: () => null,
     },
     executionLogTailer: tailer,
+    approvalsPath: '/tmp/nonexistent-approvals.md',
     runningExecutions: { getAll: () => [] } as any,
     costSummary: async () => ({ today: 0, week: 0, month: 0, total: 0, byMode: {} as any, byProject: {}, byTrigger: {}, bySource: {}, byBackend: {}, tokens: {} as any, entryCount: 0 }),
     bus,
