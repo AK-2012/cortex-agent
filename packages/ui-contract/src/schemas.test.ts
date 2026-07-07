@@ -4,7 +4,8 @@ import { queryInputSchemas, mutateInputSchemas } from './schemas.js';
 
 const QUERY_SCOPES = [
   'projects.list', 'sessions.list', 'threads.list', 'threads.get', 'tasks.list',
-  'schedules.list', 'executions.list', 'executions.get', 'cost.summary',
+  'schedules.list', 'executions.list', 'executions.get', 'memory.tree', 'memory.file',
+  'cost.summary',
 ] as const;
 
 const MUTATE_OPS = [
@@ -45,6 +46,13 @@ test('query schemas accept valid input', () => {
   assert.deepEqual(queryInputSchemas['cost.summary'].parse({ projectId: null }), { projectId: null });
   // threads.get requires a threadId
   assert.deepEqual(queryInputSchemas['threads.get'].parse({ threadId: 'thr_a' }), { threadId: 'thr_a' });
+  // memory.tree requires a projectId
+  assert.deepEqual(queryInputSchemas['memory.tree'].parse({ projectId: 'p' }), { projectId: 'p' });
+  // memory.file requires projectId + path
+  assert.deepEqual(
+    queryInputSchemas['memory.file'].parse({ projectId: 'p', path: 'STATUS.md' }),
+    { projectId: 'p', path: 'STATUS.md' },
+  );
 });
 
 test('query schemas reject invalid input', () => {
@@ -52,6 +60,8 @@ test('query schemas reject invalid input', () => {
   assert.throws(() => queryInputSchemas['executions.list'].parse({ limit: 'ten' }));
   assert.throws(() => queryInputSchemas['threads.get'].parse({}));
   assert.throws(() => queryInputSchemas['sessions.list'].parse({ resumable: 'yes' }));
+  assert.throws(() => queryInputSchemas['memory.tree'].parse({}));
+  assert.throws(() => queryInputSchemas['memory.file'].parse({ projectId: 'p' }));
 });
 
 test('mutate schemas require their mandatory fields', () => {

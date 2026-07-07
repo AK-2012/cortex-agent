@@ -49,6 +49,15 @@ export const executionsGetInput = z.object({
   executionId: z.string(),
 });
 
+export const memoryTreeInput = z.object({
+  projectId: z.string(),
+});
+
+export const memoryFileInput = z.object({
+  projectId: z.string(),
+  path: z.string(),
+});
+
 export const costSummaryInput = z.object({
   projectId: z.string().nullish(),
 });
@@ -103,6 +112,8 @@ export const queryInputSchemas = {
   'schedules.list': schedulesListInput,
   'executions.list': executionsListInput,
   'executions.get': executionsGetInput,
+  'memory.tree': memoryTreeInput,
+  'memory.file': memoryFileInput,
   'cost.summary': costSummaryInput,
 } satisfies Record<QueryScope, z.ZodType>;
 

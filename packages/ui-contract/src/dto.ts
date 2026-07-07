@@ -24,6 +24,8 @@ export type {
   SchedulesListParams,
   ExecutionsListParams,
   ExecutionsGetParams,
+  MemoryTreeParams,
+  MemoryFileParams,
   CostSummaryParams,
   // Mutate args
   ThreadsCancelArgs,
@@ -46,6 +48,10 @@ export type {
   ScheduleInfo,
   ExecutionInfo,
   ExecutionDetailInfo,
+  MemoryTree,
+  MemoryFileEntry,
+  MemoryDirEntry,
+  MemoryFile,
   ThreadsCancelReturn,
   ExecutionsCancelReturn,
   // Mapped contract
