@@ -8,7 +8,7 @@ Cortex is an autonomous research agent system for robotics and AI/ML. It runs as
 |-----------|---------|
 | `agent-server/` | Main server application (TypeScript, Node.js >=20). Slack/Feishu bot, LLM orchestration, scheduling, task system, MCP tools. See [agent-server/CORTEX.md](agent-server/CORTEX.md). |
 | `client/` | Remote agent client (TypeScript, Node.js >=20). Connects to agent-server via WebSocket, executes bash/read/write/edit/glob/grep commands locally, supports cortex-run for long-running task execution. See [client/src/CORTEX.md](client/src/CORTEX.md). |
-| `research-context/` | Structured knowledge repository for research projects (experiments, knowledge entries, patterns). |
+| `context/` | Structured knowledge repository for research projects (experiments, knowledge entries, patterns). |
 | `tmp/` | Experiment artifacts, analysis scripts, logs, and working files. |
 | `.claude/` | Claude Code configuration (settings.json, hooks, plans). |
 
@@ -67,7 +67,7 @@ The client (`client/src/`) is a lightweight WebSocket daemon that:
 
 Use the `/develop` skill for all code changes. It enforces the TDD workflow:
 
-1. **Understand** — read relevant source, check `research-context/decisions/`, search for existing patterns to reuse.
+1. **Understand** — read relevant source, check `context/decisions/`, search for existing patterns to reuse.
 2. **Write tests** — happy path, edge cases, integration points. Run them, confirm they fail.
 3. **Implement** — minimum code to make tests pass. Follow existing naming, error handling, and type patterns.
 4. **Verify** — all tests pass (`npm test`). Review diff with `git diff`.
