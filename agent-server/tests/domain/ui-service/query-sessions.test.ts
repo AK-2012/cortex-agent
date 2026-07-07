@@ -18,6 +18,7 @@ function makeDeps(overrides: Partial<UiServiceDeps> = {}): UiServiceDeps {
       ],
       get: () => undefined, exists: () => false,
       getDefault: () => ({ id: 'general', name: 'general', kind: 'general' as const, contextDir: '/g' }),
+      createProject: () => ({ ok: false, code: 'invalid-name' as const, message: 'stub' }),
     },
     sessionStore: {
       listByProject: async (pid: string) => mockSessions.filter(s => s.projectId === pid),

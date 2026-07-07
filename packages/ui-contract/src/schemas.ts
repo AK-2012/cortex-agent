@@ -9,6 +9,7 @@
 
 export {
   projectsListInput,
+  projectsCreateInput,
   sessionsListInput,
   threadsListInput,
   threadsGetInput,

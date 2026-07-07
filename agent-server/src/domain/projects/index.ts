@@ -3,3 +3,4 @@
 
 export type { Project } from './project-types.js';
 export { ProjectStore, projectStore } from './project-store.js';
+export type { CreateProjectResult } from './project-store.js';

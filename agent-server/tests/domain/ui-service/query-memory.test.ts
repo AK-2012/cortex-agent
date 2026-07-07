@@ -45,6 +45,7 @@ function makeDeps(projectId: string, root: string): UiServiceDeps {
       get: (id: string) => (id === projectId ? project : undefined),
       exists: (id: string) => id === projectId,
       getDefault: () => project,
+      createProject: () => ({ ok: false, code: 'invalid-name' as const, message: 'stub' }),
     },
     sessionStore: { listByProject: async () => [], listResumable: async () => [], getById: async () => null },
     threadStore: { getAll: () => [], get: () => null },

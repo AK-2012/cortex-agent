@@ -29,6 +29,7 @@ export type {
   CostSummaryParams,
   ConfigGetParams,
   // Mutate args
+  ProjectCreateArgs,
   ThreadsCancelArgs,
   ExecutionsCancelArgs,
   ScheduleActionArgs,
@@ -63,6 +64,7 @@ export type {
   MemoryFileEntry,
   MemoryDirEntry,
   MemoryFile,
+  ProjectCreateReturn,
   ThreadsCancelReturn,
   ExecutionsCancelReturn,
   ConfigSetReturn,

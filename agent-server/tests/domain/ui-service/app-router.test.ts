@@ -103,6 +103,7 @@ test('every query routes to the correct scope and unwraps Result.data', async ()
 // ── Mutation routing + Result unwrap ────────────────────────────────────────────────
 
 const MUTATE_CASES: Array<{ op: MutateOp; call: (c: any) => Promise<unknown>; }> = [
+  { op: 'projects.create', call: (c) => c.projects.create({ name: 'nimbus' }) },
   { op: 'threads.cancel', call: (c) => c.threads.cancel({ threadId: 't1' }) },
   { op: 'executions.cancel', call: (c) => c.executions.cancel({ executionId: 'e1' }) },
   { op: 'schedules.pause', call: (c) => c.schedules.pause({ scheduleId: 's1' }) },
@@ -126,9 +127,9 @@ test('every mutation routes to the correct op and unwraps Result.data', async ()
   }
 });
 
-test('coverage: exactly 8 queries + 10 mutations exercised', () => {
+test('coverage: exactly 8 queries + 11 mutations exercised', () => {
   assert.equal(QUERY_CASES.length, 8);
-  assert.equal(MUTATE_CASES.length, 10);
+  assert.equal(MUTATE_CASES.length, 11);
 });
 
 // ── Err → TRPCError mapping ──────────────────────────────────────────────────────────

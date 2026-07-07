@@ -9,7 +9,7 @@ const QUERY_SCOPES = [
 ] as const;
 
 const MUTATE_OPS = [
-  'threads.cancel', 'executions.cancel', 'schedules.pause', 'schedules.resume',
+  'projects.create', 'threads.cancel', 'executions.cancel', 'schedules.pause', 'schedules.resume',
   'schedules.remove', 'tasks.claim', 'tasks.unclaim', 'tasks.complete',
   'tasks.block', 'tasks.unblock', 'config.set',
 ] as const;
@@ -65,6 +65,8 @@ test('query schemas reject invalid input', () => {
 });
 
 test('mutate schemas require their mandatory fields', () => {
+  assert.deepEqual(mutateInputSchemas['projects.create'].parse({ name: 'nimbus' }), { name: 'nimbus' });
+  assert.throws(() => mutateInputSchemas['projects.create'].parse({}));
   assert.deepEqual(mutateInputSchemas['threads.cancel'].parse({ threadId: 't1' }), { threadId: 't1' });
   assert.deepEqual(
     mutateInputSchemas['tasks.claim'].parse({ projectId: 'p', taskId: 'f184' }),

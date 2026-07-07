@@ -19,6 +19,7 @@ function makeMinimalDeps(): UiServiceDeps {
       get: () => undefined,
       exists: () => false,
       getDefault: () => ({ id: 'general', name: 'general', kind: 'general' as const, contextDir: '/tmp' }),
+      createProject: () => ({ ok: false, code: 'invalid-name', message: 'stub' }),
     },
     sessionStore: {
       listByProject: async () => [],
@@ -89,6 +90,7 @@ const queryScopes = [
 ] as const;
 
 const mutateOps = [
+  'projects.create',
   'threads.cancel',
   'executions.cancel',
   'schedules.pause',
