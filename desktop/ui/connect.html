@@ -252,10 +252,13 @@
       function setStatus(type, text) {
         // type: 'ok' | 'err' | 'pending' | ''
         statusEl.className = 'status' + (type ? ' status-' + type : '');
+        statusEl.textContent = '';
         if (type === 'ok' || type === 'err') {
-          statusEl.innerHTML =
-            '<span class="status-dot"></span>' +
-            document.createTextNode(text).textContent; // XSS-safe
+          // Build imperatively — avoids innerHTML with concatenated text.
+          var dot = document.createElement('span');
+          dot.className = 'status-dot';
+          statusEl.appendChild(dot);
+          statusEl.appendChild(document.createTextNode(text));
         } else {
           statusEl.textContent = text;
         }

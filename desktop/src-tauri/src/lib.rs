@@ -151,7 +151,11 @@ const INIT_SCRIPT: &str = r#"
 window.__CORTEX_DESKTOP__ = true;
 window.__CORTEX_DESKTOP_CONFIG = { serverUrl: null, token: null };
 
-// Load credentials from AppState (fast local IPC; done before React bundle executes).
+// Timing assumption: this IPC call resolves in ~microseconds (in-process Rust handler,
+// no network). The React bundle takes tens of milliseconds to download and parse, so
+// __CORTEX_DESKTOP_CONFIG is set before providers.tsx reads it in practice.
+// This is not a hard guarantee — a sufficiently fast device / cached bundle could
+// theoretically race. Accepted: the fallback is a broken tRPC client that retries.
 (function () {
   var tauri = window.__TAURI__;
   if (!tauri || !tauri.core || !tauri.core.invoke) return;
