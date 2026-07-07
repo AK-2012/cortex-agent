@@ -45,12 +45,62 @@ test('handleRateLimitEvent is no-op before init', async (t) => {
   assert.equal(mod.isThrottled(), false);
 });
 
-test('ignores non-five_hour rate limits', async (t) => {
+test('activates on seven_day with utilization ≥ 0.95', async (t) => {
   const mod = await freshModuleWithCleanup(t);
   const persistence = makePersistenceStub();
   const adapter = makeAdapterStub();
   await mod.initRateLimitThrottle(adapter, persistence as any);
-  await mod.handleRateLimitEvent({ rateLimitType: 'seven_day', utilization: 0.99, resetsAt: Math.floor(Date.now() / 1000) + 300 });
+  await mod.handleRateLimitEvent({ rateLimitType: 'seven_day', utilization: 0.96, resetsAt: Math.floor(Date.now() / 1000) + 300 });
+  assert.equal(mod.isThrottled(), true);
+  const state = mod.getThrottleState();
+  assert.ok(state.rateLimitedTypes.includes('seven_day'));
+  assert.ok(adapter.posted[0].content.text.includes('[seven_day]'));
+});
+
+test('ignores seven_day below threshold (0.94)', async (t) => {
+  const mod = await freshModuleWithCleanup(t);
+  const persistence = makePersistenceStub();
+  const adapter = makeAdapterStub();
+  await mod.initRateLimitThrottle(adapter, persistence as any);
+  await mod.handleRateLimitEvent({ rateLimitType: 'seven_day', utilization: 0.94, resetsAt: Math.floor(Date.now() / 1000) + 300 });
+  assert.equal(mod.isThrottled(), false);
+});
+
+test('activates on seven_day_overage_included with utilization ≥ 0.95', async (t) => {
+  const mod = await freshModuleWithCleanup(t);
+  const persistence = makePersistenceStub();
+  const adapter = makeAdapterStub();
+  await mod.initRateLimitThrottle(adapter, persistence as any);
+  await mod.handleRateLimitEvent({ rateLimitType: 'seven_day_overage_included', utilization: 0.96, resetsAt: Math.floor(Date.now() / 1000) + 300 });
+  assert.equal(mod.isThrottled(), true);
+  const state = mod.getThrottleState();
+  assert.ok(state.rateLimitedTypes.includes('seven_day_overage_included'));
+});
+
+test('activates on seven_day at exactly 0.95 (boundary)', async (t) => {
+  const mod = await freshModuleWithCleanup(t);
+  const persistence = makePersistenceStub();
+  const adapter = makeAdapterStub();
+  await mod.initRateLimitThrottle(adapter, persistence as any);
+  await mod.handleRateLimitEvent({ rateLimitType: 'seven_day', utilization: 0.95, resetsAt: Math.floor(Date.now() / 1000) + 300 });
+  assert.equal(mod.isThrottled(), true);
+});
+
+test('unknown rateLimitType falls back to default threshold 0.90', async (t) => {
+  const mod = await freshModuleWithCleanup(t);
+  const persistence = makePersistenceStub();
+  const adapter = makeAdapterStub();
+  await mod.initRateLimitThrottle(adapter, persistence as any);
+  await mod.handleRateLimitEvent({ rateLimitType: 'unknown_type', utilization: 0.95, resetsAt: Math.floor(Date.now() / 1000) + 300 });
+  assert.equal(mod.isThrottled(), true);
+});
+
+test('five_hour at 0.89 still ignored (below 0.90 threshold)', async (t) => {
+  const mod = await freshModuleWithCleanup(t);
+  const persistence = makePersistenceStub();
+  const adapter = makeAdapterStub();
+  await mod.initRateLimitThrottle(adapter, persistence as any);
+  await mod.handleRateLimitEvent({ rateLimitType: 'five_hour', utilization: 0.89, resetsAt: Math.floor(Date.now() / 1000) + 300 });
   assert.equal(mod.isThrottled(), false);
 });
 
@@ -94,6 +144,7 @@ test('activates throttle and persists state', async (t) => {
   assert.ok(saved);
   assert.equal(saved.resetsAt, resetSec);
   assert.deepEqual(saved.modes, []);
+  assert.deepEqual(saved.types, ['five_hour']);
 });
 
 test('extends timer on later resetsAt while already throttled', async (t) => {
@@ -295,6 +346,7 @@ test('persistence roundtrip with modes', async (t) => {
 
   const saved1 = persistence.getSaved();
   assert.deepEqual(saved1.modes.sort(), ['api', 'plan']);
+  assert.deepEqual(saved1.types.sort(), ['five_hour']);
   assert.equal(saved1.resetsAt, resetSec + 600);
 
   // Create a fresh module and test recovery from persisted state
@@ -306,6 +358,27 @@ test('persistence roundtrip with modes', async (t) => {
   assert.equal(mod2.isThrottled(), true);
   assert.equal(mod2.getThrottleState().resetsAt, resetSec + 600);
   assert.deepEqual(mod2.getThrottleState().rateLimitedModes.sort(), ['api', 'plan']);
+  assert.deepEqual(mod2.getThrottleState().rateLimitedTypes.sort(), ['five_hour']);
   assert.ok(mod2.isModeRateLimited('plan'));
   assert.ok(mod2.isModeRateLimited('api'));
+});
+
+test('cross-type extension: seven_day extends five_hour resetsAt', async (t) => {
+  const mod = await freshModuleWithCleanup(t);
+  const persistence = makePersistenceStub();
+  const adapter = makeAdapterStub();
+  await mod.initRateLimitThrottle(adapter, persistence as any);
+
+  const fiveHourReset = Math.floor(Date.now() / 1000) + 300;
+  await mod.handleRateLimitEvent({ rateLimitType: 'five_hour', utilization: 0.95, resetsAt: fiveHourReset });
+  assert.equal(mod.isThrottled(), true);
+
+  // seven_day with later resetsAt should extend and track both types
+  const sevenDayReset = fiveHourReset + 3600;
+  await mod.handleRateLimitEvent({ rateLimitType: 'seven_day', utilization: 0.99, resetsAt: sevenDayReset });
+  assert.equal(mod.getThrottleState().resetsAt, sevenDayReset);
+  assert.deepEqual(mod.getThrottleState().rateLimitedTypes.sort(), ['five_hour', 'seven_day']);
+
+  const saved = persistence.getSaved();
+  assert.deepEqual(saved.types.sort(), ['five_hour', 'seven_day']);
 });

@@ -56,7 +56,7 @@ export interface ScheduleTask {
 
 export interface SchedulesData {
   tasks: ScheduleTask[];
-  rateLimitThrottle?: { resetsAt: number; activatedAt: number; modes?: string[] } | null;
+  rateLimitThrottle?: { resetsAt: number; activatedAt: number; modes?: string[]; types?: string[] } | null;
   /** Sessions/threads interrupted by a rate limit, awaiting auto-resume when the
    *  window resets. Owned by domain/costs/resume-registry.ts. */
   resumeQueue?: ResumeEntry[] | null;

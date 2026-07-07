@@ -11,7 +11,13 @@ import { Icons } from '../../core/icons.js';
 
 const log = createLogger('rate-limit-throttle');
 
-const UTILIZATION_THRESHOLD = 0.90;
+/** Per-type utilization thresholds. Unknown types fall back to DEFAULT_THRESHOLD. */
+const TYPE_THRESHOLDS: Record<string, number> = {
+  five_hour: 0.90,
+  seven_day: 0.95,
+  seven_day_overage_included: 0.95,
+};
+const DEFAULT_THRESHOLD = 0.90;
 const RESUME_BUFFER_MS = 5_000;
 
 // --- Module state ---
@@ -22,11 +28,12 @@ let _isThrottled = false;
 let _resetsAt: number | null = null; // Unix seconds
 let _resumeTimer: ReturnType<typeof setTimeout> | null = null;
 const _rateLimitedModes = new Set<string>();
+const _rateLimitedTypes = new Set<string>();
 
 // --- Types ---
 export interface ThrottlePersistence {
-  save: (state: { resetsAt: number; activatedAt: number; modes: string[] } | null) => Promise<void>;
-  load: () => Promise<{ resetsAt: number; activatedAt: number; modes?: string[] } | null>;
+  save: (state: { resetsAt: number; activatedAt: number; modes: string[]; types: string[] } | null) => Promise<void>;
+  load: () => Promise<{ resetsAt: number; activatedAt: number; modes?: string[]; types?: string[] } | null>;
 }
 
 // --- Logging (handled by createLogger) ---
@@ -59,6 +66,7 @@ function clearThrottle(): void {
   _isThrottled = false;
   _resetsAt = null;
   _rateLimitedModes.clear();
+  _rateLimitedTypes.clear();
   _resumeTimer = null;
   sendDM(`${Icons.ok} Rate limit throttle cleared.`);
   _persistence?.save(null).catch(e => {
@@ -104,7 +112,10 @@ async function initRateLimitThrottle(adapter: PlatformAdapter, persistence: Thro
       if (persisted.modes) {
         for (const m of persisted.modes) _rateLimitedModes.add(m);
       }
-      log.info(`Restored throttle from disk: ${persisted.modes?.length ?? 0} mode(s) rate-limited, resetsAt=${new Date(_resetsAt * 1000).toISOString()}`);
+      if (persisted.types) {
+        for (const t of persisted.types) _rateLimitedTypes.add(t);
+      }
+      log.info(`Restored throttle from disk: ${persisted.modes?.length ?? 0} mode(s), ${persisted.types?.length ?? 0} type(s) rate-limited, resetsAt=${new Date(_resetsAt * 1000).toISOString()}`);
       scheduleResumeTimer();
     } else {
       log.info(`Throttle expired during downtime (resetsAt was ${new Date(persisted.resetsAt * 1000).toISOString()}). Clearing.`);
@@ -127,18 +138,25 @@ interface RateLimitInfo {
   surpassedThreshold?: number;
 }
 
+function thresholdFor(type: string): number {
+  return TYPE_THRESHOLDS[type] ?? DEFAULT_THRESHOLD;
+}
+
 async function handleRateLimitEvent(info: RateLimitInfo, mode?: string): Promise<void> {
   if (!info || !_persistence) return;
-  if (info.rateLimitType !== 'five_hour') return;
-  if (typeof info.utilization !== 'number' || info.utilization < UTILIZATION_THRESHOLD) return;
+  const type = info.rateLimitType;
+  if (!type) return;
+  const threshold = thresholdFor(type);
+  if (typeof info.utilization !== 'number' || info.utilization < threshold) return;
   if (!info.resetsAt) return;
 
   if (_isThrottled) {
+    _rateLimitedTypes.add(type);
     if (info.resetsAt > (_resetsAt || 0)) {
-      log.info(`Extending throttle: resetsAt ${_resetsAt} → ${info.resetsAt}`);
+      log.info(`Extending throttle (${type}): resetsAt ${_resetsAt} → ${info.resetsAt}`);
       _resetsAt = info.resetsAt;
       if (mode) _rateLimitedModes.add(mode);
-      await _persistence.save({ resetsAt: _resetsAt, activatedAt: Date.now(), modes: [..._rateLimitedModes] });
+      await _persistence.save({ resetsAt: _resetsAt, activatedAt: Date.now(), modes: [..._rateLimitedModes], types: [..._rateLimitedTypes] });
       scheduleResumeTimer();
     }
     return;
@@ -146,16 +164,18 @@ async function handleRateLimitEvent(info: RateLimitInfo, mode?: string): Promise
 
   _isThrottled = true;
   _resetsAt = info.resetsAt;
+  _rateLimitedTypes.add(type);
   if (mode) _rateLimitedModes.add(mode);
-  log.info(`Throttle activated: utilization=${info.utilization}, resetsAt=${new Date(_resetsAt * 1000).toISOString()}, mode=${mode ?? '(none)'}`);
+  log.info(`Throttle activated (${type}): utilization=${info.utilization}, resetsAt=${new Date(_resetsAt * 1000).toISOString()}, mode=${mode ?? '(none)'}`);
 
   scheduleResumeTimer();
-  await _persistence.save({ resetsAt: _resetsAt, activatedAt: Date.now(), modes: [..._rateLimitedModes] });
+  await _persistence.save({ resetsAt: _resetsAt, activatedAt: Date.now(), modes: [..._rateLimitedModes], types: [..._rateLimitedTypes] });
 
   const resetStr = formatResetTime(_resetsAt);
   const remainingStr = formatRemaining(_resetsAt);
+  const typeNote = type ? ` [${type}]` : '';
   const modeNote = mode ? ` (mode: ${mode})` : '';
-  sendDM(`${Icons.warning} Rate limit throttle activated — utilization ${(info.utilization * 100).toFixed(0)}%${modeNote}.\nAuto-resume at ${resetStr} (in ${remainingStr}).`);
+  sendDM(`${Icons.warning} Rate limit throttle activated${typeNote} — utilization ${(info.utilization * 100).toFixed(0)}%${modeNote}.\nAuto-resume at ${resetStr} (in ${remainingStr}).`);
 }
 
 function isThrottled(): boolean {
@@ -166,8 +186,8 @@ function isModeRateLimited(mode: string): boolean {
   return _isThrottled && _rateLimitedModes.has(mode);
 }
 
-function getThrottleState(): { isThrottled: boolean; resetsAt: number | null; rateLimitedModes: string[] } {
-  return { isThrottled: _isThrottled, resetsAt: _resetsAt, rateLimitedModes: [..._rateLimitedModes] };
+function getThrottleState(): { isThrottled: boolean; resetsAt: number | null; rateLimitedModes: string[]; rateLimitedTypes: string[] } {
+  return { isThrottled: _isThrottled, resetsAt: _resetsAt, rateLimitedModes: [..._rateLimitedModes], rateLimitedTypes: [..._rateLimitedTypes] };
 }
 
 // --- Test helpers ---
@@ -177,6 +197,7 @@ function _testReset(): void {
   _resetsAt = null;
   _resumeTimer = null;
   _rateLimitedModes.clear();
+  _rateLimitedTypes.clear();
   _adapter = null;
   _persistence = null;
   _onResume = null;

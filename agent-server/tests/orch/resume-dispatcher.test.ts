@@ -1,5 +1,5 @@
 // input:  Node test runner + resume-dispatcher (deps injected)
-// output: direct/thread dispatch + guard (stale/busy/missing/non-paused) + flag/drain tests
+// output: direct/thread dispatch + guard (busy/missing/non-paused) + flag/drain tests
 // pos:    Validate orchestration/resume-dispatcher.ts auto-resume behavior
 // >>> If I am updated, update my require first <<<
 import '../_test-home.js'; // MUST be first — isolates store singletons
@@ -113,14 +113,18 @@ test('a thread that is skipped by a guard is never settled', async () => {
   assert.equal(calls.settled.length, 0, 'guarded thread is not settled');
 });
 
-test('stale entry is dropped (older than max age)', async () => {
+test('old entry is still dispatched (no staleness cutoff)', async () => {
+  // Regression: a fixed max-age cutoff (formerly 6h) silently dropped entries whose rate-limit
+  // window legitimately exceeded it — e.g. a seven_day limit whose resetsAt is 8-9h out. Once the
+  // window resets, the entry must be resumed regardless of how long it waited. Only live-state
+  // guards (busy channel, thread gone / no longer rate_limited) may skip it.
   const adapter = new MockAdapter({ adminChannel: 'admin' });
-  const old = NOW - (7 * 60 * 60 * 1000); // 7h ago
+  const old = NOW - (30 * 60 * 60 * 1000); // 30h ago — would have been "stale" under the old cutoff
   const { deps, calls } = baseDeps([
     { kind: 'direct', channel: 'C1', userMessage: 'orig', recordedAt: old },
   ]);
   await dispatchPendingResumes(adapter as any, deps);
-  assert.equal(calls.route.length, 0);
+  assert.equal(calls.route.length, 1);
 });
 
 test('direct entry on a busy channel is dropped', async () => {

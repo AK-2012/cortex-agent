@@ -25,9 +25,6 @@ import { createLogger } from '@core/log.js';
 
 const log = createLogger('resume-dispatcher');
 
-/** Entries older than this are considered obsolete (user moved on / thread finished).
- *  6h = the 5-hour window plus restart slack. */
-const MAX_RESUME_AGE_MS = 6 * 60 * 60 * 1000;
 /** Gap between consecutive resume starts so we don't re-trip the limit / overload the API right
  *  after a window reset. Resumes begin one every 30s. */
 const RESUME_STAGGER_MS = 30_000;
@@ -69,7 +66,6 @@ export interface ResumeDeps {
    *  interleave two assistant turns). Threads are channel-parallel-safe, so a rate-limited thread
    *  only needs to avoid a live direct session, not other threads. */
   directSessionBusy: (channel: string) => boolean;
-  now: () => number;
   delay: (ms: number) => Promise<void>;
 }
 
@@ -90,7 +86,6 @@ function defaultDeps(): ResumeDeps {
     getThread: (id) => threadStore.get(id),
     channelBusy: (ch) => runningExecutions.hasChannel(ch),
     directSessionBusy: (ch) => runningExecutions.getByChannel(ch).some(e => !e.threadId),
-    now: () => Date.now(),
     delay: (ms) => new Promise((r) => setTimeout(r, ms)),
   };
 }
@@ -137,9 +132,11 @@ export async function dispatchPendingResumes(adapter: PlatformAdapter, overrides
   log.info(`Resume complete — dispatched ${dispatched}/${entries.length}`);
 }
 
-/** Returns a human reason to skip, or null to proceed. */
+/** Returns a human reason to skip, or null to proceed. Staleness is deliberately NOT a skip
+ *  reason: a rate-limit window (e.g. a seven_day limit) can legitimately exceed any fixed age
+ *  cutoff, so an entry is resumed whenever its window resets regardless of how long it waited.
+ *  Only live-state guards apply. */
 function guardSkipReason(entry: ResumeEntry, deps: ResumeDeps): string | null {
-  if (deps.now() - entry.recordedAt > MAX_RESUME_AGE_MS) return 'stale';
   if (entry.kind === 'direct') {
     // A direct session is a live conversation — serialize per channel (no interleaved turns).
     if (deps.channelBusy(entry.channel)) return 'channel already has a running execution';
