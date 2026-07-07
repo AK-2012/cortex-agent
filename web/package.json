@@ -16,6 +16,7 @@
   },
   "dependencies": {
     "@cortex-agent/ui-contract": "workspace:*",
+    "eventsource": "^3.0.0",
     "@radix-ui/react-dialog": "^1.1.18",
     "@radix-ui/react-popover": "^1.1.18",
     "@radix-ui/react-tabs": "^1.1.2",
