@@ -1,0 +1,176 @@
+import { type CSSProperties, type ReactNode, Fragment } from 'react';
+import { splitFrontmatter, parseBlocks, type InlineNode, type Block } from './markdown';
+
+// Presentational Markdown renderer for the memory viewer 7b. Maps the pure markdown.ts
+// nodes onto the prototype's exact typography (prototype.dc.html L685–716): frontmatter card +
+// headings / paragraphs / lists / GFM tables / code / blockquote. Real file content is the variable.
+
+const MONO = "'IBM Plex Mono',monospace";
+
+function renderInline(nodes: InlineNode[]): ReactNode {
+  return nodes.map((n, i) => {
+    switch (n.type) {
+      case 'bold':
+        return (
+          <span key={i} style={{ fontWeight: 650, color: '#22262E' }}>
+            {n.text}
+          </span>
+        );
+      case 'italic':
+        return (
+          <em key={i} style={{ fontStyle: 'italic' }}>
+            {n.text}
+          </em>
+        );
+      case 'code':
+        return (
+          <code
+            key={i}
+            style={{ font: `400 .92em ${MONO}`, background: '#F1F2F5', color: '#3A3F6E', padding: '1px 4px', borderRadius: 4 }}
+          >
+            {n.text}
+          </code>
+        );
+      case 'link':
+        return (
+          <a key={i} href={n.href} style={{ color: '#4655D4', textDecoration: 'none' }}>
+            {n.text}
+          </a>
+        );
+      default:
+        return <Fragment key={i}>{n.text}</Fragment>;
+    }
+  });
+}
+
+const HEADING: CSSProperties = { fontSize: 12.5, fontWeight: 650, color: '#191C22', margin: '15px 0 5px' };
+const PARA: CSSProperties = { fontSize: 11.5, lineHeight: 1.65, color: '#383E48', margin: '4px 0 0' };
+
+function renderBlock(b: Block, i: number): ReactNode {
+  switch (b.type) {
+    case 'heading':
+      return (
+        <div key={i} style={{ ...HEADING, fontSize: b.level >= 3 ? 11.5 : 12.5 }}>
+          {renderInline(b.inline)}
+        </div>
+      );
+    case 'paragraph':
+      return (
+        <div key={i} style={PARA}>
+          {renderInline(b.inline)}
+        </div>
+      );
+    case 'list':
+      return (
+        <div key={i} style={{ fontSize: 11.5, lineHeight: 1.75, color: '#383E48', margin: '4px 0 0' }}>
+          {b.items.map((item, j) => (
+            <div key={j} style={{ display: 'flex', gap: 9 }}>
+              <span style={{ color: '#B6BDC9', flex: 'none' }}>{b.ordered ? `${j + 1}.` : '·'}</span>
+              <span>{renderInline(item)}</span>
+            </div>
+          ))}
+        </div>
+      );
+    case 'table': {
+      const cols = Math.max(b.header.length, ...b.rows.map((r) => r.length), 1);
+      const grid = `repeat(${cols}, minmax(0,1fr))`;
+      return (
+        <div key={i} style={{ border: '1px solid #EFF1F5', borderRadius: 8, overflow: 'hidden', fontSize: 11, margin: '7px 0 0' }}>
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: grid,
+              padding: '6px 12px',
+              background: '#FBFBFC',
+              borderBottom: '1px solid #EFF1F5',
+              fontSize: 9,
+              fontWeight: 700,
+              letterSpacing: '.05em',
+              color: '#98A1B0',
+            }}
+          >
+            {b.header.map((cell, c) => (
+              <span key={c}>{renderInline(cell)}</span>
+            ))}
+          </div>
+          {b.rows.map((row, r) => (
+            <div
+              key={r}
+              style={{
+                display: 'grid',
+                gridTemplateColumns: grid,
+                padding: '6px 12px',
+                borderBottom: '1px solid #F7F8FA',
+                color: '#383E48',
+              }}
+            >
+              {Array.from({ length: cols }).map((_, c) => (
+                <span key={c} style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', paddingRight: 8 }}>
+                  {row[c] ? renderInline(row[c]) : null}
+                </span>
+              ))}
+            </div>
+          ))}
+        </div>
+      );
+    }
+    case 'code':
+      return (
+        <pre
+          key={i}
+          style={{
+            background: '#FBFBFC',
+            border: '1px solid #EFF1F5',
+            borderRadius: 8,
+            padding: '10px 13px',
+            font: `400 10.5px ${MONO}`,
+            color: '#22262E',
+            overflow: 'auto',
+            margin: '7px 0 0',
+            whiteSpace: 'pre',
+          }}
+        >
+          {b.text}
+        </pre>
+      );
+    case 'blockquote':
+      return (
+        <div
+          key={i}
+          style={{ borderLeft: '2px solid #D9DCE3', padding: '2px 0 2px 9px', margin: '7px 0 0', fontSize: 11.5, lineHeight: 1.65, color: '#5B6472' }}
+        >
+          {renderInline(b.inline)}
+        </div>
+      );
+    case 'hr':
+      return <div key={i} style={{ height: 1, background: '#EFF1F5', margin: '12px 0' }} />;
+    default:
+      return null;
+  }
+}
+
+export function MarkdownView({ content }: { content: string }): JSX.Element {
+  const { frontmatter, body } = splitFrontmatter(content);
+  const blocks = parseBlocks(body);
+  return (
+    <div>
+      {frontmatter && (frontmatter.entries.length > 0 || frontmatter.summary) && (
+        <div style={{ background: '#FBFBFC', border: '1px solid #EFF1F5', borderRadius: 8, padding: '10px 13px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 13, font: `400 10px ${MONO}`, color: '#5B6472', flexWrap: 'wrap' }}>
+            {frontmatter.entries.map((e, i) => (
+              <span key={i}>
+                <span style={{ color: '#98A1B0' }}>{e.key}</span> {e.value}
+              </span>
+            ))}
+          </div>
+          {frontmatter.summary && (
+            <div style={{ fontSize: 11, color: '#22262E', marginTop: 6 }}>
+              <span style={{ font: `400 10px ${MONO}`, color: '#98A1B0' }}>summary</span>&nbsp; {frontmatter.summary}
+            </div>
+          )}
+        </div>
+      )}
+      {blocks.map((b, i) => renderBlock(b, i))}
+    </div>
+  );
+}
