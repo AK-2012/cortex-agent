@@ -1,7 +1,9 @@
 // input:  Node test runner + createUiHttpServer (transport-host) + a FAKE tRPC router
 // output: integration tests — 401 gate, HTTP query roundtrip, SSE subscription event,
-//         127.0.0.1 bind, SPA static stub (present/absent/traversal/malformed-URL), clean close()
-// pos:    Regression guard for the Web UI tRPC HTTP+SSE transport-host (task d7c2, edf0/B).
+//         127.0.0.1 bind, SPA static stub (present/absent/traversal/malformed-URL), clean close(),
+//         CORS allow-list (task 1b60): allowed origin gets ACAO header, non-wildcard, preflight 204,
+//         401 response still carries CORS so the browser can read the error body.
+// pos:    Regression guard for the Web UI tRPC HTTP+SSE transport-host (task d7c2, edf0/B, 1b60).
 //         Generic over AnyRouter — builds its own tiny router, no dependency on the real AppRouter.
 // >>> If I am updated, update my header comment and the parent folder's CORTEX.md <<<
 
@@ -41,13 +43,14 @@ after(async () => {
   for (const d of tmpDirs) rmSync(d, { recursive: true, force: true });
 });
 
-async function boot(opts: { spaDir?: string; getToken?: () => string } = {}) {
+async function boot(opts: { spaDir?: string; getToken?: () => string; corsOrigins?: string[] } = {}) {
   const inst = createUiHttpServer({
     router: fakeRouter,
     getToken: opts.getToken ?? (() => TOKEN),
     port: 0,
     host: '127.0.0.1',
     spaDir: opts.spaDir,
+    corsOrigins: opts.corsOrigins,
   });
   servers.push(inst);
   if (!inst.server.listening) {
@@ -61,15 +64,27 @@ async function boot(opts: { spaDir?: string; getToken?: () => string } = {}) {
   return { inst, port: addr.port, host: addr.address };
 }
 
-interface Res { statusCode: number; body: string }
+interface Res { statusCode: number; body: string; headers: http.IncomingHttpHeaders }
 function get(port: number, urlPath: string, headers: Record<string, string> = {}): Promise<Res> {
   return new Promise((resolve, reject) => {
     const req = http.get({ host: '127.0.0.1', port, path: urlPath, headers }, (res) => {
       let body = '';
       res.on('data', (c) => { body += c; });
-      res.on('end', () => resolve({ statusCode: res.statusCode ?? 0, body }));
+      res.on('end', () => resolve({ statusCode: res.statusCode ?? 0, body, headers: res.headers }));
     });
     req.on('error', reject);
+  });
+}
+
+function options(port: number, urlPath: string, headers: Record<string, string> = {}): Promise<Res> {
+  return new Promise((resolve, reject) => {
+    const req = http.request({ method: 'OPTIONS', host: '127.0.0.1', port, path: urlPath, headers }, (res) => {
+      let body = '';
+      res.on('data', (c) => { body += c; });
+      res.on('end', () => resolve({ statusCode: res.statusCode ?? 0, body, headers: res.headers }));
+    });
+    req.on('error', reject);
+    req.end();
   });
 }
 
@@ -165,4 +180,79 @@ test('close: shuts down cleanly (subsequent request refused)', async () => {
   const { inst, port } = await boot();
   await inst.close();
   await assert.rejects(get(port, `/trpc/ping?input=${encInput({ v: 'x' })}`, { 'x-cortex-token': TOKEN }));
+});
+
+// ── CORS allow-list tests (task 1b60) ────────────────────────────────────────
+const ALLOWED_ORIGIN = 'tauri://localhost';
+const BLOCKED_ORIGIN = 'https://evil.example.com';
+
+test('cors: allowed origin gets Access-Control-Allow-Origin on tRPC query response', async () => {
+  const { port } = await boot({ corsOrigins: [ALLOWED_ORIGIN] });
+  const { headers } = await get(
+    port,
+    `/trpc/ping?input=${encInput({ v: 'hi' })}`,
+    { 'x-cortex-token': TOKEN, 'origin': ALLOWED_ORIGIN },
+  );
+  assert.equal(headers['access-control-allow-origin'], ALLOWED_ORIGIN,
+    'ACAO header must be the exact allowed origin');
+});
+
+test('cors: ACAO is not a wildcard — exact origin, not *', async () => {
+  const { port } = await boot({ corsOrigins: [ALLOWED_ORIGIN] });
+  const { headers } = await get(
+    port,
+    `/trpc/ping?input=${encInput({ v: 'hi' })}`,
+    { 'x-cortex-token': TOKEN, 'origin': ALLOWED_ORIGIN },
+  );
+  assert.notEqual(headers['access-control-allow-origin'], '*', 'ACAO must not be wildcard');
+});
+
+test('cors: disallowed origin does NOT get ACAO header', async () => {
+  const { port } = await boot({ corsOrigins: [ALLOWED_ORIGIN] });
+  const { headers } = await get(
+    port,
+    `/trpc/ping?input=${encInput({ v: 'hi' })}`,
+    { 'x-cortex-token': TOKEN, 'origin': BLOCKED_ORIGIN },
+  );
+  assert.equal(headers['access-control-allow-origin'], undefined,
+    'Disallowed origin must not receive ACAO');
+});
+
+test('cors: no corsOrigins configured → no CORS headers (backward-compat)', async () => {
+  const { port } = await boot();  // no corsOrigins
+  const { headers } = await get(
+    port,
+    `/trpc/ping?input=${encInput({ v: 'hi' })}`,
+    { 'x-cortex-token': TOKEN, 'origin': ALLOWED_ORIGIN },
+  );
+  assert.equal(headers['access-control-allow-origin'], undefined,
+    'No CORS config → no ACAO header');
+});
+
+test('cors: OPTIONS preflight returns 204 with CORS headers (no auth token required)', async () => {
+  const { port } = await boot({ corsOrigins: [ALLOWED_ORIGIN] });
+  // No x-cortex-token — browser sends preflight BEFORE the actual request with headers
+  const { statusCode, headers } = await options(
+    port,
+    '/trpc/ping',
+    { 'origin': ALLOWED_ORIGIN, 'access-control-request-headers': 'x-cortex-token' },
+  );
+  assert.equal(statusCode, 204, 'Preflight must return 204 No Content');
+  assert.equal(headers['access-control-allow-origin'], ALLOWED_ORIGIN);
+  // x-cortex-token must be in the allowed headers
+  const allowedHeaders = (headers['access-control-allow-headers'] ?? '').toLowerCase();
+  assert.ok(allowedHeaders.includes('x-cortex-token'),
+    `access-control-allow-headers must include x-cortex-token; got: ${allowedHeaders}`);
+});
+
+test('cors: 401 response for bad token still carries ACAO (browser can read error body)', async () => {
+  const { port } = await boot({ corsOrigins: [ALLOWED_ORIGIN] });
+  const { statusCode, headers } = await get(
+    port,
+    `/trpc/ping?input=${encInput({ v: 'hi' })}`,
+    { 'x-cortex-token': 'wrong-token', 'origin': ALLOWED_ORIGIN },
+  );
+  assert.equal(statusCode, 401);
+  assert.equal(headers['access-control-allow-origin'], ALLOWED_ORIGIN,
+    '401 responses must still carry ACAO so the browser can read the error body');
 });
