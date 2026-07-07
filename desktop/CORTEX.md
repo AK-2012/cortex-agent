@@ -13,7 +13,7 @@ desktop/
 ├── src-tauri/
 │   ├── Cargo.toml            cortex-desktop crate (tauri v2 + serde)
 │   ├── build.rs              tauri-build entry point
-│   ├── tauri.conf.json       Tauri config: frontendDist=../web/dist, identifier, window
+│   ├── tauri.conf.json       Tauri config: frontendDist=../../web/dist, identifier
 │   ├── capabilities/
 │   │   └── default.json      Security capability (core:default)
 │   ├── icons/                Placeholder icons (replace with real ones for production)
@@ -32,8 +32,12 @@ desktop/
 
 Two parallel surfaces for the connect screen (task) to write and `trpc.ts` to read:
 
-1. **`window.__CORTEX_DESKTOP_CONFIG`** — set by `tauri.conf.json` initializationScript
-   before the page loads; `trpc.ts` can read it synchronously at module init time.
+1. **`window.__CORTEX_DESKTOP_CONFIG`** — set by `WebviewWindowBuilder::initialization_script()`
+   in `src-tauri/src/lib.rs` (setup hook) before any page JS runs; `trpc.ts` can read it
+   synchronously at module init time. Initial value is `{ serverUrl: undefined, token: undefined }`;
+   the connect screen updates it after login. Note: env vars `CORTEX_SERVER_URL`/`CORTEX_TOKEN`
+   only seed Rust `AppState` — not this global. Use `get_connection_config()` command to read
+   them from JS in dev mode.
 2. **Tauri commands** — `get_connection_config()` / `set_connection_config(serverUrl, token)`
    callable from JS via `@tauri-apps/api/core` invoke API.
 
@@ -49,7 +53,7 @@ reads the window global (synchronous, available at load) and optionally calls
 | `src-tauri/src/lib.rs` | core | `AppState { config: Mutex<ConnectionConfig> }` + `get_connection_config` / `set_connection_config` Tauri commands; seeds from env vars `CORTEX_SERVER_URL` / `CORTEX_TOKEN` for dev |
 | `src-tauri/Cargo.toml` | manifest | `cortex-desktop` crate, tauri v2 + serde deps, release profile optimized for size |
 | `src-tauri/build.rs` | build | `tauri_build::build()` |
-| `src-tauri/tauri.conf.json` | config | `frontendDist: ../web/dist`, window 1400×900, `withGlobalTauri: true`, initializationScript seeds `window.__CORTEX_DESKTOP_CONFIG` |
+| `src-tauri/tauri.conf.json` | config | `frontendDist: ../../web/dist`, `withGlobalTauri: true`; no window declared (window created programmatically in `lib.rs` setup to attach `initialization_script`) |
 | `src-tauri/capabilities/default.json` | security | `core:default` capability for the main window |
 | `src-tauri/icons/` | assets | Placeholder icons (generate real ones with `tauri icon <source.png>`) |
 
