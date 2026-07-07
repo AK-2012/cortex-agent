@@ -109,7 +109,7 @@ cortex daemon   # 或 systemctl --user restart cortex（如果已注册系统服
 `CORTEX_TOKEN` 的值相同）。可以通过以下命令获取：
 
 ```bash
-cortex config | grep token   # 打印令牌值
+grep CORTEX_TOKEN ~/.cortex/config/.env
 ```
 
 ### 第三步 — 测试连接

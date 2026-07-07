@@ -110,7 +110,7 @@ The client token is the shared secret your server uses to authenticate Cortex cl
 (the same token in `~/.cortex/config/.env` as `CORTEX_TOKEN`). You can retrieve it with:
 
 ```bash
-cortex config | grep token   # prints the token value
+grep CORTEX_TOKEN ~/.cortex/config/.env
 ```
 
 ### Step 3 — Test the connection
