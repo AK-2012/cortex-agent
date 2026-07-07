@@ -1,0 +1,28 @@
+[package]
+name = "cortex-desktop"
+version = "0.0.0"
+edition = "2021"
+rust-version = "1.77.2"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[lib]
+# The `_lib` suffix may seem redundant but it is necessary
+# to make the lib name unique and to allow integration tests to import the crate by name.
+name = "cortex_desktop_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[profile.release]
+panic = "abort"   # Strip expensive panic clean-up logic
+codegen-units = 1 # Compile the entire crate as one unit
+lto = true        # Perform link-time-optimizations
+opt-level = "s"   # Optimize for binary size
+strip = true      # Automatically strip symbols from the binary

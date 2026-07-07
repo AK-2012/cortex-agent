@@ -9,7 +9,7 @@ Cortex is an autonomous research agent system for robotics and AI/ML. It runs as
 | `agent-server/` | Main server application (TypeScript, Node.js >=20). Slack/Feishu bot, LLM orchestration, scheduling, task system, MCP tools. See [agent-server/CORTEX.md](agent-server/CORTEX.md). |
 | `client/` | Remote agent client (TypeScript, Node.js >=20). Connects to agent-server via WebSocket, executes bash/read/write/edit/glob/grep commands locally, supports cortex-run for long-running task execution. See [client/src/CORTEX.md](client/src/CORTEX.md). |
 | `web/` | Web SPA (Vite + React 18, tRPC client). Built to `web/dist` which is served by agent-server's `ui-http-server` and by the desktop shell. |
-| `desktop/` | Electron desktop shell. Serves `web/dist` on a loopback HTTP server and reverse-proxies `/trpc` to a remote agent-server with token injection. See [desktop/CORTEX.md](desktop/CORTEX.md). |
+| `desktop/` | Tauri v2 desktop shell. Loads `web/dist` via asset protocol in a native webview. Exposes `get_connection_config` / `set_connection_config` Tauri commands plus `window.__CORTEX_DESKTOP_CONFIG` for injecting `{serverUrl, token}` into the SPA. See [desktop/CORTEX.md](desktop/CORTEX.md). |
 | `packages/` | Shared packages (e.g. `ui-contract` — re-exported tRPC types for the web SPA). |
 | `context/` | Structured knowledge repository for research projects (experiments, knowledge entries, patterns). |
 | `tmp/` | Experiment artifacts, analysis scripts, logs, and working files. |
@@ -85,10 +85,8 @@ Bugfixes follow the same TDD discipline with an extra step: write a **regression
 Tests live colocated near source or in `tests/` directories:
 - `agent-server/tests/` — server tests (Node built-in runner with `tsx`)
 - `client/` — client tests (if added)
-- `desktop/src/` — desktop proxy tests (Node built-in runner with `tsx`)
 
 Run server tests: `cd agent-server && npm test`
-Run desktop tests: `pnpm --filter desktop test`
 
 ### When TDD Does Not Apply
 

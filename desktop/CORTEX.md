@@ -1,57 +1,76 @@
 Please update me when files in this folder change
 
-Cortex Desktop — Electron shell that wraps the built web SPA in a native window.
-Serves `web/dist` on a loopback HTTP server and reverse-proxies `/trpc` to a
-configurable remote agent-server, injecting `x-cortex-token` so the SPA's
-relative `/trpc` URL resolves same-origin without any changes to `web/src`.
+Cortex Desktop — Tauri v2 shell that wraps the built web SPA in a native window.
+Loads `web/dist` via Tauri's asset protocol (no proxy, no sidecar). The SPA talks
+directly to the remote Cortex server using absolute URLs — token injection is handled
+by the ponyfill transport in `web/src/lib/trpc.ts`, NOT by this shell.
 
 ## Package layout
 
 ```
 desktop/
-├── package.json          pnpm package + electron-builder config ("build" field)
-├── tsconfig.json         TypeScript (NodeNext ESM → dist-electron/)
-├── src/
-│   ├── config-store.ts   ConfigStore interface + env-based accessor
-│   ├── proxy-server.ts   createProxyServer() — loopback HTTP, /trpc reverse-proxy + SPA static
-│   ├── proxy-server.test.ts  12 integration tests (Node test runner + mock upstream)
-│   ├── preload.ts        Electron preload (minimal — no IPC bridge needed)
-│   └── main.ts           Electron main process — starts proxy, creates BrowserWindow
-├── dist-electron/        Compiled JS output (gitignored)
-└── dist-app/             electron-builder output (gitignored)
+├── package.json              pnpm package (@tauri-apps/cli devDep, @tauri-apps/api dep)
+├── src-tauri/
+│   ├── Cargo.toml            cortex-desktop crate (tauri v2 + serde)
+│   ├── build.rs              tauri-build entry point
+│   ├── tauri.conf.json       Tauri config: frontendDist=../web/dist, identifier, window
+│   ├── capabilities/
+│   │   └── default.json      Security capability (core:default)
+│   ├── icons/                Placeholder icons (replace with real ones for production)
+│   │   ├── 32x32.png
+│   │   ├── 128x128.png
+│   │   ├── 128x128@2x.png
+│   │   ├── icon.icns
+│   │   └── icon.ico
+│   └── src/
+│       ├── main.rs           Rust entry point (calls lib::run)
+│       └── lib.rs            AppState + Tauri commands (get/set_connection_config)
+└── src-tauri/target/         Rust build output (gitignored)
 ```
+
+## Injection mechanism for {serverUrl, token}
+
+Two parallel surfaces for the connect screen (task) to write and `trpc.ts` to read:
+
+1. **`window.__CORTEX_DESKTOP_CONFIG`** — set by `tauri.conf.json` initializationScript
+   before the page loads; `trpc.ts` can read it synchronously at module init time.
+2. **Tauri commands** — `get_connection_config()` / `set_connection_config(serverUrl, token)`
+   callable from JS via `@tauri-apps/api/core` invoke API.
+
+The connect screen calls `set_connection_config` after the user authenticates. `trpc.ts`
+reads the window global (synchronous, available at load) and optionally calls
+`get_connection_config` for re-reads (e.g. after token rotation).
 
 ## Files
 
 | filename | role | function |
 |---|---|---|
-| `src/config-store.ts` | config | `ConfigStore { serverUrl, token }` interface + `getConfig()` env accessor (CORTEX_DESKTOP_SERVER_URL / CORTEX_DESKTOP_TOKEN) |
-| `src/proxy-server.ts` | core | `createProxyServer({ getConfig, spaDir, port?, host? }) → Promise<{ port, close() }>` — loopback HTTP: /trpc forwarded to config.serverUrl with x-cortex-token injected (SSE streaming preserved via pipe); other paths → SPA static files with index.html fallback + path-traversal guard |
-| `src/proxy-server.test.ts` | tests | 12 integration tests: GET/POST proxy, token injection, 401 passthrough (wrong/missing token), SSE streaming, SPA serving, path-traversal rejection, lifecycle |
-| `src/preload.ts` | preload | Minimal Electron preload — contextIsolation on, no IPC bridge (SPA talks via HTTP loopback only) |
-| `src/main.ts` | entry | Electron main: starts proxy server on CORTEX_DESKTOP_PORT (0=ephemeral), creates 1400×900 BrowserWindow loading http://127.0.0.1:{port}, macOS activate handler, before-quit proxy cleanup |
+| `src-tauri/src/main.rs` | entry | Rust main — `#[cfg_attr windows_subsystem]` + calls `lib::run()` |
+| `src-tauri/src/lib.rs` | core | `AppState { config: Mutex<ConnectionConfig> }` + `get_connection_config` / `set_connection_config` Tauri commands; seeds from env vars `CORTEX_SERVER_URL` / `CORTEX_TOKEN` for dev |
+| `src-tauri/Cargo.toml` | manifest | `cortex-desktop` crate, tauri v2 + serde deps, release profile optimized for size |
+| `src-tauri/build.rs` | build | `tauri_build::build()` |
+| `src-tauri/tauri.conf.json` | config | `frontendDist: ../web/dist`, window 1400×900, `withGlobalTauri: true`, initializationScript seeds `window.__CORTEX_DESKTOP_CONFIG` |
+| `src-tauri/capabilities/default.json` | security | `core:default` capability for the main window |
+| `src-tauri/icons/` | assets | Placeholder icons (generate real ones with `tauri icon <source.png>`) |
 
-## Config env vars
+## Config env vars (dev / testing)
 
-| Variable | Default | Purpose |
-|---|---|---|
-| `CORTEX_DESKTOP_SERVER_URL` | `http://127.0.0.1:3004` | Upstream agent-server URL to proxy /trpc to |
-| `CORTEX_DESKTOP_TOKEN` | `` | x-cortex-token value injected into proxied requests |
-| `CORTEX_DESKTOP_PORT` | `0` | Loopback port (0 = OS picks an ephemeral port) |
-| `ELECTRON_DEVTOOLS` | unset | Set to any value in dev to open DevTools automatically |
+| Variable | Purpose |
+|---|---|
+| `CORTEX_SERVER_URL` | Pre-seed serverUrl (skips connect screen in dev) |
+| `CORTEX_TOKEN` | Pre-seed token (skips connect screen in dev) |
 
 ## Scripts
 
 | Script | Command | What it does |
 |---|---|---|
-| `compile` | `tsc -p tsconfig.json` | Compile TypeScript → dist-electron/ |
-| `dev` | `compile && electron .` | Compile + launch Electron (set env vars above first) |
-| `build` | `compile && electron-builder --dir` | Compile + produce unpacked app bundle in dist-app/linux-unpacked/ |
-| `dist` | `compile && electron-builder` | Full packaged distribution (AppImage/dmg/nsis per platform) |
-| `test` | `node --import tsx --test src/proxy-server.test.ts` | Run proxy-server integration tests |
+| `dev` | `tauri dev` | Build Rust + launch Tauri window loading `web/dist` |
+| `build` | `tauri build` | Produce a signed/bundled app for the current platform |
 
-## Packaging note
+## System prerequisites (Linux)
 
-`electron-builder extraResources` copies `../web/dist` → `resources/web-dist` at build time.
-Run `pnpm -w build` (or `pnpm --filter web build`) before `pnpm --filter desktop build` to
-ensure web/dist is current.
+```
+sudo apt-get install libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev
+```
+
+Run `pnpm --filter web build` before `tauri build` / `tauri dev` to ensure `web/dist` is current.

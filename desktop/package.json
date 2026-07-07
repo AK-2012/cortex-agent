@@ -2,58 +2,15 @@
   "name": "@cortex-agent/desktop",
   "version": "0.0.0",
   "private": true,
-  "type": "module",
-  "description": "Cortex Desktop — Electron shell wrapping the web SPA with a token-injecting loopback reverse-proxy",
-  "main": "dist-electron/main.js",
-  "engines": {
-    "node": ">=20.11.0"
-  },
   "scripts": {
-    "compile": "tsc -p tsconfig.json",
-    "dev": "pnpm run compile && electron .",
-    "build": "pnpm run compile && electron-builder --dir",
-    "dist": "pnpm run compile && electron-builder",
-    "test": "node --import tsx --test src/proxy-server.test.ts"
-  },
-  "build": {
-    "appId": "dev.cortex.desktop",
-    "productName": "Cortex",
-    "executableName": "cortex",
-    "directories": {
-      "output": "dist-app"
-    },
-    "files": [
-      "dist-electron/**/*",
-      "package.json"
-    ],
-    "extraResources": [
-      {
-        "from": "../web/dist",
-        "to": "web-dist"
-      }
-    ],
-    "linux": {
-      "target": [
-        { "target": "dir" }
-      ],
-      "category": "Utility"
-    },
-    "mac": {
-      "target": [
-        { "target": "dir" }
-      ]
-    },
-    "win": {
-      "target": [
-        { "target": "dir" }
-      ]
-    }
+    "dev": "tauri dev",
+    "build": "tauri build",
+    "tauri": "tauri"
   },
   "devDependencies": {
-    "@types/node": "^22.0.0",
-    "electron": "43.0.0",
-    "electron-builder": "^26.0.0",
-    "tsx": "^4.19.0",
-    "typescript": "^5.9.3"
+    "@tauri-apps/cli": "^2"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^2"
   }
 }
