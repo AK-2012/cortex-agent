@@ -31,6 +31,8 @@ import {
   taskCompleteInput,
   taskBlockInput,
   executionsLogInput,
+  configGetInput,
+  configSetInput,
 } from './input-schemas.js';
 import type {
   UiService,
@@ -101,7 +103,7 @@ function makeMutation<O extends MutateOp, Sch extends z.ZodType>(
 }
 
 // ── AppRouter ─────────────────────────────────────────────────────────────────────
-// 11 QueryScope + 10 MutateOp + 2 subscriptions (generic `subscribe` + `executions.log`),
+// 12 QueryScope + 11 MutateOp + 2 subscriptions (generic `subscribe` + `executions.log`),
 // mirroring the ui-service contract.
 export function createAppRouter(uiService: UiService) {
   return router({
@@ -156,6 +158,10 @@ export function createAppRouter(uiService: UiService) {
     }),
     cost: router({
       summary: makeQuery(uiService, 'cost.summary', costSummaryInput),
+    }),
+    config: router({
+      get: makeQuery(uiService, 'config.get', configGetInput),
+      set: makeMutation(uiService, 'config.set', configSetInput),
     }),
     subscribe: publicProcedure
       .input(subscribeFilterInput)

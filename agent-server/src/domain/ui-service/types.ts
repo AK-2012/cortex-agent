@@ -31,7 +31,8 @@ export type QueryScope =
   | 'executions.get'
   | 'memory.tree'
   | 'memory.file'
-  | 'cost.summary';
+  | 'cost.summary'
+  | 'config.get';
 
 // ── Mutate ops ────────────────────────────────────────────────────
 
@@ -45,7 +46,8 @@ export type MutateOp =
   | 'tasks.unclaim'
   | 'tasks.complete'
   | 'tasks.block'
-  | 'tasks.unblock';
+  | 'tasks.unblock'
+  | 'config.set';
 
 // ── Subscribe ─────────────────────────────────────────────────────
 
@@ -117,6 +119,8 @@ export interface CostSummaryParams {
   projectId?: string | null;
 }
 
+export type ConfigGetParams = Record<string, never>;
+
 // ── Mutate args ───────────────────────────────────────────────────
 
 export interface ThreadsCancelArgs {
@@ -142,6 +146,18 @@ export interface TaskCompleteArgs extends TaskActionArgs {
 
 export interface TaskBlockArgs extends TaskActionArgs {
   reason: string;
+}
+
+// The only safely-writable config section exposed by config.set (Stage 7). Other sections are
+// rejected by both the zod schema and the handler until they get their own validated write path.
+export interface BudgetValue {
+  daily_usd: number;
+  monthly_usd: number;
+}
+
+export interface ConfigSetArgs {
+  section: 'budget';
+  value: BudgetValue;
 }
 
 // ── Query return types (DTOs) ─────────────────────────────────────
@@ -330,6 +346,63 @@ export interface ExecutionDetailInfo {
   text: { label: string | null; finalOutput: string | null; error: string | null };
 }
 
+// ── config.get snapshot DTO (Stage 7 settings 12a–g) ──────────────
+// Redacted read of ~/.cortex/config for the settings panel. Every field is null / [] when its
+// source file is absent. SECURITY INVARIANT: `.env` values are NEVER returned — only the key,
+// a present flag, and a fixed mask string. `machines[].ssh` is a presence flag, not the raw
+// user@host string. No secret / credential ever appears in this DTO.
+
+export interface ConfigBudget {
+  daily_usd: number | null;
+  monthly_usd: number | null;
+}
+
+export interface ConfigProfileEntry {
+  name: string;
+  model: string | null;
+  backend: string | null;
+  mode: string | null;
+}
+
+export interface ConfigProfiles {
+  defaultProfile: string | null;
+  profiles: ConfigProfileEntry[];
+}
+
+export interface ConfigMachine {
+  name: string;
+  cortexPath: string | null;
+  gpuCount: number | null;
+  ssh: boolean;
+  win: boolean;
+}
+
+export interface ConfigMcp {
+  servers: string[];
+}
+
+export interface ConfigThreadTemplates {
+  agents: string[];
+  templates: string[];
+  shells: string[];
+}
+
+export interface ConfigEnvEntry {
+  key: string;
+  present: boolean;
+  masked: string;
+}
+
+export interface ConfigSnapshot {
+  budget: ConfigBudget | null;
+  profiles: ConfigProfiles | null;
+  machines: ConfigMachine[];
+  mcp: ConfigMcp | null;
+  threadTemplates: ConfigThreadTemplates;
+  hooks: string[];
+  env: ConfigEnvEntry[];
+}
+
 // ── memory read-only fs DTOs (DR-0018 §6 Stage-6 memory viewer 7b) ─────────
 // A project's memory tree: top-level files + memory dirs with entry counts. Read-only;
 // the underlying handler restricts all paths to the project root under PROJECTS_DIR.
@@ -371,6 +444,11 @@ export interface ExecutionsCancelReturn {
   cancelled: boolean;
 }
 
+export interface ConfigSetReturn {
+  written: true;
+  section: 'budget';
+}
+
 // ── Mapped types ──────────────────────────────────────────────────
 
 export interface QueryParamMap {
@@ -385,6 +463,7 @@ export interface QueryParamMap {
   'memory.tree': MemoryTreeParams;
   'memory.file': MemoryFileParams;
   'cost.summary': CostSummaryParams;
+  'config.get': ConfigGetParams;
 }
 
 export interface QueryReturnMap {
@@ -399,6 +478,7 @@ export interface QueryReturnMap {
   'memory.tree': MemoryTree;
   'memory.file': MemoryFile;
   'cost.summary': CostSummary;
+  'config.get': ConfigSnapshot;
 }
 
 export interface MutateArgsMap {
@@ -412,6 +492,7 @@ export interface MutateArgsMap {
   'tasks.complete': TaskCompleteArgs;
   'tasks.block': TaskBlockArgs;
   'tasks.unblock': TaskActionArgs;
+  'config.set': ConfigSetArgs;
 }
 
 export interface MutateReturnMap {
@@ -425,6 +506,7 @@ export interface MutateReturnMap {
   'tasks.complete': void;
   'tasks.block': void;
   'tasks.unblock': void;
+  'config.set': ConfigSetReturn;
 }
 
 export type QueryParams<S extends QueryScope> = S extends keyof QueryParamMap ? QueryParamMap[S] : never;

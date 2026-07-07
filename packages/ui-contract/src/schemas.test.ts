@@ -5,13 +5,13 @@ import { queryInputSchemas, mutateInputSchemas } from './schemas.js';
 const QUERY_SCOPES = [
   'projects.list', 'sessions.list', 'threads.list', 'threads.get', 'tasks.list',
   'schedules.list', 'executions.list', 'executions.get', 'memory.tree', 'memory.file',
-  'cost.summary',
+  'cost.summary', 'config.get',
 ] as const;
 
 const MUTATE_OPS = [
   'threads.cancel', 'executions.cancel', 'schedules.pause', 'schedules.resume',
   'schedules.remove', 'tasks.claim', 'tasks.unclaim', 'tasks.complete',
-  'tasks.block', 'tasks.unblock',
+  'tasks.block', 'tasks.unblock', 'config.set',
 ] as const;
 
 test('every QueryScope has an input schema', () => {
@@ -79,4 +79,21 @@ test('mutate schemas require their mandatory fields', () => {
   // missing required id
   assert.throws(() => mutateInputSchemas['threads.cancel'].parse({}));
   assert.throws(() => mutateInputSchemas['tasks.claim'].parse({ projectId: 'p' }));
+});
+
+test('config.get accepts an empty object', () => {
+  assert.deepEqual(queryInputSchemas['config.get'].parse({}), {});
+});
+
+test('config.set accepts a valid budget and rejects illegal values / sections', () => {
+  assert.deepEqual(
+    mutateInputSchemas['config.set'].parse({ section: 'budget', value: { daily_usd: 100, monthly_usd: 2000 } }),
+    { section: 'budget', value: { daily_usd: 100, monthly_usd: 2000 } },
+  );
+  // negative / zero rejected
+  assert.throws(() => mutateInputSchemas['config.set'].parse({ section: 'budget', value: { daily_usd: -1, monthly_usd: 2000 } }));
+  // missing field rejected
+  assert.throws(() => mutateInputSchemas['config.set'].parse({ section: 'budget', value: { daily_usd: 100 } }));
+  // unknown section rejected
+  assert.throws(() => mutateInputSchemas['config.set'].parse({ section: 'profiles', value: {} }));
 });
