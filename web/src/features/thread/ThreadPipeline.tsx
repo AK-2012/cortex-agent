@@ -127,16 +127,18 @@ function SubCard({ sub, onOpen }: { sub: DetailStepSub; onOpen: () => void }) {
           {sub.pill.text}
         </span>
       </div>
-      {sub.hasLine && (
+      {(sub.hasLine || sub.drillable) && (
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 10, color: '#5B6472', marginTop: 5 }}>
-          {sub.line}
-          <span
-            data-drill-thread-id={sub.id}
-            onClick={onOpen}
-            style={{ marginLeft: 'auto', fontSize: 10, fontWeight: 600, color: '#4655D4', cursor: 'pointer' }}
-          >
-            open ›
-          </span>
+          {sub.hasLine && sub.line}
+          {sub.drillable && (
+            <span
+              data-drill-thread-id={sub.id}
+              onClick={onOpen}
+              style={{ marginLeft: 'auto', fontSize: 10, fontWeight: 600, color: '#4655D4', cursor: 'pointer' }}
+            >
+              open ›
+            </span>
+          )}
         </div>
       )}
     </div>

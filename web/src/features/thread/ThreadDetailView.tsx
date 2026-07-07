@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import type { ThreadDetail } from '@cortex-agent/ui-contract';
@@ -24,6 +25,11 @@ export function ThreadDetailView({ detail, trail, now }: ThreadDetailViewProps):
   const navigate = useNavigate();
   const trpc = useTRPC();
   const queryClient = useQueryClient();
+  const [hover, setHover] = useState<string | null>(null);
+  const hp = (key: string) => ({
+    onMouseEnter: () => setHover(key),
+    onMouseLeave: () => setHover((h) => (h === key ? null : h)),
+  });
 
   const cancel = useMutation(
     trpc.threads.cancel.mutationOptions({
@@ -70,8 +76,14 @@ export function ThreadDetailView({ detail, trail, now }: ThreadDetailViewProps):
         }}
       >
         <span
+          {...hp('back')}
           onClick={() => navigate('/workbench')}
-          style={{ fontSize: 14, color: '#5B6472', cursor: 'pointer', padding: '4px 8px 4px 0' }}
+          style={{
+            fontSize: 14,
+            color: hover === 'back' ? '#191C22' : '#5B6472',
+            cursor: 'pointer',
+            padding: '4px 8px 4px 0',
+          }}
         >
           ‹
         </span>
@@ -104,40 +116,45 @@ export function ThreadDetailView({ detail, trail, now }: ThreadDetailViewProps):
         >
           {vm.pill.text}
         </span>
-        <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8 }}>
-          <span
-            title="Pause has no backend mutate op yet"
-            style={{
-              fontSize: 11.5,
-              fontWeight: 600,
-              border: '1px solid #D9DCE3',
-              borderRadius: 7,
-              padding: '4px 12px',
-              color: '#191C22',
-              background: '#fff',
-              cursor: 'not-allowed',
-              opacity: 0.6,
-            }}
-          >
-            Pause
-          </span>
-          <span
-            data-cancel-thread-id={vm.tid}
-            onClick={() => cancel.mutate({ threadId: detail.id })}
-            style={{
-              fontSize: 11.5,
-              fontWeight: 600,
-              border: '1px solid #EED3D0',
-              borderRadius: 7,
-              padding: '4px 12px',
-              color: '#C03D33',
-              background: '#fff',
-              cursor: 'pointer',
-            }}
-          >
-            Cancel
-          </span>
-        </div>
+        {/* Pause/Cancel only apply to a live (running/waiting) thread — hidden for terminal ones
+            (the backend would reject cancel; the proto-shots are both Running so the match holds). */}
+        {vm.live && (
+          <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span
+              title="Pause has no backend mutate op yet"
+              style={{
+                fontSize: 11.5,
+                fontWeight: 600,
+                border: '1px solid #D9DCE3',
+                borderRadius: 7,
+                padding: '4px 12px',
+                color: '#191C22',
+                background: '#fff',
+                cursor: 'not-allowed',
+                opacity: 0.6,
+              }}
+            >
+              Pause
+            </span>
+            <span
+              {...hp('cancel')}
+              data-cancel-thread-id={vm.tid}
+              onClick={() => cancel.mutate({ threadId: detail.id })}
+              style={{
+                fontSize: 11.5,
+                fontWeight: 600,
+                border: '1px solid #EED3D0',
+                borderRadius: 7,
+                padding: '4px 12px',
+                color: '#C03D33',
+                background: hover === 'cancel' ? '#FBEDEB' : '#fff',
+                cursor: 'pointer',
+              }}
+            >
+              Cancel
+            </span>
+          </div>
+        )}
       </div>
 
       {/* meta bar */}
