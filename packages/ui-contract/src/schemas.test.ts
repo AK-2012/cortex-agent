@@ -10,7 +10,7 @@ const QUERY_SCOPES = [
 
 const MUTATE_OPS = [
   'threads.cancel', 'executions.cancel', 'schedules.pause', 'schedules.resume',
-  'schedules.remove', 'tasks.claim', 'tasks.unclaim', 'tasks.complete',
+  'schedules.remove', 'schedules.add', 'tasks.claim', 'tasks.unclaim', 'tasks.complete',
   'tasks.block', 'tasks.unblock',
 ] as const;
 
@@ -79,4 +79,28 @@ test('mutate schemas require their mandatory fields', () => {
   // missing required id
   assert.throws(() => mutateInputSchemas['threads.cancel'].parse({}));
   assert.throws(() => mutateInputSchemas['tasks.claim'].parse({ projectId: 'p' }));
+});
+
+test('schedules.add accepts valid per-type input', () => {
+  const s = mutateInputSchemas['schedules.add'];
+  assert.equal(s.parse({ type: 'interval', message: 'm', intervalMs: 60000 }).type, 'interval');
+  assert.equal(s.parse({ type: 'daily', message: 'm', time: '09:00' }).type, 'daily');
+  assert.equal(s.parse({ type: 'weekly', message: 'm', time: '09:00', dayOfWeek: 1 }).dayOfWeek, 1);
+  assert.equal(s.parse({ type: 'once', message: 'm', delay: 5000 }).delay, 5000);
+  // optional target + fallback
+  assert.deepEqual(
+    s.parse({ type: 'once', message: 'm', delay: 1, target: { kind: 'project', projectId: 'p' }, fallback: 'skip' }).target,
+    { kind: 'project', projectId: 'p' },
+  );
+});
+
+test('schedules.add rejects missing/invalid per-type fields', () => {
+  const s = mutateInputSchemas['schedules.add'];
+  assert.throws(() => s.parse({ type: 'interval', message: 'm' }));           // no intervalMs
+  assert.throws(() => s.parse({ type: 'daily', message: 'm' }));              // no time
+  assert.throws(() => s.parse({ type: 'weekly', message: 'm', time: '09:00' })); // no dayOfWeek
+  assert.throws(() => s.parse({ type: 'once', message: 'm' }));               // no delay
+  assert.throws(() => s.parse({ type: 'interval', intervalMs: 1 }));          // no message
+  assert.throws(() => s.parse({ type: 'weekly', message: 'm', time: 'nope', dayOfWeek: 1 })); // bad time
+  assert.throws(() => s.parse({ type: 'weekly', message: 'm', time: '09:00', dayOfWeek: 9 })); // bad dow
 });

@@ -84,6 +84,44 @@ export const scheduleActionInput = z.object({
   scheduleId: z.string(),
 });
 
+// ScheduleTarget mirror — kept structurally identical to `ScheduleTarget` in schedule-repo.ts so
+// `z.infer` ≡ ScheduleTarget (the contract-parity guard in @cortex-agent/ui-contract enforces it).
+const scheduleTargetInput = z.union([
+  z.object({ kind: z.literal('fresh') }),
+  z.object({ kind: z.literal('project'), projectId: z.string() }),
+  z.object({ kind: z.literal('thread'), threadId: z.string(), channel: z.string() }),
+]);
+
+// schedules.add (DR-0018 §2.1 7c). Field-level zod + per-type required-field superRefine so the
+// router rejects malformed input before the handler runs. intervalMs/delay are raw ms; dayOfWeek 0..6.
+export const scheduleAddInput = z
+  .object({
+    type: z.enum(['interval', 'daily', 'weekly', 'once']),
+    message: z.string().min(1),
+    projectId: z.string().optional(),
+    profile: z.string().optional(),
+    intervalMs: z.number().int().positive().optional(),
+    time: z.string().regex(/^\d{2}:\d{2}$/).optional(),
+    dayOfWeek: z.number().int().min(0).max(6).optional(),
+    delay: z.number().int().positive().optional(),
+    target: scheduleTargetInput.optional(),
+    fallback: z.enum(['fresh', 'skip', 'wait']).optional(),
+  })
+  .superRefine((val, ctx) => {
+    if (val.type === 'interval' && val.intervalMs === undefined) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['intervalMs'], message: 'intervalMs is required for type=interval' });
+    }
+    if ((val.type === 'daily' || val.type === 'weekly') && val.time === undefined) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['time'], message: `time is required for type=${val.type}` });
+    }
+    if (val.type === 'weekly' && val.dayOfWeek === undefined) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['dayOfWeek'], message: 'dayOfWeek is required for type=weekly' });
+    }
+    if (val.type === 'once' && val.delay === undefined) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['delay'], message: 'delay is required for type=once' });
+    }
+  });
+
 export const taskActionInput = z.object({
   projectId: z.string(),
   taskId: z.string(),
@@ -123,6 +161,7 @@ export const mutateInputSchemas = {
   'schedules.pause': scheduleActionInput,
   'schedules.resume': scheduleActionInput,
   'schedules.remove': scheduleActionInput,
+  'schedules.add': scheduleAddInput,
   'tasks.claim': taskActionInput,
   'tasks.unclaim': taskActionInput,
   'tasks.complete': taskCompleteInput,

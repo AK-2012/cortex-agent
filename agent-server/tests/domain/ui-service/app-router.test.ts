@@ -108,6 +108,7 @@ const MUTATE_CASES: Array<{ op: MutateOp; call: (c: any) => Promise<unknown>; }>
   { op: 'schedules.pause', call: (c) => c.schedules.pause({ scheduleId: 's1' }) },
   { op: 'schedules.resume', call: (c) => c.schedules.resume({ scheduleId: 's1' }) },
   { op: 'schedules.remove', call: (c) => c.schedules.remove({ scheduleId: 's1' }) },
+  { op: 'schedules.add', call: (c) => c.schedules.add({ type: 'once', message: 'm', delay: 1000 }) },
   { op: 'tasks.claim', call: (c) => c.tasks.claim({ projectId: 'p', taskId: 'a1b2' }) },
   { op: 'tasks.unclaim', call: (c) => c.tasks.unclaim({ projectId: 'p', taskId: 'a1b2' }) },
   { op: 'tasks.complete', call: (c) => c.tasks.complete({ projectId: 'p', taskId: 'a1b2' }) },
@@ -126,9 +127,9 @@ test('every mutation routes to the correct op and unwraps Result.data', async ()
   }
 });
 
-test('coverage: exactly 8 queries + 10 mutations exercised', () => {
+test('coverage: exactly 8 queries + 11 mutations exercised', () => {
   assert.equal(QUERY_CASES.length, 8);
-  assert.equal(MUTATE_CASES.length, 10);
+  assert.equal(MUTATE_CASES.length, 11);
 });
 
 // ── Err → TRPCError mapping ──────────────────────────────────────────────────────────

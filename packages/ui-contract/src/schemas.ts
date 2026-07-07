@@ -22,6 +22,7 @@ export {
   threadsCancelInput,
   executionsCancelInput,
   scheduleActionInput,
+  scheduleAddInput,
   taskActionInput,
   taskCompleteInput,
   taskBlockInput,

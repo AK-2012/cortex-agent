@@ -27,6 +27,7 @@ import {
   threadsCancelInput,
   executionsCancelInput,
   scheduleActionInput,
+  scheduleAddInput,
   taskActionInput,
   taskCompleteInput,
   taskBlockInput,
@@ -101,7 +102,7 @@ function makeMutation<O extends MutateOp, Sch extends z.ZodType>(
 }
 
 // ── AppRouter ─────────────────────────────────────────────────────────────────────
-// 11 QueryScope + 10 MutateOp + 2 subscriptions (generic `subscribe` + `executions.log`),
+// 11 QueryScope + 11 MutateOp + 2 subscriptions (generic `subscribe` + `executions.log`),
 // mirroring the ui-service contract.
 export function createAppRouter(uiService: UiService) {
   return router({
@@ -129,6 +130,7 @@ export function createAppRouter(uiService: UiService) {
       pause: makeMutation(uiService, 'schedules.pause', scheduleActionInput),
       resume: makeMutation(uiService, 'schedules.resume', scheduleActionInput),
       remove: makeMutation(uiService, 'schedules.remove', scheduleActionInput),
+      add: makeMutation(uiService, 'schedules.add', scheduleAddInput),
     }),
     executions: router({
       list: makeQuery(uiService, 'executions.list', executionsListInput),

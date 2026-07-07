@@ -22,6 +22,7 @@ import type {
   threadsCancelInput,
   executionsCancelInput,
   scheduleActionInput,
+  scheduleAddInput,
   taskActionInput,
   taskCompleteInput,
   taskBlockInput,
@@ -58,6 +59,7 @@ const _executionsCancel: MutateParity<'executions.cancel', typeof executionsCanc
 const _schedulesPause: MutateParity<'schedules.pause', typeof scheduleActionInput> = true;
 const _schedulesResume: MutateParity<'schedules.resume', typeof scheduleActionInput> = true;
 const _schedulesRemove: MutateParity<'schedules.remove', typeof scheduleActionInput> = true;
+const _schedulesAdd: MutateParity<'schedules.add', typeof scheduleAddInput> = true;
 const _tasksClaim: MutateParity<'tasks.claim', typeof taskActionInput> = true;
 const _tasksUnclaim: MutateParity<'tasks.unclaim', typeof taskActionInput> = true;
 const _tasksComplete: MutateParity<'tasks.complete', typeof taskCompleteInput> = true;
@@ -74,6 +76,6 @@ const _executionsLog: Exact<z.infer<typeof executionsLogInput>, ExecutionsLogPar
 export const _contractParityChecked = [
   _projectsList, _sessionsList, _threadsList, _threadsGet, _tasksList, _schedulesList,
   _executionsList, _executionsGet, _memoryTree, _memoryFile, _costSummary, _threadsCancel, _executionsCancel,
-  _schedulesPause, _schedulesResume, _schedulesRemove, _tasksClaim,
+  _schedulesPause, _schedulesResume, _schedulesRemove, _schedulesAdd, _tasksClaim,
   _tasksUnclaim, _tasksComplete, _tasksBlock, _tasksUnblock, _executionsLog,
 ] as const;

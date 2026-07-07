@@ -4,8 +4,10 @@ import {
   handlePauseSchedule,
   handleResumeSchedule,
   handleRemoveSchedule,
+  handleAddSchedule,
 } from '../../../src/domain/ui-service/mutate/schedules.js';
 import type { UiServiceDeps } from '../../../src/domain/ui-service/types.js';
+import type { ScheduleTask } from '../../../src/store/schedule-repo.js';
 
 function makeDeps(overrides: Partial<UiServiceDeps> = {}): UiServiceDeps {
   return {
@@ -13,7 +15,7 @@ function makeDeps(overrides: Partial<UiServiceDeps> = {}): UiServiceDeps {
     sessionStore: { listByProject: async () => [], listResumable: async () => [], getById: async () => null },
     threadStore: { getAll: () => [], get: () => null },
     taskStore: { getAll: () => [], getById: () => null, load: () => {}, refresh: () => {} },
-    scheduler: { list: async () => [], get: async () => null, pause: async () => null, resume: async () => null, remove: async () => false },
+    scheduler: { list: async () => [], get: async () => null, pause: async () => null, resume: async () => null, remove: async () => false, add: async () => ({ id: 'sch_new' } as ScheduleTask) },
     executionRegistry: { getExecution: () => null, getAll: () => [], cancelExecution: () => null },
     executionLogTailer: { startTail: () => {}, stopTail: () => {}, refCount: () => 0 },
     runningExecutions: { getAll: () => [] } as any,
@@ -32,7 +34,7 @@ test('schedules.pause returns not-found on missing schedule', async () => {
 
 test('schedules.pause returns ok on success', async () => {
   const result = await handlePauseSchedule(makeDeps({
-    scheduler: { list: async () => [], get: async () => null, pause: async () => ({ id: 'sch1', isPaused: true } as any), resume: async () => null, remove: async () => false },
+    scheduler: { list: async () => [], get: async () => null, pause: async () => ({ id: 'sch1', isPaused: true } as any), resume: async () => null, remove: async () => false, add: async () => ({ id: 'sch_new' } as ScheduleTask) },
   }), { scheduleId: 'sch1' });
   assert.equal(result.ok, true);
 });
@@ -45,7 +47,7 @@ test('schedules.resume returns not-found on missing schedule', async () => {
 
 test('schedules.resume returns ok on success', async () => {
   const result = await handleResumeSchedule(makeDeps({
-    scheduler: { list: async () => [], get: async () => null, pause: async () => null, resume: async () => ({ id: 'sch1', isPaused: false } as any), remove: async () => false },
+    scheduler: { list: async () => [], get: async () => null, pause: async () => null, resume: async () => ({ id: 'sch1', isPaused: false } as any), remove: async () => false, add: async () => ({ id: 'sch_new' } as ScheduleTask) },
   }), { scheduleId: 'sch1' });
   assert.equal(result.ok, true);
 });
@@ -58,7 +60,124 @@ test('schedules.remove returns not-found on missing schedule', async () => {
 
 test('schedules.remove returns ok on success', async () => {
   const result = await handleRemoveSchedule(makeDeps({
-    scheduler: { list: async () => [], get: async () => null, pause: async () => null, resume: async () => null, remove: async () => true },
+    scheduler: { list: async () => [], get: async () => null, pause: async () => null, resume: async () => null, remove: async () => true, add: async () => ({ id: 'sch_new' } as ScheduleTask) },
   }), { scheduleId: 'sch1' });
   assert.equal(result.ok, true);
+});
+
+// ── schedules.add ──────────────────────────────────────────────────
+
+interface AddSpy {
+  calls: Array<{ type: string; options: Record<string, any> }>;
+  add: UiServiceDeps['scheduler']['add'];
+}
+
+/** A spyable scheduler.add that records calls and echoes a ScheduleTask built from the options
+ *  (mirrors what the real injected add returns after buildTask + backfill — no real fs). */
+function makeAddSpy(): AddSpy {
+  const calls: AddSpy['calls'] = [];
+  const add: UiServiceDeps['scheduler']['add'] = async (type, options) => {
+    calls.push({ type, options });
+    return {
+      id: 'sch_created',
+      type,
+      message: options.message,
+      projectId: options.projectId,
+      profile: options.profile ?? null,
+      intervalMs: options.intervalMs,
+      time: options.time,
+      dayOfWeek: options.dayOfWeek,
+      delay: options.delay,
+      createdAt: 1_700_000_000_000,
+      nextRun: 1_700_000_060_000,
+      lastRun: null,
+      target: options.target,
+      fallback: options.fallback,
+    } as ScheduleTask;
+  };
+  return { calls, add };
+}
+
+test('schedules.add interval creates a schedule and returns ScheduleInfo', async () => {
+  const spy = makeAddSpy();
+  const deps = makeDeps({ scheduler: { list: async () => [], get: async () => null, pause: async () => null, resume: async () => null, remove: async () => false, add: spy.add } });
+  const result = await handleAddSchedule(deps, { type: 'interval', message: 'ping', intervalMs: 60_000, projectId: 'general' });
+  assert.equal(result.ok, true);
+  if (result.ok) {
+    assert.equal(result.data.type, 'interval');
+    assert.equal(result.data.id, 'sch_created');
+    assert.equal(result.data.message, 'ping');
+    assert.equal(result.data.projectId, 'general');
+    assert.equal(typeof result.data.nextRun, 'string');
+  }
+  assert.equal(spy.calls.length, 1);
+  assert.equal(spy.calls[0].type, 'interval');
+  assert.equal(spy.calls[0].options.intervalMs, 60_000);
+});
+
+test('schedules.add daily creates a schedule', async () => {
+  const spy = makeAddSpy();
+  const deps = makeDeps({ scheduler: { list: async () => [], get: async () => null, pause: async () => null, resume: async () => null, remove: async () => false, add: spy.add } });
+  const result = await handleAddSchedule(deps, { type: 'daily', message: 'digest', time: '09:00' });
+  assert.equal(result.ok, true);
+  if (result.ok) assert.equal(result.data.type, 'daily');
+  assert.equal(spy.calls[0].options.time, '09:00');
+});
+
+test('schedules.add weekly creates a schedule', async () => {
+  const spy = makeAddSpy();
+  const deps = makeDeps({ scheduler: { list: async () => [], get: async () => null, pause: async () => null, resume: async () => null, remove: async () => false, add: spy.add } });
+  const result = await handleAddSchedule(deps, { type: 'weekly', message: 'review', time: '09:00', dayOfWeek: 1 });
+  assert.equal(result.ok, true);
+  if (result.ok) assert.equal(result.data.type, 'weekly');
+  assert.equal(spy.calls[0].options.dayOfWeek, 1);
+  assert.equal(spy.calls[0].options.time, '09:00');
+});
+
+test('schedules.add once creates a schedule', async () => {
+  const spy = makeAddSpy();
+  const deps = makeDeps({ scheduler: { list: async () => [], get: async () => null, pause: async () => null, resume: async () => null, remove: async () => false, add: spy.add } });
+  const result = await handleAddSchedule(deps, { type: 'once', message: 'run once', delay: 5_000 });
+  assert.equal(result.ok, true);
+  if (result.ok) assert.equal(result.data.type, 'once');
+  assert.equal(spy.calls[0].options.delay, 5_000);
+});
+
+test('schedules.add forwards target and fallback to scheduler.add', async () => {
+  const spy = makeAddSpy();
+  const deps = makeDeps({ scheduler: { list: async () => [], get: async () => null, pause: async () => null, resume: async () => null, remove: async () => false, add: spy.add } });
+  const result = await handleAddSchedule(deps, {
+    type: 'interval', message: 'ping', intervalMs: 60_000,
+    target: { kind: 'project', projectId: 'general' }, fallback: 'skip',
+  });
+  assert.equal(result.ok, true);
+  assert.deepEqual(spy.calls[0].options.target, { kind: 'project', projectId: 'general' });
+  assert.equal(spy.calls[0].options.fallback, 'skip');
+});
+
+test('schedules.add defaults projectId to general when omitted', async () => {
+  const spy = makeAddSpy();
+  const deps = makeDeps({ scheduler: { list: async () => [], get: async () => null, pause: async () => null, resume: async () => null, remove: async () => false, add: spy.add } });
+  const result = await handleAddSchedule(deps, { type: 'once', message: 'm', delay: 1_000 });
+  assert.equal(result.ok, true);
+  if (result.ok) assert.equal(result.data.projectId, 'general');
+  assert.equal(spy.calls[0].options.projectId, 'general');
+});
+
+test('schedules.add rejects interval without intervalMs and does not write', async () => {
+  const spy = makeAddSpy();
+  const deps = makeDeps({ scheduler: { list: async () => [], get: async () => null, pause: async () => null, resume: async () => null, remove: async () => false, add: spy.add } });
+  const result = await handleAddSchedule(deps, { type: 'interval', message: 'm' } as any);
+  assert.equal(result.ok, false);
+  if (!result.ok) assert.equal(result.code, 'invalid-args');
+  assert.equal(spy.calls.length, 0);
+});
+
+test('schedules.add rejects weekly without dayOfWeek and does not write', async () => {
+  const spy = makeAddSpy();
+  const deps = makeDeps({ scheduler: { list: async () => [], get: async () => null, pause: async () => null, resume: async () => null, remove: async () => false, add: spy.add } });
+  const result = await handleAddSchedule(deps, { type: 'weekly', message: 'm', time: '09:00' } as any);
+  assert.equal(result.ok, false);
+  if (!result.ok) assert.equal(result.code, 'invalid-args');
+  assert.equal(spy.calls.length, 0);
 });
