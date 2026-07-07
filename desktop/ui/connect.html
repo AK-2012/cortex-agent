@@ -1,0 +1,387 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Cortex — Connect</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    html, body {
+      height: 100%;
+      background: #191C22;
+      color: #E9E7E2;
+      font-family: 'IBM Plex Mono', 'Courier New', monospace;
+      font-size: 13px;
+      line-height: 1.5;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    body {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+    }
+
+    /* Settings-card style */
+    .card {
+      width: 400px;
+      background: #1E2028;
+      border: 1px solid rgba(255, 255, 255, 0.07);
+      border-radius: 8px;
+      padding: 32px;
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+    }
+
+    .logo {
+      font-size: 16px;
+      font-weight: 600;
+      color: #E9E7E2;
+      letter-spacing: 0.05em;
+      margin-bottom: 4px;
+    }
+
+    .subtitle {
+      font-size: 11px;
+      color: rgba(233, 231, 226, 0.42);
+      letter-spacing: 0.03em;
+      margin-bottom: 28px;
+    }
+
+    /* Field group */
+    .field {
+      margin-bottom: 14px;
+    }
+
+    .label {
+      display: block;
+      font-size: 10px;
+      font-weight: 600;
+      color: rgba(233, 231, 226, 0.5);
+      letter-spacing: 0.10em;
+      text-transform: uppercase;
+      margin-bottom: 5px;
+    }
+
+    .input {
+      display: block;
+      width: 100%;
+      background: #191C22;
+      border: 1px solid rgba(255, 255, 255, 0.10);
+      border-radius: 4px;
+      padding: 8px 11px;
+      font-family: 'IBM Plex Mono', 'Courier New', monospace;
+      font-size: 13px;
+      color: #E9E7E2;
+      outline: none;
+      transition: border-color 0.15s;
+    }
+
+    .input:focus {
+      border-color: #4655D4;
+    }
+
+    .input::placeholder {
+      color: rgba(233, 231, 226, 0.22);
+    }
+
+    .input:disabled {
+      opacity: 0.5;
+    }
+
+    /* Action row */
+    .actions {
+      display: flex;
+      gap: 8px;
+      margin-top: 22px;
+    }
+
+    .btn {
+      flex: 1;
+      padding: 9px 14px;
+      border-radius: 4px;
+      font-family: 'IBM Plex Mono', 'Courier New', monospace;
+      font-size: 12px;
+      font-weight: 500;
+      letter-spacing: 0.03em;
+      cursor: pointer;
+      border: none;
+      transition: opacity 0.15s, background 0.15s, border-color 0.15s;
+    }
+
+    .btn:disabled {
+      opacity: 0.38;
+      cursor: not-allowed;
+    }
+
+    .btn-outline {
+      flex: 0 0 auto;
+      width: 88px;
+      background: transparent;
+      border: 1px solid rgba(255, 255, 255, 0.14);
+      color: rgba(233, 231, 226, 0.72);
+    }
+
+    .btn-outline:hover:not(:disabled) {
+      border-color: rgba(255, 255, 255, 0.28);
+      color: #E9E7E2;
+    }
+
+    .btn-primary {
+      background: #4655D4;
+      color: #fff;
+    }
+
+    .btn-primary:hover:not(:disabled) {
+      background: #3d4bbf;
+    }
+
+    /* Status line */
+    .status {
+      margin-top: 12px;
+      font-size: 11px;
+      min-height: 16px;
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      letter-spacing: 0.02em;
+    }
+
+    .status-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+
+    .status-ok { color: #23854F; }
+    .status-ok .status-dot { background: #23854F; }
+
+    .status-err { color: #d06060; }
+    .status-err .status-dot { background: #c0392b; }
+
+    .status-pending { color: rgba(233, 231, 226, 0.42); }
+
+    /* Divider + switch link */
+    .divider {
+      border: none;
+      border-top: 1px solid rgba(255, 255, 255, 0.06);
+      margin: 24px 0 18px;
+    }
+
+    .switch-row {
+      text-align: center;
+      font-size: 11px;
+      color: rgba(233, 231, 226, 0.32);
+      letter-spacing: 0.02em;
+    }
+
+    .switch-row a {
+      color: rgba(100, 118, 220, 0.85);
+      text-decoration: none;
+      cursor: pointer;
+    }
+
+    .switch-row a:hover {
+      color: #4655D4;
+      text-decoration: underline;
+    }
+  </style>
+</head>
+<body id="cortex-connect-screen">
+  <div class="card">
+    <div class="logo">Cortex</div>
+    <div class="subtitle">Connect to your server</div>
+
+    <div class="field">
+      <label class="label" for="cx-server-url">Server URL</label>
+      <input
+        class="input"
+        type="url"
+        id="cx-server-url"
+        placeholder="https://cortex.example.com"
+        autocomplete="off"
+        spellcheck="false"
+      >
+    </div>
+
+    <div class="field">
+      <label class="label" for="cx-token">Client Token</label>
+      <input
+        class="input"
+        type="password"
+        id="cx-token"
+        placeholder="••••••••••••••••"
+        autocomplete="new-password"
+      >
+    </div>
+
+    <div class="actions">
+      <button class="btn btn-outline" id="cx-btn-test" type="button">Test</button>
+      <button class="btn btn-primary" id="cx-btn-connect" type="button">Connect</button>
+    </div>
+
+    <div class="status" id="cx-status" aria-live="polite" role="status"></div>
+
+    <hr class="divider">
+    <div class="switch-row">
+      Already connected? <a id="cx-link-switch" href="#" role="button">Switch server</a>
+    </div>
+  </div>
+
+  <script>
+    (function () {
+      'use strict';
+
+      // Tauri IPC (available via withGlobalTauri: true in tauri.conf.json).
+      var invoke = window.__TAURI__ && window.__TAURI__.core && window.__TAURI__.core.invoke;
+
+      var urlInput    = document.getElementById('cx-server-url');
+      var tokenInput  = document.getElementById('cx-token');
+      var btnTest     = document.getElementById('cx-btn-test');
+      var btnConnect  = document.getElementById('cx-btn-connect');
+      var statusEl    = document.getElementById('cx-status');
+      var linkSwitch  = document.getElementById('cx-link-switch');
+
+      // ── Helpers ───────────────────────────────────────────────────────────
+
+      function setStatus(type, text) {
+        // type: 'ok' | 'err' | 'pending' | ''
+        statusEl.className = 'status' + (type ? ' status-' + type : '');
+        if (type === 'ok' || type === 'err') {
+          statusEl.innerHTML =
+            '<span class="status-dot"></span>' +
+            document.createTextNode(text).textContent; // XSS-safe
+        } else {
+          statusEl.textContent = text;
+        }
+      }
+
+      function setLoading(on) {
+        btnTest.disabled    = on;
+        btnConnect.disabled = on;
+        urlInput.disabled   = on;
+        tokenInput.disabled = on;
+      }
+
+      function fields() {
+        return {
+          serverUrl: urlInput.value.trim().replace(/\/+$/, ''),
+          token:     tokenInput.value.trim(),
+        };
+      }
+
+      // ── Connection probe ──────────────────────────────────────────────────
+      // GET /trpc with the token header.  Responses:
+      //   200 / 400 / 404  → server reached, token accepted
+      //   401              → server reached, token rejected
+      //   network error    → server unreachable
+
+      async function probe(serverUrl, token) {
+        try {
+          var res = await fetch(serverUrl + '/trpc', {
+            method: 'GET',
+            headers: { 'x-cortex-token': token },
+            signal: AbortSignal.timeout(8000),
+          });
+          return { reached: true, ok: res.status !== 401, status: res.status };
+        } catch (e) {
+          return { reached: false, ok: false, status: 0, error: String(e) };
+        }
+      }
+
+      // ── Test button ───────────────────────────────────────────────────────
+
+      btnTest.addEventListener('click', async function () {
+        var f = fields();
+        if (!f.serverUrl || !f.token) {
+          setStatus('err', 'Server URL and token required');
+          return;
+        }
+        setLoading(true);
+        setStatus('pending', 'Testing…');
+        var r = await probe(f.serverUrl, f.token);
+        setLoading(false);
+        if (!r.reached) {
+          setStatus('err', 'Unreachable — ' + (r.error || 'network error'));
+        } else if (!r.ok) {
+          setStatus('err', '401 Unauthorized — check token');
+        } else {
+          setStatus('ok', 'Connection OK (' + r.status + ')');
+        }
+      });
+
+      // ── Connect button ────────────────────────────────────────────────────
+
+      btnConnect.addEventListener('click', async function () {
+        var f = fields();
+        if (!f.serverUrl || !f.token) {
+          setStatus('err', 'Server URL and token required');
+          return;
+        }
+        setLoading(true);
+        setStatus('pending', 'Connecting…');
+
+        var r = await probe(f.serverUrl, f.token);
+        if (!r.reached) {
+          setLoading(false);
+          setStatus('err', 'Unreachable — ' + (r.error || 'network error'));
+          return;
+        }
+        if (!r.ok) {
+          setLoading(false);
+          setStatus('err', '401 Unauthorized — check token');
+          return;
+        }
+
+        // Persist via Tauri keychain command.
+        if (invoke) {
+          try {
+            await invoke('connect', { serverUrl: f.serverUrl, token: f.token });
+          } catch (e) {
+            setLoading(false);
+            setStatus('err', 'Save failed: ' + String(e));
+            return;
+          }
+        } else {
+          // Fallback when running outside Tauri (browser preview).
+          window.__CORTEX_DESKTOP_CONFIG = { serverUrl: f.serverUrl, token: f.token };
+        }
+
+        setStatus('ok', 'Connected — loading workbench…');
+        setTimeout(function () {
+          window.location.href = 'index.html';
+        }, 350);
+      });
+
+      // ── Switch / disconnect link ───────────────────────────────────────────
+
+      linkSwitch.addEventListener('click', async function (e) {
+        e.preventDefault();
+        if (invoke) {
+          await invoke('disconnect').catch(function () {});
+        }
+        urlInput.value  = '';
+        tokenInput.value = '';
+        urlInput.focus();
+        setStatus('', '');
+      });
+
+      // ── Pre-fill existing credentials (switch-server scenario) ────────────
+
+      if (invoke) {
+        invoke('get_connection_config').then(function (cfg) {
+          if (cfg && cfg.serverUrl) {
+            urlInput.value = cfg.serverUrl;
+            // Don't pre-fill token (security); let user re-enter.
+          }
+        }).catch(function () {});
+      }
+    }());
+  </script>
+</body>
+</html>
