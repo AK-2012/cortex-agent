@@ -9,6 +9,7 @@ import type {
   ThreadDispatchInfo,
 } from '@cortex-agent/ui-contract';
 import { useTRPC } from '@/lib/trpc';
+import { useExecutionLogDrawer } from '@/features/execution/ExecutionLogDrawerProvider';
 import { dispatchesForStep } from '@/features/thread/thread-steps';
 import { useThreadGetLiveSync } from '@/features/thread/useThreadGetLiveSync';
 import { nodeLevel } from '@/features/thread/nested-threads';
@@ -194,10 +195,10 @@ function SubthreadCard({ node }: { node: ThreadChildNode }) {
 
 // A machine-dispatch sub-card in the active step (prototype's Execute-step children).
 function DispatchCard({ dispatch }: { dispatch: ThreadDispatchInfo }) {
-  const navigate = useNavigate();
+  const { open } = useExecutionLogDrawer();
   return (
     <div
-      onClick={() => navigate(`/executions/${dispatch.executionId}`)}
+      onClick={() => open(dispatch.executionId)}
       style={{
         display: 'flex',
         alignItems: 'center',
