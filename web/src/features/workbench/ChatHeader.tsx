@@ -1,15 +1,33 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { MORNING } from './chat-content';
+import { buildProfileOptions } from './profile-menu';
+import { ProfileMenu } from './ProfileMenu';
 
 // Chat header — 1:1 from prototype.dc.html L107–130: session title · profile chip · running/idle
 // status pill · ⌘K affordance. Title/profile/running are the morning-session representative values
-// (transcript Stage-4 gap — no session-detail scope). Profile menu closed by default (L111).
+// (transcript Stage-4 gap — no session-detail scope). Profile-chip dropdown (L109–121, task c3ce):
+// GAP — no profiles tRPC scope → static verbatim option set; onPick updates the local chip label.
 
 const mono = "'IBM Plex Mono',monospace";
 
 export function ChatHeader({ running, onCmdK }: { running: boolean; onCmdK: () => void }): JSX.Element {
   const [chipHover, setChipHover] = useState(false);
   const [cmdkHover, setCmdkHover] = useState(false);
+  const [profMenuOpen, setProfMenuOpen] = useState(false);
+  const [chatProfile, setChatProfile] = useState(MORNING.profile);
+  useEffect(() => {
+    if (!profMenuOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setProfMenuOpen(false);
+    };
+    const onClickAway = () => setProfMenuOpen(false);
+    window.addEventListener('keydown', onKey);
+    window.addEventListener('click', onClickAway);
+    return () => {
+      window.removeEventListener('keydown', onKey);
+      window.removeEventListener('click', onClickAway);
+    };
+  }, [profMenuOpen]);
 
   return (
     <div
@@ -26,8 +44,13 @@ export function ChatHeader({ running, onCmdK }: { running: boolean; onCmdK: () =
       <div style={{ fontSize: 13.5, fontWeight: 600, color: '#191C22' }}>{MORNING.title}</div>
       <span style={{ position: 'relative' }}>
         <span
+          data-chip="profile"
           onMouseEnter={() => setChipHover(true)}
           onMouseLeave={() => setChipHover(false)}
+          onClick={(e) => {
+            e.stopPropagation();
+            setProfMenuOpen((o) => !o);
+          }}
           style={{
             font: `500 10.5px ${mono}`,
             border: '1px solid ' + (chipHover ? '#C9CFF2' : '#E7E9EE'),
@@ -40,9 +63,20 @@ export function ChatHeader({ running, onCmdK }: { running: boolean; onCmdK: () =
             gap: 5,
           }}
         >
-          profile · {MORNING.profile}
+          profile · {chatProfile}
           <span style={{ fontSize: 8, color: '#B6BDC9' }}>▾</span>
         </span>
+        {profMenuOpen && (
+          <span onClick={(e) => e.stopPropagation()}>
+            <ProfileMenu
+              options={buildProfileOptions(chatProfile)}
+              onPick={(name) => {
+                setChatProfile(name);
+                setProfMenuOpen(false);
+              }}
+            />
+          </span>
+        )}
       </span>
       {running ? (
         <span

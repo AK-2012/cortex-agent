@@ -4,6 +4,8 @@ import { useQuery } from '@tanstack/react-query';
 import type { SessionInfo } from '@cortex-agent/ui-contract';
 import { useTRPC } from '@/lib/trpc';
 import { groupSessions, sessionMeta, projectInitials } from './session-groups';
+import { buildSwitchList, projMenuSubLabel, runningCountByProject } from './project-menu';
+import { ProjectMenu } from './ProjectMenu';
 
 // LEFT RAIL — 1:1 from prototype.dc.html L42–100 (Stage-R RB, task f528). Exact inline styles /
 // px / hex / font / weight / EN copy reproduced verbatim; real tRPC data (projects.list /
@@ -37,10 +39,40 @@ export function LeftRail(): JSX.Element {
     enabled: !!activeProjectId,
   });
 
+  // Real per-project running counts drive the project switcher popover (projects.list carries no
+  // status/phase field). ThreadInfo has projectId + status, so this is real data.
+  const threadsQuery = useQuery(trpc.threads.list.queryOptions({}));
+  const threads = threadsQuery.data ?? [];
+  const runningCounts = useMemo(() => runningCountByProject(threads), [threads]);
+
   const projName = activeProjectId ?? '—';
   const projInitials = activeProjectId ? projectInitials(activeProjectId) : '··';
   const todayCost = costQuery.data?.today;
   const projSub = typeof todayCost === 'number' ? '$' + todayCost.toFixed(2) + ' today' : '';
+
+  // Project-card dropdown (prototype L1565–1607, task c3ce).
+  const [projMenuOpen, setProjMenuOpen] = useState(false);
+  const activeRunning = activeProjectId ? runningCounts[activeProjectId] ?? 0 : 0;
+  const projMenuSub = projMenuSubLabel(activeRunning, todayCost);
+  const switchRows = useMemo(
+    () => buildSwitchList(projects, activeProjectId, runningCounts),
+    [projects, activeProjectId, runningCounts],
+  );
+  useEffect(() => {
+    if (!projMenuOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setProjMenuOpen(false);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [projMenuOpen]);
+  // GAP: switching / new-project have no backend scope or cross-pane current-project state.
+  const onSwitchProject = () => setProjMenuOpen(false);
+  const onNewProject = () => setProjMenuOpen(false);
+  const onOpenOverview = () => {
+    setProjMenuOpen(false);
+    navigate('/overview');
+  };
 
   const groups = useMemo(() => groupSessions(sessions, Date.now()), [sessions]);
 
@@ -130,6 +162,8 @@ export function LeftRail(): JSX.Element {
       {/* project card */}
       <div
         {...hp('projcard')}
+        data-card="project"
+        onClick={() => setProjMenuOpen((o) => !o)}
         style={{
           margin: '6px 12px 0',
           padding: '9px 11px',
@@ -356,6 +390,19 @@ export function LeftRail(): JSX.Element {
           Settings
         </span>
       </div>
+
+      {projMenuOpen && (
+        <ProjectMenu
+          projName={projName}
+          projInitials={projInitials}
+          subLabel={projMenuSub}
+          rows={switchRows}
+          onClose={() => setProjMenuOpen(false)}
+          onOpenOverview={onOpenOverview}
+          onSwitch={onSwitchProject}
+          onNewProject={onNewProject}
+        />
+      )}
     </div>
   );
 }
