@@ -7,6 +7,7 @@ import { KitPage } from '@/features/kit/KitPage';
 import { BaseDemoPage } from '@/features/base-demo/BaseDemoPage';
 import { ThreadDetailPage } from '@/features/thread/ThreadDetailPage';
 import { ExecutionDetailPage } from '@/features/execution/ExecutionDetailPage';
+import { OverviewPage } from '@/features/overview/OverviewPage';
 
 export const router = createBrowserRouter([
   {
@@ -19,7 +20,7 @@ export const router = createBrowserRouter([
       { path: 'threads', element: <EmptyPane title="Threads" /> },
       { path: 'threads/:threadId', element: <ThreadDetailPage /> },
       { path: 'executions/:executionId', element: <ExecutionDetailPage /> },
-      { path: 'overview', element: <EmptyPane title="Overview" /> },
+      { path: 'overview', element: <OverviewPage /> },
       { path: 'settings', element: <EmptyPane title="Settings" /> },
       { path: 'kit', element: <KitPage /> },
       { path: 'base', element: <BaseDemoPage /> },
