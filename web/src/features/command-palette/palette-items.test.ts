@@ -1,11 +1,42 @@
 import { describe, it, expect } from 'vitest';
 import type { SessionInfo, ThreadInfo, TaskInfo } from '@cortex-agent/ui-contract';
-import { buildPaletteItems, NAV_COMMANDS } from './palette-items';
+import { buildCmdkItems, NAV_COMMAND_ITEMS, selectPaletteRows } from './palette-items';
 
-function task(partial: Partial<TaskInfo> & Pick<TaskInfo, 'id'>): TaskInfo {
+function session(over: Partial<SessionInfo> = {}): SessionInfo {
   return {
-    text: `task ${partial.id}`,
-    project: 'proj-a',
+    sessionId: 'sess_1',
+    name: 'morning review',
+    projectId: 'cortex-self',
+    backend: 'claude',
+    kind: 'local',
+    createdAt: '2026-07-06T07:00:00Z',
+    lastUsedAt: '2026-07-06T07:42:00Z',
+    resumable: true,
+    label: null,
+    ...over,
+  };
+}
+
+function thread(over: Partial<ThreadInfo> = {}): ThreadInfo {
+  return {
+    id: 'thr_8f2c',
+    templateName: 'experiment-pipeline',
+    currentStep: { index: 3, name: 'Review' },
+    status: 'running',
+    projectId: 'cortex-self',
+    createdAt: '2026-07-06T07:00:00Z',
+    updatedAt: '2026-07-06T07:42:00Z',
+    totalSteps: 5,
+    artifactPath: null,
+    ...over,
+  };
+}
+
+function task(over: Partial<TaskInfo> = {}): TaskInfo {
+  return {
+    id: 'c967',
+    text: 'Rebuild the command palette',
+    project: 'cortex-self',
     status: 'open',
     priority: 'high',
     actionable: true,
@@ -14,85 +45,68 @@ function task(partial: Partial<TaskInfo> & Pick<TaskInfo, 'id'>): TaskInfo {
     dependsOn: [],
     plan: null,
     template: 'coder-review',
-    ...partial,
+    ...over,
   };
 }
 
-function thread(partial: Partial<ThreadInfo> & Pick<ThreadInfo, 'id'>): ThreadInfo {
-  return {
-    templateName: 'coder-review',
-    currentStep: null,
-    status: 'running',
-    projectId: 'proj-a',
-    createdAt: '2026-07-06T00:00:00Z',
-    updatedAt: '2026-07-06T00:00:00Z',
-    totalSteps: 3,
-    artifactPath: null,
-    ...partial,
-  };
-}
-
-function session(partial: Partial<SessionInfo> & Pick<SessionInfo, 'sessionId'>): SessionInfo {
-  return {
-    name: `session ${partial.sessionId}`,
-    projectId: 'proj-a',
-    backend: 'claude',
-    kind: 'local',
-    createdAt: '2026-07-06T00:00:00Z',
-    lastUsedAt: '2026-07-06T00:00:00Z',
-    resumable: true,
-    label: null,
-    ...partial,
-  };
-}
-
-describe('buildPaletteItems', () => {
-  it('returns no items for empty inputs', () => {
-    expect(buildPaletteItems({ sessions: [], threads: [], tasks: [] })).toEqual([]);
+describe('buildCmdkItems', () => {
+  it('maps a session to an SE row jumping to /workbench', () => {
+    const [item] = buildCmdkItems({ sessions: [session()], threads: [], tasks: [] });
+    expect(item.glyph).toBe('SE');
+    expect(item.kbd).toBe('session');
+    expect(item.label).toBe('morning review');
+    expect(item.sub).toBe('cortex-self');
+    expect(item.route).toBe('/workbench');
+    expect(item.focusId).toBe('sess_1');
+    expect(item.id).toBe('session:sess_1');
+    expect(item.keywords).toContain('sess_1');
   });
 
-  it('maps a task to a Tasks item routed to /tasks with focusId', () => {
-    const items = buildPaletteItems({
-      sessions: [],
-      threads: [],
-      tasks: [task({ id: '051b', text: 'command palette' })],
-    });
-    expect(items).toHaveLength(1);
-    expect(items[0]).toMatchObject({
-      group: 'Tasks',
-      route: '/tasks',
-      focusId: '051b',
-    });
-    expect(items[0].label).toContain('command palette');
-  });
-
-  it('maps a thread to a Threads item routed to its detail page /threads/:id', () => {
-    const items = buildPaletteItems({
-      sessions: [],
-      threads: [thread({ id: 'thr_abc', templateName: 'manager' })],
-      tasks: [],
-    });
-    expect(items).toHaveLength(1);
-    expect(items[0]).toMatchObject({
-      group: 'Threads',
-      route: '/threads/thr_abc',
-      focusId: 'thr_abc',
-    });
-  });
-
-  it('maps a session to a Sessions item routed to /workbench', () => {
-    const items = buildPaletteItems({
-      sessions: [session({ sessionId: 'sess_1', name: 'main chat' })],
+  it('falls back to the sessionId when the session has no name', () => {
+    const [item] = buildCmdkItems({
+      sessions: [session({ name: '', sessionId: 'sess_x' })],
       threads: [],
       tasks: [],
     });
-    expect(items).toHaveLength(1);
-    expect(items[0]).toMatchObject({ group: 'Sessions', route: '/workbench', focusId: 'sess_1' });
-    expect(items[0].label).toContain('main chat');
+    expect(item.label).toBe('sess_x');
   });
 
-  it('assigns unique cmdk values per item across groups', () => {
-    const items = buildPaletteItems({
+  it('maps a thread to a TH row jumping to its detail route', () => {
+    const [item] = buildCmdkItems({ sessions: [], threads: [thread()], tasks: [] });
+    expect(item.glyph).toBe('TH');
+    expect(item.kbd).toBe('thread');
+    expect(item.label).toBe('experiment-pipeline');
+    expect(item.sub).toBe('thr_8f2c');
+    expect(item.route).toBe('/threads/thr_8f2c');
+    expect(item.focusId).toBe('thr_8f2c');
+    expect(item.id).toBe('thread:thr_8f2c');
+    // fuzzy-match by id, not just label
+    expect(item.keywords).toContain('thr_8f2c');
+  });
+
+  it('maps a task to a TK row jumping to /tasks with id·project sub', () => {
+    const [item] = buildCmdkItems({ sessions: [], threads: [], tasks: [task()] });
+    expect(item.glyph).toBe('TK');
+    expect(item.kbd).toBe('task');
+    expect(item.label).toBe('Rebuild the command palette');
+    expect(item.sub).toBe('c967 · cortex-self');
+    expect(item.route).toBe('/tasks');
+    expect(item.focusId).toBe('c967');
+    expect(item.id).toBe('task:c967');
+    expect(item.keywords).toContain('c967');
+  });
+
+  it('returns items in stable sessions→threads→tasks order', () => {
+    const items = buildCmdkItems({
+      sessions: [session()],
+      threads: [thread()],
+      tasks: [task()],
+    });
+    expect(items.map((i) => i.glyph)).toEqual(['SE', 'TH', 'TK']);
+  });
+
+  it('produces collision-free cmdk values across kinds', () => {
+    const items = buildCmdkItems({
       sessions: [session({ sessionId: 'x' })],
       threads: [thread({ id: 'x' })],
       tasks: [task({ id: 'x' })],
@@ -101,50 +115,71 @@ describe('buildPaletteItems', () => {
     expect(new Set(ids).size).toBe(ids.length);
   });
 
-  it('exposes the entity id/project/status as searchable keywords', () => {
-    const [item] = buildPaletteItems({
-      sessions: [],
-      threads: [],
-      tasks: [task({ id: '051b', text: 'palette', project: 'cortex-self', status: 'open' })],
-    });
-    expect(item.keywords).toContain('051b');
-    expect(item.keywords).toContain('cortex-self');
-    expect(item.keywords).toContain('open');
+  it('returns no entity items for empty sources', () => {
+    expect(buildCmdkItems({ sessions: [], threads: [], tasks: [] })).toEqual([]);
   });
 
-  it('orders groups Sessions → Threads → Tasks', () => {
-    const items = buildPaletteItems({
-      sessions: [session({ sessionId: 's' })],
-      threads: [thread({ id: 't' })],
-      tasks: [task({ id: 'k' })],
-    });
-    expect(items.map((i) => i.group)).toEqual(['Sessions', 'Threads', 'Tasks']);
-  });
-
-  it('preserves input order within a group', () => {
-    const items = buildPaletteItems({
-      sessions: [],
+  it('drops empty keyword tokens', () => {
+    const [item] = buildCmdkItems({
+      sessions: [session({ label: null, name: 'n' })],
       threads: [],
-      tasks: [task({ id: 'a' }), task({ id: 'b' }), task({ id: 'c' })],
+      tasks: [],
     });
-    expect(items.map((i) => i.focusId)).toEqual(['a', 'b', 'c']);
+    expect(item.keywords.every((k) => k.length > 0)).toBe(true);
   });
 });
 
-describe('NAV_COMMANDS', () => {
-  it('covers every app section with a route and label', () => {
-    const routes = NAV_COMMANDS.map((c) => c.route);
-    expect(routes).toEqual(
-      expect.arrayContaining(['/workbench', '/tasks', '/threads', '/overview', '/settings', '/kit']),
-    );
-    for (const cmd of NAV_COMMANDS) {
-      expect(cmd.label.length).toBeGreaterThan(0);
-      expect(cmd.id.length).toBeGreaterThan(0);
-    }
+describe('NAV_COMMAND_ITEMS', () => {
+  it('exposes Overview and Settings nav rows (prototype OV/ST legs)', () => {
+    const byId = Object.fromEntries(NAV_COMMAND_ITEMS.map((c) => [c.id, c]));
+    expect(byId['nav:overview']).toMatchObject({ glyph: 'OV', route: '/overview' });
+    expect(byId['nav:settings']).toMatchObject({ glyph: 'ST', route: '/settings' });
   });
 
-  it('has unique command ids', () => {
-    const ids = NAV_COMMANDS.map((c) => c.id);
+  it('every nav item has a unique id, a route, a glyph and a kbd tag', () => {
+    const ids = NAV_COMMAND_ITEMS.map((c) => c.id);
     expect(new Set(ids).size).toBe(ids.length);
+    for (const c of NAV_COMMAND_ITEMS) {
+      expect(c.route.startsWith('/')).toBe(true);
+      expect(c.glyph.length).toBeGreaterThan(0);
+      expect(c.kbd.length).toBeGreaterThan(0);
+    }
+  });
+});
+
+describe('selectPaletteRows', () => {
+  const many = (n: number, mk: (i: number) => unknown) => Array.from({ length: n }, (_, i) => mk(i));
+  const sources = {
+    sessions: many(20, (i) => session({ sessionId: 'sess_' + i, name: 'sess ' + i })),
+    threads: many(20, (i) => thread({ id: 'thr_' + i, templateName: 'tmpl-' + i })),
+    tasks: many(20, (i) => task({ id: 'task_' + i, text: 'task text ' + i })),
+  } as Parameters<typeof selectPaletteRows>[1];
+
+  it('empty query → nav commands + capped entities per kind', () => {
+    const rows = selectPaletteRows('', sources, { restPerKind: 5 });
+    // 5 nav + 5 SE + 5 TH + 5 TK
+    expect(rows.length).toBe(NAV_COMMAND_ITEMS.length + 15);
+    expect(rows.slice(0, NAV_COMMAND_ITEMS.length).map((r) => r.id)).toEqual(
+      NAV_COMMAND_ITEMS.map((c) => c.id),
+    );
+    expect(rows.filter((r) => r.glyph === 'SE').length).toBe(5);
+    expect(rows.filter((r) => r.glyph === 'TH' && r.id.startsWith('thread:')).length).toBe(5);
+  });
+
+  it('query filters by substring across label/sub/keywords and caps the total', () => {
+    const rows = selectPaletteRows('thr_7', sources, { matchCap: 50 });
+    expect(rows.length).toBeGreaterThan(0);
+    expect(rows.every((r) => (r.label + ' ' + r.sub + ' ' + r.keywords.join(' ')).toLowerCase().includes('thr_7'))).toBe(true);
+    expect(rows[0].id).toBe('thread:thr_7');
+  });
+
+  it('honors the match cap', () => {
+    const rows = selectPaletteRows('task', sources, { matchCap: 7 });
+    expect(rows.length).toBe(7);
+  });
+
+  it('surfaces a nav command by keyword', () => {
+    const rows = selectPaletteRows('settings', sources);
+    expect(rows.some((r) => r.id === 'nav:settings')).toBe(true);
   });
 });

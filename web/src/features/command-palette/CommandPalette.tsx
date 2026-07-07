@@ -1,55 +1,157 @@
-import { useMemo } from 'react';
+import { useEffect, useMemo, useState, type CSSProperties } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { Command } from 'cmdk';
 import { useTRPC } from '@/lib/trpc';
-import { buildPaletteItems, NAV_COMMANDS, type PaletteGroup } from './palette-items';
+import { selectPaletteRows, type PaletteRow } from './palette-items';
 
-const OVERLAY_CLASS =
-  'fixed inset-0 z-40 bg-state-ink/40 ' +
-  'data-[state=open]:animate-fade-in data-[state=closed]:animate-fade-out ' +
-  'motion-reduce:animate-none';
+// ⌘K command palette — 1:1 rebuild from prototype.dc.html L1295–1315 (task c967). The overlay
+// chrome, row anatomy, and copy are reproduced verbatim (exact inline styles / px / hex / font /
+// weight — LeftRail/CenterChat/RightPanel raw-value precedent); real sessions/threads/tasks over
+// tRPC are substituted into the exact structure (§8.3: data is the only variable). cmdk drives the
+// fuzzy filter + ↑/↓/Enter + focus-trap; the underlying Radix Dialog drives Esc/overlay-close +
+// focus-restore. The prototype's static `i===0` highlight becomes cmdk's data-[selected] row.
+// The fixed panel/backdrop live in index.css (`.cmdk-panel`/`.cmdk-backdrop`) — cmdk's Dialog only
+// exposes overlay/content classNames, not style props.
+//
+// Deferred legs (flagged, plan §8.6): the prototype's "file" (EX), "Approvals" (AP) and
+// "New schedule" (SC) rows have no real target yet — no fs-read scope (Stage 6), no approvals /
+// schedule overlay (Stage R2+). The placeholder copy stays verbatim ("…/ file…"); results omitted.
 
-const CONTENT_CLASS =
-  'fixed left-1/2 top-[15vh] z-50 -translate-x-1/2 ' +
-  'flex max-h-[70vh] w-[90vw] max-w-xl flex-col overflow-hidden ' +
-  'rounded-card border border-card bg-surface-card shadow-overlay ' +
-  'focus:outline-none ' +
-  'data-[state=open]:animate-zoom-in data-[state=closed]:animate-zoom-out ' +
-  'motion-reduce:animate-none';
+const HEADER_STYLE: CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: 10,
+  padding: '12px 16px',
+  borderBottom: '1px solid #EFF1F5',
+};
 
-const GROUP_ORDER: PaletteGroup[] = ['Sessions', 'Threads', 'Tasks'];
+const INPUT_STYLE: CSSProperties = {
+  flex: 1,
+  fontSize: 13.5,
+  color: '#191C22',
+  fontFamily: 'inherit',
+};
+
+const ESC_STYLE: CSSProperties = {
+  font: "500 9.5px 'IBM Plex Mono',monospace",
+  color: '#98A1B0',
+  border: '1px solid #E7E9EE',
+  borderRadius: 5,
+  padding: '2px 6px',
+  cursor: 'pointer',
+};
+
+// The prototype list holds ~7 curated rows with no cap; with real data we cap the row count in
+// `selectPaletteRows` and add a max-height + scroll so the panel stays a fixed, usable height.
+const BODY_STYLE: CSSProperties = { padding: 6, maxHeight: 384, overflowY: 'auto' };
+
+const ROW_STYLE: CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: 10,
+  padding: '8px 11px',
+  borderRadius: 8,
+  cursor: 'pointer',
+};
+
+const GLYPH_STYLE: CSSProperties = {
+  width: 20,
+  height: 20,
+  borderRadius: 6,
+  background: '#F1F2F5',
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  font: "600 9px 'IBM Plex Mono',monospace",
+  color: '#5B6472',
+  flex: 'none',
+};
+
+const SUB_STYLE: CSSProperties = {
+  fontSize: 10.5,
+  color: '#98A1B0',
+  whiteSpace: 'nowrap',
+  flex: 'none',
+};
+
+const KBD_STYLE: CSSProperties = {
+  marginLeft: 'auto',
+  font: "400 9.5px 'IBM Plex Mono',monospace",
+  color: '#B6BDC9',
+  flex: 'none',
+  paddingLeft: 10,
+};
+
+const FOOTER_STYLE: CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  padding: '7px 16px',
+  borderTop: '1px solid #F7F8FA',
+  background: '#FBFBFC',
+};
+
+const FOOTER_TEXT_STYLE: CSSProperties = {
+  font: "400 9.5px 'IBM Plex Mono',monospace",
+  color: '#B6BDC9',
+};
+
+const EMPTY_STYLE: CSSProperties = {
+  padding: '18px 11px',
+  textAlign: 'center',
+  fontSize: 12.5,
+  color: '#98A1B0',
+};
 
 export interface CommandPaletteProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }
 
-// ⌘K command palette (design 6c): searches real sessions/threads/tasks over tRPC and
-// navigates via React Router. Keyboard-only reachable — cmdk provides ↑/↓/Enter + focus
-// trap; Esc/overlay close come from the underlying Radix Dialog. File search is out of
-// scope (no fs-read tRPC scope until Stage 6, plan §2.1).
+// A single palette row — glyph badge + label + sub + right-aligned kbd. cmdk sets
+// `data-[selected=true]` on the arrow-selected (or mouse-hovered) row; the prototype highlight
+// (#F5F6FD bg, #4655D4 label) is applied there via `.cmdk-row` CSS in index.css.
+function Row({ row, onSelect }: { row: PaletteRow; onSelect: () => void }) {
+  return (
+    <Command.Item value={row.id} onSelect={onSelect} className="cmdk-row" style={ROW_STYLE}>
+      <span style={GLYPH_STYLE}>{row.glyph}</span>
+      <span className="cmdk-row-label">{row.label}</span>
+      <span style={SUB_STYLE}>{row.sub}</span>
+      <span style={KBD_STYLE}>{row.kbd}</span>
+    </Command.Item>
+  );
+}
+
 export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
   const trpc = useTRPC();
   const navigate = useNavigate();
+  const [query, setQuery] = useState('');
 
-  // Fetch the three lists only while the palette is open; cmdk does the fuzzy filtering.
-  const sessionsQuery = useQuery(trpc.sessions.list.queryOptions({}, { enabled: open }));
-  const threadsQuery = useQuery(trpc.threads.list.queryOptions({}, { enabled: open }));
-  const tasksQuery = useQuery(trpc.tasks.list.queryOptions({}, { enabled: open }));
+  // Reset the query each time the palette opens (fresh search).
+  useEffect(() => {
+    if (open) setQuery('');
+  }, [open]);
 
-  const items = useMemo(
+  // Fetch the three lists only while the palette is open. `staleTime` lets the palette reuse the
+  // workbench's already-cached `sessions.list({})` instead of forcing a refetch on every open — a
+  // duplicate refetch entangles the shared httpBatchLink GET (sessions is also owned by the left
+  // rail) and the whole batch never settles, leaving threads/tasks stuck pending.
+  const STALE = 30_000;
+  const sessionsQuery = useQuery(trpc.sessions.list.queryOptions({}, { enabled: open, staleTime: STALE }));
+  const threadsQuery = useQuery(trpc.threads.list.queryOptions({}, { enabled: open, staleTime: STALE }));
+  const tasksQuery = useQuery(trpc.tasks.list.queryOptions({}, { enabled: open, staleTime: STALE }));
+
+  // We filter + cap ourselves (cmdk `shouldFilter={false}`): feeding cmdk every real entity
+  // renders hundreds of rows, which stalls the shared httpBatchLink fetch and blows up the panel.
+  const rows = useMemo<PaletteRow[]>(
     () =>
-      buildPaletteItems({
+      selectPaletteRows(query, {
         sessions: sessionsQuery.data ?? [],
         threads: threadsQuery.data ?? [],
         tasks: tasksQuery.data ?? [],
       }),
-    [sessionsQuery.data, threadsQuery.data, tasksQuery.data],
+    [query, sessionsQuery.data, threadsQuery.data, tasksQuery.data],
   );
-
-  const loading = sessionsQuery.isFetching || threadsQuery.isFetching || tasksQuery.isFetching;
-  const hasError = sessionsQuery.isError || threadsQuery.isError || tasksQuery.isError;
 
   const go = (route: string, focusId?: string) => {
     navigate(route, focusId ? { state: { focusId } } : undefined);
@@ -61,71 +163,45 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
       open={open}
       onOpenChange={onOpenChange}
       label="Command palette"
-      overlayClassName={OVERLAY_CLASS}
-      contentClassName={CONTENT_CLASS}
+      shouldFilter={false}
       loop
+      overlayClassName="cmdk-backdrop"
+      contentClassName="cmdk-panel"
     >
-      <Command.Input
-        autoFocus
-        placeholder="Search sessions, threads, tasks…"
-        className="w-full border-b border-card bg-transparent px-2g py-1.5g text-body text-state-ink placeholder:text-state-ink/40 focus:outline-none"
-      />
-      <Command.List className="min-h-0 flex-1 overflow-y-auto p-1g">
-        {loading && (
-          <Command.Loading className="px-1.5g py-1g text-ui text-state-ink/40">
-            Loading…
-          </Command.Loading>
-        )}
-        {hasError && (
-          <div className="px-1.5g py-1g text-ui text-pill-failed-fg">
-            Failed to load some results — try again.
-          </div>
-        )}
-        <Command.Empty className="px-1.5g py-2g text-center text-ui text-state-ink/40">
-          No results.
-        </Command.Empty>
-
-        <Command.Group
-          heading="Commands"
-          className="mb-1g text-ui [&_[cmdk-group-heading]]:px-1.5g [&_[cmdk-group-heading]]:py-0.5g [&_[cmdk-group-heading]]:text-ui [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:text-state-ink/45"
+      <div style={HEADER_STYLE}>
+        <svg
+          width="13"
+          height="13"
+          viewBox="0 0 12 12"
+          fill="none"
+          stroke="#98A1B0"
+          strokeWidth="1.5"
         >
-          {NAV_COMMANDS.map((cmd) => (
-            <Command.Item
-              key={cmd.id}
-              value={cmd.id}
-              keywords={[cmd.label, ...cmd.keywords]}
-              onSelect={() => go(cmd.route)}
-              className="flex cursor-pointer items-center gap-1g rounded-card px-1.5g py-1g text-ui text-state-ink/80 data-[selected=true]:bg-pill-running-bg data-[selected=true]:text-pill-running-fg"
-            >
-              {cmd.label}
-            </Command.Item>
-          ))}
-        </Command.Group>
+          <circle cx="5" cy="5" r="3.8" />
+          <path d="M8 8l2.6 2.6" />
+        </svg>
+        <Command.Input
+          autoFocus
+          value={query}
+          onValueChange={setQuery}
+          placeholder="Jump to session / thread / task / file…"
+          style={INPUT_STYLE}
+        />
+        <span style={ESC_STYLE} onClick={() => onOpenChange(false)}>
+          esc
+        </span>
+      </div>
 
-        {GROUP_ORDER.map((group) => {
-          const groupItems = items.filter((i) => i.group === group);
-          if (groupItems.length === 0) return null;
-          return (
-            <Command.Group
-              key={group}
-              heading={group}
-              className="mb-1g text-ui [&_[cmdk-group-heading]]:px-1.5g [&_[cmdk-group-heading]]:py-0.5g [&_[cmdk-group-heading]]:text-ui [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:text-state-ink/45"
-            >
-              {groupItems.map((item) => (
-                <Command.Item
-                  key={item.id}
-                  value={item.id}
-                  keywords={[item.label, ...item.keywords]}
-                  onSelect={() => go(item.route, item.focusId)}
-                  className="flex cursor-pointer items-center gap-1g rounded-card px-1.5g py-1g font-mono text-ui text-state-ink/80 data-[selected=true]:bg-pill-running-bg data-[selected=true]:text-pill-running-fg"
-                >
-                  {item.label}
-                </Command.Item>
-              ))}
-            </Command.Group>
-          );
-        })}
+      <Command.List style={BODY_STYLE}>
+        <Command.Empty style={EMPTY_STYLE}>No results.</Command.Empty>
+        {rows.map((row) => (
+          <Row key={row.id} row={row} onSelect={() => go(row.route, row.focusId)} />
+        ))}
       </Command.List>
+
+      <div style={FOOTER_STYLE}>
+        <span style={FOOTER_TEXT_STYLE}>↑↓ navigate · ⏎ open · esc dismiss</span>
+      </div>
     </Command.Dialog>
   );
 }

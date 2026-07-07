@@ -23,7 +23,7 @@ hard-codes hex.
 | `src/shell/` | `AppShell` (**Stage-R RB pass-through**, task f528 — renders `<Outlet/>` + the global ⌘K `CommandPalette`; the old token-summary nav `LeftRail` was removed — `/workbench` owns its own frame + rail) · `EmptyPane` (wraps `design/EmptyState`) |
 | `src/features/workbench/` | **Stage-R RB app-shell frame + Left Rail 1:1** (task f528) — `WorkbenchPage` = 240/fluid/400 three-pane flex frame; real `LeftRail` (prototype L42–100, real projects/sessions/cost); `CenterChat`/`RightPanel` STUB slots (siblings B/C). See its CORTEX.md |
 | `src/features/tasks/` | Tasks tab vertical slice (design 4a, task 5) — see its CORTEX.md. `TasksPanel` = reusable data-driven body (also used by the workbench Tasks tab); `Pills.tsx` delegates to `design/StatusPill` |
-| `src/features/command-palette/` | ⌘K command palette (design 6c, task 051b) on `cmdk` — searches real sessions/threads/tasks over tRPC + section-nav commands, keyboard-reachable. See its CORTEX.md |
+| `src/features/command-palette/` | ⌘K command palette **1:1 rebuild** (Stage-R2 overlay, task c967) on `cmdk` — prototype-exact overlay chrome + real sessions/threads/tasks search (substring filter, capped) + section-nav commands, keyboard-reachable. See its CORTEX.md |
 | `src/features/thread/` | Thread detail 11b **center-column view rebuilt 1:1 from the prototype** (Stage-R2 task 4450) — `/threads/:id` = real LeftRail frame + header/meta/PIPELINE/THREAD-ARTIFACT over `threads.get` (B1); nested 2b drill-down; pure `thread-detail-vm`. Superseded the Stage-3 token-summary detail. See its CORTEX.md |
 | `src/features/execution/` | Execution detail 8b (task 2198) — `executions.get` rail + live `executions.log` stream + Stop (`executions.cancel`), route `/executions/:executionId`. See its CORTEX.md |
 | `src/features/kit/` | `/kit` design-system demo surface (tasks e794/2add) — every primitive in every variant/state + degraded-4 (10c) via `DegradedDemos.tsx` + empty-state next-action panels (10d), pure presentational |
@@ -38,9 +38,11 @@ hard-codes hex.
 - `build` = `tsc --noEmit && vite build`; `typecheck` = `tsc --noEmit`; `test` = `vitest run` (`group-tasks` grouping + `design/tone` status→tone mapping pure-logic unit tests).
 - Tailwind pinned to v3.4 (config-file token contract; v4 moves tokens to CSS `@theme`).
 - Tabs/Tooltip use `@radix-ui/react-tabs` / `@radix-ui/react-tooltip` (approved primitive layer, DR-0018 §1); token-only styling.
-- **⌘K command palette live** (Stage-2 task 051b): `features/command-palette/` on `cmdk` (`^1.1.1`),
-  mounted globally in `AppShell`. Searches real `sessions.list`/`threads.list`/`tasks.list` over
-  tRPC + section-nav command items; navigates via React Router. Verified against a live
-  ui-http-server (real task + thread matches rendered by search; ⌘K open, keyboard nav/Enter/Esc,
-  navigation all driven headless-Chrome, zero console errors). File search deferred to Stage 6 (no
-  fs-read tRPC scope yet).
+- **⌘K command palette 1:1** (Stage-R2 overlay, task c967): `features/command-palette/` on `cmdk`
+  (`^1.1.1`), mounted globally in `AppShell`, rebuilt 1:1 from `prototype.dc.html` L1295–1315
+  (proto-shot `01-cmdk-palette.png`) — exact overlay chrome/anatomy/copy, flat rows, real
+  `sessions.list`/`threads.list`/`tasks.list` search (own substring filter, `shouldFilter={false}`,
+  capped) + section-nav commands; navigates via React Router. Verified: side-by-side vs the proto-shot
+  (`design/build-shots/c967-cmdk-compare.png`), live headless-Chrome render of real session rows + live
+  filter, real task rows rendered in a connection-pool-relaxed run. File/Approvals/schedule legs
+  deferred (no fs-read scope / overlays not yet built).
