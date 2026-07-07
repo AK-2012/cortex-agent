@@ -36,6 +36,16 @@ async function createWindow(port: number): Promise<BrowserWindow> {
     },
   });
 
+  // Log the loaded URL; in CORTEX_DESKTOP_TEST mode quit immediately after load
+  // (used for headless CI verification: run with Xvfb and check stdout for this line).
+  win.webContents.on('did-finish-load', () => {
+    console.log(`[main] BrowserWindow loaded: ${win.webContents.getURL()}`);
+    if (process.env['CORTEX_DESKTOP_TEST']) {
+      console.log('[main] test mode: quit after load');
+      app.quit();
+    }
+  });
+
   await win.loadURL(`http://127.0.0.1:${port}`);
 
   // Open DevTools in development when ELECTRON_DEVTOOLS env var is set.
@@ -74,6 +84,9 @@ app.on('window-all-closed', () => {
 });
 
 // Cleanly shut down the proxy server before the process exits.
+// NOTE: Electron does not await async event handlers; proxyClose() is fire-and-forget
+// here. In practice server.closeAllConnections() is synchronous (Node 18.2+), so
+// connections are torn down immediately before the process exits.
 app.on('before-quit', async () => {
   if (proxyClose) {
     await proxyClose();

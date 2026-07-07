@@ -6,7 +6,7 @@
   "description": "Cortex Desktop — Electron shell wrapping the web SPA with a token-injecting loopback reverse-proxy",
   "main": "dist-electron/main.js",
   "engines": {
-    "node": ">=20.0.0"
+    "node": ">=20.11.0"
   },
   "scripts": {
     "compile": "tsc -p tsconfig.json",
