@@ -40,6 +40,53 @@
   .sess-row {
     transition: background 0.12s;
   }
+
+  /* ⌘K command palette — 1:1 chrome from prototype.dc.html L1291–1315 (task c967).
+     cmdk's Dialog only accepts overlay/content classNames (no style prop), so the
+     fixed-position panel + backdrop live here; rows carry inline styles. */
+  .cmdk-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(25, 28, 34, 0.34);
+    z-index: 60;
+    animation: cxfade 0.18s ease;
+  }
+  .cmdk-panel {
+    position: fixed;
+    left: 50%;
+    top: 90px;
+    transform: translateX(-50%);
+    width: 560px;
+    max-width: 94vw;
+    background: #fff;
+    border-radius: 14px;
+    box-shadow: 0 24px 64px rgba(16, 24, 40, 0.3);
+    z-index: 61;
+    overflow: hidden;
+    animation: cxcmdk 0.22s cubic-bezier(0.22, 1, 0.36, 1);
+  }
+  .cmdk-panel:focus,
+  .cmdk-panel:focus-visible {
+    outline: none;
+  }
+  .cmdk-row[data-selected='true'] {
+    background: #f5f6fd;
+  }
+  .cmdk-row:hover {
+    background: #eef0fa;
+  }
+  .cmdk-row-label {
+    font-size: 12.5px;
+    font-weight: 600;
+    color: #191c22;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    min-width: 0;
+  }
+  .cmdk-row[data-selected='true'] .cmdk-row-label {
+    color: #4655d4;
+  }
 }
 
 @keyframes cxblink {

@@ -1,27 +1,33 @@
-# features/command-palette/ — ⌘K Command Palette (design 6c)
+# features/command-palette/ — ⌘K Command Palette (Stage-R2, design 6c / overlay)
 
-Stage-2 (DR-0018 §5) global command palette on `cmdk`. ⌘K / Ctrl+K opens a modal
-palette that searches **real** sessions/threads/tasks over tRPC and navigates via
-React Router. Keyboard-only reachable end-to-end. Mounted globally in `shell/AppShell`.
+Global command palette on `cmdk`, **rebuilt 1:1 from the prototype** (`prototype.dc.html`
+L1295–1315, proto-shot `01-cmdk-palette.png`) — task c967, DR-0018 §8.6 Stage R2. ⌘K / Ctrl+K
+opens the overlay; it searches **real** sessions/threads/tasks over tRPC and navigates via React
+Router. Keyboard-reachable end-to-end. Mounted globally in `shell/AppShell`.
 
 | path | role |
 |---|---|
-| `palette-items.ts` | Pure `buildPaletteItems({ sessions, threads, tasks }) → PaletteItem[]` — maps the three real tRPC query results into flat, searchable items (group `Sessions`→`/workbench`, `Threads`→`/threads`, `Tasks`→`/tasks`; `keywords` = id/text/name/project/status so cmdk can fuzzy-match by id, not just label; `focusId` = entity id carried in `location.state`). `NAV_COMMANDS` = static section-navigation command items. Stable input order; unique cmdk `value` per item. |
-| `palette-items.test.ts` | vitest unit test for `buildPaletteItems` + `NAV_COMMANDS` (TDD — written first, watched fail). |
-| `useCommandPalette.ts` | Global ⌘K/Ctrl+K keydown hook (one window listener, cleaned up on unmount) → controlled `{ open, setOpen }`. |
-| `CommandPalette.tsx` | The cmdk `Command.Dialog`: fetches `sessions.list`/`threads.list`/`tasks.list` (`enabled` while open) via `useTRPC`, renders a Commands group (nav) + the three entity groups, and on select `navigate(route, { state: { focusId } })` + close. Token-only styling (no hex); overlay/zoom motion reuse the `tailwind.config.ts` animation tokens. |
+| `palette-items.ts` | Pure mappers. `buildCmdkItems({ sessions, threads, tasks }) → CmdkItem[]` maps the three tRPC results into the prototype flat-row model (`glyph` SE/TH/TK · `label` · `sub` · right-aligned `kbd` session/thread/task · `route` · `focusId` · `keywords`). `NAV_COMMAND_ITEMS` = static nav rows (OV Overview / WB Workbench / TK Tasks / TH Threads / ST Settings — prototype OV/ST legs + section jumps). `selectPaletteRows(query, sources, opts)` = the prototype substring filter (`(label+sub+keywords).includes(q)`) with **caps** (empty query → nav + N recent entities/kind; typing → all matches capped) — feeding cmdk every real entity blows up the DOM and stalls the shared batched fetch. |
+| `palette-items.test.ts` | vitest unit tests for `buildCmdkItems` / `NAV_COMMAND_ITEMS` / `selectPaletteRows` (TDD — written first, watched fail). |
+| `useCommandPalette.ts` | Global ⌘K/Ctrl+K keydown hook (one window listener, cleaned up on unmount) → controlled `{ open, setOpen }`. Unchanged. |
+| `CommandPalette.tsx` | The `Command.Dialog` — 1:1 overlay chrome (exact inline styles/px/hex/font/weight from the prototype: search icon, `Jump to session / thread / task / file…` input, `esc` tag, flat rows, footer `↑↓ navigate · ⏎ open · esc dismiss`). `shouldFilter={false}` + controlled input → we own filtering via `selectPaletteRows`. Fetches `sessions/threads/tasks.list` (`enabled` while open, `staleTime`) via `useTRPC`; on select `navigate(route, { state: { focusId } })` + close. Panel/backdrop/row CSS live in `index.css` (`.cmdk-panel`/`.cmdk-backdrop`/`.cmdk-row`) since cmdk's Dialog exposes only classNames. |
 
 ## Notes
 
-- **File search is intentionally absent.** No `files.*` tRPC query scope exists — the fs-read
-  scope is Stage 6 (plan §2.1: each new data surface pairs with its backend task first).
-  Adding file jump would require inventing a backend scope, out of this task's scope. The task
-  title's "文件" leg is deferred to Stage 6; the done_when only requires sessions/threads/tasks.
-- **Navigation targets the entity's section route, not a per-entity detail route** — detail
-  routes (`/threads/:id`, chat/session surface) are Stage 3/4. The selected entity id rides in
-  React Router `location.state.focusId` so a future detail surface can consume it without a
-  speculative unread URL param.
-- cmdk (`^1.1.1`) provides the ↑/↓/Enter selection + focus trap; the underlying Radix Dialog
-  provides Esc/overlay close + focus restore. `Command.Input` autofocuses on open.
-- Query plumbing reuses the task-5-verified `useQuery(trpc.<scope>.list.queryOptions({}, { enabled }))`
-  pattern; typed directly against the real `AppRouter`.
+- **1:1 method (§8.3):** the prototype is authoritative on chrome/anatomy/copy (reproduced verbatim
+  with raw values — LeftRail/CenterChat/RightPanel precedent); **real data is the only variable**.
+  The prototype's static `i===0` highlight becomes cmdk's `data-[selected]` row (`.cmdk-row` CSS:
+  `#F5F6FD` bg / `#4655D4` label). Evidence: `design/build-shots/c967-cmdk-compare.png`.
+- **Deferred legs (flagged).** The prototype's **file** (EX), **Approvals** (AP) and **New schedule**
+  (SC) rows have no real target yet — no `files.*` fs-read scope (Stage 6, plan §2.1); no approvals /
+  schedule overlay (Stage R2+ overlay set). The placeholder copy keeps the verbatim "…/ file…"; those
+  results are omitted. done_when only requires sessions/threads/tasks.
+- **Row count is capped** (`selectPaletteRows`) + the list is `max-height`+scroll. This is a required
+  real-data adaptation: the prototype has ~7 curated rows and no cap; real data has hundreds, and
+  rendering them all both breaks the panel height AND (with the workbench's live SSE saturating the
+  HTTP/1.1 connection pool) stalls the palette's on-open batched fetch in headless-Chrome. Caps keep
+  the DOM small; `staleTime` avoids a duplicate `sessions.list({})` refetch that entangled the batch.
+- **Navigation** targets the entity's section route (threads → `/threads/:id`; sessions → `/workbench`;
+  tasks → `/tasks`), carrying the entity id in `location.state.focusId` for a future detail surface.
+- cmdk (`^1.1.1`) provides ↑/↓/Enter selection + focus trap; the underlying Radix Dialog provides
+  Esc/overlay close + focus restore. `Command.Input` autofocuses on open.
