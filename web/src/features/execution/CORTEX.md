@@ -1,37 +1,39 @@
-# features/execution/ — execution detail 8b (F3)
+# features/execution/ — execution log drawer (09-exec-logs)
 
-Stage-3 task 2198 (DR-0018 §6.3 F3). Renders a **real `executions.get` (`ExecutionDetailInfo`,
-B2-A)** for one execution — lifecycle / watchdog / GPU / cost right rail — with a **live-scrolling
-`cortex-run` log stream** (B2-C `executions.log` SSE subscription) on the left, a working **Stop**
-(`executions.cancel`), and an **Extend-cap** affordance. Reached from a thread dispatch row
-(`features/thread/ThreadStepList` → `/executions/:executionId`); chat is the ultimate host (Stage 4).
+Stage-R2 task b963 (DR-0018 §8.6). The **execution log drawer** overlay — a right dark slide-over
+reproduced **1:1** from `design/ref/prototype.dc.html` L1542–1562 (+ shared backdrop L1292), diffed vs
+`design/proto-shots/09-exec-logs.png`. Wired to **real** tRPC data: `executions.get`
+(`ExecutionDetailInfo`, B2-A) for the header (title / status pill / meta), a **live-scrolling
+`cortex-run` log stream** (B2-C `executions.log` SSE subscription) in the dark body, and a working
+**Kill run** (`executions.cancel`). **Replaces** the old Stage-3 8b execution *detail page* (task 2198
+— `ExecutionDetailPage`/`Rail`/`LogStreamView` deleted, route `/executions/:executionId` removed).
 
 | path | role |
 |---|---|
-| `log-buffer.ts` | **Pure** bounded-log reducer (TDD): `appendLog(state, frame, cap)` accumulates `execution.log` frames into a ring capped at `cap` lines; folds backend flood drops (`frame.dropped`) + client cap eviction into one `dropped` total; ignores replayed frames (`seq ≤ lastSeq`). `EMPTY_LOG` seed. Framework-free. |
-| `log-buffer.test.ts` | vitest unit tests for the reducer (TDD — written first, 8 tests). |
-| `execution-detail.ts` | **Pure** presentational derivations (TDD): `isStoppable` (running only), `logStreamEnabled` (dispatch.runName present), `formatGpu` ("GPU &lt;indices&gt; · &lt;memoryMb&gt; MB" when captured, null→"—" — real per-exec GPU landed via task 032e/7578), `formatCost`/`formatNum`/`formatDuration`. |
-| `execution-detail.test.ts` | vitest unit tests for the derivations (TDD — written first, 8 tests). |
+| `execution-log-view.ts` | **Pure** drawer derivations (TDD): `execPill(status)` (prototype glyph+label), `execMeta(detail)` (`machine · taskId · finished <HH:MM> \| running`, null segments dropped), `execClock`/`execNow` (UTC HH:MM / HH:MM:SS), `isStoppable` (running only), `logStreamEnabled` (dispatch.runName present). Framework-free. |
+| `execution-log-view.test.ts` | vitest unit tests (TDD — written first, watched red, 12 tests). |
+| `log-buffer.ts` | **Pure** bounded-log reducer (TDD): `appendLog(state, frame, cap)` folds `execution.log` frames into a ring capped at `cap` lines; folds backend flood drops + client cap eviction into one `dropped` total; ignores replayed frames (`seq ≤ lastSeq`). `EMPTY_LOG` seed. |
+| `log-buffer.test.ts` | vitest unit tests for the reducer (TDD, 8 tests). |
 | `useExecutionLogStream.ts` | Thin React/SSE glue: opens one `executions.log` subscription (gated on `enabled`), reads each UiEvent's `payload.{lines,seq,dropped}`, folds into `appendLog` (`LOG_CAP`=2000). Resets on executionId change; closes on unmount. |
-| `LogStreamView.tsx` | **Presentational** log viewer: mono scroll pane, sticky-bottom auto-scroll (unless the user scrolled up), "…N lines dropped" marker, `EmptyState` when no `runName`, waiting placeholder while running. `data-log-stream` for E2E. |
-| `ExecutionDetailRail.tsx` | **Presentational** right rail: Lifecycle / Watchdog / GPU / Cost `Card`s + Stop (danger, disabled unless running) + Extend-cap (disabled affordance). `data-execution-rail` / `data-action` for E2E. |
-| `execution-render.test.tsx` | `react-dom/server` render checks for the two presentational components (browser E2E is environment-blocked — see `features/thread/CORTEX.md`; 8 tests). |
-| `ExecutionDetailPage.tsx` | **Route component** (`/executions/:executionId`): `executions.get` query (refetchInterval 3s while running — no lifecycle bus event exists to invalidate on) + `useExecutionLogStream` + `executions.cancel` mutation (invalidates on settle) → header + two-column (log left, rail right). `data-execution-detail` for E2E. |
+| `ExecutionLogDrawer.tsx` | The **1:1 dark drawer** on Radix Dialog (focus trap / Esc-close / focus-restore + backdrop scrim). Exact inline styles/px/hex/font from the prototype (dark palette not in the light `proto.*` tokens → raw values, per §8.3 / LeftRail precedent). `DrawerBody` binds `executions.get` (poll 3s while running), `useExecutionLogStream` (gated on `logStreamEnabled`), and `executions.cancel` (Kill run, gated by `isStoppable` + toast). Sticky-bottom auto-scroll; dropped-lines marker; blinking `cxblink` caret. `data-execution-log` / `data-action="kill-run"` for E2E. |
+| `ExecutionLogDrawerProvider.tsx` | Global mount + `useExecutionLogDrawer()` context (`open(id)`/`close()`). One drawer instance; any dispatch row opens it with an executionId. Mounted in `shell/AppShell` (mirrors the ⌘K palette mount). |
 
 ## Notes
 
-- **Backend**: B2 (task dd2b) — `executions.get` (B2-A), `ExecutionLogTailer` + `execution.log`
-  event (B2-B), `executions.log` subscribe wiring (B2-C). No backend change in this task.
+- **Backend**: unchanged (B2 task dd2b — `executions.get`, `ExecutionLogTailer` + `execution.log`
+  event, `executions.log` subscribe wiring; real per-exec GPU 032e). Web-only task.
+- **Triggers**: `features/thread/ThreadStepList` (dispatch row) and `features/workbench/RightThreadCard`
+  (`DispatchCard`) call `useExecutionLogDrawer().open(executionId)` instead of navigating to a route.
 - **UiEvent wrapper**: log frames arrive as `{ type:'execution.log', ts, payload:{ lines, seq,
-  dropped? } }` — the log data is on `event.payload`, not the top level (`subscribe.ts`).
-- **Live log only for cortex-run launches**: a stream is subscribable only when the daemon
-  registered a `runName` for the dispatch (`logStreamEnabled`). Otherwise the location can't be
-  resolved and the rail shows a "No live log" empty state.
-- **Extend-cap has no backend op** (`MutateOp` = `*.cancel` / `tasks.*` / `schedules.*`): rendered
-  as a disabled affordance with a native-title explanation. Real cap extension is a follow-up.
-  done_when requires only Stop (`executions.cancel`), which is real.
-- **gpu is the real per-execution GPU** — captured via the cortex-run watcher (`resolveGpuSelection`,
-  incl. `--gpu auto`) → task-callback → `ExecutionRecord.gpu` → `executions.get` (task 032e/7578).
-  `formatGpu` renders "GPU &lt;indices&gt; · &lt;memoryMb&gt; MB"; "—" only when the run resolved no GPU.
-- **Status/metrics live-refresh** is a poll (`refetchInterval` while running), not a subscription:
-  no `execution.*` lifecycle event exists (only `execution.log`). The log itself is push (SSE).
+  dropped? } }` — the log data is on `event.payload` (`subscribe.ts`).
+- **Live log only for cortex-run launches**: subscribable only when the daemon registered a `runName`
+  for the dispatch (`logStreamEnabled`); otherwise the dark body shows a "no live log" note. Kill still
+  works via `executions.cancel`.
+- **Real log lines are opaque strings** — the prototype's per-line timestamp/color split is mock-only,
+  so each raw line renders in the single body tone (`#C6CBE8`) at the exact mono 10.5px/2. Structure is
+  1:1; the log data is the variable (§8.3).
+- **Status/meta live-refresh** is a 3s poll (`refetchInterval` while running) — no `execution.*`
+  lifecycle bus event exists (only `execution.log`). The log itself is push (SSE). Kill invalidates
+  `executions.get` so the header pill flips to cancelled.
+- **No extend-cap** in this drawer — the prototype footer is the static heartbeat line + Kill run only
+  (the old rail's Extend-cap affordance is gone). done_when requires only Kill, which is real.

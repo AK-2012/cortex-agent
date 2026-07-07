@@ -1,5 +1,4 @@
 import type { ReactNode } from 'react';
-import { Link } from 'react-router-dom';
 import type {
   ThreadDetail,
   ThreadStepDetail,
@@ -8,6 +7,7 @@ import type {
   ThreadAgentFlow,
 } from '@cortex-agent/ui-contract';
 import { ID, MonoText, StatusPill } from '@/design';
+import { useExecutionLogDrawer } from '@/features/execution/ExecutionLogDrawerProvider';
 import { activeStepChildren, selectActiveStep, stepSummaryParts } from './thread-steps';
 
 // Shared thread-pipeline primitive (design 11a/11b/2b, DR-0018 §6.3 F1). Renders a ThreadDetail's
@@ -45,6 +45,7 @@ function CollapsedStep({ step, totalSteps }: { step: ThreadStepDetail; totalStep
 }
 
 function DispatchRow({ dispatch }: { dispatch: ThreadDispatchInfo }) {
+  const { open } = useExecutionLogDrawer();
   return (
     <div
       data-dispatch-id={dispatch.executionId}
@@ -55,13 +56,14 @@ function DispatchRow({ dispatch }: { dispatch: ThreadDispatchInfo }) {
       <MonoText muted className="shrink-0">
         {dispatch.type}
       </MonoText>
-      {/* Drill into the execution detail (8b) — the only in-app entry to F3 until chat (Stage 4). */}
-      <Link
-        to={`/executions/${dispatch.executionId}`}
+      {/* Open the execution log drawer (09-exec-logs) — the only in-app entry until chat (Stage 4). */}
+      <button
+        type="button"
+        onClick={() => open(dispatch.executionId)}
         className="ml-auto shrink-0 rounded-card hover:bg-surface-canvas-alt focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-state-run/40"
       >
         <ID value={dispatch.executionId} />
-      </Link>
+      </button>
     </div>
   );
 }
