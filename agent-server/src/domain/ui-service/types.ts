@@ -342,7 +342,7 @@ export interface MemoryFileEntry {
 
 export interface MemoryDirEntry {
   name: string;
-  /** Number of `*.md` entry files, excluding the auto-generated `index.md`. */
+  /** Number of `*.md` entry files, excluding the auto-generated `index.md` and `CORTEX.md`. */
   entryCount: number;
 }
 
