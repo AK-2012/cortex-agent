@@ -3,8 +3,9 @@
   "version": "0.0.0",
   "private": true,
   "scripts": {
-    "dev": "tauri dev",
-    "build": "tauri build",
+    "copy-connect": "mkdir -p ../web/dist && cp -f ui/connect.html ../web/dist/connect.html",
+    "dev": "npm run copy-connect && tauri dev",
+    "build": "npm run copy-connect && tauri build",
     "tauri": "tauri"
   },
   "devDependencies": {
