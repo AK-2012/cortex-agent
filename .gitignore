@@ -39,8 +39,8 @@ site/
 
 client/dist/
 packages/*/dist/
-desktop/dist-electron/
-desktop/dist-app/
+desktop/src-tauri/target/
+desktop/src-tauri/gen/
 client/cortex-client-*.tgz
 agent-server/cortex-agent-server-*.tgz
 client/cortex-agent-client-*.tgz
