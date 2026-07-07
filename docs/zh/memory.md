@@ -57,7 +57,7 @@ context/
 ---
 id: EXP-042
 date: 2026-03-09
-project: flywheel
+project: nimbus
 summary: "从 573 个产物中初步提取对象注册表"
 tags: [registry, data-analysis, milestone-2.2]
 status: valid
@@ -98,7 +98,7 @@ last-ref: "2026-04-16T03:12:21.074Z"
 ---
 id: K-008
 date: 2026-04-01
-project: flywheel
+project: nimbus
 summary: "反模式：在未验证上游服务可用性的情况下运行烟雾测试或更广泛的验证"
 tags: [anti-pattern, smoke-test, service-dependency]
 evidence: [EXP-021, EXP-022, EXP-025, EXP-033, EXP-040]
@@ -121,7 +121,7 @@ last-ref: "2026-04-10T20:42:00.826Z"
 ---
 id: PAT-001
 date: 2026-04-01
-project: flywheel
+project: nimbus
 summary: "当多阶段管道产生零输出时，按阶段量化通过率比端到端重试更快定位瓶颈"
 tags: [pipeline, diagnosis, stage-isolation]
 source-experiments: [EXP-001, EXP-005, EXP-006, EXP-008]
@@ -242,9 +242,9 @@ Dense Context 质量的酸性测试：如果你启动一个仅对仓库有读取
 
 | 项目 | 实验 | 知识 | 模式 |
 |---------|------------|-----------|----------|
-| flywheel | 56 | 11 | 4 |
+| nimbus | 56 | 11 | 4 |
 | cortex-self | 66 | 15 | 6 |
-| tactile-reasoning | 27 | ~13 | 2 |
+| beacon-nav | 27 | ~13 | 2 |
 | 其他项目 | 各不相同 | 各不相同 | 各不相同 |
 
 所有索引同时重建——命令在不到一秒内完成。

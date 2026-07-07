@@ -15,10 +15,10 @@ test.after(() => {
 // ── Tag matching ──
 
 test('[project:xxx] tag overrides everything', () => {
-  _resetProjectCache(['dex-hand', 'cortex-self']);
+  _resetProjectCache(['orchard', 'cortex-self']);
 
   // Even when message contains a project dir name, tag wins
-  assert.equal(detectProject('[project:override] check dex-hand status'), 'override');
+  assert.equal(detectProject('[project:override] check orchard status'), 'override');
 
   // Tag alone
   assert.equal(detectProject('[project:my-project] hello'), 'my-project');
@@ -49,7 +49,7 @@ test('case-insensitive substring match on project names', () => {
 });
 
 test('no match returns general', () => {
-  _resetProjectCache(['dex-hand', 'cortex-self']);
+  _resetProjectCache(['orchard', 'cortex-self']);
 
   assert.equal(detectProject('some unrelated text'), 'general');
   assert.equal(detectProject('what time is it'), 'general');
@@ -59,37 +59,37 @@ test('no match returns general', () => {
 });
 
 test('longest match wins when multiple project names appear', () => {
-  _resetProjectCache(['dex-hand', 'dex-hand-dataset']);
+  _resetProjectCache(['orchard', 'orchard-dataset']);
 
   // Message contains both, longer one wins
-  assert.equal(detectProject('check dex-hand-dataset status'), 'dex-hand-dataset');
+  assert.equal(detectProject('check orchard-dataset status'), 'orchard-dataset');
 
   // Only shorter appears
-  assert.equal(detectProject('check dex-hand status'), 'dex-hand');
+  assert.equal(detectProject('check orchard status'), 'orchard');
 });
 
 test('exact project name match in message', () => {
-  _resetProjectCache(['cortex-self', 'flywheel', 'tactile-reasoning']);
+  _resetProjectCache(['cortex-self', 'nimbus', 'beacon-nav']);
 
   assert.equal(detectProject('cortex-self needs a restart'), 'cortex-self');
-  assert.equal(detectProject('flywheel experiment results'), 'flywheel');
-  assert.equal(detectProject('tactile-reasoning paper draft'), 'tactile-reasoning');
+  assert.equal(detectProject('nimbus experiment results'), 'nimbus');
+  assert.equal(detectProject('beacon-nav paper draft'), 'beacon-nav');
 });
 
 // ── Falsy / empty messages ──
 
 test('null returns general', () => {
-  _resetProjectCache(['dex-hand']);
+  _resetProjectCache(['orchard']);
   assert.equal(detectProject(null), 'general');
 });
 
 test('undefined returns general', () => {
-  _resetProjectCache(['dex-hand']);
+  _resetProjectCache(['orchard']);
   assert.equal(detectProject(undefined), 'general');
 });
 
 test('empty string returns general', () => {
-  _resetProjectCache(['dex-hand']);
+  _resetProjectCache(['orchard']);
   assert.equal(detectProject(''), 'general');
 });
 
@@ -105,7 +105,7 @@ test('falsy message with empty project list', () => {
 test('empty project list returns general for any message', () => {
   _resetProjectCache([]);
 
-  assert.equal(detectProject('debug dex-hand issue'), 'general');
+  assert.equal(detectProject('debug orchard issue'), 'general');
   assert.equal(detectProject('cortex-self update'), 'general');
   // Tag still works
   assert.equal(detectProject('[project:explicit] message'), 'explicit');
@@ -150,9 +150,9 @@ test('multiple projects, only one matches', () => {
 });
 
 test('project name is substring of another but only partial appears', () => {
-  _resetProjectCache(['vr', 'vr-extra', 'vr-security']);
-  // "vr" is substring of both "vr-extra" and "vr-security", but message only contains "vr"
-  assert.equal(detectProject('vr setup'), 'vr');
+  _resetProjectCache(['atlas', 'atlas-extra', 'atlas-security']);
+  // "atlas" is substring of both "atlas-extra" and "atlas-security", but message only contains "atlas"
+  assert.equal(detectProject('atlas setup'), 'atlas');
 });
 
 test('tag takes priority over dynamic match', () => {
@@ -162,9 +162,9 @@ test('tag takes priority over dynamic match', () => {
 });
 
 test('hyphenated project names match correctly', () => {
-  _resetProjectCache(['dex-hand', 'dex-hand-dataset', 'tactile-reasoning']);
+  _resetProjectCache(['orchard', 'orchard-dataset', 'beacon-nav']);
 
-  assert.equal(detectProject('dex-hand training script'), 'dex-hand');
-  assert.equal(detectProject('dex-hand-dataset collection'), 'dex-hand-dataset');
-  assert.equal(detectProject('tactile-reasoning experiment'), 'tactile-reasoning');
+  assert.equal(detectProject('orchard training script'), 'orchard');
+  assert.equal(detectProject('orchard-dataset collection'), 'orchard-dataset');
+  assert.equal(detectProject('beacon-nav experiment'), 'beacon-nav');
 });

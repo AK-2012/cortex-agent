@@ -13,7 +13,7 @@ This skill governs **multi-round debugging campaigns** — situations where you'
 
 **Complements `superpowers:systematic-debugging`**: That skill handles single-bug root cause investigation (read error → reproduce → trace → fix). This skill handles the strategic layer: when to instrument, what to fix first, how to verify, and how to plan across multiple fix cycles.
 
-**Evidence base**: This protocol is distilled from 50+ debugging experiments across flywheel (19 bugs, 37 experiments), dex-hand (rendering pipeline bugs), and cortex-self (meta-debugging). Every rule has at least 2 independent real-world failures backing it.
+**Evidence base**: This protocol is distilled from 50+ debugging experiments across nimbus (19 bugs, 37 experiments), orchard (rendering pipeline bugs), and cortex-self (meta-debugging). Every rule has at least 2 independent real-world failures backing it.
 
 ---
 
@@ -25,7 +25,7 @@ This skill governs **multi-round debugging campaigns** — situations where you'
 
 This is the single highest-leverage investment in a debugging campaign. Every hour spent here saves 3-5 hours of blind fix-test cycles later.
 
-> *Evidence*: flywheel EXP-022→037 spent 7/16 experiments building diagnostics reactively (44% waste). Three independent logging bugs (B13/B16/B19) each blocked root cause identification until fixed. B16 fix revealed "VLA 100% failure was drop-platform check" — fundamentally changing the optimization direction.
+> *Evidence*: nimbus EXP-022→037 spent 7/16 experiments building diagnostics reactively (44% waste). Three independent logging bugs (B13/B16/B19) each blocked root cause identification until fixed. B16 fix revealed "VLA 100% failure was drop-platform check" — fundamentally changing the optimization direction.
 
 #### Checklist
 
@@ -45,7 +45,7 @@ This is the single highest-leverage investment in a debugging campaign. Every ho
    - Asymmetric error handling is a systematic blind spot — one path silently swallows errors while another correctly reports them
 
 4. **Check for diagnostic bug propagation**
-   - The same logging bug pattern often repeats across stages (flywheel B16 in vla_simulation → B19 same pattern in trajectory_filter)
+   - The same logging bug pattern often repeats across stages (nimbus B16 in vla_simulation → B19 same pattern in trajectory_filter)
    - When you find a logging bug in one stage, `grep` for the same pattern in all other stages
 
 5. **Log audit**
@@ -63,7 +63,7 @@ Every time you add logging reactively, you need another test cycle to collect th
 
 **Before fixing anything, build a complete picture of what's failing and how often.**
 
-> *Evidence*: flywheel EXP-028–030 spent 3 experiments fixing instantiation parse failures (11% of total), while type planning empty responses (67% of total) went unnoticed. EXP-031 Reflection: "Should have done a grep -c error frequency count first, would have located it in 30 seconds"
+> *Evidence*: nimbus EXP-028–030 spent 3 experiments fixing instantiation parse failures (11% of total), while type planning empty responses (67% of total) went unnoticed. EXP-031 Reflection: "Should have done a grep -c error frequency count first, would have located it in 30 seconds"
 
 #### Steps
 
@@ -136,7 +136,7 @@ At the start of any multi-round debugging campaign, fill this out:
 
 **Not all hypotheses are created equal. Track their provenance.**
 
-> *Evidence*: In three independent events (dex-hand EXP-005 USD instancing, flywheel SCALE_FACTOR, cortex-self EXP-050 TiledCamera), analogy-based reasoning led to wrong root cause identification, each costing 6h+ or introducing destructive changes.
+> *Evidence*: In three independent events (orchard EXP-005 USD instancing, nimbus SCALE_FACTOR, cortex-self EXP-050 TiledCamera), analogy-based reasoning led to wrong root cause identification, each costing 6h+ or introducing destructive changes.
 
 #### Two types of hypotheses
 
@@ -174,7 +174,7 @@ Level 5:           Commented-out code with no explanation
 Level 6 (lowest):  "I think I remember..." or unnamed conventions
 ```
 
-> *Evidence*: dex-hand KNOWLEDGE.md §3.2 — code comments in `balanced.kit` ("DLSS frame gen does not yet support tiled camera well") pointed in the right direction but didn't explain the actual post-processing issue. Different interpretations led to different (wrong) debugging paths.
+> *Evidence*: orchard KNOWLEDGE.md §3.2 — code comments in `balanced.kit` ("DLSS frame gen does not yet support tiled camera well") pointed in the right direction but didn't explain the actual post-processing issue. Different interpretations led to different (wrong) debugging paths.
 
 **Rule**: Information from Level 3-6 must be treated as hypotheses requiring falsification (see 2.1).
 
@@ -184,7 +184,7 @@ Level 6 (lowest):  "I think I remember..." or unnamed conventions
 
 **Before declaring a value "wrong", trace it through the entire pipeline.**
 
-> *Evidence*: flywheel SCALE_FACTOR=0.01 was "fixed" to 1.0 because it looked like a bug. Actually it compensated for Isaac Sim's 100× USD magnification. The "fix" broke the pipeline.
+> *Evidence*: nimbus SCALE_FACTOR=0.01 was "fixed" to 1.0 because it looked like a bug. Actually it compensated for Isaac Sim's 100× USD magnification. The "fix" broke the pipeline.
 
 **Rule**: When a value looks obviously wrong in one component, check:
 1. What downstream component consumes this value?
@@ -198,7 +198,7 @@ Level 6 (lowest):  "I think I remember..." or unnamed conventions
 
 **Some bugs require N conditions simultaneously. Missing one = can't reproduce.**
 
-> *Evidence*: dex-hand EXP-005 — TiledCamera DL denoiser bug required ALL THREE: (1) TiledCameraCfg (not CameraCfg), (2) 20+ environments, (3) different visual content per env. Missing any one condition = no visible symptom. 4 envs with same content showed nothing.
+> *Evidence*: orchard EXP-005 — TiledCamera DL denoiser bug required ALL THREE: (1) TiledCameraCfg (not CameraCfg), (2) 20+ environments, (3) different visual content per env. Missing any one condition = no visible symptom. 4 envs with same content showed nothing.
 
 #### Progressive reproduction protocol
 
@@ -231,7 +231,7 @@ Layer 5: Robustness bugs         (intermittent failures, edge cases)
 Layer 6: Quality/diagnostic bugs (wrong failure reasons, silent data corruption)
 ```
 
-> *Evidence*: flywheel EXP-001→014 exposed 6 layers sequentially (environment → crash → exception handling → resource → service degradation → diagnostic quality). Same pattern re-emerged in EXP-024→027 (env dependencies → Docker conflicts → service fields → response content). Each 2-3x scale-up also reveals new layers.
+> *Evidence*: nimbus EXP-001→014 exposed 6 layers sequentially (environment → crash → exception handling → resource → service degradation → diagnostic quality). Same pattern re-emerged in EXP-024→027 (env dependencies → Docker conflicts → service fields → response content). Each 2-3x scale-up also reveals new layers.
 
 **Plan for 3-5 fix cycles**, not 1. Each cycle typically moves you one layer deeper. If you're on fix cycle 6+, consider whether the architecture itself is the problem.
 
@@ -265,7 +265,7 @@ Layer 6: Quality/diagnostic bugs (wrong failure reasons, silent data corruption)
 
 **Don't modify code while a test is running.**
 
-> *Evidence*: flywheel EXP-006 — modified code mid-batch, then batch 2 ran with unverified fix. Created uncertainty: did the fix work, or did different inputs hide the problem?
+> *Evidence*: nimbus EXP-006 — modified code mid-batch, then batch 2 ran with unverified fix. Created uncertainty: did the fix work, or did different inputs hide the problem?
 
 **Rules**:
 - Never change code during an active run — let it complete or kill it first
@@ -308,7 +308,7 @@ Small samples make it impossible to distinguish signal from noise:
 
 **Unit tests mock external dependencies. They cannot catch real-system failures.**
 
-> *Evidence*: This pattern repeated 4 independent times in flywheel:
+> *Evidence*: This pattern repeated 4 independent times in nimbus:
 > - EXP-021: 19/19 unit tests pass → EXP-022: 5/7 smoke test failures
 > - EXP-026: 2 tests pass → EXP-027: 4/7 failures
 > - EXP-030: 29 tests pass → EXP-033: 2/7 residual
@@ -328,7 +328,7 @@ Small samples make it impossible to distinguish signal from noise:
 
 **Test at increasing scales, not just minimum or maximum.**
 
-> *Evidence*: flywheel EXP-006 jumped from 5 → 21 objects, wasting compute to discover GPU descriptor pool exhaustion (B9). dex-hand EXP-005 showed bugs that only appear at 20+ environments, invisible at 4.
+> *Evidence*: nimbus EXP-006 jumped from 5 → 21 objects, wasting compute to discover GPU descriptor pool exhaustion (B9). orchard EXP-005 showed bugs that only appear at 20+ environments, invisible at 4.
 
 ```
 Scale 1: Unit test (mocked, fast, catches regressions)
@@ -400,11 +400,11 @@ When debugging systems that call external services (LLM APIs, inference servers,
 
 **Capture raw responses first.** Before analyzing parsing logic, save the complete raw provider response on every failure path. The root cause is often in what the service returned, not in how you parsed it.
 
-> *Evidence*: flywheel EXP-026 — root cause was service layer field selection (`reasoning_content` vs `content`), but 3 prior experiments debugged the stage/parsing layer because no raw response was captured.
+> *Evidence*: nimbus EXP-026 — root cause was service layer field selection (`reasoning_content` vs `content`), but 3 prior experiments debugged the stage/parsing layer because no raw response was captured.
 
 **Service fatigue.** Long-running GPU services degrade over time: memory fragmentation, state corruption, resource leaks. If failures increase with runtime duration, implement periodic restarts or health checks.
 
-> *Evidence*: flywheel EXP-011 — TRELLIS2 normal for batches 1-5, degraded 6-10, completely failed 11+. 7 hours continuous runtime.
+> *Evidence*: nimbus EXP-011 — TRELLIS2 normal for batches 1-5, degraded 6-10, completely failed 11+. 7 hours continuous runtime.
 
 **Transient vs. persistent failures.** Distinguish BEFORE adding retry logic:
 - **Transient**: Empty responses, timeouts → Single retry with backoff
@@ -425,7 +425,7 @@ When debugging rendering pipelines (Isaac Sim, game engines, visualization):
 Scene Construction → Ray Tracing → [DL Denoiser] → [DLSS/TAA] → [Cached RT] → Output
 ```
 
-> *Evidence*: dex-hand EXP-004 (DLSS jitter) and EXP-005 (DL denoiser cross-tile bleeding) — both symptoms appeared in rendered output but root causes were in different post-processing layers.
+> *Evidence*: orchard EXP-004 (DLSS jitter) and EXP-005 (DL denoiser cross-tile bleeding) — both symptoms appeared in rendered output but root causes were in different post-processing layers.
 
 **Debug protocol**:
 1. Check rendering configuration files for enabled post-processing stages
@@ -457,7 +457,7 @@ When debugging pipelines with sequential stages:
 
 **Naming/configuration verification.** When comparing two runs or two model checkpoints, always create a configuration comparison table listing all dimensions that could differ. Checkpoint names can be misleading.
 
-> *Evidence*: dex-hand EXP-002 — model5-1 vs model10 improvement was attributed to data scaling, but the actual change was modality (adding tactile). Names didn't encode the difference.
+> *Evidence*: orchard EXP-002 — model5-1 vs model10 improvement was attributed to data scaling, but the actual change was modality (adding a depth channel). Names didn't encode the difference.
 
 **Scaling reveals new bug layers.** Each 2-3x scale-up exposes new failure types (resource contention, service fatigue, edge cases). Scale gradually: 5 → 14 → 50 → production.
 

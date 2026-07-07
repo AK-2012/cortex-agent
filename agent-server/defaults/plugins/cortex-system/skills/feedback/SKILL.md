@@ -39,8 +39,8 @@ Read the feedback message and classify it:
 | **Directive** | "Always do X", "Start doing X", "X should work like Y" | "Always run tests after changing code" |
 | **Observation** | "I noticed X", "X seems off", "Why does X happen?" | "The agent sometimes skips compound" |
 | **Approval** | "Approve X", "Deny X", "Yes to X", "Go ahead with X" | "Approve the budget increase" |
-| **Resource** | "Increase budget", "Spend less on X", "Reallocate" | "Increase flywheel budget to 5000 calls" |
-| **Strategy** | "Pivot to X", "Drop project Y", "Start project Z" | "Pause dex-hand, focus on flywheel" |
+| **Resource** | "Increase budget", "Spend less on X", "Reallocate" | "Increase nimbus budget to 5000 calls" |
+| **Strategy** | "Pivot to X", "Drop project Y", "Start project Z" | "Pause orchard, focus on nimbus" |
 | **Knowledge** | "FYI X", "We now have X", "Deadline moved to X" | "We just got access to new GPU cluster" |
 | **Calibration** | "Quality is too low", "Be more rigorous", "Bar is wrong" | "Stop producing surface-level findings" |
 | **Tuning** | "Bot is too verbose", "Sessions too long", "Use model X" | "Use a cheaper model for routine work cycles" |

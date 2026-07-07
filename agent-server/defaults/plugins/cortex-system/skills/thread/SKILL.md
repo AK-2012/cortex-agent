@@ -429,7 +429,7 @@ Tasks in TASKS.md use the `[template: <name>]` tag to specify which thread templ
 
 ```markdown
 - [ ] Run ablation study [template: <template-name>]
-  Why: Need to isolate tactile contribution
+  Why: Need to isolate depth-sensor contribution
   Done when: Results in experiments/EXP-NNN.md
 ```
 

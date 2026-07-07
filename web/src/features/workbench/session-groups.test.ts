@@ -84,7 +84,7 @@ describe('projectInitials', () => {
   });
 
   it('uses the first two chars for a single-segment id', () => {
-    expect(projectInitials('flywheel')).toBe('FL');
+    expect(projectInitials('nimbus')).toBe('NI');
   });
 
   it('handles empty / degenerate ids', () => {

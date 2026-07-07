@@ -161,21 +161,21 @@ test('ProjectStore - resolveFromMessage returns general when no match', async (t
 // ── resolveFromMessage: [project:xxx] tag ──
 
 test('ProjectStore - [project:xxx] tag overrides everything', async (t) => {
-  const { baseDir, cleanup } = makeTempProjectsDir(['dex-hand', 'cortex-self']);
+  const { baseDir, cleanup } = makeTempProjectsDir(['orchard', 'cortex-self']);
   t.after(cleanup);
 
   const { store } = await makeStore(baseDir);
   t.after(() => store.destroy());
 
   // Tag with valid project id wins over substring
-  const r1 = store.resolveFromMessage('[project:cortex-self] check dex-hand status');
+  const r1 = store.resolveFromMessage('[project:cortex-self] check orchard status');
   assert.ok(r1);
   assert.equal(r1!.id, 'cortex-self');
 
   // Tag alone with valid project
-  const r2 = store.resolveFromMessage('[project:dex-hand] hello');
+  const r2 = store.resolveFromMessage('[project:orchard] hello');
   assert.ok(r2);
-  assert.equal(r2!.id, 'dex-hand');
+  assert.equal(r2!.id, 'orchard');
 
   // Tag with non-existent project returns general
   const r3 = store.resolveFromMessage('[project:fantasy] something');
@@ -222,25 +222,25 @@ test('ProjectStore - case-insensitive substring match on project names', async (
 });
 
 test('ProjectStore - longest match wins when multiple project names appear', async (t) => {
-  const { baseDir, cleanup } = makeTempProjectsDir(['dex-hand', 'dex-hand-dataset']);
+  const { baseDir, cleanup } = makeTempProjectsDir(['orchard', 'orchard-dataset']);
   t.after(cleanup);
 
   const { store } = await makeStore(baseDir);
   t.after(() => store.destroy());
 
   // Message contains both, longer one wins
-  const r1 = store.resolveFromMessage('check dex-hand-dataset status');
+  const r1 = store.resolveFromMessage('check orchard-dataset status');
   assert.ok(r1);
-  assert.equal(r1!.id, 'dex-hand-dataset');
+  assert.equal(r1!.id, 'orchard-dataset');
 
   // Only shorter appears
-  const r2 = store.resolveFromMessage('check dex-hand status');
+  const r2 = store.resolveFromMessage('check orchard status');
   assert.ok(r2);
-  assert.equal(r2!.id, 'dex-hand');
+  assert.equal(r2!.id, 'orchard');
 });
 
 test('ProjectStore - no match returns general', async (t) => {
-  const { baseDir, cleanup } = makeTempProjectsDir(['dex-hand', 'cortex-self']);
+  const { baseDir, cleanup } = makeTempProjectsDir(['orchard', 'cortex-self']);
   t.after(cleanup);
 
   const { store } = await makeStore(baseDir);
@@ -256,7 +256,7 @@ test('ProjectStore - no match returns general', async (t) => {
 });
 
 test('ProjectStore - empty message returns general', async (t) => {
-  const { baseDir, cleanup } = makeTempProjectsDir(['dex-hand']);
+  const { baseDir, cleanup } = makeTempProjectsDir(['orchard']);
   t.after(cleanup);
 
   const { store } = await makeStore(baseDir);
@@ -268,7 +268,7 @@ test('ProjectStore - empty message returns general', async (t) => {
 });
 
 test('ProjectStore - null message returns general', async (t) => {
-  const { baseDir, cleanup } = makeTempProjectsDir(['dex-hand']);
+  const { baseDir, cleanup } = makeTempProjectsDir(['orchard']);
   t.after(cleanup);
 
   const { store } = await makeStore(baseDir);
@@ -280,7 +280,7 @@ test('ProjectStore - null message returns general', async (t) => {
 });
 
 test('ProjectStore - undefined message returns general', async (t) => {
-  const { baseDir, cleanup } = makeTempProjectsDir(['dex-hand']);
+  const { baseDir, cleanup } = makeTempProjectsDir(['orchard']);
   t.after(cleanup);
 
   const { store } = await makeStore(baseDir);
@@ -299,7 +299,7 @@ test('ProjectStore - empty projects dir returns general for any message except t
   t.after(() => store.destroy());
 
   // No user projects — unrelated text returns general
-  const r1 = store.resolveFromMessage('debug dex-hand issue');
+  const r1 = store.resolveFromMessage('debug orchard issue');
   assert.ok(r1);
   assert.equal(r1!.id, 'general');
 
@@ -310,16 +310,16 @@ test('ProjectStore - empty projects dir returns general for any message except t
 });
 
 test('ProjectStore - project name is substring of another but only partial appears', async (t) => {
-  const { baseDir, cleanup } = makeTempProjectsDir(['vr', 'vr-extra', 'vr-security']);
+  const { baseDir, cleanup } = makeTempProjectsDir(['atlas', 'atlas-extra', 'atlas-security']);
   t.after(cleanup);
 
   const { store } = await makeStore(baseDir);
   t.after(() => store.destroy());
 
-  // Only "vr" in message, not the longer names
-  const r = store.resolveFromMessage('vr setup');
+  // Only "atlas" in message, not the longer names
+  const r = store.resolveFromMessage('atlas setup');
   assert.ok(r);
-  assert.equal(r!.id, 'vr');
+  assert.equal(r!.id, 'atlas');
 });
 
 test('ProjectStore - tag takes priority over dynamic match', async (t) => {
@@ -336,7 +336,7 @@ test('ProjectStore - tag takes priority over dynamic match', async (t) => {
 });
 
 test('ProjectStore - exact project name match in message', async (t) => {
-  const { baseDir, cleanup } = makeTempProjectsDir(['cortex-self', 'flywheel', 'tactile-reasoning']);
+  const { baseDir, cleanup } = makeTempProjectsDir(['cortex-self', 'nimbus', 'beacon-nav']);
   t.after(cleanup);
 
   const { store } = await makeStore(baseDir);
@@ -346,13 +346,13 @@ test('ProjectStore - exact project name match in message', async (t) => {
   assert.ok(r1);
   assert.equal(r1!.id, 'cortex-self');
 
-  const r2 = store.resolveFromMessage('flywheel experiment results');
+  const r2 = store.resolveFromMessage('nimbus experiment results');
   assert.ok(r2);
-  assert.equal(r2!.id, 'flywheel');
+  assert.equal(r2!.id, 'nimbus');
 
-  const r3 = store.resolveFromMessage('tactile-reasoning paper draft');
+  const r3 = store.resolveFromMessage('beacon-nav paper draft');
   assert.ok(r3);
-  assert.equal(r3!.id, 'tactile-reasoning');
+  assert.equal(r3!.id, 'beacon-nav');
 });
 
 // ── Scaffolding ──

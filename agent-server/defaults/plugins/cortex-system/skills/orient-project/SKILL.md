@@ -71,12 +71,12 @@ Keep it short. Prefer omission over extra context.
 
 ## Example
 
-**Input:** Start work on a flywheel task to fix a broken data export script.
+**Input:** Start work on a nimbus task to fix a broken data export script.
 
 **Output:**
 
 ## Task-Ready Briefing
-- **Project:** flywheel
+- **Project:** nimbus
 - **Task:** Fix the broken data export script
 - **Current state:** Export pipeline exists; recent STATUS notes schema drift in the downstream consumer.
 - **Relevant constraints:** none found

@@ -183,7 +183,7 @@ Cortex 扫描多个根目录以查找 `SKILL.md` 文件：
 
 ### 命令标准化
 
-如果用户输入的消息以已知技能名称开头（不带 `/` 前缀），消息路由器自动在前面加上 `/` 以确保它被视为技能调用。例如，在聊天中输入 `synthesize flywheel` 会被标准化为 `/synthesize flywheel`。
+如果用户输入的消息以已知技能名称开头（不带 `/` 前缀），消息路由器自动在前面加上 `/` 以确保它被视为技能调用。例如，在聊天中输入 `synthesize nimbus` 会被标准化为 `/synthesize nimbus`。
 
 ## `!skills` 命令
 

@@ -59,7 +59,7 @@ export function sessionMeta(s: SessionInfo): string {
 }
 
 // Avatar initials from a project id: first letter of the first two `-`/`_`-split segments, else the
-// first two chars (single-segment). `quad-nav-sim2real` → `QN`, `flywheel` → `FL`.
+// first two chars (single-segment). `quad-nav-sim2real` → `QN`, `nimbus` → `NI`.
 export function projectInitials(id: string): string {
   const segments = id.split(/[-_]/).filter(Boolean);
   if (segments.length >= 2) return (segments[0][0] + segments[1][0]).toUpperCase();

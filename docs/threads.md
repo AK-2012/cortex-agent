@@ -343,7 +343,7 @@ Hooks are shell commands executed at specific points in the thread lifecycle. Th
 {
   "onEnd": {
     "command": "node hooks/post-task-hook.mjs",
-    "args": ["--project", "flywheel"],
+    "args": ["--project", "nimbus"],
     "timeout": 30000
   }
 }
@@ -416,7 +416,7 @@ Its role is **rehydration memory**: a fresh manager incarnation (after rotation 
 
 ```
 !thread coder-review Implement user authentication for the API
-!thread researcher Survey recent papers on tactile sensing
+!thread researcher Survey recent papers on grasp planning
 ```
 
 The first word after `!thread` is the template name (or agent name for single-agent execution). The rest is the user message passed to the first agent.

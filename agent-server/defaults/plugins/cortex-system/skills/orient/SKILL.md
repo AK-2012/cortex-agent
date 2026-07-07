@@ -104,7 +104,7 @@ The standard comprehensive orient procedure. Runs when explicitly requested, whe
 
 ## Scope
 
-If a project argument is provided (e.g. `/orient dex-hand`), scope to that project only:
+If a project argument is provided (e.g. `/orient orchard`), scope to that project only:
 - Read only `context/projects/<arg>/` files (STATUS.md, ISSUES.md, experiments/index.md, TASKS.md, mission.md, roadmap.md)
 - Also read `context/projects/<arg>/decisions/` if the directory exists — project-direction decisions inform task context
 - Skip cross-project comparison — focus on within-project task ranking

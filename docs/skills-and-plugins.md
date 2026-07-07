@@ -182,7 +182,7 @@ Skills discovered under `plugins/<name>/skills/<skill>/SKILL.md` are namespaced 
 
 ### Command Normalization
 
-If a user types a message that starts with a known skill name (without the `/` prefix), the message router automatically prepends `/` to ensure it's treated as a skill invocation. For example, typing `synthesize flywheel` in chat is normalized to `/synthesize flywheel`.
+If a user types a message that starts with a known skill name (without the `/` prefix), the message router automatically prepends `/` to ensure it's treated as a skill invocation. For example, typing `synthesize nimbus` in chat is normalized to `/synthesize nimbus`.
 
 ## The `!skills` Command
 

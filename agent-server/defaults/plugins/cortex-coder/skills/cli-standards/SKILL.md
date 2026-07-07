@@ -47,8 +47,8 @@ Every command and subcommand supports `--help` / `-h`. Help output must include:
 
 ```
 Examples:
-  cli query --project flywheel --status actionable --json
-  cli complete --project dex-hand --task-id a3f2 --note "Verified"
+  cli query --project nimbus --status actionable --json
+  cli complete --project orchard --task-id a3f2 --note "Verified"
   echo '{"subtasks":[...]}' | cli decompose --project myproj --task-id b7c1 --subtasks-file -
 ```
 

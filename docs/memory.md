@@ -56,7 +56,7 @@ Each experiment is an atomic file recording a single investigation. An experimen
 ---
 id: EXP-042
 date: 2026-03-09
-project: flywheel
+project: nimbus
 summary: "Initial object registry extraction from 573 artifacts"
 tags: [registry, data-analysis, milestone-2.2]
 status: valid
@@ -97,7 +97,7 @@ Knowledge entries are atomic facts, anti-patterns, or heuristics distilled from 
 ---
 id: K-008
 date: 2026-04-01
-project: flywheel
+project: nimbus
 summary: "ANTI-PATTERN: Running smoke tests or broader validation without verifying upstream service availability"
 tags: [anti-pattern, smoke-test, service-dependency]
 evidence: [EXP-021, EXP-022, EXP-025, EXP-033, EXP-040]
@@ -120,7 +120,7 @@ Patterns synthesize invariants across multiple experiments. A pattern states a r
 ---
 id: PAT-001
 date: 2026-04-01
-project: flywheel
+project: nimbus
 summary: "When a multi-stage pipeline yields zero output, per-stage pass-rate quantification locates the bottleneck faster than end-to-end retries"
 tags: [pipeline, diagnosis, stage-isolation]
 source-experiments: [EXP-001, EXP-005, EXP-006, EXP-008]
@@ -241,9 +241,9 @@ As of the last index rebuild, the system tracks across 9 projects:
 
 | Project | Experiments | Knowledge | Patterns |
 |---------|------------|-----------|----------|
-| flywheel | 56 | 11 | 4 |
+| nimbus | 56 | 11 | 4 |
 | cortex-self | 66 | 15 | 6 |
-| tactile-reasoning | 27 | ~13 | 2 |
+| beacon-nav | 27 | ~13 | 2 |
 | Other projects | varies | varies | varies |
 
 All indexes are rebuilt simultaneously — the command runs in under a second.

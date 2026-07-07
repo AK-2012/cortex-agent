@@ -55,13 +55,13 @@ describe('switchRowMeta', () => {
 describe('buildSwitchList', () => {
   it('excludes the active project and maps real running counts, order preserved', () => {
     const rows = buildSwitchList(
-      [project('flywheel'), project('cortex-self'), project('tactile')],
+      [project('nimbus'), project('cortex-self'), project('beacon')],
       'cortex-self',
-      { flywheel: 2 },
+      { nimbus: 2 },
     );
     expect(rows).toEqual([
-      { id: 'flywheel', running: 2, isRunning: true, meta: '2 running' },
-      { id: 'tactile', running: 0, isRunning: false, meta: 'idle' },
+      { id: 'nimbus', running: 2, isRunning: true, meta: '2 running' },
+      { id: 'beacon', running: 0, isRunning: false, meta: 'idle' },
     ]);
   });
 

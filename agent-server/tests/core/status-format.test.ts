@@ -10,12 +10,12 @@ describe('buildThreadStatusMessage', () => {
       stepNumber: 1,
       label: 'coder:plan',
       elapsedS: 34,
-      taskProject: 'tactile-reasoning',
+      taskProject: 'beacon-nav',
       taskId: 'a3be',
       taskText: 'Implement contact encoder baseline',
     });
     // task project + text + id come first, before the step
-    assert.ok(msg.startsWith(`${Icons.processing} [tactile-reasoning] Implement contact encoder baseline`), msg);
+    assert.ok(msg.startsWith(`${Icons.processing} [beacon-nav] Implement contact encoder baseline`), msg);
     assert.ok(msg.includes('`a3be`'), msg);
     assert.ok(msg.includes('Step 1: *coder:plan*'), msg);
     // short thread id retained for thread-op debugging

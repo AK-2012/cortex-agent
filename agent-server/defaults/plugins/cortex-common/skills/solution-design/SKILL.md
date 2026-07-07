@@ -66,7 +66,7 @@ Before committing, check: is there a way to get 80% of the benefit with 20% of t
 
 **2d. Will this solution hold at scale?**
 
-> Provenance: 2026-03-15 PI feedback — flywheel registry exclusion was O(N) in prompt tokens, guaranteed to hit context window ceiling at ~1000 objects. Four rounds of token-cap increases (1024→2048→4096→8192) masked this structural limit. See flywheel KNOWLEDGE.md § 7.
+> Provenance: 2026-03-15 PI feedback — nimbus registry exclusion was O(N) in prompt tokens, guaranteed to hit context window ceiling at ~1000 objects. Four rounds of token-cap increases (1024→2048→4096→8192) masked this structural limit. See nimbus KNOWLEDGE.md § 7.
 
 For the proposed approach, identify the key resource it consumes (tokens, memory, time, API calls, storage) and apply five tests:
 
@@ -128,7 +128,7 @@ Then implement. If at any point during implementation you hit a Gate 3 signal (o
 
 ## Examples
 
-### Example 1: Gate 2 catches architecture mismatch (flywheel prompt dedup)
+### Example 1: Gate 2 catches architecture mismatch (nimbus prompt dedup)
 
 **Context**: prompt_generation repeatedly generated similar objects for the same category (e.g., multiple "blue ceramic mugs"). The existing code was a for loop generating artifacts one by one.
 
@@ -150,7 +150,7 @@ Then implement. If at any point during implementation you hit a Gate 3 signal (o
 
 ---
 
-### Example 2: Gate 3b — architecture matches, iterate is correct (flywheel VLM size estimation)
+### Example 2: Gate 3b — architecture matches, iterate is correct (nimbus VLM size estimation)
 
 **Context**: VLM severely hallucinated when estimating object sizes, with only 40% reasonable rate.
 
