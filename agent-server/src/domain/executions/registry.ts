@@ -2,6 +2,7 @@
 // output: named function exports matching the pre-migration API surface, with lock-release side effect on terminal transitions
 // pos:    thin re-export layer — delegates to ExecutionRepo. Maintains backward compat for all import sites.
 //         Lock-release: every terminal transition (complete/fail/cancel/stale) auto-releases any task lock held by the executionId.
+//         releaseExecutionLocks(id) exposes the same release for the thread SUSPEND path (thread_wait) WITHOUT ending the execution (DR-0014 lock hygiene).
 // >>> If I am updated, update my header comment and CORTEX.md <<<
 
 import * as fs from 'node:fs';
@@ -43,6 +44,17 @@ function releaseLocksOwnedBy(executionId: string | null | undefined): void {
       lockLog.warn(`release attempt failed for ${project} / ${executionId}: ${err?.message || err}`);
     }
   }
+}
+
+/** Release any task locks owned by `executionId` WITHOUT ending the execution.
+ *  Used by the thread suspend path (DR-0014): a manager that acquired a project lock
+ *  (e.g. `cortex-task decompose --auto-lock`, which does not auto-release) and then calls
+ *  thread_wait must release BEFORE yielding. Otherwise the lock is held for the entire
+ *  child-wait window (starving sibling managers' decomposes), and the terminal auto-release
+ *  cannot recover it because re-entry completes under a NEW executionId that no longer matches
+ *  the original lock owner — leaking the lock until its 20-min TTL expires. Idempotent. */
+export function releaseExecutionLocks(executionId: string | null | undefined): void {
+  releaseLocksOwnedBy(executionId);
 }
 
 // --- Sync reads ---

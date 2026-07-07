@@ -1,6 +1,6 @@
 // input:  Node test runner + execution registry + task-lock primitives
-// output: regression tests for auto lock-release on terminal execution transitions
-// pos:    verifies that complete/fail/cancel/stale execution paths release owned task locks
+// output: regression tests for auto lock-release on terminal execution transitions + suspend path
+// pos:    verifies complete/fail/cancel/stale terminal paths AND releaseExecutionLocks (thread_wait suspend) release owned task locks
 // >>> If I am updated, update my header comment and the parent folder's CORTEX.md <<<
 
 import './_test-home.js'; // MUST be first: isolate CORTEX_HOME before paths.ts loads
@@ -159,6 +159,60 @@ test('completeExecution does not error when execution holds no lock', () => {
   assert.ok(result);
   assert.equal(result.status, 'completed');
   // No exception thrown = pass
+});
+
+// G: releaseExecutionLocks releases the lock owned by the executionId (suspend path, DR-0014).
+//    A manager that acquired a lock (e.g. `decompose --auto-lock`) and then suspends on its
+//    children must release BEFORE yielding — otherwise the lock is held across the whole child
+//    wait and the terminal auto-release later can't match it (re-entry uses a new executionId).
+test('releaseExecutionLocks releases the lock owned by the executionId (suspend path)', () => {
+  const { project, cleanup } = makeTestProject();
+  const execId = startExec('lock-test-suspend');
+
+  try {
+    acquireLock(project, { owner: execId });
+    assert.equal(readLock(project)?.owner, execId);
+
+    // Simulate thread_wait suspension: release without ending the execution.
+    executionRegistry.releaseExecutionLocks(execId);
+
+    assert.equal(readLock(project), null, 'lock should be released on suspend');
+    // Execution is still live (NOT terminal) — suspend does not complete it.
+    assert.notEqual(executionRepo.getExecution(execId)?.status, 'completed');
+  } finally {
+    try { releaseLock(project, execId, { force: true }); } catch {}
+    cleanup();
+  }
+});
+
+// H: releaseExecutionLocks(execB) does NOT release a lock held by execA (owner-match).
+test('releaseExecutionLocks(execB) does not release lock held by execA', () => {
+  const { project, cleanup } = makeTestProject();
+  const execA = startExec('lock-test-suspend-a');
+  const execB = startExec('lock-test-suspend-b');
+
+  try {
+    acquireLock(project, { owner: execA });
+    assert.equal(readLock(project)?.owner, execA);
+
+    executionRegistry.releaseExecutionLocks(execB);
+
+    const lock = readLock(project);
+    assert.ok(lock);
+    assert.equal(lock!.owner, execA, 'execA lock should still be held');
+  } finally {
+    try { releaseLock(project, execA, { force: true }); } catch {}
+    cleanup();
+  }
+});
+
+// I: releaseExecutionLocks with no lock / null id — does not error.
+test('releaseExecutionLocks is a no-op when no lock is held or id is null', () => {
+  const execId = startExec('lock-test-suspend-nolock');
+  executionRegistry.releaseExecutionLocks(execId); // no lock held
+  executionRegistry.releaseExecutionLocks(null);   // null id
+  executionRegistry.releaseExecutionLocks(undefined);
+  // No exception = pass
 });
 
 // F: execution A holds lock, execution B calls completeExecution(B) — does NOT release A's lock
