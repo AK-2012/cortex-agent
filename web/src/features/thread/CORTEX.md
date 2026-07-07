@@ -1,47 +1,47 @@
-# features/thread/ — inline thread card 11a (F1) + thread detail 11b + nested 2b (F2)
+# features/thread/ — thread detail 11b (center-column view) + nested 2b + pure step logic
 
-Stage-3 tasks 065f (F1) + 0f25 (F2). Renders a **real `threads.get` (`ThreadDetail`, B1 task 58f3)** as a
-vertical step pipeline: completed/pending steps collapse to one line; only the **active** (running)
-step expands its children — machine dispatches (Execute) and/or subthreads (Review) — plus the live
-agent flow. `ThreadStepList` is the shared primitive; the F2 detail page (11b) reuses it and layers
-the 2b three-state nested-thread panel into the active step's SUB-THREADS region.
+Renders a **real `threads.get` (`ThreadDetail`, B1 task 58f3)** thread as the prototype's 11b
+detail view. **Stage-R2 task 4450** rebuilt this surface **1:1 from `design/ref/prototype.dc.html`
+L398–522** (exact inline styles / px / hex / font / weight / EN copy), replacing the superseded
+Stage-3 token-summary presentation (`ThreadDetailPage`/`ThreadStepList`/`NestedThreadsPanel`/
+`ThreadArtifactsPanel`/`InlineThreadCard` were removed). Diff targets: `proto-shots/04-thread-detail-exp.png`
+(top-level) + `05-thread-detail-stats.png` (nested).
 
 | path | role |
 |---|---|
-| `thread-steps.ts` | **Pure** selectors/formatters (TDD): `selectActiveStep` (the running step), `dispatchesForStep` (join dispatches to a step by `agentSlotId` — the only per-step link in the DTO), `activeStepChildren` (bundle active-step dispatches + thread subthreads + agentFlow; null when terminal), `stepSummaryParts` (collapsed-line chunks: stage · $cost · duration). Framework-free. |
-| `thread-steps.test.ts` | vitest unit tests for the pure logic (TDD — written first, 10 tests). |
-| `nested-threads.ts` | **Pure** (F2, TDD): `nodeLevel` (child `depth`→display level, root=1 / direct child=2), `isMaxLevel` (level≥5 or `truncated`), `countDescendants`, `treeMaxLevel` (deepest level, clamped to `MAX_LEVEL`=5), `flattenOutline` (pre-order one-row-per-thread for the Outline state), `INLINE_MAX_VISIBLE_LEVEL`=3. |
-| `nested-threads.test.ts` | vitest unit tests for the pure tree logic (TDD — written first, 14 tests). |
-| `ThreadStepList.tsx` | **Shared presentational primitive**: `{ detail, renderSubthreads? }` → vertical `<ol>` of steps; collapsed rows for completed/pending, an expanded block for the active step (agent flow + Dispatches + Subthreads). The optional `renderSubthreads` slot (F2) replaces the default flat subthread list — 11a leaves it undefined (unchanged); 11b passes `NestedThreadsPanel`. `data-step-index`/`data-step-status`/`data-active-step` for E2E. |
-| `InlineThreadCard.tsx` | **11a card** (data-bound): `{ threadId }` → `trpc.threads.get` query + `useThreadGetLiveSync` + loading/error states → `Card` header (`StatusPill`·`ID`·template·$cost) + `ThreadStepList`. `data-inline-thread-id` for E2E. |
-| `ThreadDetailPage.tsx` | **11b page** (F2, route `/threads/:threadId`): `threads.get` + `useThreadGetLiveSync` → header (`StatusPill`·`ID`·template·$cost·depth `x/5` meter·ancestor breadcrumb) + two columns: left `ThreadStepList` (single-column pipeline; `renderSubthreads`→`NestedThreadsPanel`), right persistent `ThreadArtifactsPanel`. Breadcrumb trail rides in React Router `location.state.trail`. `data-thread-detail`/`data-pipeline`/`data-depth-levels` for E2E. |
-| `NestedThreadsPanel.tsx` | **2b nested panel** (F2): the recursive `ThreadChildNode` subtree with three states — **A inline** (Tree: expand two levels in place, constant 14px indent, L3+ collapse to drill rows) / **C outline** (whole subtree flattened, one row per thread) via a Tree/Outline toggle, and **B drill-down** (`open ›` → `navigate('/threads/:id', { state:{ trail } })` re-roots `threads.get` on that child). `data-nested-panel`/`data-nested-thread-id`/`data-drill-thread-id`/`data-outline-thread-id`/`data-level` for E2E. |
-| `ThreadArtifactsPanel.tsx` | **11b right rail** (F2): thread-level artifact **refs** (`ThreadArtifactRefs`: artifact/workspace path, task) persistent + `live` badge. Document content viewer + per-step write-trail deferred to Stage 6 (fs-read scope, plan §2.1). `data-thread-artifacts` for E2E. |
-| `useThreadGetLiveSync.ts` | One SSE subscription on `thread.created/step.started/step.finished/completed/failed` → invalidate `threads.get` for this `threadId` → refetch. Mirrors `features/workbench/useThreadsLiveSync`. |
-| `thread-render.test.tsx` | `react-dom/server` render checks (F2) for `ThreadArtifactsPanel`/`ThreadStepList` slot/`NestedThreadsPanel` — assert the real components' rendered markup (browser E2E is environment-blocked; see Notes). |
+| `thread-detail-vm.ts` | **Pure** VM (TDD, 8 tests): `buildThreadDetailVm(detail, trail, now)` → the prototype `detail` model (header fields, pill, crumbs, meta, depth dots, step rows incl. the running step's agent-flow + sub-thread cards, artifact header/written-by). `threadPill` (status→prototype pill pair) + `fmtClock` (MM:SS elapsed). Reuses `thread-steps` (`dispatchesForStep`) + `nested-threads` (`nodeLevel`/`treeMaxLevel`/`MAX_LEVEL`). |
+| `thread-detail-vm.test.ts` | vitest unit tests for the pure VM (written first, RED→GREEN). |
+| `ThreadDetailRoute.tsx` | **Route `/threads/:threadId`** — the center-column frame: prototype outer flex (`display:flex;height:100vh;min-width:1180px`) mounting the real `features/workbench/LeftRail` + `ThreadDetailView` (the prototype keeps the rail + hides the workbench right panel in thread view, `showRightPanel:false`). Binds `threads.get` + `useThreadGetLiveSync` + loading/error; 1s tick advances the running-thread elapsed clock; reads the ancestor breadcrumb trail from `location.state.trail`. |
+| `ThreadDetailView.tsx` | 1:1 header bar (‹ back · breadcrumbs · name · tid · status pill · Pause/Cancel) + meta bar (template/started/elapsed/cost/task + depth dots) + content flex. Cancel = real `threads.cancel` mutation (→ invalidate + navigate to /workbench); Pause inert (**GAP-P**, no threads pause MutateOp). Drill-down (2b) re-roots `threads.get` on the child, carrying the `{id,name}` trail. `data-thread-detail`. |
+| `ThreadPipeline.tsx` | 1:1 PIPELINE column (L425–487): connectors, collapsed done/pending step cards, and the running step's expanded card (AGENT flow + SUB-THREADS sub-cards with `open ›` drill). `data-pipeline`/`data-active-step`/`data-sub-thread-id`/`data-drill-thread-id`. |
+| `ThreadArtifactPanel.tsx` | 1:1 THREAD ARTIFACT card (L488–520): header (path · live badge · updated · Open ↗) + REFERENCES body (real refs) + WRITTEN BY footer (from steps). **GAP-artifact-body**: the rich body (RESULT/METRICS/tail) needs the artifact file content → fs-read scope (plan §2.1, Stage 6); refs + written-by are real, a muted note points at the Memory viewer. `data-thread-artifact`. |
+| `thread-detail-render.test.tsx` | `react-dom/server` render checks of `ThreadPipeline` + `ThreadArtifactPanel` (browser E2E environment-blocked — persistent SSE; live proof is the CDP harness below). |
+| `thread-steps.ts` | **Pure** (kept): `selectActiveStep` · `dispatchesForStep` (join by `agentSlotId`) · `activeStepChildren` · `stepSummaryParts`. Consumed by `thread-detail-vm` + workbench `RightThreadCard`/`thread-card-proto`. |
+| `thread-steps.test.ts` | vitest for `thread-steps.ts` (10 tests). |
+| `nested-threads.ts` | **Pure** (kept): `nodeLevel` (child depth→display level, root=1) · `isMaxLevel` (≥5 or truncated) · `countDescendants` · `treeMaxLevel` (clamped ≤5) · `flattenOutline` · `INLINE_MAX_VISIBLE_LEVEL`. Consumed by `thread-detail-vm` + workbench `right-panel-vm`/`RightThreadCard`. |
+| `nested-threads.test.ts` | vitest for `nested-threads.ts` (14 tests). |
+| `useThreadGetLiveSync.ts` | One SSE subscription on `thread.created/step.*/completed/failed` → invalidate `threads.get` for this `threadId` → refetch. Reused by the detail route + workbench inline/right cards. |
 
 ## Notes
 
-- **Host**: chat (the design's ultimate host for 11a) is Stage 4 — until then `InlineThreadCard`
-  mounts in the **workbench Threads tab** via row expand (`features/workbench/ThreadsPanel.tsx`).
-  The **11b detail page** is reached via that tab's `open ›` link and the ⌘K palette (Thread items
-  now route to `/threads/:id`), and internally via 2b drill-down.
-- **No backend change**: consumes only the existing `threads.get` scope (B1) + `subscribe`.
-- **Execute/Review = data-driven, not stage-name-string-matched**: the active step surfaces whatever
-  children the DTO carries (dispatches when it dispatched to a machine, subthreads when it spawned
-  children). `ThreadChildNode` has no owning-step field, so subthreads are attributed at thread level
-  under the active step.
-- Live re-flow needs a **daemon-routed** thread transition (bus events are in-process), same caveat
-  as the tasks/threads-list slices.
-- **Depth model / B1 off-by-one**: B1 caps its child tree at `depth` 0..4 (up to 5 descendant
-  levels), so with `level = depth+2` a node can reach L6 while the design's model is ≤5 total
-  (root=L1). The UI **clamps**: `treeMaxLevel`/the `x/5` meter cap at `MAX_LEVEL`=5 and anything at
-  L5+ or `truncated` is marked **`max`** (never shows a numeric L6). Reconciling the actual cap
-  (MAX_CHILD_DEPTH 4→3) is a B1 concern, not F2.
-- **Drill-down re-roots**: descending into a child calls `threads.get` for that child (a fresh ≤5
-  window), so arbitrarily deep / `truncated` trees stay navigable without an unbounded payload.
-- **Verification honesty**: headless-Chrome E2E is blocked in this environment (the SPA's persistent
-  SSE subscription defeats `--dump-dom`/virtual-time, and Chrome's remote-debugging server is killed
-  by the sandbox). F2 is therefore verified by (a) a **real** ui-http-server + `createUiService` +
-  B1 handler live check (token gate 401/200, real `ThreadDetail` with a ≤5-level `truncated` tree,
-  drill re-root) and (b) `react-dom/server` render tests of the real components — not a browser click-through.
+- **Host**: the detail view is reached via the workbench right-panel "Detail" link, the ⌘K palette
+  (Thread items route to `/threads/:id`), and 2b drill-down. It renders inside `AppShell` (global ⌘K
+  preserved) as a full-viewport frame with the real Left Rail.
+- **No backend change**: consumes only the existing `threads.get` (B1) + `threads.cancel` + `subscribe`.
+- **Data-driven, not stage-name-matched**: the active step surfaces whatever children the DTO carries
+  (dispatches/subthreads). `ThreadChildNode` has no owning-step field → subthreads attributed at thread
+  level under the active step.
+- **Depth / B1 off-by-one**: clamped to `MAX_LEVEL`=5 (`x/5` meter), truncated nodes marked max — a
+  B1 concern, not this view.
+- **Flagged gaps** (paired stage): **GAP-artifact-body** (RESULT/METRICS need fs-read — Stage 6);
+  **GAP-P** Pause (no threads pause MutateOp); AGENT feed = `agentFlow.lastOutput` only (no per-agent
+  tool-call trace — that is the execution-log/tool surface, Stage 4); ancestor crumb names ride the
+  drill trail (real, no new scope). Local coder threads persist **no subthreads/dispatches**, so the
+  SUB-THREADS + nested-crumb (05) paths are **unit + render tested**, not live (same env as F1/F2).
+- **Verified live** (task 4450): real dist ui-http-server + real `threadStore`/`taskStore`/
+  `sessionStore`/`getCostSummary` (133 real threads) serving built `web/dist` behind `x-cortex-token`;
+  headless-Chrome CDP at 1440×900 (token via `Network.setExtraHTTPHeaders`) → gate 401(no)/200(yes);
+  `/threads/thr_24289550` (real running coder-review) rendered the frame (rail **240** / artifact
+  **440**), header/meta/PIPELINE/THREAD ARTIFACT/WRITTEN BY/REFERENCES all present, collapsed `1·plan`
+  + expanded running `2·implement` with real agent flow, **0 console errors**. Side-by-side vs
+  `proto-shots/04-thread-detail-exp.png` at `design/build-shots/4450-thread-detail-vs-04-sidebyside.png`.
