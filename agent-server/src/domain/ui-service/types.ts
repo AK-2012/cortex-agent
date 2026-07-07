@@ -29,6 +29,8 @@ export type QueryScope =
   | 'schedules.list'
   | 'executions.list'
   | 'executions.get'
+  | 'memory.tree'
+  | 'memory.file'
   | 'cost.summary'
   | 'config.get';
 
@@ -101,6 +103,16 @@ export interface ExecutionsListParams {
 
 export interface ExecutionsGetParams {
   executionId: string;
+}
+
+export interface MemoryTreeParams {
+  projectId: string;
+}
+
+export interface MemoryFileParams {
+  projectId: string;
+  /** Path relative to the project root. Absolute paths / `..` traversal / symlink escape are rejected. */
+  path: string;
 }
 
 export interface CostSummaryParams {
@@ -391,6 +403,37 @@ export interface ConfigSnapshot {
   env: ConfigEnvEntry[];
 }
 
+// ── memory read-only fs DTOs (DR-0018 §6 Stage-6 memory viewer 7b) ─────────
+// A project's memory tree: top-level files + memory dirs with entry counts. Read-only;
+// the underlying handler restricts all paths to the project root under PROJECTS_DIR.
+
+export interface MemoryFileEntry {
+  name: string;
+  sizeBytes: number;
+  modifiedAt: string;
+}
+
+export interface MemoryDirEntry {
+  name: string;
+  /** Number of `*.md` entry files, excluding the auto-generated `index.md` and `CORTEX.md`. */
+  entryCount: number;
+}
+
+export interface MemoryTree {
+  projectId: string;
+  files: MemoryFileEntry[];
+  dirs: MemoryDirEntry[];
+}
+
+export interface MemoryFile {
+  projectId: string;
+  /** Project-root-relative path echoed back. */
+  path: string;
+  content: string;
+  sizeBytes: number;
+  modifiedAt: string;
+}
+
 // ── Mutate return types ───────────────────────────────────────────
 
 export interface ThreadsCancelReturn {
@@ -417,6 +460,8 @@ export interface QueryParamMap {
   'schedules.list': SchedulesListParams;
   'executions.list': ExecutionsListParams;
   'executions.get': ExecutionsGetParams;
+  'memory.tree': MemoryTreeParams;
+  'memory.file': MemoryFileParams;
   'cost.summary': CostSummaryParams;
   'config.get': ConfigGetParams;
 }
@@ -430,6 +475,8 @@ export interface QueryReturnMap {
   'schedules.list': ScheduleInfo[];
   'executions.list': ExecutionInfo[];
   'executions.get': ExecutionDetailInfo;
+  'memory.tree': MemoryTree;
+  'memory.file': MemoryFile;
   'cost.summary': CostSummary;
   'config.get': ConfigSnapshot;
 }

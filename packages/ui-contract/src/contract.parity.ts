@@ -16,6 +16,8 @@ import type {
   schedulesListInput,
   executionsListInput,
   executionsGetInput,
+  memoryTreeInput,
+  memoryFileInput,
   costSummaryInput,
   threadsCancelInput,
   executionsCancelInput,
@@ -48,6 +50,8 @@ const _tasksList: QueryParity<'tasks.list', typeof tasksListInput> = true;
 const _schedulesList: QueryParity<'schedules.list', typeof schedulesListInput> = true;
 const _executionsList: QueryParity<'executions.list', typeof executionsListInput> = true;
 const _executionsGet: QueryParity<'executions.get', typeof executionsGetInput> = true;
+const _memoryTree: QueryParity<'memory.tree', typeof memoryTreeInput> = true;
+const _memoryFile: QueryParity<'memory.file', typeof memoryFileInput> = true;
 const _costSummary: QueryParity<'cost.summary', typeof costSummaryInput> = true;
 const _configGet: QueryParity<'config.get', typeof configGetInput> = true;
 
@@ -73,7 +77,7 @@ const _executionsLog: Exact<z.infer<typeof executionsLogInput>, ExecutionsLogPar
 // checks are not tree-shaken away by the type checker.
 export const _contractParityChecked = [
   _projectsList, _sessionsList, _threadsList, _threadsGet, _tasksList, _schedulesList,
-  _executionsList, _executionsGet, _costSummary, _configGet, _threadsCancel, _executionsCancel,
+  _executionsList, _executionsGet, _memoryTree, _memoryFile, _costSummary, _configGet, _threadsCancel, _executionsCancel,
   _schedulesPause, _schedulesResume, _schedulesRemove, _tasksClaim,
   _tasksUnclaim, _tasksComplete, _tasksBlock, _tasksUnblock, _configSet, _executionsLog,
 ] as const;

@@ -16,6 +16,8 @@ export {
   schedulesListInput,
   executionsListInput,
   executionsGetInput,
+  memoryTreeInput,
+  memoryFileInput,
   costSummaryInput,
   threadsCancelInput,
   executionsCancelInput,
