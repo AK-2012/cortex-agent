@@ -27,7 +27,7 @@ function makeDeps(overrides: Partial<UiServiceDeps> = {}): UiServiceDeps {
     },
     threadStore: { getAll: () => [], get: () => null },
     taskStore: { getAll: () => [], getById: () => null, load: () => {}, refresh: () => {} },
-    scheduler: { list: async () => [], get: async () => null, pause: async () => null, resume: async () => null, remove: async () => false },
+    scheduler: { list: async () => [], get: async () => null, pause: async () => null, resume: async () => null, remove: async () => false, add: async () => ({ id: 'sch_new' } as any) },
     executionRegistry: { getExecution: () => null, getAll: () => [], cancelExecution: () => null },
     executionLogTailer: { startTail: () => {}, stopTail: () => {}, refCount: () => 0 },
     runningExecutions: { getAll: () => [] } as any,

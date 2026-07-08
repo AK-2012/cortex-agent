@@ -311,7 +311,27 @@ process.on('SIGTERM', async () => {
     sessionStore,
     threadStore,
     taskStore,
-    scheduler,
+    scheduler: {
+      list: () => scheduler.list(),
+      get: (id) => scheduler.get(id),
+      pause: (id, pausedBy) => scheduler.pause(id, pausedBy),
+      resume: (id) => scheduler.resume(id),
+      remove: (id) => scheduler.remove(id),
+      // schedules.add: create via the real scheduler.add (timing math + persist), then backfill
+      // target/fallback through the shared scheduleRepo singleton (buildTask drops them) — mirrors
+      // domain/mcp/tools/schedule.ts::runScheduleAdd. scheduler._repo === scheduleRepo (default).
+      add: async (type, options) => {
+        const task = await scheduler.add(type, options);
+        if (options.target || options.fallback) {
+          await scheduleRepo.updateTask(task.id, (t) => {
+            if (options.target) t.target = options.target;
+            if (options.fallback) t.fallback = options.fallback;
+          });
+          return (await scheduleRepo.findTask(task.id)) ?? task;
+        }
+        return task;
+      },
+    },
     executionRegistry,
     executionLogTailer,
     runningExecutions,

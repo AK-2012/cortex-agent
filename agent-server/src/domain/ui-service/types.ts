@@ -9,7 +9,7 @@ import type { EventBus } from '@events/index.js';
 import type { RunningExecutions } from '@core/running-executions.js';
 import type { PlatformAdapter } from '@platform/adapter.js';
 import type { Session } from '@store/session-registry-repo.js';
-import type { ScheduleTask } from '@store/schedule-repo.js';
+import type { ScheduleTask, ScheduleTarget } from '@store/schedule-repo.js';
 import type { LogLocation } from '@domain/executions/log-tailer.js';
 
 // ── Result ────────────────────────────────────────────────────────
@@ -43,6 +43,7 @@ export type MutateOp =
   | 'schedules.pause'
   | 'schedules.resume'
   | 'schedules.remove'
+  | 'schedules.add'
   | 'tasks.claim'
   | 'tasks.unclaim'
   | 'tasks.complete'
@@ -138,6 +139,22 @@ export interface ExecutionsCancelArgs {
 
 export interface ScheduleActionArgs {
   scheduleId: string;
+}
+
+// Args for `schedules.add` (DR-0018 §2.1 7c). Per-type required fields are enforced by the zod
+// `scheduleAddInput` schema at the router boundary AND re-checked in the handler (so a direct
+// facade/unit call is rejected too). intervalMs/delay are raw ms numbers; dayOfWeek is 0..6.
+export interface ScheduleAddArgs {
+  type: 'interval' | 'daily' | 'weekly' | 'once';
+  message: string;
+  projectId?: string;
+  profile?: string;
+  intervalMs?: number;
+  time?: string;
+  dayOfWeek?: number;
+  delay?: number;
+  target?: ScheduleTarget;
+  fallback?: 'fresh' | 'skip' | 'wait';
 }
 
 export interface TaskActionArgs {
@@ -498,6 +515,7 @@ export interface MutateArgsMap {
   'schedules.pause': ScheduleActionArgs;
   'schedules.resume': ScheduleActionArgs;
   'schedules.remove': ScheduleActionArgs;
+  'schedules.add': ScheduleAddArgs;
   'tasks.claim': TaskActionArgs;
   'tasks.unclaim': TaskActionArgs;
   'tasks.complete': TaskCompleteArgs;
@@ -513,6 +531,7 @@ export interface MutateReturnMap {
   'schedules.pause': void;
   'schedules.resume': void;
   'schedules.remove': void;
+  'schedules.add': ScheduleInfo;
   'tasks.claim': void;
   'tasks.unclaim': void;
   'tasks.complete': void;
@@ -571,6 +590,22 @@ export interface UiServiceDeps {
     pause(id: string, pausedBy?: 'user' | 'rate-limit'): Promise<ScheduleTask | null>;
     resume(id: string): Promise<ScheduleTask | null>;
     remove(id: string): Promise<boolean>;
+    /** Create a schedule (schedules.add). The injected impl (app.ts) composes the real
+     *  scheduler.add + schedule-repo backfill of target/fallback, returning the final task. */
+    add(
+      type: ScheduleTask['type'],
+      options: {
+        message: string;
+        projectId: string;
+        profile?: string | null;
+        intervalMs?: number;
+        time?: string;
+        dayOfWeek?: number;
+        delay?: number;
+        target?: ScheduleTarget;
+        fallback?: 'fresh' | 'skip' | 'wait';
+      },
+    ): Promise<ScheduleTask>;
   };
   executionRegistry: {
     getExecution(id: string): any | null;

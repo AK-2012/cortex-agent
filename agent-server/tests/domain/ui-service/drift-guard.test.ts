@@ -42,6 +42,7 @@ function makeMinimalDeps(): UiServiceDeps {
       pause: async () => null,
       resume: async () => null,
       remove: async () => false,
+      add: async () => ({ id: 'sch_new' } as any),
     },
     executionRegistry: {
       getExecution: () => null,
@@ -96,6 +97,7 @@ const mutateOps = [
   'schedules.pause',
   'schedules.resume',
   'schedules.remove',
+  'schedules.add',
   'tasks.claim',
   'tasks.unclaim',
   'tasks.complete',
@@ -113,11 +115,7 @@ test('drift-guard: every QueryScope has a registered handler', async () => {
   const ui = createUiService(makeMinimalDeps());
   for (const scope of queryScopes) {
     const result = await ui.query(scope, {} as any);
-    // If handler is missing, it would return Err with code 'invalid-args'
-    // If handler exists (even if it fails), it would return Err with a different code
     assert.ok(result.ok !== undefined, `Handler for ${scope} should exist and return a Result`);
-    // With empty deps, the handler should either succeed (empty list) or return an error
-    // But it should NOT return 'invalid-args' with "unknown query scope" message
     if (!result.ok) {
       const err = result as any;
       if (err.code === 'invalid-args' && UNREGISTERED.test(err.message)) {
