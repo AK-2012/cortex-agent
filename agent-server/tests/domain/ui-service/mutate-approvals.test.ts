@@ -40,11 +40,11 @@ function idOf(md: string, title: string): string {
 
 function makeDeps(approvalsPath: string): UiServiceDeps {
   return {
-    projectStore: { list: () => [], get: () => undefined, exists: () => false, getDefault: () => ({ id: 'general', name: 'general', kind: 'general' as const, contextDir: '/g' }) },
+    projectStore: { list: () => [], get: () => undefined, exists: () => false, getDefault: () => ({ id: 'general', name: 'general', kind: 'general' as const, contextDir: '/g' }), createProject: () => ({} as any) },
     sessionStore: { listByProject: async () => [], listResumable: async () => [], getById: async () => null },
     threadStore: { getAll: () => [], get: () => null },
     taskStore: { getAll: () => [], getById: () => null, load: () => {}, refresh: () => {} },
-    scheduler: { list: async () => [], get: async () => null, pause: async () => null, resume: async () => null, remove: async () => false },
+    scheduler: { list: async () => [], get: async () => null, pause: async () => null, resume: async () => null, remove: async () => false, add: async () => ({ id: 'sch_new' } as any) },
     executionRegistry: { getExecution: () => null, getAll: () => [], cancelExecution: () => null },
     executionLogTailer: { startTail: () => {}, stopTail: () => {}, refCount: () => 0 },
     approvalsPath,
