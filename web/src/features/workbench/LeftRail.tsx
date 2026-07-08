@@ -6,6 +6,7 @@ import { useTRPC } from '@/lib/trpc';
 import { groupSessions, sessionMeta, projectInitials } from './session-groups';
 import { buildSwitchList, projMenuSubLabel, runningCountByProject } from './project-menu';
 import { ProjectMenu } from './ProjectMenu';
+import { NewProjectModal } from './NewProjectModal';
 
 // LEFT RAIL — 1:1 from prototype.dc.html L42–100 (Stage-R RB, task f528). Exact inline styles /
 // px / hex / font / weight / EN copy reproduced verbatim; real tRPC data (projects.list /
@@ -52,6 +53,8 @@ export function LeftRail(): JSX.Element {
 
   // Project-card dropdown (prototype L1565–1607, task c3ce).
   const [projMenuOpen, setProjMenuOpen] = useState(false);
+  // New-project modal (prototype L1407–1429, task c551).
+  const [newProjOpen, setNewProjOpen] = useState(false);
   const activeRunning = activeProjectId ? runningCounts[activeProjectId] ?? 0 : 0;
   const projMenuSub = projMenuSubLabel(activeRunning, todayCost);
   const switchRows = useMemo(
@@ -66,9 +69,13 @@ export function LeftRail(): JSX.Element {
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [projMenuOpen]);
-  // GAP: switching / new-project have no backend scope or cross-pane current-project state.
+  // GAP: switching has no backend scope or cross-pane current-project state.
   const onSwitchProject = () => setProjMenuOpen(false);
-  const onNewProject = () => setProjMenuOpen(false);
+  // New project — wired to the real projects.create mutation via NewProjectModal (task c551).
+  const onNewProject = () => {
+    setProjMenuOpen(false);
+    setNewProjOpen(true);
+  };
   const onOpenOverview = () => {
     setProjMenuOpen(false);
     navigate('/overview');
@@ -403,6 +410,8 @@ export function LeftRail(): JSX.Element {
           onNewProject={onNewProject}
         />
       )}
+
+      {newProjOpen && <NewProjectModal onClose={() => setNewProjOpen(false)} />}
     </div>
   );
 }
