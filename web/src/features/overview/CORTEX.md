@@ -28,8 +28,8 @@ mirroring the prototype's `isOverview` state. Diffed vs `proto-shots/10-overview
   `budget /day` + `forecast today` — `CostSummary` has no budget/forecast field (**Stage 7**); **Last
   14 days** — no per-day cost series → structural bar skeleton + real `today` label, `avg —/day`
   (**Stage 7**); **Where it goes** — `byTrigger` is free-form + global, no threads/sessions/schedules
-  breakdown → empty bars + `—` (**Stage 7**). `+ New` schedule + Adjust-budget + ⋯ are inert (no
-  create/budget mutate scope).
+  breakdown → empty bars + `—` (**Stage 7**). Adjust-budget + ⋯ are inert (no budget mutate scope).
+  The Schedules `+ New` now opens the New-schedule overlay (`features/schedule`, real `schedules.add`).
 
 ## Notes
 

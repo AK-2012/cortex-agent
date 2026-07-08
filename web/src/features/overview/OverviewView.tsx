@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { ScheduleInfo, ExecutionInfo } from '@cortex-agent/ui-contract';
 import { useTRPC } from '@/lib/trpc';
 import { useExecutionLogDrawer } from '@/features/execution/ExecutionLogDrawerProvider';
+import { useScheduleModal } from '@/features/schedule/ScheduleModalProvider';
 import {
   formatMoney,
   deriveActiveProjectId,
@@ -63,6 +64,7 @@ export function OverviewView(): JSX.Element {
   const trpc = useTRPC();
   const queryClient = useQueryClient();
   const { open: openExecutionLog } = useExecutionLogDrawer();
+  const { open: openScheduleModal } = useScheduleModal();
   const now = Date.now();
 
   const projectsQuery = useQuery(trpc.projects.list.queryOptions({}));
@@ -274,8 +276,13 @@ export function OverviewView(): JSX.Element {
         <div style={CARD}>
           <div style={{ display: 'flex', alignItems: 'center', padding: '10px 14px', borderBottom: '1px solid #EFF1F5' }}>
             <span style={{ fontSize: 12, fontWeight: 650, color: '#191C22' }}>Schedules</span>
-            {/* + New — no schedule-create tRPC mutate, inert (Stage 6) */}
-            <span style={{ marginLeft: 'auto', fontSize: 11, fontWeight: 600, color: '#4655D4', cursor: 'pointer' }}>+ New</span>
+            {/* + New — opens the New-schedule overlay (design 7c), real schedules.add */}
+            <span
+              onClick={() => openScheduleModal({ projectId: activeProjectId })}
+              style={{ marginLeft: 'auto', fontSize: 11, fontWeight: 600, color: '#4655D4', cursor: 'pointer' }}
+            >
+              + New
+            </span>
           </div>
           <div style={{ padding: '9px 14px 11px', display: 'flex', flexDirection: 'column', gap: 9 }}>
             {schedules.length === 0 && (
