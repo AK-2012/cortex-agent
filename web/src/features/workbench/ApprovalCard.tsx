@@ -5,7 +5,7 @@ import { useApprovals } from '@/features/approvals/ApprovalsProvider';
 // Inline approval-required card — 1:1 from prototype.dc.html L247–276 (pending · unarmed default).
 // The chat transcript body is still representative (no session-transcript scope — Stage 4), so this
 // shows the representative APR-0007 content; but the card is now a live TRIGGER: clicking it (or its
-// Approve/Deny) opens the approval center overlay (task 851f), where the real approvals.list entries
+// Approve/Deny) opens the approval center overlay, where the real approvals.list entries
 // are approved/rejected via the real mutate ops. The card's own buttons stay non-mutating (the real
 // decision surface is the overlay); a per-card inline mutate is deferred with the Stage-4 transcript.
 

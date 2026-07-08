@@ -1,11 +1,11 @@
 # features/approvals/ — approval center overlay (7a)
 
-Stage-R3 task 851f (DR-0018 §8.5/§8.6). The **approval center** overlay — a centered 1120×700 modal
+Stage-R3. The **approval center** overlay — a centered 1120×700 modal
 reproduced **1:1** from `design/ref/prototype.dc.html` L1317-1405 (+ shared backdrop L1292), diffed vs
 `design/proto-shots/03-approval-center.png` (and the deny-armed footer vs `20-approval-deny-armed.png`,
 which is the *inline card* deny state — the overlay's own deny-armed follows the source `apd.armed`
 branch: feedback input + Cancel + Confirm reject). Wired to the **real** `approvals.*` ui-service scope
-(paired backend task 0d46): `approvals.list` for the queue, `approvals.approve` / `approvals.reject`
+(paired backend scope): `approvals.list` for the queue, `approvals.approve` / `approvals.reject`
 for a decision that flips the target entry's Status line in `~/.cortex/context/PENDING_APPROVALS.md`
 (the mutate never runs the underlying operation) → the list re-invalidates for a live refresh.
 
@@ -47,5 +47,5 @@ carries extras with **no backing field** → rendered structurally as omitted/`�
   refresh is **invalidate-after-mutate** (not a subscription). By design, not a gap.
 - **Overlay chrome** follows the `features/tasks/TaskModal` precedent (plain backdrop + fixed panel +
   Escape `useEffect`), the established convention for the prototype-1:1 modals, not Radix Dialog.
-- Backend: paired task 0d46 (`approvals.list` + `approvals.approve/reject`, PENDING_APPROVALS.md
-  parser/writer). Carried into this branch (it had not yet merged to main); web is the new surface.
+- Backend: the paired approvals scope (`approvals.list` + `approvals.approve/reject`,
+  PENDING_APPROVALS.md parser/writer). Web is the new surface over that already-landed scope.

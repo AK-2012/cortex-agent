@@ -91,7 +91,7 @@ export function LeftRail(): JSX.Element {
     selectedId ??
     (groups[0]?.items[0]?.sessionId ?? null);
 
-  // Approval center (Stage-R3 task 851f): real `approvals.list` pending count drives the banner;
+  // Approval center (Stage-R3): real `approvals.list` pending count drives the banner;
   // clicking it opens the approval center overlay (mounted globally in AppShell).
   const approvals = useApprovals();
   const approvalsQuery = useQuery(trpc.approvals.list.queryOptions({ status: 'pending' }));
@@ -342,7 +342,7 @@ export function LeftRail(): JSX.Element {
         ))}
       </div>
 
-      {/* approval-pending banner (real approvals.list; opens the approval center, task 851f) */}
+      {/* approval-pending banner (real approvals.list; opens the approval center) */}
       {hasPendingApprovals && (
         <div
           {...hp('approval')}
