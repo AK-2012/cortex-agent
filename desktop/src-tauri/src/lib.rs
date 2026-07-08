@@ -16,8 +16,10 @@
 //   window.__CORTEX_DESKTOP_CONFIG and passes it to createTrpcClient().
 //
 // Switch / disconnect:
-//   A hover button injected by initialization_script calls the `disconnect`
-//   Tauri command (clears keychain + AppState) then navigates to connect.html.
+//   An always-visible (low-contrast, bottom-right) button injected by
+//   initialization_script calls the `disconnect` Tauri command (clears keychain
+//   + AppState) then navigates to connect.html — a permanent escape hatch so a
+//   stale/dead saved server is always recoverable.
 
 use serde::{Deserialize, Serialize};
 use std::sync::Mutex;
@@ -127,8 +129,8 @@ fn connect(
 
 /// Clear credentials from keychain and AppState.
 ///
-/// Called by the "Switch server" hover button. After this returns the JS
-/// navigates to connect.html.
+/// Called by the always-visible "Switch server" button. After this returns the
+/// JS navigates to connect.html.
 #[tauri::command]
 fn disconnect(state: State<AppState>) -> Result<(), String> {
     clear_keychain();
@@ -144,8 +146,9 @@ fn disconnect(state: State<AppState>) -> Result<(), String> {
 //    window.__CORTEX_DESKTOP_CONFIG. The IPC round-trip is ~microseconds;
 //    the React bundle takes tens of milliseconds to download + parse, so
 //    the global is set before providers.tsx reads it.
-// 3. After DOMContentLoaded, injects a "Switch server" hover button into the
-//    workbench. Suppressed on the connect screen (identified by body id).
+// 3. After DOMContentLoaded, injects an always-visible "Switch server" button
+//    (low-contrast, bottom-right) into the workbench. Suppressed on the connect
+//    screen (identified by body id).
 
 const INIT_SCRIPT: &str = r#"
 window.__CORTEX_DESKTOP__ = true;
@@ -177,27 +180,22 @@ document.addEventListener('DOMContentLoaded', function () {
   btn.id = '__cortex-switch-btn';
   btn.title = 'Switch or disconnect server';
   btn.textContent = 'Switch';
+  // ALWAYS visible (no hover fade-to-0). A stale/dead saved server leaves the SPA with a broken
+  // tRPC client and no visible UI affordance; a hover-only button was effectively unreachable in
+  // that state. Kept small, low-contrast, and pinned bottom-right so it stays unobtrusive while
+  // remaining a permanent escape hatch back to the connect screen. It brightens on hover only.
   btn.style.cssText = [
     'position:fixed', 'bottom:12px', 'right:12px', 'z-index:9999',
     'background:rgba(70,85,212,0.12)', 'color:rgba(233,231,226,0.55)',
     'border:1px solid rgba(70,85,212,0.25)', 'border-radius:4px',
     'padding:4px 10px', 'font:11px/1.4 "IBM Plex Mono",monospace',
-    'cursor:pointer', 'letter-spacing:.04em', 'opacity:0',
-    'transition:opacity 0.25s',
+    'cursor:pointer', 'letter-spacing:.04em', 'opacity:0.55',
+    'transition:opacity 0.2s',
   ].join(';');
 
-  // Reveal on mouse activity, hide after 3 s idle.
-  var hideTimer;
-  function reveal() {
-    btn.style.opacity = '1';
-    clearTimeout(hideTimer);
-    hideTimer = setTimeout(function () { btn.style.opacity = '0'; }, 3000);
-  }
-  document.addEventListener('mousemove', reveal, { passive: true });
-  btn.addEventListener('mouseenter', function () { clearTimeout(hideTimer); btn.style.opacity = '1'; });
-  btn.addEventListener('mouseleave', function () {
-    hideTimer = setTimeout(function () { btn.style.opacity = '0'; }, 1000);
-  });
+  // Brighten on hover, settle back to the resting low-contrast state on leave — but never hide.
+  btn.addEventListener('mouseenter', function () { btn.style.opacity = '1'; });
+  btn.addEventListener('mouseleave', function () { btn.style.opacity = '0.55'; });
 
   btn.addEventListener('click', function () {
     tauri.core.invoke('disconnect').catch(function () {}).finally(function () {
@@ -219,8 +217,14 @@ pub fn run() {
         token: std::env::var("CORTEX_TOKEN").ok(),
     });
 
+    // A credential counts as PRESENT only when it is Some AND non-empty after trimming.
+    // `Option::is_some()` is true for `Some("")` / `Some("   ")`, so blank or whitespace-only
+    // saved creds (e.g. a half-filled keychain entry or `CORTEX_SERVER_URL=`) would wrongly
+    // route to index.html and leave the user stranded with a dead tRPC client. Requiring a
+    // non-empty trimmed value makes garbage creds fall through to connect.html.
+    let non_blank = |v: &Option<String>| v.as_deref().map(str::trim).is_some_and(|s| !s.is_empty());
     let has_credentials =
-        initial_config.server_url.is_some() && initial_config.token.is_some();
+        non_blank(&initial_config.server_url) && non_blank(&initial_config.token);
 
     // Open the workbench directly when credentials are available; otherwise
     // show the connection config screen.

@@ -1,4 +1,5 @@
-// input:  a real UiService (injected) + env (CORTEX_UI_HTTP gate, CORTEX_UI_PORT)
+// input:  a real UiService (injected) + env (CORTEX_UI_HTTP gate, CORTEX_UI_PORT,
+//          CORTEX_UI_CORS_ORIGINS)
 // output: startUiHttpServer(opts) -> UiHttpServer | null — builds the tRPC AppRouter over the
 //         injected UiService and starts the Web UI HTTP+SSE transport-host behind the
 //         x-cortex-token bearer gate (getClientToken), bound 127.0.0.1. Returns null (clean
@@ -8,6 +9,11 @@
 //         both so the router stays transport-agnostic and the transport-host stays router-
 //         agnostic (platform -> core only). app.ts calls this after createUiService and closes
 //         the returned handle on shutdown.
+//         CORS: resolves the transport-host's allow-list from opts.corsOrigins else the
+//         CORTEX_UI_CORS_ORIGINS env var (comma-separated). This is what makes the running-server
+//         path (app.ts, which calls startUiHttpServer without opts.corsOrigins) honor CORS purely
+//         via env — needed so the Tauri desktop webview (cross-origin, e.g. tauri://localhost) can
+//         reach tRPC directly. No app.ts change required.
 // >>> If I am updated, update the parent folder's CORTEX.md <<<
 
 import { createAppRouter } from '@domain/ui-service/app-router.js';
@@ -37,6 +43,24 @@ export interface StartUiHttpOptions {
   env?: NodeJS.ProcessEnv;
   /** Directory of the built SPA to serve for non-tRPC paths (absent in Stage 1). */
   spaDir?: string;
+  /**
+   * Explicit CORS allow-list forwarded to the transport-host. When omitted, the list is parsed
+   * from the CORTEX_UI_CORS_ORIGINS env var (comma-separated; entries trimmed, empties dropped).
+   * Env-driven so the running-server path (app.ts) can enable CORS for the Tauri desktop webview
+   * (e.g. tauri://localhost) with no code change — just the env var. Absent/empty → no CORS headers.
+   */
+  corsOrigins?: string[];
+}
+
+/**
+ * Parse a comma-separated origin list (from CORTEX_UI_CORS_ORIGINS) into a trimmed, empties-dropped
+ * array. Returns undefined when the raw value is absent or yields no entries, so the transport-host
+ * keeps its backward-compatible "no CORS headers" default rather than an empty allow-list.
+ */
+function parseCorsOrigins(raw: string | undefined): string[] | undefined {
+  if (!raw) return undefined;
+  const origins = raw.split(',').map((o) => o.trim()).filter((o) => o.length > 0);
+  return origins.length > 0 ? origins : undefined;
 }
 
 /**
@@ -53,12 +77,17 @@ export function startUiHttpServer(opts: StartUiHttpOptions): UiHttpServer | null
   const parsedPort = parseInt(env.CORTEX_UI_PORT ?? '', 10);
   const port = Number.isNaN(parsedPort) ? DEFAULT_UI_PORT : parsedPort;
   const router = createAppRouter(opts.uiService);
-  log.info(`Web UI enabled — starting tRPC HTTP+SSE on 127.0.0.1:${port}`);
+  const corsOrigins = opts.corsOrigins ?? parseCorsOrigins(env.CORTEX_UI_CORS_ORIGINS);
+  log.info(
+    `Web UI enabled — starting tRPC HTTP+SSE on 127.0.0.1:${port}` +
+      (corsOrigins ? ` (CORS allow-list: ${corsOrigins.join(', ')})` : ''),
+  );
   return createUiHttpServer({
     router,
     getToken: opts.getToken ?? getClientToken,
     port,
     host: '127.0.0.1',
     spaDir: opts.spaDir,
+    corsOrigins,
   });
 }

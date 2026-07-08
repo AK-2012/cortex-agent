@@ -61,7 +61,7 @@ Project→conduit mapping (formerly `channel-repo.ts`) has moved into `platform/
 | `status-helpers.ts` | execution / status-message / streaming-VM helpers (pure subset has been sunk to `core/status-format.ts`) |
 
 ### L5: entry/
-`app.ts` (composition root, S13: <200 lines) `daemon.ts` `startup-helpers.ts` `startup-notify.ts` `start-ui-http.ts` (Web UI wiring: build createAppRouter(uiService) + start createUiHttpServer on CORTEX_UI_PORT/3004 behind getClientToken, opt-in via CORTEX_UI_HTTP; null when off)
+`app.ts` (composition root, S13: <200 lines) `daemon.ts` `startup-helpers.ts` `startup-notify.ts` `start-ui-http.ts` (Web UI wiring: build createAppRouter(uiService) + start createUiHttpServer on CORTEX_UI_PORT/3004 behind getClientToken, opt-in via CORTEX_UI_HTTP; null when off; **CORS allow-list resolved from opts.corsOrigins else CORTEX_UI_CORS_ORIGINS env (comma-separated)** and passed to the transport-host, so app.ts honors CORS for the Tauri desktop webview via env with no code change)
 
 ### Other static directories
 | Directory | Contents |

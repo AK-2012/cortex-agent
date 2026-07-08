@@ -1,6 +1,8 @@
 // input:  Node test runner + startUiHttpServer (entry wiring) + a FAKE UiService
 // output: integration tests — env gate (enabled/disabled), default port 3004, token 401,
-//         HTTP query roundtrip, HTTP mutate roundtrip, SSE subscription event, clean close()
+//         HTTP query roundtrip, HTTP mutate roundtrip, SSE subscription event, clean close(),
+//         CORS via CORTEX_UI_CORS_ORIGINS env (allow-listed Origin echoed, preflight OPTIONS 204,
+//         non-listed origin → none)
 // pos:    Regression guard for the entry-layer wiring that builds createAppRouter(uiService)
 //         and starts createUiHttpServer on CORTEX_UI_PORT behind getClientToken (task 3af2, edf0/C).
 //         Drives the REAL wiring code path with an injected fake UiService (analogous to the
@@ -77,10 +79,10 @@ function portOf(inst: { server: http.Server }): number {
   return addr.port;
 }
 
-interface Res { statusCode: number; body: string }
+interface Res { statusCode: number; body: string; headers: http.IncomingHttpHeaders }
 function req(
   port: number,
-  method: 'GET' | 'POST',
+  method: 'GET' | 'POST' | 'OPTIONS',
   urlPath: string,
   headers: Record<string, string> = {},
   body?: string,
@@ -89,7 +91,7 @@ function req(
     const r = http.request({ host: '127.0.0.1', port, method, path: urlPath, headers }, (res) => {
       let buf = '';
       res.on('data', (c) => { buf += c; });
-      res.on('end', () => resolve({ statusCode: res.statusCode ?? 0, body: buf }));
+      res.on('end', () => resolve({ statusCode: res.statusCode ?? 0, body: buf, headers: res.headers }));
     });
     r.on('error', reject);
     if (body !== undefined) r.write(body);
@@ -169,4 +171,63 @@ test('close: shuts down cleanly (subsequent request refused)', async () => {
   const port = portOf(inst!);
   await inst!.close();
   await assert.rejects(req(port, 'GET', `/trpc/projects.list?input=${enc({})}`, { 'x-cortex-token': TOKEN }));
+});
+
+// ── CORS wiring via CORTEX_UI_CORS_ORIGINS env (the running-server path in app.ts) ──
+// Proves the entry wiring parses the env var and threads the allow-list all the way to the
+// transport-host, so app.ts (which never passes opts.corsOrigins) honors CORS purely via env.
+const CORS_ORIGIN = 'tauri://localhost';
+
+test('cors env: allow-listed Origin from CORTEX_UI_CORS_ORIGINS gets ACAO echoed', async () => {
+  const inst = await boot({ CORTEX_UI_HTTP: '1', CORTEX_UI_PORT: '0', CORTEX_UI_CORS_ORIGINS: CORS_ORIGIN });
+  const { statusCode, headers } = await req(
+    portOf(inst!), 'GET', `/trpc/projects.list?input=${enc({})}`,
+    { 'x-cortex-token': TOKEN, origin: CORS_ORIGIN },
+  );
+  assert.equal(statusCode, 200);
+  assert.equal(headers['access-control-allow-origin'], CORS_ORIGIN,
+    'ACAO must be the exact allow-listed origin, proving the env var reached the transport-host');
+});
+
+test('cors env: comma-separated list is parsed (trim + drop empties) and each entry matches', async () => {
+  const inst = await boot({
+    CORTEX_UI_HTTP: '1', CORTEX_UI_PORT: '0',
+    // Intentional whitespace + a trailing empty entry to prove trim + filter.
+    CORTEX_UI_CORS_ORIGINS: ` http://tauri.localhost , ${CORS_ORIGIN} , `,
+  });
+  const { headers } = await req(
+    portOf(inst!), 'GET', `/trpc/projects.list?input=${enc({})}`,
+    { 'x-cortex-token': TOKEN, origin: CORS_ORIGIN },
+  );
+  assert.equal(headers['access-control-allow-origin'], CORS_ORIGIN);
+});
+
+test('cors env: preflight OPTIONS for a tRPC path returns 204 with ACAO (no auth token)', async () => {
+  const inst = await boot({ CORTEX_UI_HTTP: '1', CORTEX_UI_PORT: '0', CORTEX_UI_CORS_ORIGINS: CORS_ORIGIN });
+  const { statusCode, headers } = await req(
+    portOf(inst!), 'OPTIONS', '/trpc/projects.list',
+    { origin: CORS_ORIGIN, 'access-control-request-method': 'POST', 'access-control-request-headers': 'x-cortex-token' },
+  );
+  assert.equal(statusCode, 204, 'preflight must be 204 No Content');
+  assert.equal(headers['access-control-allow-origin'], CORS_ORIGIN);
+});
+
+test('cors env: a non-listed Origin gets no ACAO header', async () => {
+  const inst = await boot({ CORTEX_UI_HTTP: '1', CORTEX_UI_PORT: '0', CORTEX_UI_CORS_ORIGINS: CORS_ORIGIN });
+  const { headers } = await req(
+    portOf(inst!), 'GET', `/trpc/projects.list?input=${enc({})}`,
+    { 'x-cortex-token': TOKEN, origin: 'https://evil.example.com' },
+  );
+  assert.equal(headers['access-control-allow-origin'], undefined,
+    'a non-allow-listed origin must not receive ACAO');
+});
+
+test('cors env: unset CORTEX_UI_CORS_ORIGINS → no CORS headers (backward-compat)', async () => {
+  const inst = await boot({ CORTEX_UI_HTTP: '1', CORTEX_UI_PORT: '0' });
+  const { headers } = await req(
+    portOf(inst!), 'GET', `/trpc/projects.list?input=${enc({})}`,
+    { 'x-cortex-token': TOKEN, origin: CORS_ORIGIN },
+  );
+  assert.equal(headers['access-control-allow-origin'], undefined,
+    'no env var → transport-host keeps its no-CORS default');
 });
