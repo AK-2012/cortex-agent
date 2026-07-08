@@ -1,20 +1,28 @@
 import { useEffect, useState } from 'react';
-import { MORNING } from './chat-content';
+import { DEFAULT_CHAT_PROFILE } from './chat-content';
 import { buildProfileOptions } from './profile-menu';
 import { ProfileMenu } from './ProfileMenu';
 
 // Chat header — 1:1 from prototype.dc.html L107–130: session title · profile chip · running/idle
-// status pill · ⌘K affordance. Title/profile/running are the morning-session representative values
-// (transcript Stage-4 gap — no session-detail scope). Profile-chip dropdown (L109–121, task c3ce):
-// GAP — no profiles tRPC scope → static verbatim option set; onPick updates the local chip label.
+// status pill · ⌘K affordance. `title` is the REAL active session name (task aba0); `running` is
+// derived from live `session.message` activity. Profile-chip dropdown (L109–121, task c3ce): GAP —
+// no profiles tRPC scope → static verbatim option set; onPick updates the local chip label only.
 
 const mono = "'IBM Plex Mono',monospace";
 
-export function ChatHeader({ running, onCmdK }: { running: boolean; onCmdK: () => void }): JSX.Element {
+export function ChatHeader({
+  title,
+  running,
+  onCmdK,
+}: {
+  title: string;
+  running: boolean;
+  onCmdK: () => void;
+}): JSX.Element {
   const [chipHover, setChipHover] = useState(false);
   const [cmdkHover, setCmdkHover] = useState(false);
   const [profMenuOpen, setProfMenuOpen] = useState(false);
-  const [chatProfile, setChatProfile] = useState(MORNING.profile);
+  const [chatProfile, setChatProfile] = useState(DEFAULT_CHAT_PROFILE);
   useEffect(() => {
     if (!profMenuOpen) return;
     const onKey = (e: KeyboardEvent) => {
@@ -41,7 +49,19 @@ export function ChatHeader({ running, onCmdK }: { running: boolean; onCmdK: () =
         padding: '0 20px',
       }}
     >
-      <div style={{ fontSize: 13.5, fontWeight: 600, color: '#191C22' }}>{MORNING.title}</div>
+      <div
+        style={{
+          fontSize: 13.5,
+          fontWeight: 600,
+          color: '#191C22',
+          maxWidth: 320,
+          whiteSpace: 'nowrap',
+          overflow: 'hidden',
+          textOverflow: 'ellipsis',
+        }}
+      >
+        {title}
+      </div>
       <span style={{ position: 'relative' }}>
         <span
           data-chip="profile"

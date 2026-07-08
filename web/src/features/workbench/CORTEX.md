@@ -14,19 +14,21 @@ LeftRail (f528) + CenterChat (89e7) + RightPanel (1e96) are all real 1:1 — the
 | `LeftRail.tsx` | **Real Left Rail 1:1** (prototype L42–100). Exact inline styles/px/hex/font/weight/EN copy; real `projects.list` + `sessions.list` (+ `cost.summary`) substituted into the design's structure. cx logo + daemon dot · project card (active project = most-recent session's project; avatar initials; cost-only sub-line) — **clicks open the project switcher popover** (`ProjectMenu`, task c3ce; adds a `threads.list` query for real running counts; Esc/outside-click close) · + New session (⌘N, inert — no create scope) · session groups TODAY/YESTERDAY/EARLIER · approval banner (hidden, GAP-1) · EN/中 (EN active) · Settings→`/settings`. |
 | `ProjectMenu.tsx` | **Project switcher popover 1:1** (prototype L1565–1607, task c3ce). Fixed overlay (click-catcher z-58 / menu z-59) at `left:10;top:106;width:282`. Header = active project + real sub-line (`projMenuSubLabel`) + "Open project overview →" (→`/overview`); SWITCH PROJECT list = real projects minus active with real running counts; "+ New project" (inert, GAP). List `maxHeight:420;overflow:auto` bounds the real 20-project volume (prototype mock had 3) so the footer stays reachable. GAPs: switch is inert (no cross-pane current-project state / switch op); phase labels ("idle/paused/M3.1") have no backing field → real running count only. |
 | `project-menu.ts` / `project-menu.test.ts` | **Pure** (TDD, 8 tests): `runningCountByProject` (threads.list running+waiting grouped by projectId) · `buildSwitchList` (projects minus active + real counts) · `switchRowMeta` · `projMenuSubLabel` (`N threads running · $X today`). |
-| `CenterChat.tsx` | **Real CENTER CHAT 1:1** (prototype L103–395, task 89e7, RB sibling B). Same `export function CenterChat()`. Fills the fluid center pane; composes `ChatHeader` + `MessageStream` + `Composer` (morning-session default, running=true). |
-| `ChatHeader.tsx` | Chat header (prototype L107–130): session title · profile chip · running/idle pill · ⌘K (dispatches the global palette keydown). The profile chip **opens the profile picker popover** (`ProfileMenu`, task c3ce) — local `chatProfile` state; Esc/click-away close. |
+| `CenterChat.tsx` | **Real CENTER CHAT 1:1** (prototype L103–395, task 89e7 → **S4 chat aba0**). Same `export function CenterChat()`. Fills the fluid center pane; resolves the **active session** (most-recent `sessions.list`), runs the real `sessions.transcript` query + `useSessionMessageLiveSync`, builds prototype rows via `transcript-vm`, and composes `ChatHeader` + `MessageStream` + `Composer`. `running` is DERIVED from live-stream activity (no session running field). |
+| `ChatHeader.tsx` | Chat header (prototype L107–130): **real session title** (task aba0) · profile chip · running/idle pill (derived) · ⌘K (dispatches the global palette keydown). The profile chip **opens the profile picker popover** (`ProfileMenu`, task c3ce) — local `chatProfile` state (default `DEFAULT_CHAT_PROFILE`); Esc/click-away close. |
 | `ProfileMenu.tsx` | **Profile picker popover 1:1** (prototype L112–120, task c3ce). Absolute-anchored `left:0;top:26` inside the chip's relative span. GAP: no `profiles` tRPC scope → static verbatim option set; onPick updates the local chip label only. |
 | `profile-menu.ts` / `profile-menu.test.ts` | **Pure** (TDD, 3 tests): `buildProfileOptions(active)` + `PROFILE_NAMES` — verbatim prototype profile option set (research/plan/execute/claude-haiku + model sub-labels). |
-| `MessageStream.tsx` | Message stream (prototype L131–357): TODAY divider · right-aligned user bubble · `ToolCallsRow` · assistant text+result chips · `InlineThreadCardProto` (LIVE) · `ApprovalCard`. Static representative transcript (GAP-A). |
-| `ToolCallsRow.tsx` | Collapsed/expanded tool-call row (prototype L152–172); local toggle. |
-| `ApprovalCard.tsx` | Inline approval-required card (prototype L247–276, pending·unarmed); INERT Approve/Deny (GAP-B). |
-| `Composer.tsx` | Composer (prototype L359–395): slash palette (local) · running/idle status line · input · `/ commands` chip · stop/send (INERT, GAP-C). |
+| `MessageStream.tsx` | Message stream (prototype L131–357), **rows-driven** (task aba0): renders the `ChatRow[]` built from REAL `sessions.transcript` + live tail — TODAY divider · right-aligned user bubble · `ToolCallsRow` · assistant text (streaming `cxblink` caret on the last row while live). Empty session → the prototype `chatEmpty` empty-state (L133–143, verbatim EN copy). Kept 1:1 surfaces: `InlineThreadCardProto` (LIVE `threads.get`) + `ApprovalCard` (Stage-5 GAP-B, representative). |
+| `ToolCallsRow.tsx` | Collapsed/expanded tool-call row (prototype L152–172); local toggle. Fed real tool events (`toolName`/`toolInput`) mapped from the transcript. |
+| `ApprovalCard.tsx` | Inline approval-required card (prototype L247–276, pending·unarmed); INERT Approve/Deny (Stage-5 GAP-B, `REPRESENTATIVE_APPROVAL`). |
+| `Composer.tsx` | Composer (prototype L359–395): slash palette (18-slash-menu, local visual) · running/idle status line (real `turns`; elapsed/cost = `—`) · input · `/ commands` chip · **REAL send** (task aba0): ⏎/click → `sessions.send` mutate. Stop inert (no session-cancel op). |
+| `transcript-vm.ts` / `transcript-vm.test.ts` | **Pure** (TDD, 12 tests): `buildTranscriptRows(transcript, liveTail, {streaming})` → prototype `ChatRow[]` (divider on day-change · user · collapsed tools · assistant + streaming caret); `liveToMessage` (session.message→TranscriptMessage); `turnCount`. De-dups the live tail against the fetched transcript. |
+| `useSessionMessageLiveSync.ts` | Thin React/SSE glue (task aba0): one `subscribe({events:['session.message'], sessionId})` → bounded live-tail buffer (streams assistant/tool output) + `streaming` idle-timer flag + invalidates `sessions.transcript` for reconciliation. Mirrors `useThreadGetLiveSync`. |
 | `InlineThreadCardProto.tsx` | **LIVE inline thread card** (prototype L180–246) bound to REAL `threads.get` (B1): picks the first running/waiting thread from `threads.list`, maps `ThreadDetail`→prototype rows via `thread-card-proto`, re-flows live via `useThreadGetLiveSync`. The one live-data surface of the chat. |
 | `thread-card-proto.ts` | **Pure** (TDD): `threadPill` (status→prototype pill pair) + `buildThreadCard` (`ThreadDetail`→vertical rows; only the running step expands its subthread cards + nested rows; done/pending collapse). |
 | `thread-card-proto.test.ts` | vitest for `thread-card-proto.ts` (4 tests). |
-| `chat-content.ts` | **Pure** (TDD): `fmtClock`/`moneyLabel`/`toolCallsLabel` + `MORNING` representative transcript constants + `SLASH_COMMANDS` (verbatim from the prototype script). |
-| `chat-content.test.ts` | vitest for `chat-content.ts` (9 tests). |
+| `chat-content.ts` | Static non-data content (task aba0 trimmed the transcript constants — the body is now real): `toolCallsLabel` + `ToolCall`/`ApprovalContent` types · `SLASH_COMMANDS` (18-slash-menu, verbatim) · `REPRESENTATIVE_APPROVAL` (Stage-5 GAP-B) · `DEFAULT_CHAT_PROFILE`. |
+| `chat-content.test.ts` | vitest for `chat-content.ts` (4 tests). |
 | `RightPanel.tsx` | **Real Right Panel 1:1** (prototype L1091–1276, task 1e96). Same export `RightPanel(): JSX.Element` (replaced the f528 STUB). Exact inline styles/px/hex/font/weight/EN copy; real tRPC data. Tab bar Threads/Tasks/Machines + counts (real `threads.list` active len · `tasks.list` open actionable count · Machines `0` GAP-M) · cost/budget bar (real `cost.summary.today`; budget denominator GAP-B) · Active/History toggle (`scope.ts`) · Threads tab = `RightThreadCard` list · Tasks tab = reused `features/tasks/TasksPanel` · Machines tab = `RightMachinesTab` stub. |
 | `RightThreadCard.tsx` | One thread card 1:1 (prototype L1115–1185). Header (node icon · mono templateName · status pill · meta line · depth dots) + collapsible step-tree body (running/opened cards fetch `threads.get`; dot+tail grid, active-step dispatch/subthread sub-cards) + footer (Pause · Cancel · Detail · Σcost). Cancel = real `threads.cancel` mutation → invalidates `threads.list`/`threads.get` (live). Pause inert (GAP-P). |
 | `RightMachinesTab.tsx` | Machines tab **structural stub** (prototype L1237–1274). GAP-M: no machines tRPC scope (Stage 7). |
@@ -40,12 +42,16 @@ LeftRail (f528) + CenterChat (89e7) + RightPanel (1e96) are all real 1:1 — the
 **Data gaps rendered structurally + flagged** (paired stage). Left Rail (f528): GAP-1 approvals
 banner — no tRPC approvals scope → conditionally hidden (**Stage 5**); GAP-2 `SessionInfo` no
 turns/cost/running fields (session-detail backend, later); GAP-3 `ProjectConduitInfo` no
-phase/milestone → project sub-line cost-only (**Stage 6**). Center Chat (89e7): GAP-A chat transcript
-body — no session-transcript tRPC scope → divider/user/tool-call/assistant blocks are the prototype's
-representative morning content, static (**Stage 4**); GAP-B approval card — no approvals scope →
-representative APR-0007, inert buttons (**Stage 5**); GAP-C composer send — no session-send mutate →
-input + slash palette local-only, send/stop inert (**Stage 4**). The one LIVE center surface is the
-inline thread card (`threads.get`). Right Panel (1e96): **GAP-M** Machines tab — no machines tRPC
+phase/milestone → project sub-line cost-only (**Stage 6**). Center Chat (89e7 → **S4 aba0**):
+**GAP-A RESOLVED** — the transcript body is now REAL (`sessions.transcript` query → prototype rows,
+grouped turns/tools/assistant); **GAP-C RESOLVED** — composer send is REAL (`sessions.send` mutate) and
+assistant output streams back live via the `session.message` subscription (`useSessionMessageLiveSync`).
+Remaining Center-Chat gaps: GAP-B approval card — no approvals scope → representative APR-0007, inert
+(**Stage 5**); session **elapsed/cost** — `SessionInfo` has no such fields → status line shows real
+`turns`, elapsed/cost = `—` (explicit placeholder, no fabrication); composer **Stop** — no session-cancel
+MutateOp → inert affordance; **slash execution** — no backend op → the 18-slash-menu is a local visual
+affordance only. The other LIVE center surface (inline thread card, `threads.get`) is kept. Right Panel
+(1e96): **GAP-M** Machines tab — no machines tRPC
 scope (**Stage 7**); **GAP-P** Pause — no `threads` pause MutateOp (inert affordance); **GAP-B**
 budget denominator — `CostSummary` has `today` only, no budget scope (rendered `today` real, `/ —` +
 empty bar; **Stage 7**).
@@ -59,9 +65,10 @@ Center Chat uses its own 1:1 `InlineThreadCardProto`; kept valid for any future 
 
 ## Notes
 
-- **No backend change** — existing ui-service contract only (`projects.list`, `sessions.list`,
-  `cost.summary`, + `threads.list`/`threads.get`/`threads.cancel`/`subscribe` for the center inline
-  card + right panel). Web-only.
+- **Web-only** — the S4 chat backend (`sessions.transcript` query, `sessions.send` mutate,
+  `session.message` subscribe event) is delivered by a paired be leaf; this task consumes it and
+  changes only `web/`. Other consumed scopes: `projects.list`, `sessions.list`, `cost.summary`,
+  `threads.list`/`threads.get`/`threads.cancel`/`subscribe` (center inline card + right panel).
 - **Verified live** (task f528): real dist ui-http-server + real `ProjectStore`/`sessionStore`/
   `getCostSummary` (real ~/.cortex data) serving built `web/dist` behind `x-cortex-token`;
   headless-Chrome CDP (token via `Network.setExtraHTTPHeaders`) at 1440×900 → frame **240/800/400**,
