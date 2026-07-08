@@ -243,13 +243,13 @@ export function OverviewView(): JSX.Element {
           </div>
         </div>
 
-        {/* Project memory — EXPLICIT placeholder: no fs-read tRPC scope (Stage 6) */}
-        <div style={CARD}>
-          <CardHeader title="Project memory" right="agent-maintained" />
+        {/* Project memory — REAL: memory viewer 7b now backed by the memory.tree/memory.file fs scope */}
+        <div style={{ ...CARD, cursor: 'pointer' }} onClick={() => navigate('/memory')}>
+          <CardHeader title="Project memory" right="git-backed" />
           <div style={{ padding: '18px 14px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4, textAlign: 'center' }}>
-            <div style={{ fontSize: 11.5, fontWeight: 600, color: '#8A93A2' }}>Memory viewer not yet available</div>
+            <div style={{ fontSize: 11.5, fontWeight: 600, color: '#4655D4' }}>Open memory viewer ›</div>
             <div style={{ fontSize: 10.5, color: '#B6BDC9', lineHeight: 1.5 }}>
-              File tree + diff needs a read-only fs query scope — backend pending (Stage 6).
+              Mission · roadmap · STATUS · TASKS + experiments / knowledge / patterns / decisions.
             </div>
           </div>
         </div>
