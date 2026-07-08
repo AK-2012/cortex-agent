@@ -24,3 +24,16 @@ export function readDesktopConfig(): RemoteConfig | undefined {
   }
   return undefined;
 }
+
+/**
+ * True when running inside the Tauri desktop shell. The initialization_script sets
+ * `window.__CORTEX_DESKTOP__ = true` synchronously (before the React bundle executes),
+ * independent of whether credentials are configured yet.
+ *
+ * Used to pick a HashRouter in desktop mode: the shell loads the SPA via the Tauri asset
+ * protocol at `/index.html`, which a BrowserRouter cannot match (→ "404 Not Found"). Hash
+ * routing is path-independent. Browser / ui-http mode keeps BrowserRouter (clean URLs).
+ */
+export function isDesktopShell(): boolean {
+  return (globalThis as unknown as { __CORTEX_DESKTOP__?: boolean }).__CORTEX_DESKTOP__ === true;
+}

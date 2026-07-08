@@ -1,4 +1,5 @@
-import { createBrowserRouter, Navigate } from 'react-router-dom';
+import { createBrowserRouter, createHashRouter, Navigate } from 'react-router-dom';
+import { isDesktopShell } from '@/lib/desktop-config';
 import { AppShell } from '@/shell/AppShell';
 import { EmptyPane } from '@/shell/EmptyPane';
 import { WorkbenchPage } from '@/features/workbench/WorkbenchPage';
@@ -8,7 +9,12 @@ import { BaseDemoPage } from '@/features/base-demo/BaseDemoPage';
 import { ThreadDetailRoute } from '@/features/thread/ThreadDetailRoute';
 import { OverviewPage } from '@/features/overview/OverviewPage';
 
-export const router = createBrowserRouter([
+// Desktop shell loads the SPA via the Tauri asset protocol at `/index.html`, which a
+// BrowserRouter cannot match (→ "404 Not Found"). Use a path-independent HashRouter there;
+// browser / ui-http mode keeps clean-URL BrowserRouter.
+const createRouter = isDesktopShell() ? createHashRouter : createBrowserRouter;
+
+export const router = createRouter([
   {
     path: '/',
     element: <AppShell />,

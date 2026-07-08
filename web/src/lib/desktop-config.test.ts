@@ -1,12 +1,28 @@
 import { describe, it, expect, afterEach } from 'vitest';
-import { readDesktopConfig } from './desktop-config';
+import { readDesktopConfig, isDesktopShell } from './desktop-config';
 
 // Tests run in the vitest Node environment (no jsdom). readDesktopConfig() reads
 // from globalThis (≡ window in browsers), so we can mock the global directly here.
 
 type MockGlobal = typeof globalThis & {
   __CORTEX_DESKTOP_CONFIG?: { serverUrl?: string | null; token?: string | null };
+  __CORTEX_DESKTOP__?: boolean;
 };
+
+describe('isDesktopShell', () => {
+  afterEach(() => {
+    delete (globalThis as MockGlobal).__CORTEX_DESKTOP__;
+  });
+
+  it('returns true when the Tauri init script set __CORTEX_DESKTOP__', () => {
+    (globalThis as MockGlobal).__CORTEX_DESKTOP__ = true;
+    expect(isDesktopShell()).toBe(true);
+  });
+
+  it('returns false in browser / ui-http mode (flag absent)', () => {
+    expect(isDesktopShell()).toBe(false);
+  });
+});
 
 describe('readDesktopConfig', () => {
   afterEach(() => {
