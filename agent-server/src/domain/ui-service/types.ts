@@ -33,6 +33,7 @@ export type QueryScope =
   | 'executions.get'
   | 'memory.tree'
   | 'memory.file'
+  | 'approvals.list'
   | 'cost.summary'
   | 'config.get';
 
@@ -52,6 +53,8 @@ export type MutateOp =
   | 'tasks.complete'
   | 'tasks.block'
   | 'tasks.unblock'
+  | 'approvals.approve'
+  | 'approvals.reject'
   | 'config.set';
 
 // ── Subscribe ─────────────────────────────────────────────────────
@@ -126,6 +129,11 @@ export interface MemoryFileParams {
   path: string;
 }
 
+export interface ApprovalsListParams {
+  /** Filter to a single approval status. Omitted → all entries. */
+  status?: ApprovalStatus;
+}
+
 export interface CostSummaryParams {
   projectId?: string | null;
 }
@@ -194,6 +202,15 @@ export interface BudgetValue {
 export interface ConfigSetArgs {
   section: 'budget';
   value: BudgetValue;
+}
+
+export interface ApprovalsApproveArgs {
+  id: string;
+}
+
+export interface ApprovalsRejectArgs {
+  id: string;
+  feedback?: string;
 }
 
 // ── Query return types (DTOs) ─────────────────────────────────────
@@ -496,6 +513,30 @@ export interface MemoryFile {
   modifiedAt: string;
 }
 
+// ── approvals DTO (DR-0018 §2.1 approval center 7a) ────────────────
+// Parsed from <CORTEX_HOME>/context/PENDING_APPROVALS.md. One entry per `## <date> <title>`
+// heading. The queue is a markdown store; approve/reject only flip the Status line (no execution).
+
+export type ApprovalStatus = 'pending' | 'approved' | 'rejected' | 'failed';
+
+export interface ApprovalInfo {
+  /** Stable id derived from the heading line (no explicit id exists in the markdown). */
+  id: string;
+  title: string;
+  operation: string | null;
+  reason: string | null;
+  impact: string | null;
+  /** From the `Command/Action` bullet. */
+  command: string | null;
+  status: ApprovalStatus;
+  /** Date from the `## <YYYY-MM-DD> <title>` heading, null if unparseable. */
+  queuedAt: string | null;
+  /** Timestamp parsed from an approved/rejected Status line, null otherwise. */
+  decidedAt: string | null;
+  /** Parenthetical feedback captured from a rejected Status line, null otherwise. */
+  feedback: string | null;
+}
+
 // ── Mutate return types ───────────────────────────────────────────
 
 export interface ProjectCreateReturn {
@@ -522,6 +563,11 @@ export interface ConfigSetReturn {
   section: 'budget';
 }
 
+export interface ApprovalMutateReturn {
+  id: string;
+  status: ApprovalStatus;
+}
+
 // ── Mapped types ──────────────────────────────────────────────────
 
 export interface QueryParamMap {
@@ -536,6 +582,7 @@ export interface QueryParamMap {
   'executions.get': ExecutionsGetParams;
   'memory.tree': MemoryTreeParams;
   'memory.file': MemoryFileParams;
+  'approvals.list': ApprovalsListParams;
   'cost.summary': CostSummaryParams;
   'config.get': ConfigGetParams;
 }
@@ -552,6 +599,7 @@ export interface QueryReturnMap {
   'executions.get': ExecutionDetailInfo;
   'memory.tree': MemoryTree;
   'memory.file': MemoryFile;
+  'approvals.list': ApprovalInfo[];
   'cost.summary': CostSummary;
   'config.get': ConfigSnapshot;
 }
@@ -570,6 +618,8 @@ export interface MutateArgsMap {
   'tasks.complete': TaskCompleteArgs;
   'tasks.block': TaskBlockArgs;
   'tasks.unblock': TaskActionArgs;
+  'approvals.approve': ApprovalsApproveArgs;
+  'approvals.reject': ApprovalsRejectArgs;
   'config.set': ConfigSetArgs;
 }
 
@@ -587,6 +637,8 @@ export interface MutateReturnMap {
   'tasks.complete': void;
   'tasks.block': void;
   'tasks.unblock': void;
+  'approvals.approve': ApprovalMutateReturn;
+  'approvals.reject': ApprovalMutateReturn;
   'config.set': ConfigSetReturn;
 }
 
@@ -673,6 +725,8 @@ export interface UiServiceDeps {
     getAll(): any[];
     cancelExecution(id: string, metrics?: any): any | null;
   };
+  /** Absolute path to PENDING_APPROVALS.md (the approval-center 7a markdown queue). */
+  approvalsPath: string;
   /** Ref-counted live log tailer (B2-C). Started/stopped around each execution.log subscription. */
   executionLogTailer: {
     startTail(executionId: string, location: LogLocation): void;

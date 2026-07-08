@@ -21,6 +21,9 @@ import type {
   executionsGetInput,
   memoryTreeInput,
   memoryFileInput,
+  approvalsListInput,
+  approvalsApproveInput,
+  approvalsRejectInput,
   costSummaryInput,
   threadsCancelInput,
   executionsCancelInput,
@@ -57,6 +60,7 @@ const _executionsList: QueryParity<'executions.list', typeof executionsListInput
 const _executionsGet: QueryParity<'executions.get', typeof executionsGetInput> = true;
 const _memoryTree: QueryParity<'memory.tree', typeof memoryTreeInput> = true;
 const _memoryFile: QueryParity<'memory.file', typeof memoryFileInput> = true;
+const _approvalsList: QueryParity<'approvals.list', typeof approvalsListInput> = true;
 const _costSummary: QueryParity<'cost.summary', typeof costSummaryInput> = true;
 const _configGet: QueryParity<'config.get', typeof configGetInput> = true;
 
@@ -75,6 +79,8 @@ const _tasksComplete: MutateParity<'tasks.complete', typeof taskCompleteInput> =
 const _tasksBlock: MutateParity<'tasks.block', typeof taskBlockInput> = true;
 const _tasksUnblock: MutateParity<'tasks.unblock', typeof taskActionInput> = true;
 const _configSet: MutateParity<'config.set', typeof configSetInput> = true;
+const _approvalsApprove: MutateParity<'approvals.approve', typeof approvalsApproveInput> = true;
+const _approvalsReject: MutateParity<'approvals.reject', typeof approvalsRejectInput> = true;
 
 // ── Subscriptions ─────────────────────────────────────────────────
 // Subscriptions have no query/mutate map entry; guard the input schema against its backend
@@ -85,8 +91,9 @@ const _executionsLog: Exact<z.infer<typeof executionsLogInput>, ExecutionsLogPar
 // checks are not tree-shaken away by the type checker.
 export const _contractParityChecked = [
   _projectsList, _sessionsList, _sessionsTranscript, _threadsList, _threadsGet, _tasksList, _schedulesList,
-  _executionsList, _executionsGet, _memoryTree, _memoryFile, _costSummary, _configGet,
+  _executionsList, _executionsGet, _memoryTree, _memoryFile, _approvalsList, _costSummary, _configGet,
   _projectsCreate, _sessionsSend, _threadsCancel, _executionsCancel,
   _schedulesPause, _schedulesResume, _schedulesRemove, _schedulesAdd, _tasksClaim,
-  _tasksUnclaim, _tasksComplete, _tasksBlock, _tasksUnblock, _configSet, _executionsLog,
+  _tasksUnclaim, _tasksComplete, _tasksBlock, _tasksUnblock,
+  _approvalsApprove, _approvalsReject, _configSet, _executionsLog,
 ] as const;

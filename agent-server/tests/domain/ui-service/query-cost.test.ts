@@ -22,6 +22,7 @@ test('cost.summary delegates to costSummary and returns CostSummary', async () =
     executionLogTailer: { startTail: () => {}, stopTail: () => {}, refCount: () => 0 },
     conversationHistory: { getHistory: async () => null },
     sendSessionMessage: () => {},
+    approvalsPath: '/tmp/nonexistent-approvals.md',
     runningExecutions: { getAll: () => [] } as any,
     costSummary: async (projectId?: string | null) => {
       assert.equal(projectId, null);
@@ -47,6 +48,7 @@ test('cost.summary passes projectId filter', async () => {
     executionLogTailer: { startTail: () => {}, stopTail: () => {}, refCount: () => 0 },
     conversationHistory: { getHistory: async () => null },
     sendSessionMessage: () => {},
+    approvalsPath: '/tmp/nonexistent-approvals.md',
     runningExecutions: { getAll: () => [] } as any,
     costSummary: async (projectId?: string | null) => {
       capturedProjectId = projectId;

@@ -62,6 +62,10 @@ export const memoryFileInput = z.object({
   path: z.string(),
 });
 
+export const approvalsListInput = z.object({
+  status: z.enum(['pending', 'approved', 'rejected', 'failed']).optional(),
+});
+
 export const costSummaryInput = z.object({
   projectId: z.string().nullish(),
 });
@@ -167,6 +171,15 @@ export const configSetInput = z.object({
   }),
 });
 
+export const approvalsApproveInput = z.object({
+  id: z.string(),
+});
+
+export const approvalsRejectInput = z.object({
+  id: z.string(),
+  feedback: z.string().optional(),
+});
+
 // ── Keyed maps (one entry per QueryScope / MutateOp) ──────────────
 
 export const queryInputSchemas = {
@@ -181,6 +194,7 @@ export const queryInputSchemas = {
   'executions.get': executionsGetInput,
   'memory.tree': memoryTreeInput,
   'memory.file': memoryFileInput,
+  'approvals.list': approvalsListInput,
   'cost.summary': costSummaryInput,
   'config.get': configGetInput,
 } satisfies Record<QueryScope, z.ZodType>;
@@ -199,5 +213,7 @@ export const mutateInputSchemas = {
   'tasks.complete': taskCompleteInput,
   'tasks.block': taskBlockInput,
   'tasks.unblock': taskActionInput,
+  'approvals.approve': approvalsApproveInput,
+  'approvals.reject': approvalsRejectInput,
   'config.set': configSetInput,
 } satisfies Record<MutateOp, z.ZodType>;

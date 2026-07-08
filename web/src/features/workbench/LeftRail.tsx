@@ -7,6 +7,7 @@ import { groupSessions, sessionMeta, projectInitials } from './session-groups';
 import { buildSwitchList, projMenuSubLabel, runningCountByProject } from './project-menu';
 import { ProjectMenu } from './ProjectMenu';
 import { NewProjectModal } from './NewProjectModal';
+import { useApprovals } from '@/features/approvals/ApprovalsProvider';
 
 // LEFT RAIL — 1:1 from prototype.dc.html L42–100 (Stage-R RB, task f528). Exact inline styles /
 // px / hex / font / weight / EN copy reproduced verbatim; real tRPC data (projects.list /
@@ -90,8 +91,11 @@ export function LeftRail(): JSX.Element {
     selectedId ??
     (groups[0]?.items[0]?.sessionId ?? null);
 
-  // GAP-1: no approvals tRPC scope (Stage 5) — banner conditionally hidden with real empty data.
-  const pendingCount = 0;
+  // Approval center (Stage-R3 task 851f): real `approvals.list` pending count drives the banner;
+  // clicking it opens the approval center overlay (mounted globally in AppShell).
+  const approvals = useApprovals();
+  const approvalsQuery = useQuery(trpc.approvals.list.queryOptions({ status: 'pending' }));
+  const pendingCount = approvalsQuery.data?.length ?? 0;
   const hasPendingApprovals = pendingCount > 0;
   const pendingLabel =
     pendingCount + ' ' + (pendingCount > 1 ? 'approvals pending' : 'approval pending');
@@ -338,10 +342,11 @@ export function LeftRail(): JSX.Element {
         ))}
       </div>
 
-      {/* approval-pending banner (GAP-1: hidden — no approvals scope) */}
+      {/* approval-pending banner (real approvals.list; opens the approval center, task 851f) */}
       {hasPendingApprovals && (
         <div
           {...hp('approval')}
+          onClick={() => approvals.open()}
           style={{
             margin: '0 12px 10px',
             padding: '9px 12px',

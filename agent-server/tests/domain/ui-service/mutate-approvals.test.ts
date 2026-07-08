@@ -1,0 +1,149 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import * as fs from 'node:fs';
+import * as os from 'node:os';
+import * as path from 'node:path';
+import { TRPCError } from '@trpc/server';
+import {
+  applyApprovalDecision,
+  handleApproveApproval,
+  handleRejectApproval,
+} from '../../../src/domain/ui-service/mutate/approvals.js';
+import { parseApprovals } from '../../../src/domain/ui-service/query/approvals.js';
+import { createUiService } from '../../../src/domain/ui-service/ui-service.js';
+import { createAppRouter } from '../../../src/domain/ui-service/app-router.js';
+import { createCallerFactory } from '../../../src/domain/ui-service/trpc.js';
+import type { UiServiceDeps } from '../../../src/domain/ui-service/types.js';
+
+const SAMPLE = `# Pending Approvals
+
+> intro line
+
+## 2026-03-01 Alpha: promote a rule
+- **Operation**: Move K to rules
+- **Reason**: it is a validated behavior rule
+- **Impact**: adds a rule section
+- **Command/Action**: Edit CLAUDE.md
+- **Status**: pending
+
+## 2026-03-02 Beta: bump idle timeout
+- **Operation**: Increase IDLE_TIMEOUT to 15m
+- **Reason**: scans fail
+- **Status**: pending
+`;
+
+function idOf(md: string, title: string): string {
+  const e = parseApprovals(md).find((x) => x.title === title);
+  if (!e) throw new Error(`no entry titled ${title}`);
+  return e.id;
+}
+
+function makeDeps(approvalsPath: string): UiServiceDeps {
+  return {
+    projectStore: { list: () => [], get: () => undefined, exists: () => false, getDefault: () => ({ id: 'general', name: 'general', kind: 'general' as const, contextDir: '/g' }), createProject: () => ({} as any) },
+    sessionStore: { listByProject: async () => [], listResumable: async () => [], getById: async () => null },
+    threadStore: { getAll: () => [], get: () => null },
+    taskStore: { getAll: () => [], getById: () => null, load: () => {}, refresh: () => {} },
+    scheduler: { list: async () => [], get: async () => null, pause: async () => null, resume: async () => null, remove: async () => false, add: async () => ({ id: 'sch_new' } as any) },
+    executionRegistry: { getExecution: () => null, getAll: () => [], cancelExecution: () => null },
+    executionLogTailer: { startTail: () => {}, stopTail: () => {}, refCount: () => 0 },
+    conversationHistory: { getHistory: async () => null },
+    sendSessionMessage: () => {},
+    approvalsPath,
+    runningExecutions: { getAll: () => [] } as any,
+    costSummary: async () => ({ today: 0, week: 0, month: 0, total: 0, byMode: {} as any, byProject: {}, byTrigger: {}, bySource: {}, byBackend: {}, tokens: {} as any, entryCount: 0 }),
+    bus: { subscribe: () => ({ unsubscribe: () => {} }), publish: () => {} } as any,
+    adapter: {} as any,
+  };
+}
+
+function writeTemp(content: string): string {
+  const dir = fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), 'cortex-appr-mut-'));
+  const p = path.join(dir, 'PENDING_APPROVALS.md');
+  fs.writeFileSync(p, content, 'utf8');
+  return p;
+}
+
+// ── (1) approve flips ONLY the target Status line ────────────────────────────
+test('applyApprovalDecision approve flips only the target entry Status line', () => {
+  const id = idOf(SAMPLE, 'Alpha: promote a rule');
+  const { md, entry } = applyApprovalDecision(SAMPLE, id, 'approved', '2026-07-07');
+
+  assert.equal(entry.status, 'approved');
+  assert.match(md, /- \*\*Status\*\*: approved 2026-07-07/);
+  // Beta entry's Status untouched.
+  const beta = parseApprovals(md).find((e) => e.title === 'Beta: bump idle timeout')!;
+  assert.equal(beta.status, 'pending');
+  // Non-Status bullets of Alpha intact.
+  assert.match(md, /- \*\*Operation\*\*: Move K to rules/);
+  assert.match(md, /- \*\*Command\/Action\*\*: Edit CLAUDE.md/);
+});
+
+// ── (2) reject records feedback (and without feedback → no parens) ───────────
+test('applyApprovalDecision reject records timestamp + feedback', () => {
+  const id = idOf(SAMPLE, 'Alpha: promote a rule');
+  const { md, entry } = applyApprovalDecision(SAMPLE, id, 'rejected', '2026-07-07', 'not now');
+  assert.equal(entry.status, 'rejected');
+  assert.equal(entry.feedback, 'not now');
+  assert.match(md, /- \*\*Status\*\*: rejected 2026-07-07 \(not now\)/);
+});
+
+test('applyApprovalDecision reject without feedback writes no parens', () => {
+  const id = idOf(SAMPLE, 'Alpha: promote a rule');
+  const { md } = applyApprovalDecision(SAMPLE, id, 'rejected', '2026-07-07');
+  assert.match(md, /- \*\*Status\*\*: rejected 2026-07-07\n/);
+  assert.doesNotMatch(md, /rejected 2026-07-07 \(/);
+});
+
+// ── (3) idempotent: re-approve an already-approved entry is a no-op ──────────
+test('applyApprovalDecision is idempotent for the same decision', () => {
+  const id = idOf(SAMPLE, 'Alpha: promote a rule');
+  const once = applyApprovalDecision(SAMPLE, id, 'approved', '2026-07-07').md;
+  const twice = applyApprovalDecision(once, id, 'approved', '2026-08-08').md;
+  assert.equal(twice, once); // unchanged despite a different `now`
+});
+
+// ── (4) unknown id → not-found ───────────────────────────────────────────────
+test('applyApprovalDecision throws not-found for an unknown id', () => {
+  assert.throws(
+    () => applyApprovalDecision(SAMPLE, 'deadbeef', 'approved', '2026-07-07'),
+    (e: any) => e?.code === 'not-found',
+  );
+});
+
+// ── (5) handlers write back to disk ──────────────────────────────────────────
+test('handleApproveApproval writes the flip back to disk', async () => {
+  const p = writeTemp(SAMPLE);
+  const id = idOf(fs.readFileSync(p, 'utf8'), 'Beta: bump idle timeout');
+  const res = await handleApproveApproval(makeDeps(p), { id });
+  assert.ok(res.ok);
+  assert.equal(res.data.status, 'approved');
+  const after = fs.readFileSync(p, 'utf8');
+  const beta = parseApprovals(after).find((e) => e.title === 'Beta: bump idle timeout')!;
+  assert.equal(beta.status, 'approved');
+});
+
+test('handleRejectApproval returns not-found for unknown id', async () => {
+  const res = await handleRejectApproval(makeDeps(writeTemp(SAMPLE)), { id: 'nope1234' });
+  assert.equal(res.ok, false);
+  if (!res.ok) assert.equal(res.code, 'not-found');
+});
+
+// ── (6) facade + tRPC wiring ─────────────────────────────────────────────────
+test('approvals.approve / approvals.reject reachable via facade + tRPC', async () => {
+  const p = writeTemp(SAMPLE);
+  const ui = createUiService(makeDeps(p));
+  const alphaId = idOf(fs.readFileSync(p, 'utf8'), 'Alpha: promote a rule');
+  const okd = await ui.mutate('approvals.approve', { id: alphaId });
+  assert.ok(okd.ok);
+  assert.equal(okd.data.status, 'approved');
+
+  const caller = createCallerFactory(createAppRouter(createUiService(makeDeps(p))))({});
+  const betaId = idOf(fs.readFileSync(p, 'utf8'), 'Beta: bump idle timeout');
+  const r = await caller.approvals.reject({ id: betaId, feedback: 'no' });
+  assert.equal(r.status, 'rejected');
+  await assert.rejects(
+    () => caller.approvals.approve({ id: 'missing00' }),
+    (e: unknown) => e instanceof TRPCError && e.code === 'NOT_FOUND',
+  );
+});

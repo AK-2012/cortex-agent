@@ -7,7 +7,7 @@ import { mkdirSync } from 'fs';
 import * as path from 'path';
 import { createAdapterFromEnv, extractTuiAdapter } from '@platform/index.js';
 import type { PlatformAdapter } from '@platform/index.js';
-import { WORKSPACE_DIR, CONFIG_DIR, DATA_DIR, STORE_DIR, DEFAULTS_DIR } from '@core/utils.js';
+import { WORKSPACE_DIR, CONFIG_DIR, DATA_DIR, STORE_DIR, DEFAULTS_DIR, CONTEXT_DIR } from '@core/utils.js';
 import { tryAcquireSingletonLock, releaseSingletonLock } from '@core/singleton-lock.js';
 import { closeAllSessions, closeSession as closeClaudePooledSession, shutdownCodex } from '@domain/agents/index.js';
 import { closeAllAdapters } from '../agent-adapter/index.js';
@@ -335,6 +335,7 @@ process.on('SIGTERM', async () => {
     },
     executionRegistry,
     executionLogTailer,
+    approvalsPath: path.join(CONTEXT_DIR, 'PENDING_APPROVALS.md'),
     runningExecutions,
     costSummary: getCostSummary,
     conversationHistory,

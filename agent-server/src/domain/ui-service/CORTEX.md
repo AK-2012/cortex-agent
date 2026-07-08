@@ -9,7 +9,7 @@ live in the transport-host). Consumed by M5 TUI dashboard and the Web UI (tRPC A
 | `types.ts` | types | Result, QueryScope, MutateOp, SubscribeFilter, UiEvent, UiService interface, DTOs |
 | `input-schemas.ts` | schemas | Source-of-truth zod input schema per QueryScope / MutateOp + `queryInputSchemas` / `mutateInputSchemas` keyed maps. Consumed by the AppRouter; re-exported (runtime) by `@cortex-agent/ui-contract` for the browser. Kept here (not in ui-contract) so the router can consume it without agent-server importing ui-contract, which would close a workspace build cycle |
 | `trpc.ts` | tRPC init | Shared `initTRPC.create()` — exports `router` / `publicProcedure` / `createCallerFactory` (transport-agnostic) |
-| `app-router.ts` | tRPC router | `createAppRouter(uiService): AppRouter` — mirrors the full contract (13 query + 14 mutation + 2 subscriptions: generic `subscribe` + `executions.log`; `subscribeFilterInput` carries `sessionId` for the S4 `session.message` stream) over the injected UiService; unwraps `Result`, maps `Err`→`TRPCError`. `AppRouter` type re-exported by `@cortex-agent/ui-contract` |
+| `app-router.ts` | tRPC router | `createAppRouter(uiService): AppRouter` — mirrors the full contract (14 query + 16 mutation + 2 subscriptions: generic `subscribe` + `executions.log`; `subscribeFilterInput` carries `sessionId` for the S4 `session.message` stream) over the injected UiService; unwraps `Result`, maps `Err`→`TRPCError`. `AppRouter` type re-exported by `@cortex-agent/ui-contract` |
 | `ui-service.ts` | facade | createUiService(deps) — routes scope/op strings to per-module handlers; `subscribeExecutionLog(executionId)` (B2-C) resolves the run's log location, ref-counts the tailer, streams `execution.log` over the bounded queue |
 | `subscribe.ts` | subscribe | EventBus → AsyncIterable&lt;UiEvent&gt; with bounded queue (cap 256, drop-oldest + synthetic `ui-subscribe.dropped`); post-filters by projectId, (B2-C) executionId, and (S4) sessionId — scopes `session.message` to one session (no cross-session leak) |
 | `index.ts` | barrel | re-exports createUiService and public types |
@@ -20,6 +20,7 @@ live in the transport-host). Consumed by M5 TUI dashboard and the Web UI (tRPC A
 | `query/schedules.ts` | query | schedules.list handler |
 | `query/executions.ts` | query | executions.list + executions.get handlers |
 | `query/memory.ts` | query | memory.tree (project memory tree: top-level files + memory dirs w/ entry counts) + memory.file (raw file content + metadata) handlers — read-only, path-restricted to the project root; rejects `..` traversal / absolute paths / symlink escape |
+| `query/approvals.ts` | query | approvals.list handler + pure `parseApprovals` (PENDING_APPROVALS.md → ApprovalInfo[], missing fields null, status filter); path via `deps.approvalsPath` |
 | `query/cost.ts` | query | cost.summary handler |
 | `query/config.ts` | query | config.get handler — redacted snapshot of `~/.cortex/config` (budget/profiles/machines/mcp/thread-templates/hooks/.env) for the settings panel (Stage 7); pure `readConfigSnapshot(configDir, hooksDir)` + thin handler. SECURITY: `.env` values + machine `ssh` are never returned, only redacted markers |
 | `mutate/projects.ts` | mutate | projects.create handler (reuses ProjectStore.createProject; maps invalid-name/already-exists → Err) |
@@ -29,3 +30,4 @@ live in the transport-host). Consumed by M5 TUI dashboard and the Web UI (tRPC A
 | `mutate/schedules.ts` | mutate | schedules.{pause,resume,remove,add} handlers (add: reuses injected scheduler.add + schedule-repo backfill of target/fallback, returns the created ScheduleInfo) |
 | `mutate/tasks.ts` | mutate | tasks.{claim,unclaim,complete,block,unblock} handlers |
 | `mutate/config.ts` | mutate | config.set handler — safe atomic write of the whitelisted `budget` section only (Stage 7); pure `writeBudget(configDir, value)` (zod-validate + atomicWrite) + thin handler (safeParse→invalid-args, IO→internal). Non-budget sections rejected |
+| `mutate/approvals.ts` | mutate | approvals.{approve,reject} handlers + pure `applyApprovalDecision` (flips only the target entry's Status line w/ timestamp + reject feedback; idempotent; unknown id → not-found; NO underlying execution) |
