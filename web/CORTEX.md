@@ -36,7 +36,7 @@ hard-codes hex.
 
 - Depends on `@cortex-agent/ui-contract` (`workspace:*`) for the `AppRouter` type + zod schemas — type-only, no backend runtime coupling.
 - **Tasks tab live** (Stage-1 task 5): `/tasks` renders real `tasks.list` grouped by lifecycle·priority and live-updates via the tRPC subscription. Verified end-to-end against a running ui-http-server (real render + live update on a real Complete mutation).
-- **Workbench live** (Stage-2 task 5b0f): `/workbench` renders real `sessions.list` (left) + `threads.list` / `tasks.list` (right tabs) with an Active/History filter and live subscriptions; center chat is a placeholder (no transcript scope yet — Stage 4), Machines is a placeholder (Stage 7).
+- **Workbench live** (Stage-R RB): `/workbench` renders the real 1:1 three-pane frame — LeftRail (f528), CenterChat (89e7 → **S4 chat aba0**: real `sessions.transcript` render + `sessions.send` + live `session.message` streaming), RightPanel (1e96) — all over real tRPC data with live subscriptions. Machines is a placeholder (Stage 7).
 - Dev boots without agent-server (proxy engages only on `/trpc` request). Live data needs the port-3004 ui-http-server (task 3) and `CORTEX_CLIENT_TOKEN` set in the dev shell (proxy injects it).
 - `build` = `tsc --noEmit && vite build`; `typecheck` = `tsc --noEmit`; `test` = `vitest run` (`group-tasks` grouping + `design/tone` status→tone mapping pure-logic unit tests).
 - Tailwind pinned to v3.4 (config-file token contract; v4 moves tokens to CSS `@theme`).

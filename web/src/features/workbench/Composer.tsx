@@ -1,15 +1,31 @@
 import { useState } from 'react';
-import { fmtClock, moneyLabel, MORNING, SLASH_COMMANDS } from './chat-content';
+import { useMutation } from '@tanstack/react-query';
+import { useTRPC } from '@/lib/trpc';
+import { SLASH_COMMANDS } from './chat-content';
 
-// Composer — 1:1 from prototype.dc.html L359–395: slash palette (default closed) · running/idle
-// status line · input ("Message Cortex — type / for commands") · "/ commands" chip + hint · stop/send
-// button. DATA GAP (composer send — Stage 4): no session-send mutate, so send/stop are INERT; the
-// input + slash palette are local visual state only. Status-line metrics are the morning
-// representative values (transcript Stage-4 gap).
+// Composer — 1:1 from prototype.dc.html L359–395: slash palette (18-slash-menu) · running/idle status
+// line · input · "/ commands" chip + hint · stop/send. REAL send (task aba0): ⏎ / send-click routes the
+// message through the `sessions.send` mutate for the active session; the sent turn + assistant reply
+// echo back over the live `session.message` stream (fire-and-forget — no reply on the mutate return).
+// Status metrics: `turns` is the real transcript turn count; elapsed & session cost have NO tRPC scope
+// (SessionInfo carries no running/elapsed/cost) → rendered as explicit "—" placeholders, never
+// fabricated. Stop has no session-cancel op → inert affordance (flagged). Slash exec has no backend →
+// the slash menu is a local visual affordance only.
 
 const mono = "'IBM Plex Mono',monospace";
+const DASH = '—';
 
-export function Composer({ running }: { running: boolean }): JSX.Element {
+export function Composer({
+  sessionId,
+  running,
+  turns,
+}: {
+  sessionId: string;
+  running: boolean;
+  turns: number;
+}): JSX.Element {
+  const trpc = useTRPC();
+  const sendMut = useMutation(trpc.sessions.send.mutationOptions());
   const [composer, setComposer] = useState('');
   const [slashOpen, setSlashOpen] = useState(false);
   const [slashHover, setSlashHover] = useState<number | null>(null);
@@ -18,11 +34,29 @@ export function Composer({ running }: { running: boolean }): JSX.Element {
 
   const composerBorder = slashOpen ? '#4655D4' : '#D9DCE3';
   const composerHint = running ? 'running · esc to stop' : '⏎ send · ⇧⏎ newline';
-  const sendBg = composer.trim() ? '#191C22' : '#D9DCE3';
+  const canSend = !!composer.trim() && !!sessionId && !sendMut.isPending;
+  const sendBg = canSend ? '#191C22' : '#D9DCE3';
 
   const q = composer.startsWith('/') ? composer.slice(1).toLowerCase() : '';
   const filtered = SLASH_COMMANDS.filter((c) => c.cmd.slice(1).startsWith(q));
   const slashList = filtered.length ? filtered : SLASH_COMMANDS;
+
+  const doSend = (): void => {
+    const text = composer.trim();
+    if (!text || !sessionId) return;
+    sendMut.mutate({ sessionId, text });
+    setComposer('');
+    setSlashOpen(false);
+  };
+
+  const onKey = (e: React.KeyboardEvent<HTMLInputElement>): void => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      doSend();
+    } else if (e.key === 'Escape') {
+      setSlashOpen(false);
+    }
+  };
 
   return (
     <div style={{ flex: 'none' }}>
@@ -48,6 +82,10 @@ export function Composer({ running }: { running: boolean }): JSX.Element {
                 key={c.cmd}
                 onMouseEnter={() => setSlashHover(i)}
                 onMouseLeave={() => setSlashHover((h) => (h === i ? null : h))}
+                onClick={() => {
+                  setComposer(c.cmd + ' ');
+                  setSlashOpen(false);
+                }}
                 style={{
                   display: 'flex',
                   alignItems: 'center',
@@ -94,7 +132,7 @@ export function Composer({ running }: { running: boolean }): JSX.Element {
               }}
             />
             <span>
-              running · {fmtClock(MORNING.runBaseSeconds)} · {MORNING.turns} turns · {moneyLabel(MORNING.sessionCost)}
+              running · {DASH} · {turns} turns · {DASH}
             </span>
           </div>
         ) : (
@@ -110,7 +148,7 @@ export function Composer({ running }: { running: boolean }): JSX.Element {
           >
             <span style={{ width: 7, height: 7, borderRadius: '50%', background: '#D9DCE3' }} />
             <span>
-              idle · {MORNING.turns} turns · {moneyLabel(MORNING.sessionCost)}
+              idle · {turns} turns · {DASH}
             </span>
           </div>
         )}
@@ -126,12 +164,14 @@ export function Composer({ running }: { running: boolean }): JSX.Element {
           <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
             <div style={{ flex: 1, minWidth: 0 }}>
               <input
+                data-composer-input
                 value={composer}
                 onChange={(e) => {
                   const v = e.target.value;
                   setComposer(v);
                   setSlashOpen(v.startsWith('/'));
                 }}
+                onKeyDown={onKey}
                 placeholder="Message Cortex — type / for commands"
                 style={{ width: '100%', fontSize: 13.5, color: '#191C22', fontFamily: 'inherit', padding: '2px 0' }}
               />
@@ -178,6 +218,8 @@ export function Composer({ running }: { running: boolean }): JSX.Element {
               </div>
             ) : (
               <div
+                data-action="send"
+                onClick={doSend}
                 style={{
                   flex: 'none',
                   width: 34,
@@ -187,7 +229,7 @@ export function Composer({ running }: { running: boolean }): JSX.Element {
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
-                  cursor: 'pointer',
+                  cursor: canSend ? 'pointer' : 'default',
                 }}
               >
                 <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="#fff" strokeWidth="1.8">

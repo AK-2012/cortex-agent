@@ -1,12 +1,16 @@
-import { MORNING } from './chat-content';
+import { Fragment } from 'react';
+import { REPRESENTATIVE_APPROVAL } from './chat-content';
+import type { ChatRow } from './transcript-vm';
 import { ToolCallsRow } from './ToolCallsRow';
 import { InlineThreadCardProto } from './InlineThreadCardProto';
 import { ApprovalCard } from './ApprovalCard';
 
-// Message stream — 1:1 from prototype.dc.html L131–357 (morning session, running). DATA GAP
-// (transcript — Stage 4): no session-transcript tRPC scope, so the divider / user bubble / tool-call
-// row / assistant text+chips are the prototype's exact morning content rendered as static content.
-// The only live surface is the inline thread card (threads.get). Approval card is Stage-5 gap.
+// Message stream — 1:1 from prototype.dc.html L131–357. The transcript body (divider / user bubble /
+// tool-call row / assistant text) is now driven by REAL data (task aba0): the `rows` are built from
+// the real `sessions.transcript` query + live `session.message` stream by the pure transcript-vm; the
+// last assistant row streams a caret while output is live. Real data is the only variable — every
+// px/hex/font/copy is the prototype's. Kept 1:1 surfaces: the live inline thread card (threads.get)
+// and the representative approval card (Stage-5 GAP-B, no approvals scope — flagged).
 
 const mono = "'IBM Plex Mono',monospace";
 
@@ -40,58 +44,74 @@ function UserBubble({ text }: { text: string }): JSX.Element {
   );
 }
 
-function AssistantBlock({
-  text,
-  chips,
-}: {
-  text: string;
-  chips?: { text: string; bg: string; color: string }[];
-}): JSX.Element {
+function AssistantBlock({ text, streaming }: { text: string; streaming: boolean }): JSX.Element {
   return (
     <div style={{ animation: 'cxmsg .34s cubic-bezier(.22,1,.36,1) both', fontSize: 14, lineHeight: 1.65, color: '#22262E' }}>
       {text}
-      {chips && chips.length > 0 && (
-        <div style={{ display: 'flex', gap: 8, marginTop: 10, flexWrap: 'wrap' }}>
-          {chips.map((c, i) => (
-            <span
-              key={i}
-              style={{
-                font: `600 11.5px ${mono}`,
-                background: c.bg,
-                color: c.color,
-                padding: '3px 9px',
-                borderRadius: 6,
-              }}
-            >
-              {c.text}
-            </span>
-          ))}
-        </div>
+      {streaming && (
+        <span
+          style={{
+            display: 'inline-block',
+            width: 7,
+            height: 15,
+            background: '#4655D4',
+            borderRadius: 1.5,
+            marginLeft: 3,
+            verticalAlign: -2,
+            animation: 'cxblink 1.1s steps(1) infinite',
+          }}
+        />
       )}
     </div>
   );
 }
 
-export function MessageStream(): JSX.Element {
+// Empty session — 1:1 from prototype.dc.html L133–143 (chatEmpty). EN copy verbatim from support.js.
+function EmptyChat(): JSX.Element {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 13, padding: '88px 20px 40px', textAlign: 'center' }}>
+      <div style={{ width: 40, height: 40, borderRadius: 12, background: '#191C22', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', font: `600 15px ${mono}` }}>cx</div>
+      <div style={{ fontSize: 15, fontWeight: 650, color: '#191C22' }}>Start with one message</div>
+      <div style={{ fontSize: 12, color: '#8A93A2', lineHeight: 1.7, maxWidth: 420 }}>
+        This project is empty. Just chat — describe the mission and the agent runs project_init (mission.md · TASKS.yaml · memory scaffold · git).
+      </div>
+      <div style={{ fontSize: 10.5, color: '#B6BDC9', lineHeight: 1.7, maxWidth: 430 }}>
+        Everything else — tasks, threads, cross-machine runs — starts from this chat
+      </div>
+    </div>
+  );
+}
+
+function Row({ row }: { row: ChatRow }): JSX.Element | null {
+  switch (row.kind) {
+    case 'divider':
+      return <Divider text={row.text} />;
+    case 'user':
+      return <UserBubble text={row.text} />;
+    case 'tools':
+      return <ToolCallsRow calls={row.calls.map((c) => ({ label: c.kind, kind: c.kind, input: c.input }))} />;
+    case 'assistant':
+      return <AssistantBlock text={row.text} streaming={row.streaming} />;
+    default:
+      return null;
+  }
+}
+
+export function MessageStream({ rows, loading }: { rows: ChatRow[]; loading: boolean }): JSX.Element {
+  const populated = rows.length > 0;
   return (
     <div style={{ flex: 1, overflow: 'auto', minHeight: 0 }}>
-      <div
-        style={{
-          maxWidth: 720,
-          margin: '0 auto',
-          padding: '22px 32px 12px',
-          display: 'flex',
-          flexDirection: 'column',
-          gap: 16,
-        }}
-      >
-        <Divider text={MORNING.divider} />
-        <UserBubble text={MORNING.userMessage} />
-        <ToolCallsRow calls={MORNING.toolCalls} />
-        <AssistantBlock text={MORNING.assistant1} chips={MORNING.assistant1Chips} />
-        <AssistantBlock text={MORNING.assistant2} />
-        <InlineThreadCardProto />
-        <ApprovalCard approval={MORNING.approval} />
+      <div style={{ maxWidth: 720, margin: '0 auto', padding: '22px 32px 12px', display: 'flex', flexDirection: 'column', gap: 16 }}>
+        {!populated && !loading && <EmptyChat />}
+        {rows.map((row, i) => (
+          <Row key={i} row={row} />
+        ))}
+        {populated && (
+          <Fragment>
+            <InlineThreadCardProto />
+            <ApprovalCard approval={REPRESENTATIVE_APPROVAL} />
+          </Fragment>
+        )}
       </div>
     </div>
   );

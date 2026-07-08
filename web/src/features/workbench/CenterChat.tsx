@@ -1,25 +1,53 @@
+import { useMemo } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import { useTRPC } from '@/lib/trpc';
 import { ChatHeader } from './ChatHeader';
 import { MessageStream } from './MessageStream';
 import { Composer } from './Composer';
+import { useSessionMessageLiveSync } from './useSessionMessageLiveSync';
+import { buildTranscriptRows, turnCount } from './transcript-vm';
 
-// CENTER CHAT pane — 1:1 rebuild from prototype.dc.html L103–395 (workspace-chat view, Stage-R RB
-// sibling B, task 89e7). Fills the fluid center pane (flex:1;min-width:0) of the workbench frame.
-// Default = the 00-workbench proto-shot state: morning-session, running=true.
-//
-// Structure: chat header (title · profile chip · running pill · ⌘K) + message stream (TODAY divider,
-// user bubble, collapsed tool-call row, assistant text + result chips, an inline thread card wired to
-// REAL threads.get [live], an inline approval-required card) + composer (input · running status line
-// · slash chip · stop/send).
-//
-// DATA GAPS (rendered structurally with the prototype's representative content; flagged in the
-// completion note with paired stage):
-//   • chat transcript body — NO tRPC scope (Stage 4 session send/stream) → static representative copy
-//   • approval card — NO approvals scope (Stage 5) → representative APR-0007, inert buttons
-//   • composer send — NON-functional (Stage 4) → input + slash palette are local visual state only
-// The one LIVE surface is the inline thread card (threads.get + live re-flow).
+// CENTER CHAT pane — 1:1 rebuild from prototype.dc.html L103–395 (workspace-chat view). Task aba0
+// (S4 chat) makes the transcript body + composer send REAL, replacing 89e7's GAP-A (static transcript)
+// and GAP-C (inert send) placeholders:
+//   • transcript: real `sessions.transcript` query (grouped turns) → prototype message rows
+//   • streaming: live `session.message` subscription appends assistant/tool output as it lands, and
+//     invalidates the transcript so the finalized history reconciles (buildTranscriptRows de-dups)
+//   • send: the composer routes each message through the real `sessions.send` mutate; the reply echoes
+//     back over the same live stream (fire-and-forget)
+// Active session = the most-recently-used session (sessions.list, sorted by lastUsedAt) — the contract
+// has no cross-pane selected-session state; running is DERIVED from live-stream activity (SessionInfo
+// carries no running field). The one other live surface (inline thread card, threads.get) is kept.
+
+const EMPTY_TRANSCRIPT = { sessionId: '', turns: [] };
+
 export function CenterChat(): JSX.Element {
-  // Header running pill / composer status line / send-vs-stop follow the morning-session default.
-  const running = true;
+  const trpc = useTRPC();
+  const sessionsQuery = useQuery(trpc.sessions.list.queryOptions({}));
+
+  const active = useMemo(() => {
+    const list = sessionsQuery.data ?? [];
+    if (list.length === 0) return null;
+    return [...list].sort((a, b) => (a.lastUsedAt < b.lastUsedAt ? 1 : -1))[0];
+  }, [sessionsQuery.data]);
+
+  const sessionId = active?.sessionId ?? '';
+  const title = active ? (active.label ?? active.name) : 'No session';
+
+  const transcriptQuery = useQuery({
+    ...trpc.sessions.transcript.queryOptions({ sessionId }),
+    enabled: !!sessionId,
+  });
+
+  const { liveTail, streaming } = useSessionMessageLiveSync(sessionId);
+
+  const transcript = transcriptQuery.data ?? EMPTY_TRANSCRIPT;
+  const rows = useMemo(
+    () => buildTranscriptRows(transcript, liveTail, { streaming }),
+    [transcript, liveTail, streaming],
+  );
+  const turns = turnCount(transcriptQuery.data);
+  const running = streaming;
 
   const onCmdK = () => {
     // Trigger the global ⌘K command palette (AppShell mounts it via a window keydown hook).
@@ -38,9 +66,9 @@ export function CenterChat(): JSX.Element {
         minHeight: 0,
       }}
     >
-      <ChatHeader running={running} onCmdK={onCmdK} />
-      <MessageStream />
-      <Composer running={running} />
+      <ChatHeader title={title} running={running} onCmdK={onCmdK} />
+      <MessageStream rows={rows} loading={!!sessionId && transcriptQuery.isPending} />
+      <Composer sessionId={sessionId} running={running} turns={turns} />
     </div>
   );
 }

@@ -13,6 +13,8 @@ function makeDeps(createProject: UiServiceDeps['projectStore']['createProject'])
       createProject,
     },
     sessionStore: { listByProject: async () => [], listResumable: async () => [], getById: async () => null },
+    conversationHistory: { getHistory: async () => null },
+    sendSessionMessage: () => {},
     threadStore: { getAll: () => [], get: () => null },
     taskStore: { getAll: () => [], getById: () => null, load: () => {}, refresh: () => {} },
     scheduler: { list: async () => [], get: async () => null, pause: async () => null, resume: async () => null, remove: async () => false, add: async () => ({ id: 'sch_new' } as any) },
