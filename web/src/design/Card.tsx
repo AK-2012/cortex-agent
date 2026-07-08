@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 
-// Surface card primitive (DR-0018 §5): white card, 1px token border, 10px radius,
+// Surface card primitive (design §5): white card, 1px token border, 10px radius,
 // subtle token shadow. `padded` applies the standard 16px (2g) inset.
 
 export interface CardProps {

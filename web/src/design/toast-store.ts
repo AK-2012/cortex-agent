@@ -1,6 +1,6 @@
 import type { Tone } from './tone';
 
-// Pure toast-queue logic (DR-0018 §5, task 970d). Framework-agnostic and
+// Pure toast-queue logic (design §5, task 970d). Framework-agnostic and
 // deterministic so it can be unit-tested without a DOM; the React `useToast`
 // hook in Toast.tsx owns id generation and timers and delegates to these.
 

@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react';
 import { severityTone, type DegradedSeverity } from './degraded';
 
-// Degraded / exception state card (DR-0018 §5, design 10c). Unified color language:
+// Degraded / exception state card (design §5, design 10c). Unified color language:
 // amber(waiting) / red(human) / blue(info). No hard-coded hex — the tinted header and
 // dot come from the `pill-<tone>-{bg,fg}` and `state-{run|wait|fail}` tokens, selected
 // via `severityTone` (the tested invariant lives in ./degraded.ts).

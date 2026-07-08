@@ -1,7 +1,7 @@
 import * as RadixDialog from '@radix-ui/react-dialog';
 import type { ReactNode } from 'react';
 
-// Token-styled wrapper over Radix Dialog (approved primitive layer, DR-0018 §1):
+// Token-styled wrapper over Radix Dialog (approved primitive layer, design §1):
 // focus trap, esc-to-close, aria-modal, scroll-lock and focus restore come from
 // Radix; colors/spacing/radius/shadow are token-only. Supports controlled
 // (`open`/`onOpenChange`) and uncontrolled (`trigger`) usage. A `title` is

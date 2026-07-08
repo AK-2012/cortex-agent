@@ -2,7 +2,7 @@ import type { ReactNode } from 'react';
 import { MonoText } from './MonoText';
 
 // Section header: title + optional mono count + right-aligned actions + optional
-// description line. Used to head grouped lists and panes (DR-0018 §5).
+// description line. Used to head grouped lists and panes (design §5).
 
 export interface SectionHeaderProps {
   title: ReactNode;

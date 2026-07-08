@@ -137,7 +137,7 @@ describe('buildThreadDetailVm', () => {
       child({ id: 'thr_c1', templateName: 'check-claims', status: 'completed', depth: 0, costUsd: 0.12 }),
     ],
     artifacts: {
-      artifactPath: 'experiments/EXP-023.md',
+      artifactPath: 'experiments/domain-rand-sweep.md',
       workspacePath: '/ws/thr_8f2c',
       taskId: 'T-041',
       taskProject: 'quad-nav-sim2real',
@@ -241,7 +241,7 @@ describe('buildThreadDetailVm', () => {
 
   it('maps the artifact refs header + written-by from steps (content is a Stage-6 gap)', () => {
     const vm = buildThreadDetailVm(expDetail, [], NOW);
-    expect(vm.artifact.path).toBe('experiments/EXP-023.md');
+    expect(vm.artifact.path).toBe('experiments/domain-rand-sweep.md');
     expect(vm.artifact.live).toBe(true);
     expect(vm.artifact.taskId).toBe('T-041');
     expect(vm.artifact.taskProject).toBe('quad-nav-sim2real');

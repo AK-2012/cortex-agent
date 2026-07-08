@@ -1,6 +1,6 @@
 import { statusTone, type Tone } from './tone';
 
-// Token-driven status pill (DR-0018 §5 pill palette). No hard-coded hex — the
+// Token-driven status pill (design §5 pill palette). No hard-coded hex — the
 // bg/fg pair is selected from the tailwind `pill-<tone>-{bg,fg}` tokens.
 
 const TONE_CLASS: Record<Tone, string> = {

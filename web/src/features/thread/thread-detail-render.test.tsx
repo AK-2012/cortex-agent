@@ -84,7 +84,7 @@ describe('ThreadPipeline', () => {
 
 describe('ThreadArtifactPanel', () => {
   const artifact: DetailArtifact = {
-    path: 'experiments/EXP-023.md',
+    path: 'experiments/domain-rand-sweep.md',
     live: true,
     updated: '2m ago',
     taskId: 'T-041',
@@ -99,7 +99,7 @@ describe('ThreadArtifactPanel', () => {
   const html = renderToStaticMarkup(<ThreadArtifactPanel artifact={artifact} onOpen={() => {}} />);
   it('renders the header refs + live badge + Open', () => {
     expect(html).toContain('THREAD ARTIFACT');
-    expect(html).toContain('experiments/EXP-023.md');
+    expect(html).toContain('experiments/domain-rand-sweep.md');
     expect(html).toContain('live');
     expect(html).toContain('Open ↗');
     expect(html).toContain('2m ago');

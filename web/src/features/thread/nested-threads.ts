@@ -1,4 +1,4 @@
-// Pure selectors/formatters for the nested-thread panel (design 2b, DR-0018 §6.3 F2).
+// Pure selectors/formatters for the nested-thread panel (design 2b, §6.3 F2).
 // Framework-free so the ≤5-level depth logic can be unit-tested in isolation (TDD).
 // Source: ThreadDetail.children (recursive ThreadChildNode tree from threads.get, B1).
 //

@@ -1,4 +1,4 @@
-// Degraded / exception status language (DR-0018 §5, design 10c).
+// Degraded / exception status language (design §5, design 10c).
 // The four degraded variants (rate-limit throttle · backend fallback · machine
 // offline · over-budget pause) share one color language, collapsed onto three
 // severities that map to the already-token-defined pill tones (see ./tone.ts):

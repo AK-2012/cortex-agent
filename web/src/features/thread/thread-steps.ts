@@ -1,6 +1,6 @@
 // Pure selectors + formatters for the inline thread card (design 11a) and the shared
 // ThreadStepList primitive. Frame-work-free so they can be unit-tested in isolation (TDD).
-// Source DTO: ThreadDetail from threads.get (DR-0018 §6.3 B1).
+// Source DTO: ThreadDetail from threads.get (design §6.3 B1).
 
 import type {
   ThreadDetail,

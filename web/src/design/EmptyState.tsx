@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 
-// Empty-state primitive (DR-0018 §5, design 10d): centered card with muted title,
+// Empty-state primitive (design §5, design 10d): centered card with muted title,
 // optional description, optional action. Generalizes the shell EmptyPane.
 
 export interface EmptyStateProps {

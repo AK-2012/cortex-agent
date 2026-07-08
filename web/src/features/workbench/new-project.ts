@@ -2,13 +2,14 @@
 // output: pure helpers for the modal — creatability gate, the prototype's Create-button color, and
 //         the honest backend error message to surface
 // pos:    New-project modal (prototype.dc.html L1407-1429, task c551). Copy constants are verbatim
-//         from the prototype script (npTitle/npHint/npPh/npCreateLabel + L.cancel).
+//         from the prototype script (npTitle/npHint/npCreateLabel + L.cancel); the input placeholder
+//         uses a neutral example project name.
 
 /** Verbatim EN copy from the prototype (ZH toggle is Stage 8). */
 export const NP_TITLE = 'New project';
 export const NP_BREADCRUMB = 'context/projects/';
 export const NP_LABEL = 'PROJECT NAME';
-export const NP_PLACEHOLDER = 'tactile-reasoning';
+export const NP_PLACEHOLDER = 'nimbus';
 export const NP_HINT = 'Becomes context/projects/<name>/ — the agent handles everything else';
 export const NP_CREATE_LABEL = 'Create →';
 export const NP_CANCEL = 'Cancel';

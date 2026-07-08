@@ -22,7 +22,7 @@ import {
 import type { ReactNode } from 'react';
 import { DegradedDemos } from './DegradedDemos';
 
-// /kit — design-system demo surface (DR-0018 §5 Stage 2). Renders every primitive
+// /kit — design-system demo surface (design §5 Stage 2). Renders every primitive
 // in every variant/state so the token library can be eyeballed and reviewed. Pure
 // presentational: needs no agent-server.
 
@@ -56,7 +56,7 @@ export function KitPage() {
     <div className="flex h-full flex-col gap-4g overflow-auto p-2g pb-6g">
       <SectionHeader
         title="Design Kit"
-        description="Token-driven core primitives (DR-0018 §5). All colors from tailwind tokens."
+        description="Token-driven core primitives (design §5). All colors from tailwind tokens."
       />
 
       <Group title="StatusPill — tones">

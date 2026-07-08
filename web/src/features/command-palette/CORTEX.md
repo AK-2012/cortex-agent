@@ -1,7 +1,7 @@
 # features/command-palette/ — ⌘K Command Palette (Stage-R2, design 6c / overlay)
 
 Global command palette on `cmdk`, **rebuilt 1:1 from the prototype** (`prototype.dc.html`
-L1295–1315, proto-shot `01-cmdk-palette.png`) — task c967, DR-0018 §8.6 Stage R2. ⌘K / Ctrl+K
+L1295–1315, proto-shot `01-cmdk-palette.png`) — task c967, design §8.6 Stage R2. ⌘K / Ctrl+K
 opens the overlay; it searches **real** sessions/threads/tasks over tRPC and navigates via React
 Router. Keyboard-reachable end-to-end. Mounted globally in `shell/AppShell`.
 

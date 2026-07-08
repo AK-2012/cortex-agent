@@ -1,7 +1,7 @@
 import * as RadixTabs from '@radix-ui/react-tabs';
 import type { ReactNode } from 'react';
 
-// Token-styled wrapper over Radix Tabs (approved primitive layer, DR-0018 §1):
+// Token-styled wrapper over Radix Tabs (approved primitive layer, design §1):
 // keyboard/a11y from Radix, colors from tokens. Exposes both a data-driven form
 // (`Tabs`) and the styled parts (`TabsRoot`/`TabsList`/`Tab`/`TabPanel`).
 

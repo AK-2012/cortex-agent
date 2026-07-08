@@ -1,4 +1,4 @@
-// Status → visual tone mapping for the token pill palette (DR-0018 §5).
+// Status → visual tone mapping for the token pill palette (design §5).
 // The ui-service contract emits several status vocabularies (thread / task / execution);
 // all collapse onto the five pill tones defined in tailwind.config.ts.
 

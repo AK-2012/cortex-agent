@@ -1,7 +1,7 @@
 import type { ElementType, ReactNode } from 'react';
 
 // Monospace text primitive (IBM Plex Mono via `font-mono` token). Used for data
-// values, IDs, counts — anything that should read as machine data (DR-0018 §5).
+// values, IDs, counts — anything that should read as machine data (design §5).
 
 export interface MonoTextProps {
   children: ReactNode;
