@@ -9,6 +9,7 @@ import { BaseDemoPage } from '@/features/base-demo/BaseDemoPage';
 import { ThreadDetailRoute } from '@/features/thread/ThreadDetailRoute';
 import { OverviewPage } from '@/features/overview/OverviewPage';
 import { MemoryPage } from '@/features/memory/MemoryPage';
+import { SettingsRoute } from '@/features/settings/SettingsRoute';
 
 // Desktop shell loads the SPA via the Tauri asset protocol at `/index.html`, which a
 // BrowserRouter cannot match (→ "404 Not Found"). Use a path-independent HashRouter there;
@@ -27,7 +28,7 @@ export const router = createRouter([
       { path: 'threads/:threadId', element: <ThreadDetailRoute /> },
       { path: 'overview', element: <OverviewPage /> },
       { path: 'memory', element: <MemoryPage /> },
-      { path: 'settings', element: <EmptyPane title="Settings" /> },
+      { path: 'settings', element: <SettingsRoute /> },
       { path: 'kit', element: <KitPage /> },
       { path: 'base', element: <BaseDemoPage /> },
     ],
