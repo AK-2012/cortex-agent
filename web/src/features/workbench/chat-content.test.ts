@@ -48,7 +48,7 @@ describe('MORNING representative content (verbatim from prototype)', () => {
   it('carries the 4 morning tool calls with labels/kinds/inputs', () => {
     expect(MORNING.toolCalls).toHaveLength(4);
     expect(MORNING.toolCalls.map((c) => c.label)).toEqual([
-      'read EXP-023.md',
+      'read domain-rand-sweep.md',
       'threads.status',
       'read eval-logs/',
       'recompute table',

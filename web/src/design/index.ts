@@ -1,4 +1,4 @@
-// @cortex-agent/web design system — token-driven core primitives (DR-0018 §5).
+// @cortex-agent/web design system — token-driven core primitives (design §5).
 // Every color/space/radius/shadow/font comes from tailwind.config.ts tokens;
 // no primitive hard-codes a hex value.
 

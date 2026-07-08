@@ -1,6 +1,6 @@
 import { Button, DegradedState, ID, MonoText, StatusPill } from '@/design';
 
-// The four degraded variants (DR-0018 §5, design 10c), each a composition of the
+// The four degraded variants (design §5, design 10c), each a composition of the
 // `DegradedState` primitive + existing primitives. Pure presentational — no real data
 // (Machines/threads/budget wiring are Stage 3/5/7). Demonstrates the unified color
 // language: amber(waiting) / red(human) / blue(info).

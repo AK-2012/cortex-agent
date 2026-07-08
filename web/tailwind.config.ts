@@ -1,6 +1,6 @@
 import type { Config } from 'tailwindcss';
 
-// Single source of truth for the Cortex UI design tokens (DR-0018 §5, v2 定稿).
+// Single source of truth for the Cortex UI design tokens (design §5, v2 定稿).
 // No screen may hard-code a hex value — every color/space/radius/shadow/font below
 // is consumed as a Tailwind token. Status pills and mono text are built from `pill`
 // and `fontFamily.mono` respectively.
@@ -38,7 +38,7 @@ const config: Config = {
           'canvas-alt': '#F7F8FA',
           rail: '#FBFBFC',
         },
-        // Prototype 1:1 palette (DR-0018 §8.6 RA / task 6d21). Audited from
+        // Prototype 1:1 palette (design §8.6 RA / task 6d21). Audited from
         // prototype.dc.html — the recurring structural ink/line/accent/amber
         // scale. Per §8.3 one-off hexes may stay raw in a screen; these are the
         // values that repeat across the design and become tokens for RB+.
@@ -123,7 +123,7 @@ const config: Config = {
         card: '0 1px 2px rgba(0,0,0,0.04), 0 1px 3px rgba(0,0,0,0.06)',
         overlay: '0 10px 38px rgba(0,0,0,0.20), 0 6px 12px rgba(0,0,0,0.12)',
       },
-      // Overlay enter/exit motion (DR-0018 §5, task 970d). Driven off Radix
+      // Overlay enter/exit motion (design §5, task 970d). Driven off Radix
       // `data-[state=open|closed]` attributes; kept token-side (no extra dep).
       // `motion-reduce:` variants in the primitives disable transforms.
       keyframes: {

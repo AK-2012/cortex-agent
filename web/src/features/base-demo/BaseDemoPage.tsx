@@ -1,4 +1,4 @@
-// /base — prototype 1:1 base specimen (DR-0018 §8.6 RA / task 6d21).
+// /base — prototype 1:1 base specimen (design §8.6 RA / task 6d21).
 // Pure presentational surface that exercises the faithful base — the exact fonts
 // (system sans for UI, IBM Plex Mono for data/IDs), the audited prototype palette,
 // and the prototype animation set — so a rendered screenshot can be diffed against

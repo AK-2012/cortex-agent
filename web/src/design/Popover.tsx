@@ -1,7 +1,7 @@
 import * as RadixPopover from '@radix-ui/react-popover';
 import type { ReactNode } from 'react';
 
-// Token-styled wrapper over Radix Popover (approved primitive layer, DR-0018 §1):
+// Token-styled wrapper over Radix Popover (approved primitive layer, design §1):
 // positioning, esc-to-close and focus return to the trigger come from Radix.
 // Supports controlled (`open`/`onOpenChange`) and uncontrolled usage.
 

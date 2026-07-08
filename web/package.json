@@ -3,7 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "Cortex Web UI — Vite + React 18 SPA (DR-0018). tRPC client + TanStack Query + React Router + token-ised Tailwind.",
+  "description": "Cortex Web UI — Vite + React 18 SPA. tRPC client + TanStack Query + React Router + token-ised Tailwind.",
   "engines": {
     "node": ">=20.0.0"
   },

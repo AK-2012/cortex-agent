@@ -3,7 +3,7 @@ import { createContext, useCallback, useContext, useMemo, useRef, useState, type
 import { addToast, removeToast, type ToastItem } from './toast-store';
 import type { Tone } from './tone';
 
-// Token-styled wrapper over Radix Toast (approved primitive layer, DR-0018 §1):
+// Token-styled wrapper over Radix Toast (approved primitive layer, design §1):
 // role/announce, swipe-dismiss, timing and hotkey a11y come from Radix. The
 // imperative `useToast()` API pushes onto the pure `toast-store` queue; styling
 // (tone accent, surface, motion) is token-only. Mount `ToastProvider` once near

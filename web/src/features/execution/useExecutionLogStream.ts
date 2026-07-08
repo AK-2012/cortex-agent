@@ -6,7 +6,7 @@ import { appendLog, EMPTY_LOG, type LogFrame, type LogState } from './log-buffer
 export const LOG_CAP = 2000;
 
 // Opens one SSE subscription on `executions.log` for a running cortex-run execution and accumulates
-// each frame's lines into a bounded buffer via the pure appendLog reducer (design 8b, DR-0018 §6.3
+// each frame's lines into a bounded buffer via the pure appendLog reducer (design 8b, §6.3
 // F3). Gated on `enabled` (a live log is only subscribable when the dispatch has a runName). Resets
 // and re-subscribes when the executionId changes; closes on unmount. All buffer logic lives in
 // log-buffer (unit-tested) — this hook is the thin React/SSE glue.

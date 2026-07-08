@@ -55,7 +55,7 @@ export const MORNING = {
   divider: 'TODAY 07:42',
   userMessage: 'How did the domain-randomization sweep go overnight?',
   toolCalls: [
-    { label: 'read EXP-023.md', kind: 'read', input: 'experiments/EXP-023.md' },
+    { label: 'read domain-rand-sweep.md', kind: 'read', input: 'experiments/domain-rand-sweep.md' },
     { label: 'threads.status', kind: 'mcp', input: 'threads.status()' },
     { label: 'read eval-logs/', kind: 'read', input: 'eval-logs/**/summary.json' },
     { label: 'recompute table', kind: 'bash', input: 'python tools/recompute_success.py --all-seeds' },

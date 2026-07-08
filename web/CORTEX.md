@@ -1,15 +1,15 @@
 # web/ — @cortex-agent/web
 
-Cortex Web UI: Vite + React 18 + TypeScript SPA (DR-0018 Stage-1 task 4). Renders the
+Cortex Web UI: Vite + React 18 + TypeScript SPA (Stage-1). Renders the
 three-pane workbench shell; talks to agent-server over tRPC (HTTP/SSE) via `@trpc/client`
-+ TanStack Query. Design tokens (DR-0018 §5) live in `tailwind.config.ts` — no screen
++ TanStack Query. Design tokens (design §5) live in `tailwind.config.ts` — no screen
 hard-codes hex.
 
 ## Layout
 
 | path | role |
 |---|---|
-| `tailwind.config.ts` | **All** design tokens: §5 state palette / status-pill bg/fg pairs / surfaces / 8px grid / radius / shadow, **plus the prototype 1:1 base (DR-0018 §8.6 RA, task 6d21)** — `fontFamily.sans`/`mono` match the prototype exactly, the audited `proto.*` color scale (ink/line/accent/amber tints), and the 16 `cx*` animation utilities. No screen hard-codes hex |
+| `tailwind.config.ts` | **All** design tokens: §5 state palette / status-pill bg/fg pairs / surfaces / 8px grid / radius / shadow, **plus the prototype 1:1 base (design §8.6 RA, task 6d21)** — `fontFamily.sans`/`mono` match the prototype exactly, the audited `proto.*` color scale (ink/line/accent/amber tints), and the 16 `cx*` animation utilities. No screen hard-codes hex |
 | `index.html` | SPA entry; `#root` + `/src/main.tsx`; loads **IBM Plex Mono** (Google Fonts, wght 400;500;600) matching the prototype helmet |
 | `src/index.css` | Tailwind directives + the prototype `<style>` base **verbatim** (§8.6 RA): html/body reset (base `#E9E7E2` + exact system-sans stack), `input{}` reset, `.sess-row` hover, and the 16 raw `@keyframes cx*` (literal names — inline `animation:cx…` in prototype-1:1 markup depends on them) |
 | `vite.config.ts` | React plugin; `@` → `src` alias; dev proxy `/trpc` → `127.0.0.1:3004`. Proxy injects `x-cortex-token` (from `CORTEX_CLIENT_TOKEN`) so the token-gated ui-http-server is reachable in dev without the browser holding the secret (SSE cannot set headers) |
@@ -19,7 +19,7 @@ hard-codes hex.
 | `src/providers.tsx` | `QueryClientProvider` + tRPC `TRPCProvider` + `design/TooltipProvider` |
 | `src/lib/trpc.ts` | `@trpc/tanstack-react-query` context + vanilla client + **conditional transport** (task 1b60). `splitLink`: query/mutate → `httpBatchLink`, subscription → `httpSubscriptionLink`. **Two modes**: browser/ui-http (no config) — relative `/trpc`, same-origin, proxy injects token; desktop/remote (injected `RemoteConfig{serverUrl,token}`) — absolute URL, `x-cortex-token` in batch headers, `eventsource` npm ponyfill for SSE (fetch-based, injects token in custom fetch). Exports `trpcUrl(config?)`, `buildBatchHeaders(config?)`, `buildSseFetch(token)` for unit testing. `src/lib/trpc.test.ts` covers both modes. |
 | `src/router.tsx` | `createBrowserRouter`: `AppShell` layout; `/workbench` → `WorkbenchPage` (design 3a, task 5b0f), `/tasks` → `TasksPage` (task 5), `/kit` → `KitPage` (design demo, task e794), other routes still `EmptyPane` |
-| `src/design/` | Design-system core primitives (DR-0018 §5 Stage 2, tasks e794/2add) — token-driven StatusPill/MonoText/ID/Card/SectionHeader/Button/Tabs/Tooltip/EmptyState/DegradedState (10c status language). See its CORTEX.md |
+| `src/design/` | Design-system core primitives (design §5 Stage 2, tasks e794/2add) — token-driven StatusPill/MonoText/ID/Card/SectionHeader/Button/Tabs/Tooltip/EmptyState/DegradedState (10c status language). See its CORTEX.md |
 | `src/shell/` | `AppShell` (**Stage-R RB pass-through**, task f528 — renders `<Outlet/>` + the global ⌘K `CommandPalette`; the old token-summary nav `LeftRail` was removed — `/workbench` owns its own frame + rail) · `EmptyPane` (wraps `design/EmptyState`) |
 | `src/features/workbench/` | **Stage-R RB app-shell frame + Left Rail 1:1** (task f528) — `WorkbenchPage` = 240/fluid/400 three-pane flex frame; real `LeftRail` (prototype L42–100, real projects/sessions/cost); `CenterChat`/`RightPanel` STUB slots (siblings B/C). See its CORTEX.md |
 | `src/features/tasks/` | Tasks tab vertical slice (design 4a, task 5) — see its CORTEX.md. `TasksPanel` = reusable data-driven body (also used by the workbench Tasks tab); `Pills.tsx` delegates to `design/StatusPill` |
@@ -40,7 +40,7 @@ hard-codes hex.
 - Dev boots without agent-server (proxy engages only on `/trpc` request). Live data needs the port-3004 ui-http-server (task 3) and `CORTEX_CLIENT_TOKEN` set in the dev shell (proxy injects it).
 - `build` = `tsc --noEmit && vite build`; `typecheck` = `tsc --noEmit`; `test` = `vitest run` (`group-tasks` grouping + `design/tone` status→tone mapping pure-logic unit tests).
 - Tailwind pinned to v3.4 (config-file token contract; v4 moves tokens to CSS `@theme`).
-- Tabs/Tooltip use `@radix-ui/react-tabs` / `@radix-ui/react-tooltip` (approved primitive layer, DR-0018 §1); token-only styling.
+- Tabs/Tooltip use `@radix-ui/react-tabs` / `@radix-ui/react-tooltip` (approved primitive layer, design §1); token-only styling.
 - **⌘K command palette 1:1** (Stage-R2 overlay, task c967): `features/command-palette/` on `cmdk`
   (`^1.1.1`), mounted globally in `AppShell`, rebuilt 1:1 from `prototype.dc.html` L1295–1315
   (proto-shot `01-cmdk-palette.png`) — exact overlay chrome/anatomy/copy, flat rows, real

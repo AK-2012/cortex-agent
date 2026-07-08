@@ -1,6 +1,6 @@
 # features/execution/ — execution log drawer (09-exec-logs)
 
-Stage-R2 task b963 (DR-0018 §8.6). The **execution log drawer** overlay — a right dark slide-over
+Stage-R2 task b963 (design §8.6). The **execution log drawer** overlay — a right dark slide-over
 reproduced **1:1** from `design/ref/prototype.dc.html` L1542–1562 (+ shared backdrop L1292), diffed vs
 `design/proto-shots/09-exec-logs.png`. Wired to **real** tRPC data: `executions.get`
 (`ExecutionDetailInfo`, B2-A) for the header (title / status pill / meta), a **live-scrolling

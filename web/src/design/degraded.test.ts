@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { TONES, type Tone } from './tone';
 import { DEGRADED_SEVERITIES, severityTone, type DegradedSeverity } from './degraded';
 
-// Degraded status language (DR-0018 §5, design 10c): the four degraded variants
+// Degraded status language (design §5, design 10c): the four degraded variants
 // collapse onto three severities whose color semantics are the tested invariant —
 // 琥珀(amber)=等待(waiting), 红(red)=需人工(needs-human), 蓝(blue)=transient note.
 

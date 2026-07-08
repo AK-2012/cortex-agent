@@ -1,4 +1,4 @@
-# design/ — token-driven core primitives (DR-0018 §5, Stage 2)
+# design/ — token-driven core primitives (design §5, Stage 2)
 
 The design-system primitive library. Every functional screen composes from these
 instead of hard-coding styles. **All** colors/spacing/radius/shadow/fonts come from
@@ -34,7 +34,7 @@ instead of hard-coding styles. **All** colors/spacing/radius/shadow/fonts come f
   every variant/state (pure presentational, no agent-server needed). The Overlays group has live
   triggers for Modal/Drawer/Toast/Popover.
 - Tabs/Tooltip/Modal/Drawer/Popover/Toast wrap `@radix-ui/react-{tabs,tooltip,dialog,popover,toast}`
-  (approved primitive layer, DR-0018 §1) for keyboard/a11y/positioning; styling is token-only.
+  (approved primitive layer, design §1) for keyboard/a11y/positioning; styling is token-only.
 - **Overlay motion** lives as `keyframes`/`animation` tokens in `tailwind.config.ts` (no extra dep),
   driven off Radix `data-[state=open|closed]`; each overlay carries `motion-reduce:animate-none`.
 - `features/tasks/Pills.tsx` and `shell/EmptyPane` now delegate to `StatusPill` / `EmptyState`

@@ -1,4 +1,4 @@
-// Pure bounded-log reducer for the execution detail live log stream (design 8b, DR-0018 §6.3 F3).
+// Pure bounded-log reducer for the execution detail live log stream (design 8b, §6.3 F3).
 // Frames come from the `execution.log` SSE subscription payload; appendLog accumulates them into a
 // ring capped at `cap` lines. Both the backend-reported flood drops (`frame.dropped`) and lines
 // evicted here when the cap is exceeded fold into one `dropped` total (the "…N lines dropped"

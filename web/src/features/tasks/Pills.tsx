@@ -1,7 +1,7 @@
 import type { TaskInfo } from '@cortex-agent/ui-contract';
 import { StatusPill as DesignStatusPill, type Tone } from '@/design';
 
-// Task-specific pills built on the design-system StatusPill primitive (DR-0018 §5).
+// Task-specific pills built on the design-system StatusPill primitive (design §5).
 // Appearance preserved from the Stage-1 slice: priority high/med/low → failed/waiting/
 // cancelled tone; status open/done → running/done tone.
 

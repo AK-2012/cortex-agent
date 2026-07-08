@@ -1,7 +1,7 @@
 import * as RadixTooltip from '@radix-ui/react-tooltip';
 import type { ReactNode } from 'react';
 
-// Token-styled wrapper over Radix Tooltip (approved primitive layer, DR-0018 §1):
+// Token-styled wrapper over Radix Tooltip (approved primitive layer, design §1):
 // positioning/a11y from Radix, colors from tokens (ink surface, card text).
 // Mount `TooltipProvider` once near the app root.
 
