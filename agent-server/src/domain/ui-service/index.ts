@@ -8,4 +8,6 @@ export type { Result, Ok, Err } from './types.js';
 export type {
   ProjectConduitInfo, SessionInfo, ThreadInfo, TaskInfo,
   ScheduleInfo, ExecutionInfo,
+  SessionTranscript, TranscriptTurn, TranscriptMessage,
+  SessionsSendArgs, SessionsSendReturn, SessionsTranscriptParams,
 } from './types.js';

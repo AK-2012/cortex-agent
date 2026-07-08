@@ -10,6 +10,8 @@
 export {
   projectsListInput,
   sessionsListInput,
+  sessionsTranscriptInput,
+  sessionsSendInput,
   threadsListInput,
   threadsGetInput,
   tasksListInput,

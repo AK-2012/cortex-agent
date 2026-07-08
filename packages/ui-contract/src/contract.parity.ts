@@ -10,6 +10,8 @@ import type { QueryParamMap, MutateArgsMap, ExecutionsLogParams } from './dto.js
 import type {
   projectsListInput,
   sessionsListInput,
+  sessionsTranscriptInput,
+  sessionsSendInput,
   threadsListInput,
   threadsGetInput,
   tasksListInput,
@@ -42,6 +44,7 @@ type MutateParity<O extends keyof MutateArgsMap, Schema extends z.ZodType> = Exa
 // ── Query scopes ──────────────────────────────────────────────────
 const _projectsList: QueryParity<'projects.list', typeof projectsListInput> = true;
 const _sessionsList: QueryParity<'sessions.list', typeof sessionsListInput> = true;
+const _sessionsTranscript: QueryParity<'sessions.transcript', typeof sessionsTranscriptInput> = true;
 const _threadsList: QueryParity<'threads.list', typeof threadsListInput> = true;
 const _threadsGet: QueryParity<'threads.get', typeof threadsGetInput> = true;
 const _tasksList: QueryParity<'tasks.list', typeof tasksListInput> = true;
@@ -53,6 +56,7 @@ const _memoryFile: QueryParity<'memory.file', typeof memoryFileInput> = true;
 const _costSummary: QueryParity<'cost.summary', typeof costSummaryInput> = true;
 
 // ── Mutate ops ────────────────────────────────────────────────────
+const _sessionsSend: MutateParity<'sessions.send', typeof sessionsSendInput> = true;
 const _threadsCancel: MutateParity<'threads.cancel', typeof threadsCancelInput> = true;
 const _executionsCancel: MutateParity<'executions.cancel', typeof executionsCancelInput> = true;
 const _schedulesPause: MutateParity<'schedules.pause', typeof scheduleActionInput> = true;
@@ -72,8 +76,8 @@ const _executionsLog: Exact<z.infer<typeof executionsLogInput>, ExecutionsLogPar
 // Reference the guards so noUnusedLocals (if enabled) stays quiet and the
 // checks are not tree-shaken away by the type checker.
 export const _contractParityChecked = [
-  _projectsList, _sessionsList, _threadsList, _threadsGet, _tasksList, _schedulesList,
-  _executionsList, _executionsGet, _memoryTree, _memoryFile, _costSummary, _threadsCancel, _executionsCancel,
+  _projectsList, _sessionsList, _sessionsTranscript, _threadsList, _threadsGet, _tasksList, _schedulesList,
+  _executionsList, _executionsGet, _memoryTree, _memoryFile, _costSummary, _sessionsSend, _threadsCancel, _executionsCancel,
   _schedulesPause, _schedulesResume, _schedulesRemove, _tasksClaim,
   _tasksUnclaim, _tasksComplete, _tasksBlock, _tasksUnblock, _executionsLog,
 ] as const;

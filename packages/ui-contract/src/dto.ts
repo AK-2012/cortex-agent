@@ -18,6 +18,7 @@ export type {
   ExecutionsLogParams,
   // Query params
   SessionsListParams,
+  SessionsTranscriptParams,
   ThreadsListParams,
   ThreadsGetParams,
   TasksListParams,
@@ -28,6 +29,7 @@ export type {
   MemoryFileParams,
   CostSummaryParams,
   // Mutate args
+  SessionsSendArgs,
   ThreadsCancelArgs,
   ExecutionsCancelArgs,
   ScheduleActionArgs,
@@ -37,6 +39,9 @@ export type {
   // Output DTOs
   ProjectConduitInfo,
   SessionInfo,
+  SessionTranscript,
+  TranscriptTurn,
+  TranscriptMessage,
   ThreadInfo,
   ThreadDetail,
   ThreadStepDetail,
@@ -52,6 +57,7 @@ export type {
   MemoryFileEntry,
   MemoryDirEntry,
   MemoryFile,
+  SessionsSendReturn,
   ThreadsCancelReturn,
   ExecutionsCancelReturn,
   // Mapped contract

@@ -11,6 +11,7 @@ import type { PlatformAdapter } from '@platform/adapter.js';
 import type { Session } from '@store/session-registry-repo.js';
 import type { ScheduleTask } from '@store/schedule-repo.js';
 import type { LogLocation } from '@domain/executions/log-tailer.js';
+import type { SessionHistory } from '@store/conversation-history-repo.js';
 
 // ── Result ────────────────────────────────────────────────────────
 
@@ -23,6 +24,7 @@ export type Result<T> = Ok<T> | Err;
 export type QueryScope =
   | 'projects.list'
   | 'sessions.list'
+  | 'sessions.transcript'
   | 'threads.list'
   | 'threads.get'
   | 'tasks.list'
@@ -36,6 +38,7 @@ export type QueryScope =
 // ── Mutate ops ────────────────────────────────────────────────────
 
 export type MutateOp =
+  | 'sessions.send'
   | 'threads.cancel'
   | 'executions.cancel'
   | 'schedules.pause'
@@ -54,6 +57,8 @@ export interface SubscribeFilter {
   projectId?: string | null;
   /** Scope `execution.log` events to a single execution (B2-C live log stream). */
   executionId?: string | null;
+  /** Scope `session.message` events to a single session (S4 chat live stream). */
+  sessionId?: string | null;
 }
 
 export interface UiEvent {
@@ -72,6 +77,10 @@ export interface ExecutionsLogParams {
 export interface SessionsListParams {
   projectId?: string;
   resumable?: boolean;
+}
+
+export interface SessionsTranscriptParams {
+  sessionId: string;
 }
 
 export interface ThreadsListParams {
@@ -119,6 +128,11 @@ export interface CostSummaryParams {
 
 // ── Mutate args ───────────────────────────────────────────────────
 
+export interface SessionsSendArgs {
+  sessionId: string;
+  text: string;
+}
+
 export interface ThreadsCancelArgs {
   threadId: string;
 }
@@ -164,6 +178,32 @@ export interface SessionInfo {
   lastUsedAt: string;
   resumable: boolean;
   label: string | null;
+}
+
+// ── sessions.transcript DTO (S4 chat) ─────────────────────────────
+// Wraps conversation-history's per-session event stream, grouped into turns (each `user`
+// event opens a turn). Streaming assistant partials are already collapsed at the source
+// (conversationHistory.getHistory). An absent/empty history maps to `{ sessionId, turns: [] }`.
+
+export interface TranscriptMessage {
+  type: 'user' | 'assistant' | 'tool';
+  /** user / assistant text; null for tool events. */
+  text: string | null;
+  /** tool name (tool events only). */
+  toolName: string | null;
+  /** compact tool input summary (tool events only). */
+  toolInput: string | null;
+  ts: string;
+}
+
+export interface TranscriptTurn {
+  turnIndex: number;
+  messages: TranscriptMessage[];
+}
+
+export interface SessionTranscript {
+  sessionId: string;
+  turns: TranscriptTurn[];
 }
 
 export interface ThreadInfo {
@@ -363,6 +403,12 @@ export interface MemoryFile {
 
 // ── Mutate return types ───────────────────────────────────────────
 
+export interface SessionsSendReturn {
+  /** The message was accepted and routed. Assistant output returns via the `session.message`
+   *  stream event, NOT this return (fire-and-forget). */
+  accepted: boolean;
+}
+
 export interface ThreadsCancelReturn {
   cancelled: boolean;
 }
@@ -376,6 +422,7 @@ export interface ExecutionsCancelReturn {
 export interface QueryParamMap {
   'projects.list': Record<string, never>;
   'sessions.list': SessionsListParams;
+  'sessions.transcript': SessionsTranscriptParams;
   'threads.list': ThreadsListParams;
   'threads.get': ThreadsGetParams;
   'tasks.list': TasksListParams;
@@ -390,6 +437,7 @@ export interface QueryParamMap {
 export interface QueryReturnMap {
   'projects.list': ProjectConduitInfo[];
   'sessions.list': SessionInfo[];
+  'sessions.transcript': SessionTranscript;
   'threads.list': ThreadInfo[];
   'threads.get': ThreadDetail;
   'tasks.list': TaskInfo[];
@@ -402,6 +450,7 @@ export interface QueryReturnMap {
 }
 
 export interface MutateArgsMap {
+  'sessions.send': SessionsSendArgs;
   'threads.cancel': ThreadsCancelArgs;
   'executions.cancel': ExecutionsCancelArgs;
   'schedules.pause': ScheduleActionArgs;
@@ -415,6 +464,7 @@ export interface MutateArgsMap {
 }
 
 export interface MutateReturnMap {
+  'sessions.send': SessionsSendReturn;
   'threads.cancel': ThreadsCancelReturn;
   'executions.cancel': ExecutionsCancelReturn;
   'schedules.pause': void;
@@ -460,6 +510,17 @@ export interface UiServiceDeps {
     listResumable(projectId?: string): Promise<Session[]>;
     getById(sessionId: string): Promise<Session | null>;
   };
+  /** Backend-independent conversation history — read source for `sessions.transcript` (S4 chat). */
+  conversationHistory: {
+    getHistory(sessionId: string): Promise<SessionHistory | null>;
+  };
+  /**
+   * Inject a genuine user turn into a session and route it through the agent (S4 chat send).
+   * Fire-and-forget: assistant output returns via the `session.message` stream event, not here.
+   * Wired in the entry layer (app.ts) to the orchestration send path — kept as an injected
+   * callback so the ui-service domain never imports orchestration (layer safety / depcruise).
+   */
+  sendSessionMessage: (opts: { sessionId: string; channel: string; text: string }) => void;
   threadStore: {
     getAll(): any[];
     get(id: string): any | null;

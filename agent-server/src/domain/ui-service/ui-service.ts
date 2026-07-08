@@ -4,13 +4,14 @@
 
 import type { UiServiceDeps, UiService, QueryScope, MutateOp, Result } from './types.js';
 import { handleProjectsList } from './query/projects.js';
-import { handleSessionsList } from './query/sessions.js';
+import { handleSessionsList, handleSessionsTranscript } from './query/sessions.js';
 import { handleThreadsList, handleThreadsGet } from './query/threads.js';
 import { handleTasksList } from './query/tasks.js';
 import { handleSchedulesList } from './query/schedules.js';
 import { handleExecutionsList, handleExecutionsGet } from './query/executions.js';
 import { handleMemoryTree, handleMemoryFile } from './query/memory.js';
 import { handleCostSummary } from './query/cost.js';
+import { handleSendSession } from './mutate/sessions.js';
 import { handleCancelThread } from './mutate/threads.js';
 import { handleCancelExecution } from './mutate/executions.js';
 import {
@@ -34,6 +35,7 @@ type MutateHandler = (deps: UiServiceDeps, args: any) => Promise<Result<any>>;
 const queryHandlers: Record<string, QueryHandler> = {
   'projects.list': (deps) => handleProjectsList(deps),
   'sessions.list': (deps, params) => handleSessionsList(deps, params),
+  'sessions.transcript': (deps, params) => handleSessionsTranscript(deps, params),
   'threads.list': (deps, params) => handleThreadsList(deps, params),
   'threads.get': (deps, params) => handleThreadsGet(deps, params),
   'tasks.list': (deps, params) => handleTasksList(deps, params),
@@ -46,6 +48,7 @@ const queryHandlers: Record<string, QueryHandler> = {
 };
 
 const mutateHandlers: Record<string, MutateHandler> = {
+  'sessions.send': (deps, args) => handleSendSession(deps, args),
   'threads.cancel': (deps, args) => handleCancelThread(deps, args),
   'executions.cancel': (deps, args) => handleCancelExecution(deps, args),
   'schedules.pause': (deps, args) => handlePauseSchedule(deps, args),

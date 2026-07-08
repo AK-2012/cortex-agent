@@ -15,6 +15,8 @@ import { router, publicProcedure } from './trpc.js';
 import {
   projectsListInput,
   sessionsListInput,
+  sessionsTranscriptInput,
+  sessionsSendInput,
   threadsListInput,
   threadsGetInput,
   tasksListInput,
@@ -46,6 +48,7 @@ import type {
 const subscribeFilterInput = z.object({
   events: z.array(z.string()),
   projectId: z.string().nullish(),
+  sessionId: z.string().nullish(),
 });
 
 // ── Result → value / Err → TRPCError ─────────────────────────────────────────────
@@ -101,7 +104,7 @@ function makeMutation<O extends MutateOp, Sch extends z.ZodType>(
 }
 
 // ── AppRouter ─────────────────────────────────────────────────────────────────────
-// 11 QueryScope + 10 MutateOp + 2 subscriptions (generic `subscribe` + `executions.log`),
+// 12 QueryScope + 11 MutateOp + 2 subscriptions (generic `subscribe` + `executions.log`),
 // mirroring the ui-service contract.
 export function createAppRouter(uiService: UiService) {
   return router({
@@ -110,6 +113,8 @@ export function createAppRouter(uiService: UiService) {
     }),
     sessions: router({
       list: makeQuery(uiService, 'sessions.list', sessionsListInput),
+      transcript: makeQuery(uiService, 'sessions.transcript', sessionsTranscriptInput),
+      send: makeMutation(uiService, 'sessions.send', sessionsSendInput),
     }),
     threads: router({
       list: makeQuery(uiService, 'threads.list', threadsListInput),

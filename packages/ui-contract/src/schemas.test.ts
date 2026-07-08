@@ -3,13 +3,13 @@ import assert from 'node:assert/strict';
 import { queryInputSchemas, mutateInputSchemas } from './schemas.js';
 
 const QUERY_SCOPES = [
-  'projects.list', 'sessions.list', 'threads.list', 'threads.get', 'tasks.list',
+  'projects.list', 'sessions.list', 'sessions.transcript', 'threads.list', 'threads.get', 'tasks.list',
   'schedules.list', 'executions.list', 'executions.get', 'memory.tree', 'memory.file',
   'cost.summary',
 ] as const;
 
 const MUTATE_OPS = [
-  'threads.cancel', 'executions.cancel', 'schedules.pause', 'schedules.resume',
+  'sessions.send', 'threads.cancel', 'executions.cancel', 'schedules.pause', 'schedules.resume',
   'schedules.remove', 'tasks.claim', 'tasks.unclaim', 'tasks.complete',
   'tasks.block', 'tasks.unblock',
 ] as const;
@@ -53,6 +53,11 @@ test('query schemas accept valid input', () => {
     queryInputSchemas['memory.file'].parse({ projectId: 'p', path: 'STATUS.md' }),
     { projectId: 'p', path: 'STATUS.md' },
   );
+  // sessions.transcript requires a sessionId
+  assert.deepEqual(
+    queryInputSchemas['sessions.transcript'].parse({ sessionId: 'sess-1' }),
+    { sessionId: 'sess-1' },
+  );
 });
 
 test('query schemas reject invalid input', () => {
@@ -62,6 +67,7 @@ test('query schemas reject invalid input', () => {
   assert.throws(() => queryInputSchemas['sessions.list'].parse({ resumable: 'yes' }));
   assert.throws(() => queryInputSchemas['memory.tree'].parse({}));
   assert.throws(() => queryInputSchemas['memory.file'].parse({ projectId: 'p' }));
+  assert.throws(() => queryInputSchemas['sessions.transcript'].parse({}));
 });
 
 test('mutate schemas require their mandatory fields', () => {
@@ -76,6 +82,13 @@ test('mutate schemas require their mandatory fields', () => {
     mutateInputSchemas['tasks.block'].parse({ projectId: 'p', taskId: 'f184', reason: 'stuck' }),
     { projectId: 'p', taskId: 'f184', reason: 'stuck' },
   );
+  // sessions.send requires sessionId + non-empty text
+  assert.deepEqual(
+    mutateInputSchemas['sessions.send'].parse({ sessionId: 'sess-1', text: 'hi' }),
+    { sessionId: 'sess-1', text: 'hi' },
+  );
+  assert.throws(() => mutateInputSchemas['sessions.send'].parse({ sessionId: 'sess-1', text: '' }));
+  assert.throws(() => mutateInputSchemas['sessions.send'].parse({ sessionId: 'sess-1' }));
   // missing required id
   assert.throws(() => mutateInputSchemas['threads.cancel'].parse({}));
   assert.throws(() => mutateInputSchemas['tasks.claim'].parse({ projectId: 'p' }));
