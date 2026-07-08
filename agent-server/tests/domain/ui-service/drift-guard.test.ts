@@ -50,6 +50,8 @@ function makeMinimalDeps(): UiServiceDeps {
       cancelExecution: () => null,
     },
     executionLogTailer: { startTail: () => {}, stopTail: () => {}, refCount: () => 0 },
+    conversationHistory: { getHistory: async () => null },
+    sendSessionMessage: () => {},
     runningExecutions: {
       register: () => {},
       getByKey: () => null,
@@ -81,6 +83,7 @@ function makeMinimalDeps(): UiServiceDeps {
 const queryScopes = [
   'projects.list',
   'sessions.list',
+  'sessions.transcript',
   'threads.list',
   'tasks.list',
   'schedules.list',
@@ -92,6 +95,7 @@ const queryScopes = [
 
 const mutateOps = [
   'projects.create',
+  'sessions.send',
   'threads.cancel',
   'executions.cancel',
   'schedules.pause',

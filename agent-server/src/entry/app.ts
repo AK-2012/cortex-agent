@@ -75,6 +75,7 @@ import { startDispatchReconciler } from '@orch/dispatch-reconciler.js';
 import { ensurePIAgentDirs } from '../agent-adapter/pi/agent-dir.js';
 import { initOutboundQueue, getOutboundQueue } from '@store/outbound-queue.js';
 import { createUiService } from '@domain/ui-service/index.js';
+import { sendWebUserMessage } from '../orchestration/session-send.js';
 import { startUiHttpServer } from './start-ui-http.js';
 import type { UiHttpServer } from '@platform/ui-http/ui-http-server.js';
 import { createTuiSessionService } from '@domain/tui-session/index.js';
@@ -336,6 +337,10 @@ process.on('SIGTERM', async () => {
     executionLogTailer,
     runningExecutions,
     costSummary: getCostSummary,
+    conversationHistory,
+    // S4 chat send: inject a genuine user turn into a session via the orchestration send path.
+    // Injected here (entry layer) so the ui-service domain never imports orchestration.
+    sendSessionMessage: ({ channel, text }) => sendWebUserMessage({ channel, text, adapter }),
     bus,
     adapter,
   });

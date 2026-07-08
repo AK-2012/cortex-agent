@@ -81,6 +81,7 @@ function makeCaller(fake: ReturnType<typeof makeFake>) {
 const QUERY_CASES: Array<{ scope: QueryScope; call: (c: any) => Promise<unknown>; input: any }> = [
   { scope: 'projects.list', call: (c) => c.projects.list({}), input: {} },
   { scope: 'sessions.list', call: (c) => c.sessions.list({}), input: {} },
+  { scope: 'sessions.transcript', call: (c) => c.sessions.transcript({ sessionId: 's1' }), input: {} },
   { scope: 'threads.list', call: (c) => c.threads.list({}), input: {} },
   { scope: 'tasks.list', call: (c) => c.tasks.list({}), input: {} },
   { scope: 'schedules.list', call: (c) => c.schedules.list({}), input: {} },
@@ -104,6 +105,7 @@ test('every query routes to the correct scope and unwraps Result.data', async ()
 
 const MUTATE_CASES: Array<{ op: MutateOp; call: (c: any) => Promise<unknown>; }> = [
   { op: 'projects.create', call: (c) => c.projects.create({ name: 'nimbus' }) },
+  { op: 'sessions.send', call: (c) => c.sessions.send({ sessionId: 's1', text: 'hi' }) },
   { op: 'threads.cancel', call: (c) => c.threads.cancel({ threadId: 't1' }) },
   { op: 'executions.cancel', call: (c) => c.executions.cancel({ executionId: 'e1' }) },
   { op: 'schedules.pause', call: (c) => c.schedules.pause({ scheduleId: 's1' }) },
@@ -128,9 +130,9 @@ test('every mutation routes to the correct op and unwraps Result.data', async ()
   }
 });
 
-test('coverage: exactly 8 queries + 12 mutations exercised', () => {
-  assert.equal(QUERY_CASES.length, 8);
-  assert.equal(MUTATE_CASES.length, 12);
+test('coverage: exactly 9 queries + 13 mutations exercised', () => {
+  assert.equal(QUERY_CASES.length, 9);
+  assert.equal(MUTATE_CASES.length, 13);
 });
 
 // ── Err → TRPCError mapping ──────────────────────────────────────────────────────────
@@ -182,4 +184,12 @@ test('subscription yields the injected events and passes the filter through', as
 
   assert.deepEqual(received, events);
   assert.deepEqual(fake.getSubscribeFilter(), { events: ['a.happened', 'b.happened'], projectId: 'proj' });
+});
+
+test('subscription passes a sessionId filter through (session.message live stream)', async () => {
+  const fake = makeFake({ events: [] });
+  const caller = makeCaller(fake);
+  const iter = await caller.subscribe({ events: ['session.message'], sessionId: 'sess-1' });
+  for await (const _ of iter) break;
+  assert.deepEqual(fake.getSubscribeFilter(), { events: ['session.message'], sessionId: 'sess-1' });
 });

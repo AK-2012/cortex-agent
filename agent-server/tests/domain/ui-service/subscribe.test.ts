@@ -49,6 +49,42 @@ test('subscribe passes through task.unclaimed / task.unblocked events', async ()
   sub.close();
 });
 
+test('subscribe scopes session.message to a single sessionId (no cross-session leak)', async () => {
+  const bus = new EventBus();
+  const sub = createSubscription(bus, {
+    events: ['session.message'],
+    sessionId: 'sess-A',
+  });
+
+  // An event for a different session must NOT be delivered…
+  bus.publish({ type: 'session.message', sessionId: 'sess-B', channel: 'C2', role: 'assistant', text: 'leak?' });
+  // …only the matching one is.
+  bus.publish({ type: 'session.message', sessionId: 'sess-A', channel: 'C1', role: 'assistant', text: 'for A' });
+
+  const iter = sub[Symbol.asyncIterator]();
+  const first = await iter.next();
+  assert.equal(first.done, false);
+  assert.equal(first.value.type, 'session.message');
+  assert.equal((first.value.payload as any).sessionId, 'sess-A');
+  assert.equal((first.value.payload as any).text, 'for A');
+
+  sub.close();
+});
+
+test('subscribe with no sessionId filter receives session.message for any session', async () => {
+  const bus = new EventBus();
+  const sub = createSubscription(bus, { events: ['session.message'] });
+
+  bus.publish({ type: 'session.message', sessionId: 'sess-B', channel: 'C2', role: 'user', text: 'hi' });
+
+  const iter = sub[Symbol.asyncIterator]();
+  const first = await iter.next();
+  assert.equal(first.done, false);
+  assert.equal((first.value.payload as any).sessionId, 'sess-B');
+
+  sub.close();
+});
+
 test('subscribe filters out non-matching event types', async () => {
   const bus = new EventBus();
   const sub = createSubscription(bus, {

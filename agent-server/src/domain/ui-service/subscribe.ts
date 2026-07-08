@@ -80,6 +80,7 @@ export function createSubscription(
   const eventTypes = filter.events;
   const projectId = filter.projectId ?? null;
   const executionId = filter.executionId ?? null;
+  const sessionId = filter.sessionId ?? null;
   let droppedCount = 0;
 
   // Wire overflow handler: push a synthetic UiEvent onto the queue.
@@ -108,6 +109,11 @@ export function createSubscription(
 
       // Post-filter by executionId — scopes execution.log to a single execution (B2-C).
       if (executionId && event.executionId && event.executionId !== executionId) {
+        return;
+      }
+
+      // Post-filter by sessionId — scopes session.message to a single session (S4 chat).
+      if (sessionId && event.sessionId && event.sessionId !== sessionId) {
         return;
       }
 
