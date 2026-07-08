@@ -20,6 +20,10 @@ export const sessionsListInput = z.object({
   resumable: z.boolean().optional(),
 });
 
+export const sessionsTranscriptInput = z.object({
+  sessionId: z.string(),
+});
+
 export const threadsListInput = z.object({
   projectId: z.string().optional(),
   status: z.array(z.string()).optional(),
@@ -78,6 +82,11 @@ export const executionsLogInput = z.object({
 // ProjectStore.createProject so the rule has one source of truth.
 export const projectsCreateInput = z.object({
   name: z.string(),
+});
+
+export const sessionsSendInput = z.object({
+  sessionId: z.string(),
+  text: z.string().min(1),
 });
 
 export const threadsCancelInput = z.object({
@@ -163,6 +172,7 @@ export const configSetInput = z.object({
 export const queryInputSchemas = {
   'projects.list': projectsListInput,
   'sessions.list': sessionsListInput,
+  'sessions.transcript': sessionsTranscriptInput,
   'threads.list': threadsListInput,
   'threads.get': threadsGetInput,
   'tasks.list': tasksListInput,
@@ -177,6 +187,7 @@ export const queryInputSchemas = {
 
 export const mutateInputSchemas = {
   'projects.create': projectsCreateInput,
+  'sessions.send': sessionsSendInput,
   'threads.cancel': threadsCancelInput,
   'executions.cancel': executionsCancelInput,
   'schedules.pause': scheduleActionInput,

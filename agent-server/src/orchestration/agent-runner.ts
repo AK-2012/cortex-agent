@@ -27,6 +27,7 @@ import { buildDurableHooks } from './durable-helpers.js';
 const log = createLogger('agent-runner');
 import { createToolTrace } from '@platform/index.js';
 import { setStreamingCallback, clearStreamingCallback, publishPlanSubmitted, publishAskUserRequested } from './routing/hook-bridge.js';
+import { publishSessionMessage } from './session-events.js';
 import { maybeNotifyCodexLowUsage } from '@domain/costs/codex-usage-monitor.js';
 import { recordResume } from '@domain/costs/resume-registry.js';
 import { getAgent } from '@domain/threads/index.js';
@@ -132,7 +133,10 @@ export class AgentRunner {
     // Backend-independent conversation history (keyed by sessionId, the TUI display source).
     // Record the user message now; assistant messages + tool calls are appended via the
     // callbacks below as they stream. Only when we have a sessionId to key by.
-    if (sessionId) recordHistory(conversationHistory.appendUser(sessionId, { text: userMessage || '' }));
+    if (sessionId) {
+      recordHistory(conversationHistory.appendUser(sessionId, { text: userMessage || '' }));
+      publishSessionMessage({ sessionId, channel, role: 'user', text: userMessage || '' });
+    }
     const onMessagePosted = (ref: MessageRef) => void conversationLedger.addResponseTs(channel, messageTs, ref.messageId).catch((e) => log.error(e));
     // 2. Build agent callbacks (streaming, fallback, progress)
     const callbacks = buildAgentCallbacks(adapter, dest, statusMsg, threadAnchorId, startTime, sessionName, sessionId, onMessagePosted);
@@ -164,13 +168,20 @@ export class AgentRunner {
         },
         onAssistantMessage: (text: string) => {
           callbacks.onAssistantMsg(text);
-          if (sessionId && text) recordHistory(conversationHistory.appendAssistant(sessionId, { text }));
+          if (sessionId && text) {
+            recordHistory(conversationHistory.appendAssistant(sessionId, { text }));
+            publishSessionMessage({ sessionId, channel, role: 'assistant', text });
+          }
         },
         onProgress: callbacks.onProgress,
         onFallback: callbacks.onFallback,
         onToolUse: composeToolUse(
           composeToolUse(callbacks.onToolUse, interactiveCallbacks.onToolUse),
-          sessionId ? (name: string, input: any) => recordHistory(conversationHistory.appendTool(sessionId, { toolName: name, toolInput: summarizeToolInputForHistory(input) })) : null,
+          sessionId ? (name: string, input: any) => {
+            const toolInput = summarizeToolInputForHistory(input);
+            recordHistory(conversationHistory.appendTool(sessionId, { toolName: name, toolInput }));
+            publishSessionMessage({ sessionId, channel, role: 'tool', text: '', toolName: name, toolInput });
+          } : null,
         ),
         onPlanWritten: interactiveCallbacks.onPlanWritten,
         onAskUserQuestion: interactiveCallbacks.onAskUserQuestion,

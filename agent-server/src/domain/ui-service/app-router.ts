@@ -16,6 +16,8 @@ import {
   projectsListInput,
   projectsCreateInput,
   sessionsListInput,
+  sessionsTranscriptInput,
+  sessionsSendInput,
   threadsListInput,
   threadsGetInput,
   tasksListInput,
@@ -50,6 +52,7 @@ import type {
 const subscribeFilterInput = z.object({
   events: z.array(z.string()),
   projectId: z.string().nullish(),
+  sessionId: z.string().nullish(),
 });
 
 // ── Result → value / Err → TRPCError ─────────────────────────────────────────────
@@ -107,7 +110,8 @@ function makeMutation<O extends MutateOp, Sch extends z.ZodType>(
 }
 
 // ── AppRouter ─────────────────────────────────────────────────────────────────────
-// 12 QueryScope + 13 MutateOp + 2 subscriptions (generic `subscribe` + `executions.log`),
+// 13 QueryScope + 14 MutateOp + 2 subscriptions (generic `subscribe` + `executions.log`;
+// `subscribeFilterInput` carries `sessionId` for the S4 `session.message` stream),
 // mirroring the ui-service contract.
 export function createAppRouter(uiService: UiService) {
   return router({
@@ -117,6 +121,8 @@ export function createAppRouter(uiService: UiService) {
     }),
     sessions: router({
       list: makeQuery(uiService, 'sessions.list', sessionsListInput),
+      transcript: makeQuery(uiService, 'sessions.transcript', sessionsTranscriptInput),
+      send: makeMutation(uiService, 'sessions.send', sessionsSendInput),
     }),
     threads: router({
       list: makeQuery(uiService, 'threads.list', threadsListInput),

@@ -1,8 +1,15 @@
-// input:  UiServiceDeps + SessionsListParams
-// output: handleSessionsList → SessionInfo[]
-// pos:    query handler for 'sessions.list'
+// input:  UiServiceDeps + SessionsListParams / SessionsTranscriptParams
+// output: handleSessionsList → SessionInfo[]; handleSessionsTranscript → SessionTranscript
+// pos:    query handlers for 'sessions.list' and 'sessions.transcript'
 
-import type { UiServiceDeps, SessionInfo, SessionsListParams } from '../types.js';
+import type {
+  UiServiceDeps,
+  SessionInfo,
+  SessionsListParams,
+  SessionsTranscriptParams,
+  SessionTranscript,
+  TranscriptTurn,
+} from '../types.js';
 
 export async function handleSessionsList(
   deps: UiServiceDeps,
@@ -38,4 +45,35 @@ export async function handleSessionsList(
     resumable: s.kind !== 'scheduled',
     label: s.label ?? null,
   }));
+}
+
+// ── sessions.transcript (S4 chat) ─────────────────────────────────
+// Wrap the backend-independent conversation history and group its already-turn-tagged event
+// stream into turns. An absent/empty history is not an error — it maps to zero turns.
+export async function handleSessionsTranscript(
+  deps: UiServiceDeps,
+  params: SessionsTranscriptParams,
+): Promise<SessionTranscript> {
+  const history = await deps.conversationHistory.getHistory(params.sessionId);
+  if (!history) return { sessionId: params.sessionId, turns: [] };
+
+  const byTurn = new Map<number, TranscriptTurn>();
+  const order: number[] = [];
+  for (const ev of history.events) {
+    let turn = byTurn.get(ev.turnIndex);
+    if (!turn) {
+      turn = { turnIndex: ev.turnIndex, messages: [] };
+      byTurn.set(ev.turnIndex, turn);
+      order.push(ev.turnIndex);
+    }
+    turn.messages.push({
+      type: ev.type,
+      text: ev.type === 'tool' ? null : (ev.text ?? ''),
+      toolName: ev.type === 'tool' ? (ev.toolName ?? '') : null,
+      toolInput: ev.type === 'tool' ? (ev.toolInput ?? '') : null,
+      ts: ev.ts,
+    });
+  }
+
+  return { sessionId: history.sessionId, turns: order.map((i) => byTurn.get(i)!) };
 }
