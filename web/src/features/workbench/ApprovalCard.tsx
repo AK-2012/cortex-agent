@@ -1,24 +1,30 @@
 import { useState } from 'react';
 import type { ApprovalContent } from './chat-content';
+import { useApprovals } from '@/features/approvals/ApprovalsProvider';
 
 // Inline approval-required card — 1:1 from prototype.dc.html L247–276 (pending · unarmed default).
-// DATA GAP (approval card — Stage 5): no approvals tRPC scope, so this renders the representative
-// APR-0007 content with INERT Approve/Deny buttons (no mutate). Pending-unarmed branch only
-// (L255–261); the armed feedback / resolved branches are Stage-5 interactive work.
+// The chat transcript body is still representative (no session-transcript scope — Stage 4), so this
+// shows the representative APR-0007 content; but the card is now a live TRIGGER: clicking it (or its
+// Approve/Deny) opens the approval center overlay (task 851f), where the real approvals.list entries
+// are approved/rejected via the real mutate ops. The card's own buttons stay non-mutating (the real
+// decision surface is the overlay); a per-card inline mutate is deferred with the Stage-4 transcript.
 
 const mono = "'IBM Plex Mono',monospace";
 
 export function ApprovalCard({ approval }: { approval: ApprovalContent }): JSX.Element {
   const [approveHover, setApproveHover] = useState(false);
   const [denyHover, setDenyHover] = useState(false);
+  const approvals = useApprovals();
 
   return (
     <div
+      onClick={() => approvals.open()}
       style={{
         border: '1px solid #EFDDB0',
         background: '#FDF9F0',
         borderRadius: 10,
         padding: '13px 16px',
+        cursor: 'pointer',
       }}
     >
       <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
