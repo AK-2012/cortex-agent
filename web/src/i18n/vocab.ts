@@ -79,6 +79,9 @@ export const en = {
   back: 'Back',
   search: 'Search',
   more: 'More',
+  step: 'step',
+  depth: 'depth',
+  pendingApproval: 'Pending',
 };
 
 export type Vocab = typeof en;
@@ -158,4 +161,7 @@ export const zh: Record<keyof Vocab, string> = {
   back: '返回',
   search: '搜索',
   more: '更多',
+  step: '步骤',
+  depth: '深度',
+  pendingApproval: '待审批',
 };

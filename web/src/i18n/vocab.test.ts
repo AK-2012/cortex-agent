@@ -46,4 +46,13 @@ describe('vocab en/zh parity', () => {
     expect(zh.pillWaiting).toBe('等待中');
     expect(zh.pillCancelled).toBe('已取消');
   });
+
+  it('carries the mobile 5b thread-screen chrome keys (步骤/深度/待审批)', () => {
+    expect(en.step).toBe('step');
+    expect(zh.step).toBe('步骤');
+    expect(en.depth).toBe('depth');
+    expect(zh.depth).toBe('深度');
+    expect(en.pendingApproval).toBe('Pending');
+    expect(zh.pendingApproval).toBe('待审批');
+  });
 });
