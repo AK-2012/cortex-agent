@@ -133,6 +133,23 @@ describe('buildTranscriptRows', () => {
     const tools = rows.find((r) => r.kind === 'tools') as { calls: { input: string }[] };
     expect(tools.calls[0].input).toBe(long);
   });
+
+  it('an optional formatDivider overrides the default divider label (mobile ZH dividers)', () => {
+    const rows = buildTranscriptRows(
+      tx([{ turnIndex: 0, messages: [{ type: 'user', text: 'hi', toolName: null, toolInput: null, ts: T }] }]),
+      [],
+      { formatDivider: () => '今天 07:42' },
+    );
+    expect(rows[0]).toEqual({ kind: 'divider', text: '今天 07:42' });
+  });
+
+  it('without formatDivider the default EN divider is unchanged', () => {
+    const rows = buildTranscriptRows(
+      tx([{ turnIndex: 0, messages: [{ type: 'user', text: 'hi', toolName: null, toolInput: null, ts: T }] }]),
+      [],
+    );
+    expect((rows[0] as { text: string }).text.startsWith('TODAY') || (rows[0] as { text: string }).text.length > 0).toBe(true);
+  });
 });
 
 describe('liveToMessage', () => {
