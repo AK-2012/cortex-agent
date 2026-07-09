@@ -79,9 +79,9 @@ describe('MobileTasksView', () => {
     expect(html).not.toContain('已阻塞');
   });
 
-  it('renders real task ids/text and the claimed-by pill (no fabricated mock ids)', () => {
+  it('renders real task ids/text and the claimed-by pill with the 认领 label (scheme L3130)', () => {
     const html = view();
-    expect(html).toContain('thr_abcd');
+    expect(html).toContain('认领 · thr_abcd'); // scheme pill = "认领 · <claimedBy>"
     expect(html).not.toContain('T-041'); // scheme mock id must not leak
   });
 
