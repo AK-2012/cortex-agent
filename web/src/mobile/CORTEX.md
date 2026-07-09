@@ -13,14 +13,19 @@ a later pass replaces behind its own export (RB f528 frame-owner precedent). Raw
 | `IOSDevice.test.tsx` | `react-dom/server` render checks (frame/island/home-indicator/time). |
 | `mobile-tabs.ts` | **Pure** Tab model: `MOBILE_TABS` (sessions/threads/tasks/machines → `/m/*` + vocab label key), `activeTabId(pathname)`, `tabBadge(id, {activeThreadCount, hasPendingApproval})` (线程 count badge / 会话 amber dot). |
 | `mobile-tabs.test.ts` | vitest units for the pure Tab logic (TDD, written first). |
+| `mobile-tasks.ts` | **Pure** 5c task logic: `classifyMobileTask` (blocked→in-progress→claimable→waiting-deps precedence), `groupMobileTasks` (open-only buckets), `executableCount`/`allOpenCount` (可执行 = in-progress+claimable / 全部 = all open), `orderedGroups(grouped, segment)`, `MOBILE_GROUP_DOT` (verbatim scheme dot hex). |
+| `mobile-tasks.test.ts` | vitest units for the 5c grouping/counts (TDD, written first). |
 | `BottomTabBar.tsx` | Presentational bottom Tab bar (props-driven; MobileShell binds real counts). Exact scheme chrome: 4 tabs with SVG icons, active `#191C22`/inactive `#98A1B0`, `#4655D4` active-thread badge, `#C99A2E` amber approval dot, ≥44px touch targets, zh labels from `useVocab`. |
 | `BottomTabBar.test.tsx` | `react-dom/server` render checks (labels/active/badge/dot/touch). |
 | `MobileShell.tsx` | Frame owner: `IOSDevice` + persistent `BottomTabBar` + scroll `<Outlet/>`. Fetches real `threads.list` (active filter, reuses `features/workbench/scope`) → 线程 badge and `approvals.list` (pending) → 会话 amber dot. |
 | `mobile-routes.tsx` | Pure route config `mobileRoutes` (MobileShell layout + the 6 screen slots + index/`*` redirect to `/m/sessions`). Separate from the router instance so it is inspectable without a browser history. |
 | `mobile-router.tsx` | The concrete `mobileRouter` (browser/hash by shell mode). |
 | `mobile-router.test.ts` | Structural test of `mobileRoutes` (path set, 5 STUB routes navigable, index + catch-all). |
-| `screens/` | 6 STUB screen slots (`StubScreen` shared body): `MobileSessionsScreen` (5a) · `MobileThreadsScreen` (5b) · `MobileTasksScreen` (5c) · `MobileMachinesScreen` (机器, 3b 同构) · `MobileApprovalsScreen` (10e) · `MobileOverviewScreen` (10f). Neutral placeholders (守则11), replaced by later passes. |
-| `screens/screens.test.tsx` | render checks (each slot renders its design id marker + vocab title). |
+| `screens/` | Screen slots: `MobileTasksScreen` (5c) is a **real** tRPC-bound screen (below); the rest are STUB slots (`StubScreen` shared body): `MobileSessionsScreen` (5a) · `MobileThreadsScreen` (5b) · `MobileMachinesScreen` (机器, 3b 同构) · `MobileApprovalsScreen` (10e) · `MobileOverviewScreen` (10f). Neutral placeholders (守则11), replaced by later passes. |
+| `screens/MobileTasksScreen.tsx` | **5c 任务 (real)** — binds `tasks.list` + `useTasksLiveSync` + `tasks.unblock`; owns segment (可执行/全部) + per-card expand + pending state. |
+| `screens/MobileTasksView.tsx` | Presentational 5c view (1:1 scheme L3110-3186, raw px/hex/font §8.3): 任务 header + 可执行/全部 segmented + grouped list (进行中/可认领/等依赖/已阻塞, status dots) + claimable-card expand→DONE-WHEN (honest placeholder, no `doneWhen` field) + blocked-card 「解除」 (≥44px). Bottom Tab is shell-owned, not rendered here. |
+| `screens/MobileTasksView.test.tsx` | `react-dom/server` render checks (marker/gutter/segments/4 groups/expand placeholder/blocked 解除/deps). |
+| `screens/screens.test.tsx` | render checks for the remaining STUB slots (5a/5b/machines/10e/10f). |
 
 ## Notes
 

@@ -3,14 +3,15 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { LangProvider } from '@/i18n';
 import { MobileSessionsScreen } from './MobileSessionsScreen';
 import { MobileThreadsScreen } from './MobileThreadsScreen';
-import { MobileTasksScreen } from './MobileTasksScreen';
 import { MobileMachinesScreen } from './MobileMachinesScreen';
 import { MobileApprovalsScreen } from './MobileApprovalsScreen';
 import { MobileOverviewScreen } from './MobileOverviewScreen';
 
-// Each mobile screen is a neutral STUB slot (design 5a/5b/5c/10e/10f) that a sibling thread replaces
-// behind the same export (RB f528 frame-owner precedent). These assert the slots render with their
-// design id marker + a title, and reserve the status-bar gutter (padding-top:62px).
+// The remaining STUB slots (5a/5b/machines/10e/10f) render a neutral placeholder a sibling thread
+// replaces behind the same export (RB f528 frame-owner precedent). These assert the slots render
+// with their design id marker + a title, and reserve the status-bar gutter (padding-top:62px).
+// 5c (MobileTasksScreen) is now a real tRPC-bound screen — its presentation is covered by
+// MobileTasksView.test.tsx, its grouping by mobile-tasks.test.ts.
 
 function render(node: React.ReactElement) {
   return renderToStaticMarkup(<LangProvider>{node}</LangProvider>);
@@ -19,7 +20,6 @@ function render(node: React.ReactElement) {
 const cases: [string, React.ReactElement][] = [
   ['5a', <MobileSessionsScreen />],
   ['5b', <MobileThreadsScreen />],
-  ['5c', <MobileTasksScreen />],
   ['machines', <MobileMachinesScreen />],
   ['10e', <MobileApprovalsScreen />],
   ['10f', <MobileOverviewScreen />],
@@ -37,7 +37,6 @@ describe('mobile STUB screens', () => {
   it('renders the (en, node-default) titles from vocab', () => {
     expect(render(<MobileSessionsScreen />)).toContain('Sessions');
     expect(render(<MobileThreadsScreen />)).toContain('Threads');
-    expect(render(<MobileTasksScreen />)).toContain('Tasks');
     expect(render(<MobileMachinesScreen />)).toContain('Machines');
   });
 });
