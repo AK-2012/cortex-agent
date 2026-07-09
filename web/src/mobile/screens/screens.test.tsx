@@ -5,12 +5,12 @@ import { MobileSessionsScreen } from './MobileSessionsScreen';
 import { MobileThreadsScreen } from './MobileThreadsScreen';
 import { MobileTasksScreen } from './MobileTasksScreen';
 import { MobileMachinesScreen } from './MobileMachinesScreen';
-import { MobileApprovalsScreen } from './MobileApprovalsScreen';
 import { MobileOverviewScreen } from './MobileOverviewScreen';
 
-// Each mobile screen is a neutral STUB slot (design 5a/5b/5c/10e/10f) that a sibling thread replaces
-// behind the same export (RB f528 frame-owner precedent). These assert the slots render with their
-// design id marker + a title, and reserve the status-bar gutter (padding-top:62px).
+// The remaining mobile screens are neutral STUB slots (design 5a/5b/5c/10f) that a sibling thread
+// replaces behind the same export (RB f528 frame-owner precedent). These assert the slots render with
+// their design id marker + a title, and reserve the status-bar gutter (padding-top:62px). 10e
+// (approvals) is now a real tRPC-bound screen — see mobile-approvals-render.test.tsx.
 
 function render(node: React.ReactElement) {
   return renderToStaticMarkup(<LangProvider>{node}</LangProvider>);
@@ -21,7 +21,6 @@ const cases: [string, React.ReactElement][] = [
   ['5b', <MobileThreadsScreen />],
   ['5c', <MobileTasksScreen />],
   ['machines', <MobileMachinesScreen />],
-  ['10e', <MobileApprovalsScreen />],
   ['10f', <MobileOverviewScreen />],
 ];
 

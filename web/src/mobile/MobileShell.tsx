@@ -8,7 +8,7 @@ import { useVocab } from '@/i18n';
 import { threadScopeFilter } from '@/features/workbench/scope';
 import { IOSDevice } from './IOSDevice';
 import { BottomTabBar } from './BottomTabBar';
-import { activeTabId } from './mobile-tabs';
+import { activeTabId, isTabRoute } from './mobile-tabs';
 
 export function MobileShell() {
   const vocab = useVocab();
@@ -26,6 +26,10 @@ export function MobileShell() {
   const activeThreadCount = activeThreads.data?.length ?? 0;
   const hasPendingApproval = (pendingApprovals.data?.length ?? 0) > 0;
 
+  // The 4 bottom-Tab screens keep the persistent tab bar; the non-Tab sub-screens (10e approvals /
+  // 10f overview, reached via a ‹ back header) hide it and own their own home-indicator gutter.
+  const showTabBar = isTabRoute(location.pathname);
+
   return (
     <div
       style={{
@@ -41,13 +45,15 @@ export function MobileShell() {
           <div style={{ flex: 1, overflow: 'auto' }}>
             <Outlet />
           </div>
-          <BottomTabBar
-            vocab={vocab}
-            activeId={activeTabId(location.pathname)}
-            activeThreadCount={activeThreadCount}
-            hasPendingApproval={hasPendingApproval}
-            onNavigate={navigate}
-          />
+          {showTabBar && (
+            <BottomTabBar
+              vocab={vocab}
+              activeId={activeTabId(location.pathname)}
+              activeThreadCount={activeThreadCount}
+              hasPendingApproval={hasPendingApproval}
+              onNavigate={navigate}
+            />
+          )}
         </div>
       </IOSDevice>
     </div>

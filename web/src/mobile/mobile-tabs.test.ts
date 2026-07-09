@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { MOBILE_TABS, activeTabId, tabBadge } from './mobile-tabs';
+import { MOBILE_TABS, activeTabId, isTabRoute, tabBadge } from './mobile-tabs';
 
 describe('MOBILE_TABS', () => {
   it('is the 4 bottom tabs in design order: sessions / threads / tasks / machines', () => {
@@ -44,6 +44,21 @@ describe('activeTabId', () => {
   it('defaults to sessions for an unknown path (catch-all lands there)', () => {
     expect(activeTabId('/workbench')).toBe('sessions');
     expect(activeTabId('/')).toBe('sessions');
+  });
+});
+
+describe('isTabRoute', () => {
+  it('is true for the 4 tab paths (and their sub-paths)', () => {
+    expect(isTabRoute('/m/sessions')).toBe(true);
+    expect(isTabRoute('/m/threads')).toBe(true);
+    expect(isTabRoute('/m/tasks')).toBe(true);
+    expect(isTabRoute('/m/machines')).toBe(true);
+    expect(isTabRoute('/m/threads/thr_abcd')).toBe(true);
+  });
+
+  it('is false for the non-Tab sub-screens (10e approvals / 10f overview)', () => {
+    expect(isTabRoute('/m/approvals')).toBe(false);
+    expect(isTabRoute('/m/overview')).toBe(false);
   });
 });
 
