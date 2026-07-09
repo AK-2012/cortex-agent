@@ -1,0 +1,55 @@
+// Mobile app-shell frame (design 5a–5c). Owns the ported iOS device frame + a persistent bottom Tab
+// bar, with the active screen swapped through <Outlet/>. Mirrors the RB f528 frame-owner precedent:
+// the shell owns the load-bearing chrome; each screen is a STUB slot filled by a later pass.
+import { Outlet, useLocation, useNavigate } from 'react-router-dom';
+import { useQuery } from '@tanstack/react-query';
+import { useTRPC } from '@/lib/trpc';
+import { useVocab } from '@/i18n';
+import { threadScopeFilter } from '@/features/workbench/scope';
+import { IOSDevice } from './IOSDevice';
+import { BottomTabBar } from './BottomTabBar';
+import { activeTabId } from './mobile-tabs';
+
+export function MobileShell() {
+  const vocab = useVocab();
+  const location = useLocation();
+  const navigate = useNavigate();
+  const trpc = useTRPC();
+
+  // Real counts for the tab decorations: active threads (running+waiting) drive the 线程 badge;
+  // pending approvals drive the 会话 amber dot. Both reuse the existing ui-service contract.
+  const activeThreads = useQuery(
+    trpc.threads.list.queryOptions({ status: threadScopeFilter('active') }),
+  );
+  const pendingApprovals = useQuery(trpc.approvals.list.queryOptions({ status: 'pending' }));
+
+  const activeThreadCount = activeThreads.data?.length ?? 0;
+  const hasPendingApproval = (pendingApprovals.data?.length ?? 0) > 0;
+
+  return (
+    <div
+      style={{
+        minHeight: '100vh',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        background: '#E9E7E2',
+      }}
+    >
+      <IOSDevice>
+        <div style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
+          <div style={{ flex: 1, overflow: 'auto' }}>
+            <Outlet />
+          </div>
+          <BottomTabBar
+            vocab={vocab}
+            activeId={activeTabId(location.pathname)}
+            activeThreadCount={activeThreadCount}
+            hasPendingApproval={hasPendingApproval}
+            onNavigate={navigate}
+          />
+        </div>
+      </IOSDevice>
+    </div>
+  );
+}
