@@ -1,6 +1,7 @@
-// Mobile app-shell frame (design 5a–5c). Owns the ported iOS device frame + a persistent bottom Tab
-// bar, with the active screen swapped through <Outlet/>. Mirrors the RB f528 frame-owner precedent:
-// the shell owns the load-bearing chrome; each screen is a STUB slot filled by a later pass.
+// Mobile app-shell frame (design 5a–5c). Owns the ported iOS device frame + the bottom Tab bar (shown
+// only on Tab routes), with the active screen swapped through <Outlet/>. Mirrors the RB f528
+// frame-owner precedent: the shell owns the load-bearing chrome; each screen is a slot a later pass
+// fills. Non-Tab drill-in pages (10e/10f) hide the Tab bar — the scheme draws none there (`非 Tab 页`).
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { useTRPC } from '@/lib/trpc';
@@ -8,7 +9,7 @@ import { useVocab } from '@/i18n';
 import { threadScopeFilter } from '@/features/workbench/scope';
 import { IOSDevice } from './IOSDevice';
 import { BottomTabBar } from './BottomTabBar';
-import { activeTabId } from './mobile-tabs';
+import { activeTabId, isTabRoute } from './mobile-tabs';
 
 export function MobileShell() {
   const vocab = useVocab();
@@ -25,6 +26,7 @@ export function MobileShell() {
 
   const activeThreadCount = activeThreads.data?.length ?? 0;
   const hasPendingApproval = (pendingApprovals.data?.length ?? 0) > 0;
+  const showTabBar = isTabRoute(location.pathname);
 
   return (
     <div
@@ -41,13 +43,15 @@ export function MobileShell() {
           <div style={{ flex: 1, overflow: 'auto' }}>
             <Outlet />
           </div>
-          <BottomTabBar
-            vocab={vocab}
-            activeId={activeTabId(location.pathname)}
-            activeThreadCount={activeThreadCount}
-            hasPendingApproval={hasPendingApproval}
-            onNavigate={navigate}
-          />
+          {showTabBar && (
+            <BottomTabBar
+              vocab={vocab}
+              activeId={activeTabId(location.pathname)}
+              activeThreadCount={activeThreadCount}
+              hasPendingApproval={hasPendingApproval}
+              onNavigate={navigate}
+            />
+          )}
         </div>
       </IOSDevice>
     </div>

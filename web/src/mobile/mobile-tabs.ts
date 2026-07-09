@@ -30,6 +30,15 @@ export function activeTabId(pathname: string): MobileTabId {
   return found ? found.id : 'sessions';
 }
 
+/**
+ * Whether a pathname is one of the 4 bottom-Tab routes (or a sub-path of one). The shell shows the
+ * bottom Tab bar only on Tab routes; the non-Tab drill-in pages 10e (`/m/approvals`) and 10f
+ * (`/m/overview`) hide it — the scheme draws no Tab bar for those (`非 Tab 页`, task 82ff).
+ */
+export function isTabRoute(pathname: string): boolean {
+  return MOBILE_TABS.some((t) => pathname === t.path || pathname.startsWith(t.path + '/'));
+}
+
 export interface TabBadge {
   count?: number;
   dot?: boolean;

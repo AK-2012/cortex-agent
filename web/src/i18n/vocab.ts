@@ -79,6 +79,19 @@ export const en = {
   back: 'Back',
   search: 'Search',
   more: 'More',
+
+  // ── Group D: mobile 10f project Overview (scheme L3249–3298, task 82ff) ──
+  budgetPerDay: 'budget',
+  perDay: '/day',
+  thisWeek: 'this week',
+  forecastToday: 'forecast today',
+  projectMemory: 'Project memory',
+  viewAll: 'All',
+  scheduleCard: 'Schedules',
+  newSchedule: 'New',
+  execFlow: 'Executions',
+  paused: 'Paused',
+  execCountUnit: 'today',
 };
 
 export type Vocab = typeof en;
@@ -158,4 +171,17 @@ export const zh: Record<keyof Vocab, string> = {
   back: '返回',
   search: '搜索',
   more: '更多',
+
+  // ── Group D: mobile 10f project Overview (scheme L3249–3298, task 82ff) ──
+  budgetPerDay: '预算',
+  perDay: '/日',
+  thisWeek: '本周',
+  forecastToday: '预测今日',
+  projectMemory: '项目记忆',
+  viewAll: '全部',
+  scheduleCard: '调度',
+  newSchedule: '新建',
+  execFlow: '执行流水',
+  paused: '已暂停',
+  execCountUnit: '今日',
 };

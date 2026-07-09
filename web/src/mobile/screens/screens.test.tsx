@@ -6,11 +6,13 @@ import { MobileThreadsScreen } from './MobileThreadsScreen';
 import { MobileTasksScreen } from './MobileTasksScreen';
 import { MobileMachinesScreen } from './MobileMachinesScreen';
 import { MobileApprovalsScreen } from './MobileApprovalsScreen';
-import { MobileOverviewScreen } from './MobileOverviewScreen';
 
-// Each mobile screen is a neutral STUB slot (design 5a/5b/5c/10e/10f) that a sibling thread replaces
+// Each mobile screen is a neutral STUB slot (design 5a/5b/5c/10e) that a sibling thread replaces
 // behind the same export (RB f528 frame-owner precedent). These assert the slots render with their
 // design id marker + a title, and reserve the status-bar gutter (padding-top:62px).
+// NOTE: 10f (MobileOverviewScreen) is no longer a stub (task 82ff — real 1:1 Overview over live tRPC
+// data); it needs the QueryClient/tRPC providers, so it is covered by overview-mobile-vm.test.ts +
+// the live headless-Chrome render, not this static-markup stub suite.
 
 function render(node: React.ReactElement) {
   return renderToStaticMarkup(<LangProvider>{node}</LangProvider>);
@@ -22,7 +24,6 @@ const cases: [string, React.ReactElement][] = [
   ['5c', <MobileTasksScreen />],
   ['machines', <MobileMachinesScreen />],
   ['10e', <MobileApprovalsScreen />],
-  ['10f', <MobileOverviewScreen />],
 ];
 
 describe('mobile STUB screens', () => {

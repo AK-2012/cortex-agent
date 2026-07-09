@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { MOBILE_TABS, activeTabId, tabBadge } from './mobile-tabs';
+import { MOBILE_TABS, activeTabId, tabBadge, isTabRoute } from './mobile-tabs';
 
 describe('MOBILE_TABS', () => {
   it('is the 4 bottom tabs in design order: sessions / threads / tasks / machines', () => {
@@ -71,5 +71,26 @@ describe('tabBadge', () => {
   it('never decorates tasks / machines tabs', () => {
     expect(tabBadge('tasks', { activeThreadCount: 9, hasPendingApproval: true })).toEqual({});
     expect(tabBadge('machines', { activeThreadCount: 9, hasPendingApproval: true })).toEqual({});
+  });
+});
+
+describe('isTabRoute', () => {
+  it('is true for the 4 Tab paths and their sub-paths', () => {
+    expect(isTabRoute('/m/sessions')).toBe(true);
+    expect(isTabRoute('/m/threads')).toBe(true);
+    expect(isTabRoute('/m/tasks')).toBe(true);
+    expect(isTabRoute('/m/machines')).toBe(true);
+    expect(isTabRoute('/m/threads/thr_x')).toBe(true);
+  });
+
+  it('is false for the non-Tab drill-in pages 10e (approvals) and 10f (overview)', () => {
+    // scheme draws no bottom Tab bar for these — the shell hides it (task 82ff, D1)
+    expect(isTabRoute('/m/approvals')).toBe(false);
+    expect(isTabRoute('/m/overview')).toBe(false);
+  });
+
+  it('is false for the index / unknown paths', () => {
+    expect(isTabRoute('/')).toBe(false);
+    expect(isTabRoute('/workbench')).toBe(false);
   });
 });

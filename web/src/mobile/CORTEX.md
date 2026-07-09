@@ -11,16 +11,17 @@ a later pass replaces behind its own export (RB f528 frame-owner precedent). Raw
 |---|---|
 | `IOSDevice.tsx` | Ported iOS 26 device frame (`IOSDevice` + `IOSStatusBar`): 402×874 bezel r48, dynamic island (126×37), status bar (9:41 + signal/wifi/battery glyphs), home indicator (139×5). Verbatim from `design/ref/ios-frame.jsx`. The source's `IOSNavBar`/`IOSKeyboard`/`IOSList` are not ported (screens own their headers). |
 | `IOSDevice.test.tsx` | `react-dom/server` render checks (frame/island/home-indicator/time). |
-| `mobile-tabs.ts` | **Pure** Tab model: `MOBILE_TABS` (sessions/threads/tasks/machines → `/m/*` + vocab label key), `activeTabId(pathname)`, `tabBadge(id, {activeThreadCount, hasPendingApproval})` (线程 count badge / 会话 amber dot). |
+| `mobile-tabs.ts` | **Pure** Tab model: `MOBILE_TABS` (sessions/threads/tasks/machines → `/m/*` + vocab label key), `activeTabId(pathname)`, `isTabRoute(pathname)` (whether the Tab bar shows — false for 10e/10f drill-ins, task 82ff), `tabBadge(id, {activeThreadCount, hasPendingApproval})` (线程 count badge / 会话 amber dot). |
 | `mobile-tabs.test.ts` | vitest units for the pure Tab logic (TDD, written first). |
 | `BottomTabBar.tsx` | Presentational bottom Tab bar (props-driven; MobileShell binds real counts). Exact scheme chrome: 4 tabs with SVG icons, active `#191C22`/inactive `#98A1B0`, `#4655D4` active-thread badge, `#C99A2E` amber approval dot, ≥44px touch targets, zh labels from `useVocab`. |
 | `BottomTabBar.test.tsx` | `react-dom/server` render checks (labels/active/badge/dot/touch). |
-| `MobileShell.tsx` | Frame owner: `IOSDevice` + persistent `BottomTabBar` + scroll `<Outlet/>`. Fetches real `threads.list` (active filter, reuses `features/workbench/scope`) → 线程 badge and `approvals.list` (pending) → 会话 amber dot. |
+| `MobileShell.tsx` | Frame owner: `IOSDevice` + `BottomTabBar` (shown only on Tab routes via `isTabRoute` — task 82ff) + scroll `<Outlet/>`. Fetches real `threads.list` (active filter, reuses `features/workbench/scope`) → 线程 badge and `approvals.list` (pending) → 会话 amber dot. Non-Tab drill-in pages 10e/10f hide the Tab bar (scheme draws none there — `非 Tab 页`). |
 | `mobile-routes.tsx` | Pure route config `mobileRoutes` (MobileShell layout + the 6 screen slots + index/`*` redirect to `/m/sessions`). Separate from the router instance so it is inspectable without a browser history. |
 | `mobile-router.tsx` | The concrete `mobileRouter` (browser/hash by shell mode). |
 | `mobile-router.test.ts` | Structural test of `mobileRoutes` (path set, 5 STUB routes navigable, index + catch-all). |
-| `screens/` | 6 STUB screen slots (`StubScreen` shared body): `MobileSessionsScreen` (5a) · `MobileThreadsScreen` (5b) · `MobileTasksScreen` (5c) · `MobileMachinesScreen` (机器, 3b 同构) · `MobileApprovalsScreen` (10e) · `MobileOverviewScreen` (10f). Neutral placeholders (守则11), replaced by later passes. |
-| `screens/screens.test.tsx` | render checks (each slot renders its design id marker + vocab title). |
+| `screens/` | Screen slots: 5 STUB (`StubScreen` shared body): `MobileSessionsScreen` (5a) · `MobileThreadsScreen` (5b) · `MobileTasksScreen` (5c) · `MobileMachinesScreen` (机器, 3b 同构) · `MobileApprovalsScreen` (10e) — neutral placeholders (守则11), replaced by later passes. **`MobileOverviewScreen` (10f) is REAL** (task 82ff): 1:1 from `scheme.dc.html` L3249–3298, live cost/memory/schedules/executions over the existing tRPC contract. |
+| `screens/overview-mobile-vm.ts` | **Pure** ZH view-model for 10f (`projectAvatarInitials`, `relTimeZh`, `intervalLabelZh`, `nextRunLabelZh`, `lastRunLabelZh`, `countTodayExecutions`, `activeThreadCountLabelZh`); reuses `overview-vm.deriveActiveProjectId`/`formatMoney`. TDD (`overview-mobile-vm.test.ts`, 16). |
+| `screens/screens.test.tsx` | render checks for the 5 STUB slots (10f excluded — it needs tRPC providers; covered by the vm units + live headless render). |
 
 ## Notes
 
