@@ -26,6 +26,11 @@ export interface BuildOpts {
   streaming?: boolean;
   /** Injected clock for deterministic day-relative divider labels (defaults to Date.now). */
   now?: Date;
+  /**
+   * Optional divider-label override (e.g. the mobile 5a screen's ZH 今天/昨天 dividers). Defaults to
+   * the EN `dividerLabel` (TODAY / YESTERDAY / "MON D"). Receives the first message ts of the day.
+   */
+  formatDivider?: (ts: string, now: Date) => string;
 }
 
 /** Map a live `session.message` event into a `TranscriptMessage` (same shape the fetched DTO uses). */
@@ -106,7 +111,8 @@ export function buildTranscriptRows(
     const day = dayStamp(m.ts);
     if (day !== curDay) {
       flushTools();
-      rows.push({ kind: 'divider', text: dividerLabel(m.ts, now) });
+      const label = opts.formatDivider ? opts.formatDivider(m.ts, now) : dividerLabel(m.ts, now);
+      rows.push({ kind: 'divider', text: label });
       curDay = day;
     }
     if (m.type === 'tool') {

@@ -79,6 +79,13 @@ export const en = {
   back: 'Back',
   search: 'Search',
   more: 'More',
+
+  // ── Group D: mobile session screen 5a (scheme.dc.html L2932-3003, task c880) ──
+  toolCallsUnit: 'tool calls',
+  needsApproval: 'Approval required',
+  subthreads: 'subthreads',
+  dayToday: 'Today',
+  dayYesterday: 'Yesterday',
 };
 
 export type Vocab = typeof en;
@@ -158,4 +165,11 @@ export const zh: Record<keyof Vocab, string> = {
   back: '返回',
   search: '搜索',
   more: '更多',
+
+  // ── Group D: mobile session screen 5a (scheme.dc.html L2932-3003, task c880) ──
+  toolCallsUnit: '次工具调用',
+  needsApproval: '需要审批',
+  subthreads: '子线程',
+  dayToday: '今天',
+  dayYesterday: '昨天',
 };

@@ -19,8 +19,11 @@ a later pass replaces behind its own export (RB f528 frame-owner precedent). Raw
 | `mobile-routes.tsx` | Pure route config `mobileRoutes` (MobileShell layout + the 6 screen slots + index/`*` redirect to `/m/sessions`). Separate from the router instance so it is inspectable without a browser history. |
 | `mobile-router.tsx` | The concrete `mobileRouter` (browser/hash by shell mode). |
 | `mobile-router.test.ts` | Structural test of `mobileRoutes` (path set, 5 STUB routes navigable, index + catch-all). |
-| `screens/` | 6 STUB screen slots (`StubScreen` shared body): `MobileSessionsScreen` (5a) · `MobileThreadsScreen` (5b) · `MobileTasksScreen` (5c) · `MobileMachinesScreen` (机器, 3b 同构) · `MobileApprovalsScreen` (10e) · `MobileOverviewScreen` (10f). Neutral placeholders (守则11), replaced by later passes. |
-| `screens/screens.test.tsx` | render checks (each slot renders its design id marker + vocab title). |
+| `screens/MobileSessionsScreen.tsx` | **Session screen 5a** (task c880) — 1:1 rebuild from `scheme.dc.html` L2932-3003: session header (QN avatar/title/`running·turns·$`) + chat stream (dark user bubble / collapsed tool chips / assistant + inline experiment-pipeline stepper card / over-budget approval card) + composer (input + running status line + send). Real tRPC: `sessions.transcript` (chat) · `threads.get` (inline card) · `approvals.list`+`approve`/`reject` (approval card) · `sessions.send` (send). Missing fields (session cost/elapsed) → explicit `—`, never fabricated. The bottom Tab is the shell's (not re-rendered). |
+| `screens/{MobileSessionHeader,MobileMessageStream,MobileThreadStepper,MobileApprovalCard,MobileComposer}.tsx` | 5a presentational + wired parts (`MobileInlineThreadCard`/`MobileApprovalCardContainer` bind real tRPC). Pure `mobile-session-vm.ts` maps DTOs → the scheme slot model (initials/status-line/ZH divider/horizontal stepper/approval desc/tool chips). |
+| `screens/` (stubs) | Remaining STUB slots (`StubScreen` shared body): `MobileThreadsScreen` (5b) · `MobileTasksScreen` (5c) · `MobileMachinesScreen` (机器, 3b 同构) · `MobileApprovalsScreen` (10e) · `MobileOverviewScreen` (10f). Neutral placeholders (守则11), replaced by later passes. |
+| `screens/mobile-session-vm.test.ts` · `screens/mobile-session-render.test.tsx` | 5a pure-logic units + `react-dom/server` render checks (neutral props, 守则11). |
+| `screens/screens.test.tsx` | render checks for the remaining stub slots (5a excluded — it needs tRPC providers). |
 
 ## Notes
 
