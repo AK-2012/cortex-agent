@@ -21,7 +21,7 @@ a later pass replaces behind its own export (RB f528 frame-owner precedent). Raw
 | `mobile-routes.tsx` | Pure route config `mobileRoutes` (MobileShell layout + the 6 screen slots + index/`*` redirect to `/m/sessions`). Separate from the router instance so it is inspectable without a browser history. |
 | `mobile-router.tsx` | The concrete `mobileRouter` (browser/hash by shell mode). |
 | `mobile-router.test.ts` | Structural test of `mobileRoutes` (path set, 5 STUB routes navigable, index + catch-all). |
-| `screens/` | Screen slots: `MobileThreadsScreen` (5b) · `MobileMachinesScreen` (机器, 3b 同构) · `MobileOverviewScreen` (10f) are still neutral STUB slots (`StubScreen` shared body, 守则11). **`MobileSessionsScreen` (5a), `MobileApprovalsScreen` (10e) and `MobileTasksScreen` (5c) are live** — see below. |
+| `screens/` | Screen slots: `MobileMachinesScreen` (机器, 3b 同构) · `MobileOverviewScreen` (10f) are still neutral STUB slots (`StubScreen` shared body, 守则11). **`MobileSessionsScreen` (5a), `MobileThreadsScreen` (5b), `MobileApprovalsScreen` (10e) and `MobileTasksScreen` (5c) are live** — see below. |
 | `screens/MobileSessionsScreen.tsx` | **Session screen 5a** (task c880) — 1:1 rebuild from `scheme.dc.html` L2932-3003: session header (QN avatar/title/`running·turns·$`) + chat stream (dark user bubble / collapsed tool chips / assistant + inline experiment-pipeline stepper card / over-budget approval card) + composer (input + running status line + send). Real tRPC: `sessions.transcript` (chat) · `threads.get` (inline card) · `approvals.list`+`approve`/`reject` (approval card) · `sessions.send` (send). Missing fields (session cost/elapsed) → explicit `—`, never fabricated. The bottom Tab is the shell's (not re-rendered). |
 | `screens/{MobileSessionHeader,MobileMessageStream,MobileThreadStepper,MobileApprovalCard,MobileComposer}.tsx` | 5a presentational + wired parts (`MobileInlineThreadCard`/`MobileApprovalCardContainer` bind real tRPC). Pure `mobile-session-vm.ts` maps DTOs → the scheme slot model (initials/status-line/ZH divider/horizontal stepper/approval desc/tool chips). |
 | `screens/mobile-session-vm.test.ts` · `screens/mobile-session-render.test.tsx` | 5a pure-logic units + `react-dom/server` render checks (neutral props, 守则11). |
@@ -31,7 +31,26 @@ a later pass replaces behind its own export (RB f528 frame-owner precedent). Raw
 | `screens/MobileTasksScreen.tsx` | **5c 任务 (real)** — binds `tasks.list` + `useTasksLiveSync` + `tasks.unblock`; owns segment (可执行/全部) + per-card expand + pending state. |
 | `screens/MobileTasksView.tsx` | Presentational 5c view (1:1 scheme L3110-3186, raw px/hex/font §8.3): 任务 header + 可执行/全部 segmented + grouped list (进行中/可认领/等依赖/已阻塞, status dots) + claimable-card expand→DONE-WHEN (honest placeholder, no `doneWhen` field) + blocked-card 「解除」 (≥44px). Bottom Tab is shell-owned, not rendered here. |
 | `screens/MobileTasksView.test.tsx` | `react-dom/server` render checks (marker/gutter/segments/4 groups/expand placeholder/blocked 解除/deps). |
-| `screens/screens.test.tsx` | render checks for the remaining STUB slots (5b/10f + 机器; 5a/10e/5c excluded — they need tRPC providers). |
+| `screens/screens.test.tsx` | render checks for the remaining STUB slots (机器 + 10f; 5a/5b/5c/10e excluded — they need tRPC providers). |
+
+### 5b 移动端线程 (task ad9c) — REAL, 1:1 from `scheme.dc.html` L3005–3108
+
+| path | role |
+|---|---|
+| `screens/MobileThreadsScreen.tsx` | **5b container** replacing the stub behind the same export. Header (线程 + 活跃/历史 segment + 今日 budget band) + thread-card list + full-page drill (整页下钻). Real tRPC: `threads.list` (list + 活跃 count), `threads.get` (via `MobileThreadCard`), `cost.summary` (budget band). `useThreadsLiveSync` live refresh. Owns `segment` + `trail` (drill) state; L3「打开 ›」pushes an in-screen re-rooted `threads.get` view (no `/m/threads/:id` route — stays in the slot) with ‹ 返回 back. |
+| `screens/MobileThreadCard.tsx` | **One card container**: lazy `threads.get` on expand (running default-open), real `threads.cancel` on 取消 + `useThreadGetLiveSync`. Delegates rendering to `MobileThreadCardView`. Mirrors desktop `RightThreadCard`. |
+| `screens/MobileThreadViews.tsx` | **Presentational** (prop-driven, render-tested): `MobileThreadsHeader` · `MobileThreadCardView` (collapsed Card B / expanded Card A) · `MobileStepTree` · `MobileSubCard` (L2 in-place expand) · `MobileDrillRow` (L3「打开 ›」). Exact scheme px/hex/font/weight (§8.3). **Reuses the desktop L2/L3 rules verbatim**: `right-panel-vm` (`stepDotKind`/`threadPill`/`depthInfo`/`formatCost`), `thread/thread-steps` (`dispatchesForStep`), `thread/nested-threads` (`nodeLevel`) — only the mobile chrome is re-authored. |
+| `screens/mobile-thread-vm.ts` | **Pure** mobile-only glue (TDD): `budgetBand` (honest `today / —`, GAP-B), `pillLabel` (zh status text via vocab — the desktop `threadPill` hardcodes EN), `threadMetaLineZh`, `threadSubLine`, `stepTimeLabel`/`fmtClock`. |
+| `screens/mobile-thread-vm.test.ts` / `MobileThreadViews.test.tsx` | vitest (14) + `react-dom/server` render checks (8), TDD written first. |
+
+**5b data gaps (守则11 honest placeholders, NO fabrication):** GAP-B budget denominator — `CostSummary`
+has `today` only, no budget limit → `today / —`, 0% bar (real today). GAP-subprogress — `ThreadChildNode`
+has status only, no inner step list → the L2 pill shows zh status (no `运行 2/3` fraction), the
+`✓collect·●re-derive·○report` progress row is omitted; L2 expands to its real L3 children. GAP-gpu —
+`ThreadStepDetail` has no machine field → the `gpu-01·lab-4090` inline label shows only a real joined
+`dispatch.machine`, else omitted. B1 `step N/N` off-by-one inherited (meta shows `步骤 2/1`). Local coder
+threads persist no subthreads/dispatches → the L2/L3/depth-dot render paths are unit + render tested, not
+live (same env as F1/F2). i18n: added `step`/`depth`/`pendingApproval` vocab keys.
 
 ## Notes
 

@@ -107,6 +107,11 @@ export const en = {
   mAutoUnlock: 'auto-unlocks',
   mBlockedPill: 'Blocked',
   mNoTasks: 'No tasks',
+
+  // ── Group G: mobile 5b 线程 screen (scheme L3005-3108, task ad9c) ──
+  step: 'step',
+  depth: 'depth',
+  pendingApproval: 'Pending',
 };
 
 export type Vocab = typeof en;
@@ -214,4 +219,9 @@ export const zh: Record<keyof Vocab, string> = {
   mAutoUnlock: '自动解锁',
   mBlockedPill: '阻塞',
   mNoTasks: '暂无任务',
+
+  // ── Group G: mobile 5b 线程 screen (scheme L3005-3108, task ad9c) ──
+  step: '步骤',
+  depth: '深度',
+  pendingApproval: '待审批',
 };
