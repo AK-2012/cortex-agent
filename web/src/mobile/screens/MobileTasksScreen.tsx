@@ -40,6 +40,8 @@ export function MobileTasksScreen() {
   const tasks = tasksQuery.data ?? [];
   const grouped = useMemo(() => groupMobileTasks(tasks), [tasks]);
   const groups = orderedGroups(grouped, segment);
+  const execCount = executableCount(grouped);
+  const totalCount = allOpenCount(grouped);
 
   const onToggleExpand = (id: string) =>
     setExpandedIds((prev) => {
@@ -64,8 +66,8 @@ export function MobileTasksScreen() {
       vocab={vocab}
       groups={groups}
       segment={segment}
-      executableCount={executableCount(tasks)}
-      allCount={allOpenCount(tasks)}
+      executableCount={execCount}
+      allCount={totalCount}
       onSegment={setSegment}
       expandedIds={expandedIds}
       onToggleExpand={onToggleExpand}

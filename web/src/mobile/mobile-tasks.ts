@@ -6,12 +6,28 @@ import type { TaskInfo } from '@cortex-agent/ui-contract';
 export type MobileTaskGroup = 'in-progress' | 'claimable' | 'waiting-deps' | 'blocked';
 
 /**
- * Classify one task into a scheme group. Precedence (top→down): blocked → in-progress → claimable →
- * waiting-deps, so an overlapping task (e.g. claimed AND blocked) lands in the higher-attention group.
+ * Is any of `t`'s dependencies still open (not done)? The DTO `actionable` flag is computed WITHOUT
+ * checking dependency satisfaction, so a dep-waiting task comes back `actionable:true` — we recover
+ * the real 等依赖 signal by joining `dependsOn` against the list's status map (desktop TaskModal
+ * dependency-join precedent). A dep id not present in the list is treated as satisfied (can't prove
+ * unmet — e.g. archived / cross-project).
  */
-export function classifyMobileTask(t: TaskInfo): MobileTaskGroup {
+export function hasUnmetDependencies(
+  t: TaskInfo,
+  statusById: Map<string, TaskInfo['status']>,
+): boolean {
+  return t.dependsOn.some((dep) => statusById.get(dep) === 'open');
+}
+
+/**
+ * Classify one task into a scheme group. Precedence (top→down): blocked → in-progress →
+ * waiting-deps → claimable, so an overlapping task lands in the higher-attention group. `unmetDeps`
+ * is the pre-computed dependency-join result (see `hasUnmetDependencies`).
+ */
+export function classifyMobileTask(t: TaskInfo, unmetDeps: boolean): MobileTaskGroup {
   if (t.blockedBy != null) return 'blocked';
   if (t.claimedBy != null) return 'in-progress';
+  if (unmetDeps) return 'waiting-deps';
   if (t.actionable) return 'claimable';
   return 'waiting-deps';
 }
@@ -25,10 +41,11 @@ export interface MobileTasksGrouped {
 
 /** Bucket the OPEN tasks by classifier (done tasks are excluded from all four groups). Stable order. */
 export function groupMobileTasks(tasks: TaskInfo[]): MobileTasksGrouped {
+  const statusById = new Map<string, TaskInfo['status']>(tasks.map((t) => [t.id, t.status]));
   const g: MobileTasksGrouped = { inProgress: [], claimable: [], waitingDeps: [], blocked: [] };
   for (const t of tasks) {
     if (t.status !== 'open') continue;
-    switch (classifyMobileTask(t)) {
+    switch (classifyMobileTask(t, hasUnmetDependencies(t, statusById))) {
       case 'in-progress':
         g.inProgress.push(t);
         break;
@@ -47,20 +64,21 @@ export function groupMobileTasks(tasks: TaskInfo[]): MobileTasksGrouped {
 }
 
 /**
- * 可执行 count = in-progress + claimable open tasks (the executable/executing working set).
- * Matches the scheme mock arithmetic 可执行 3 = 进行中(1) + 可认领(2).
+ * 可执行 count = in-progress + claimable (the executable/executing working set). Matches the scheme
+ * mock arithmetic 可执行 3 = 进行中(1) + 可认领(2).
  */
-export function executableCount(tasks: TaskInfo[]): number {
-  return tasks.filter((t) => {
-    if (t.status !== 'open') return false;
-    const c = classifyMobileTask(t);
-    return c === 'in-progress' || c === 'claimable';
-  }).length;
+export function executableCount(grouped: MobileTasksGrouped): number {
+  return grouped.inProgress.length + grouped.claimable.length;
 }
 
-/** 全部 count = every open task in the queue. */
-export function allOpenCount(tasks: TaskInfo[]): number {
-  return tasks.filter((t) => t.status === 'open').length;
+/** 全部 count = every open task in the queue (all four groups). */
+export function allOpenCount(grouped: MobileTasksGrouped): number {
+  return (
+    grouped.inProgress.length +
+    grouped.claimable.length +
+    grouped.waitingDeps.length +
+    grouped.blocked.length
+  );
 }
 
 export type MobileSegment = 'executable' | 'all';
