@@ -91,6 +91,22 @@ export const en = {
   subthreads: 'subthreads',
   dayToday: 'Today',
   dayYesterday: 'Yesterday',
+
+  // ── Group F: mobile 5c 任务 screen (scheme L3110-3195) ──
+  mExecutable: 'Executable',
+  mAll: 'All',
+  mInProgress: 'In progress',
+  mClaimable: 'Claimable',
+  mWaitingDeps: 'Waiting',
+  mBlocked: 'Blocked',
+  mDoneWhen: 'DONE WHEN',
+  mDoneWhenGap: 'Done-when detail not available here yet',
+  mUnblock: 'Unblock',
+  mClaim: 'Claimed',
+  mDependsOn: 'needs',
+  mAutoUnlock: 'auto-unlocks',
+  mBlockedPill: 'Blocked',
+  mNoTasks: 'No tasks',
 };
 
 export type Vocab = typeof en;
@@ -182,4 +198,20 @@ export const zh: Record<keyof Vocab, string> = {
   subthreads: '子线程',
   dayToday: '今天',
   dayYesterday: '昨天',
+
+  // ── Group F: mobile 5c 任务 screen (scheme L3110-3195) ──
+  mExecutable: '可执行',
+  mAll: '全部',
+  mInProgress: '进行中',
+  mClaimable: '可认领',
+  mWaitingDeps: '等依赖',
+  mBlocked: '已阻塞',
+  mDoneWhen: '完成标准（DONE WHEN）',
+  mDoneWhenGap: 'done-when 明细暂无法在此展示',
+  mUnblock: '解除',
+  mClaim: '认领',
+  mDependsOn: '依赖',
+  mAutoUnlock: '自动解锁',
+  mBlockedPill: '阻塞',
+  mNoTasks: '暂无任务',
 };
