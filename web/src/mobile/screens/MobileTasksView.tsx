@@ -61,7 +61,7 @@ const CARD_BASE: CSSProperties = {
   padding: '10px 13px',
 };
 
-function InProgressCard({ task }: { task: TaskInfo }) {
+function InProgressCard({ task, vocab }: { task: TaskInfo; vocab: Vocab }) {
   return (
     <div style={{ ...CARD_BASE, border: '1px solid #E7E9EE' }}>
       <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
@@ -79,7 +79,7 @@ function InProgressCard({ task }: { task: TaskInfo }) {
                   borderRadius: 999,
                 }}
               >
-                {task.claimedBy}
+                {vocab.mClaim} · {task.claimedBy}
               </span>
             </div>
           )}
@@ -271,7 +271,7 @@ function GroupCards({
       {view.tasks.map((task) => {
         switch (view.group) {
           case 'in-progress':
-            return <InProgressCard key={task.id} task={task} />;
+            return <InProgressCard key={task.id} task={task} vocab={vocab} />;
           case 'claimable':
             return (
               <ClaimableCard
