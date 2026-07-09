@@ -36,6 +36,15 @@ export interface TabBadge {
 }
 
 /**
+ * Whether a pathname belongs to one of the 4 bottom Tab screens. The mobile shell renders the
+ * persistent BottomTabBar only for tab routes; the non-Tab sub-screens (10e approvals / 10f overview,
+ * reached via a ‹ back header) hide the bar and own their own home-indicator gutter.
+ */
+export function isTabRoute(pathname: string): boolean {
+  return MOBILE_TABS.some((t) => pathname === t.path || pathname.startsWith(t.path + '/'));
+}
+
+/**
  * Per-tab decoration: the active-thread count badge on 线程 (scheme #4655D4 pill) and the amber
  * pending-approval dot on 会话 (scheme #C99A2E). Everything else is undecorated.
  */

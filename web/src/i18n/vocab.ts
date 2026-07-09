@@ -79,6 +79,11 @@ export const en = {
   back: 'Back',
   search: 'Search',
   more: 'More',
+
+  // ── Group D: mobile approval screen 10e chrome ──
+  toProcess: 'to process',
+  weekProcessed: 'Processed this week',
+  slackSynced: 'Slack sync available',
 };
 
 export type Vocab = typeof en;
@@ -158,4 +163,9 @@ export const zh: Record<keyof Vocab, string> = {
   back: '返回',
   search: '搜索',
   more: '更多',
+
+  // ── Group D: mobile approval screen 10e chrome ──
+  toProcess: '待处理',
+  weekProcessed: '本周已处理',
+  slackSynced: 'Slack 同步可用',
 };
