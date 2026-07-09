@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import type { ThreadInfo, ThreadStepDetail } from '@cortex-agent/ui-contract';
-import { budgetBand, threadMetaLineZh, threadSubLine, stepTimeLabel, fmtClock } from './mobile-thread-vm';
+import { en, zh } from '@/i18n';
+import { budgetBand, threadMetaLineZh, threadSubLine, stepTimeLabel, fmtClock, pillLabel } from './mobile-thread-vm';
 
 // Pure mobile-only glue for the 5b 线程 screen. The structural L2/L3/dot/level/depth/pill rules are
 // reused from the desktop helpers (right-panel-vm / nested-threads / thread-steps) and covered by
@@ -89,6 +90,20 @@ describe('stepTimeLabel', () => {
   });
   it('running with no startedAt → empty (no fabrication)', () => {
     expect(stepTimeLabel(step({ status: 'running', startedAt: null }), Date.now())).toBe('');
+  });
+});
+
+describe('pillLabel — zh status pill text (colors come from desktop threadPill)', () => {
+  it('maps thread status to the zh vocab label', () => {
+    expect(pillLabel('running', zh)).toBe('运行中');
+    expect(pillLabel('waiting', zh)).toBe('等待中');
+    expect(pillLabel('completed', zh)).toBe('完成');
+    expect(pillLabel('failed', zh)).toBe('失败');
+    expect(pillLabel('cancelled', zh)).toBe('已取消');
+    expect(pillLabel('aborted', zh)).toBe('已取消');
+  });
+  it('respects the active vocab (en on desktop)', () => {
+    expect(pillLabel('running', en)).toBe('Running');
   });
 });
 

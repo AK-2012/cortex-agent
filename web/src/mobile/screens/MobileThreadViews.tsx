@@ -21,6 +21,7 @@ import {
   threadMetaLineZh,
   threadSubLine,
   stepTimeLabel,
+  pillLabel,
 } from './mobile-thread-vm';
 
 export { buildBand as budgetBand };
@@ -160,6 +161,7 @@ function MobileSubCard({
 }) {
   const [expanded, setExpanded] = useState(node.status === 'running');
   const pill = threadPill(node.status);
+  const pillText = pillLabel(node.status, vocab);
   const running = node.status === 'running';
   return (
     <div style={{ border: `1px solid ${running ? '#E3E6F5' : '#EFF1F5'}`, background: running ? '#FBFBFE' : '#FBFBFC', borderRadius: 9 }}>
@@ -171,7 +173,7 @@ function MobileSubCard({
         <span style={{ font: `600 11px ${MONO}`, color: running ? '#191C22' : '#5B6472' }}>{node.templateName ?? node.id}</span>
         <span style={{ font: `400 8.5px ${MONO}`, color: '#B6BDC9' }}>L{nodeLevel(node)}</span>
         <span style={{ marginLeft: 'auto', fontSize: 9, fontWeight: 600, padding: '1.5px 7px', borderRadius: 999, background: pill.bg, color: pill.fg }}>
-          {pill.text}
+          {pillText}
         </span>
       </div>
       {expanded && node.children.length > 0 && (
@@ -286,6 +288,7 @@ export function MobileThreadCardView({
   loading?: boolean;
 }) {
   const pill = threadPill(thread.status);
+  const pillText = pillLabel(thread.status, vocab);
   const showBody = expanded && !!detail;
 
   if (!showBody) {
@@ -296,7 +299,7 @@ export function MobileThreadCardView({
           <span style={{ color: '#B6BDC9', fontSize: 8.5 }}>▸</span>
           <span style={{ font: `600 11.5px ${MONO}`, color: '#191C22' }}>{thread.templateName}</span>
           <span style={{ marginLeft: 'auto', fontSize: 10, fontWeight: 600, padding: '2px 8px', borderRadius: 999, background: pill.bg, color: pill.fg }}>
-            {pill.text}
+            {pillText}
           </span>
         </div>
         <div style={{ font: `400 10px ${MONO}`, color: '#98A1B0', marginTop: 4, paddingLeft: 16 }}>
@@ -315,7 +318,7 @@ export function MobileThreadCardView({
           <NodeIcon color={thread.status === 'running' ? '#4655D4' : '#8A93A2'} />
           <span style={{ font: `600 12.5px ${MONO}`, color: '#191C22' }}>{thread.templateName}</span>
           <span style={{ marginLeft: 'auto', fontSize: 10, fontWeight: 600, padding: '2px 8px', borderRadius: 999, background: pill.bg, color: pill.fg }}>
-            {pill.text}
+            {pillText}
           </span>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4 }}>

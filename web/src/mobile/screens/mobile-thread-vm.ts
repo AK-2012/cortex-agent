@@ -5,7 +5,28 @@
 // band, collapsed sub-line, step clock). Framework-free so it is unit-tested in isolation (TDD).
 
 import type { ThreadInfo, ThreadStepDetail } from '@cortex-agent/ui-contract';
+import type { Vocab } from '@/i18n';
 import { formatCost, formatDurationS, formatAge } from '@/features/workbench/right-panel-vm';
+
+/**
+ * Status-pill LABEL in the mobile (zh) vocabulary. Colors still come from the reused desktop
+ * `threadPill` (same rule); only the text is localized (done_when: ZH 文案走 i18n) — the desktop
+ * helper hardcodes English labels, which must not leak into the zh mobile surface.
+ */
+export function pillLabel(status: ThreadInfo['status'], vocab: Vocab): string {
+  switch (status) {
+    case 'running':
+      return vocab.pillRunning;
+    case 'waiting':
+      return vocab.pillWaiting;
+    case 'completed':
+      return vocab.pillDone;
+    case 'failed':
+      return vocab.pillFailed;
+    default:
+      return vocab.pillCancelled;
+  }
+}
 
 export interface BudgetBand {
   numerator: string;
