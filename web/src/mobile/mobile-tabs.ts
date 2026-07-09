@@ -30,18 +30,18 @@ export function activeTabId(pathname: string): MobileTabId {
   return found ? found.id : 'sessions';
 }
 
-export interface TabBadge {
-  count?: number;
-  dot?: boolean;
-}
-
 /**
- * Whether a pathname belongs to one of the 4 bottom Tab screens. The mobile shell renders the
- * persistent BottomTabBar only for tab routes; the non-Tab sub-screens (10e approvals / 10f overview,
- * reached via a ‹ back header) hide the bar and own their own home-indicator gutter.
+ * Whether a pathname is one of the 4 bottom-Tab routes (or a sub-path of one). The shell shows the
+ * bottom Tab bar only on Tab routes; the non-Tab drill-in pages 10e (`/m/approvals`) and 10f
+ * (`/m/overview`) hide it — the scheme draws no Tab bar for those (`非 Tab 页`, task 82ff).
  */
 export function isTabRoute(pathname: string): boolean {
   return MOBILE_TABS.some((t) => pathname === t.path || pathname.startsWith(t.path + '/'));
+}
+
+export interface TabBadge {
+  count?: number;
+  dot?: boolean;
 }
 
 /**

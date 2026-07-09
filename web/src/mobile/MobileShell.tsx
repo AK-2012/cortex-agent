@@ -1,6 +1,7 @@
-// Mobile app-shell frame (design 5a–5c). Owns the ported iOS device frame + a persistent bottom Tab
-// bar, with the active screen swapped through <Outlet/>. Mirrors the RB f528 frame-owner precedent:
-// the shell owns the load-bearing chrome; each screen is a STUB slot filled by a later pass.
+// Mobile app-shell frame (design 5a–5c). Owns the ported iOS device frame + the bottom Tab bar (shown
+// only on Tab routes), with the active screen swapped through <Outlet/>. Mirrors the RB f528
+// frame-owner precedent: the shell owns the load-bearing chrome; each screen is a slot a later pass
+// fills. Non-Tab drill-in pages (10e/10f) hide the Tab bar — the scheme draws none there (`非 Tab 页`).
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { useTRPC } from '@/lib/trpc';

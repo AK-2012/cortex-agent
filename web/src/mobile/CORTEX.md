@@ -21,7 +21,7 @@ a later pass replaces behind its own export (RB f528 frame-owner precedent). Raw
 | `mobile-routes.tsx` | Pure route config `mobileRoutes` (MobileShell layout + the 6 screen slots + index/`*` redirect to `/m/sessions`). Separate from the router instance so it is inspectable without a browser history. |
 | `mobile-router.tsx` | The concrete `mobileRouter` (browser/hash by shell mode). |
 | `mobile-router.test.ts` | Structural test of `mobileRoutes` (path set, 5 STUB routes navigable, index + catch-all). |
-| `screens/` | Screen slots: `MobileMachinesScreen` (机器, 3b 同构) · `MobileOverviewScreen` (10f) are still neutral STUB slots (`StubScreen` shared body, 守则11). **`MobileSessionsScreen` (5a), `MobileThreadsScreen` (5b), `MobileApprovalsScreen` (10e) and `MobileTasksScreen` (5c) are live** — see below. |
+| `screens/` | Screen slots: `MobileMachinesScreen` (机器, 3b 同构) is the only remaining neutral STUB slot (`StubScreen` shared body, 守则11). **`MobileSessionsScreen` (5a), `MobileThreadsScreen` (5b), `MobileTasksScreen` (5c), `MobileApprovalsScreen` (10e) and `MobileOverviewScreen` (10f) are live** — see below. |
 | `screens/MobileSessionsScreen.tsx` | **Session screen 5a** (task c880) — 1:1 rebuild from `scheme.dc.html` L2932-3003: session header (QN avatar/title/`running·turns·$`) + chat stream (dark user bubble / collapsed tool chips / assistant + inline experiment-pipeline stepper card / over-budget approval card) + composer (input + running status line + send). Real tRPC: `sessions.transcript` (chat) · `threads.get` (inline card) · `approvals.list`+`approve`/`reject` (approval card) · `sessions.send` (send). Missing fields (session cost/elapsed) → explicit `—`, never fabricated. The bottom Tab is the shell's (not re-rendered). |
 | `screens/{MobileSessionHeader,MobileMessageStream,MobileThreadStepper,MobileApprovalCard,MobileComposer}.tsx` | 5a presentational + wired parts (`MobileInlineThreadCard`/`MobileApprovalCardContainer` bind real tRPC). Pure `mobile-session-vm.ts` maps DTOs → the scheme slot model (initials/status-line/ZH divider/horizontal stepper/approval desc/tool chips). |
 | `screens/mobile-session-vm.test.ts` · `screens/mobile-session-render.test.tsx` | 5a pure-logic units + `react-dom/server` render checks (neutral props, 守则11). |
@@ -31,7 +31,7 @@ a later pass replaces behind its own export (RB f528 frame-owner precedent). Raw
 | `screens/MobileTasksScreen.tsx` | **5c 任务 (real)** — binds `tasks.list` + `useTasksLiveSync` + `tasks.unblock`; owns segment (可执行/全部) + per-card expand + pending state. |
 | `screens/MobileTasksView.tsx` | Presentational 5c view (1:1 scheme L3110-3186, raw px/hex/font §8.3): 任务 header + 可执行/全部 segmented + grouped list (进行中/可认领/等依赖/已阻塞, status dots) + claimable-card expand→DONE-WHEN (honest placeholder, no `doneWhen` field) + blocked-card 「解除」 (≥44px). Bottom Tab is shell-owned, not rendered here. |
 | `screens/MobileTasksView.test.tsx` | `react-dom/server` render checks (marker/gutter/segments/4 groups/expand placeholder/blocked 解除/deps). |
-| `screens/screens.test.tsx` | render checks for the remaining STUB slots (机器 + 10f; 5a/5b/5c/10e excluded — they need tRPC providers). |
+| `screens/screens.test.tsx` | render checks for the remaining STUB slot (机器; 5a/5b/5c/10e/10f excluded — they need tRPC providers). |
 
 ### 5b 移动端线程 (task ad9c) — REAL, 1:1 from `scheme.dc.html` L3005–3108
 
@@ -51,6 +51,13 @@ has status only, no inner step list → the L2 pill shows zh status (no `运行 
 `dispatch.machine`, else omitted. B1 `step N/N` off-by-one inherited (meta shows `步骤 2/1`). Local coder
 threads persist no subthreads/dispatches → the L2/L3/depth-dot render paths are unit + render tested, not
 live (same env as F1/F2). i18n: added `step`/`depth`/`pendingApproval` vocab keys.
+
+### 10f 移动端项目 Overview (task 82ff) — REAL, 1:1 from `scheme.dc.html` L3249–3298
+
+| path | role |
+|---|---|
+| `screens/MobileOverviewScreen.tsx` | **10f project Overview (real)** — 1:1 from `scheme.dc.html` L3249–3298 (‹ 返回 + 项目头, 非 Tab 页): 成本卡 (今日 $ + 预算带 + 14 天柱状 + 本周/本月/预测) + 项目记忆卡 (文件行 + +/- 徽标 + 全部→) + 调度卡 (条目 + 恢复 + 新建) + 执行流水行. Single-column compression of desktop 6a. Real tRPC: `cost.summary` + `memory.tree` + `schedules.list` + `executions.list`. Honest placeholders (6a df67 / memory 7b precedent) for line-level +/- diff + forecast; no fabrication. |
+| `screens/overview-mobile-vm.ts` | **Pure** ZH view-model for 10f (`projectAvatarInitials`, `relTimeZh`, `intervalLabelZh`, `nextRunLabelZh`, `lastRunLabelZh`, `countTodayExecutions`, `activeThreadCountLabelZh`); reuses `overview-vm.deriveActiveProjectId`/`formatMoney`. TDD (`overview-mobile-vm.test.ts`, 16). |
 
 ## Notes
 
