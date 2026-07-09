@@ -33,6 +33,13 @@ describe('vocab en/zh parity', () => {
     expect(zh.tasks).toBe('任务');
   });
 
+  it('carries the mobile bottom-tab labels (会话/线程/任务/机器)', () => {
+    expect(en.sessions).toBe('Sessions');
+    expect(zh.sessions).toBe('会话');
+    expect(zh.threads).toBe('线程');
+    expect(zh.machines).toBe('机器');
+  });
+
   it('carries the status-pill labels', () => {
     expect(en.pillRunning).toBe('Running');
     expect(zh.pillRunning).toBe('运行中');

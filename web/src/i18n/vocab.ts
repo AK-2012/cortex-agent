@@ -73,6 +73,7 @@ export const en = {
   pillCancelled: 'Cancelled',
 
   // ── Group C: mobile shell chrome supplement ──
+  sessions: 'Sessions',
   workbench: 'Workbench',
   overview: 'Overview',
   back: 'Back',
@@ -151,6 +152,7 @@ export const zh: Record<keyof Vocab, string> = {
   pillCancelled: '已取消',
 
   // ── Group C: mobile shell chrome supplement ──
+  sessions: '会话',
   workbench: '工作台',
   overview: '概览',
   back: '返回',

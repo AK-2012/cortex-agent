@@ -15,8 +15,11 @@ hard-codes hex.
 | `vite.config.ts` | React plugin; `@` → `src` alias; dev proxy `/trpc` → `127.0.0.1:3004`. Proxy injects `x-cortex-token` (from `CORTEX_CLIENT_TOKEN`) so the token-gated ui-http-server is reachable in dev without the browser holding the secret (SSE cannot set headers) |
 | `postcss.config.js` | tailwindcss + autoprefixer |
 | `index.html` | SPA entry; `#root` + `/src/main.tsx` |
-| `src/main.tsx` | React root; wraps `Providers` + `RouterProvider` |
-| `src/providers.tsx` | `QueryClientProvider` + tRPC `TRPCProvider` + `design/TooltipProvider` |
+| `src/main.tsx` | React root; wraps `Providers` + `RootRouter` |
+| `src/RootRouter.tsx` | **Viewport render switch** (task 0325): `useIsMobile()` → mounts `mobile/mobile-router` (mobile) or the unchanged desktop `router` (desktop). Two separate configs keep the desktop path byte-identical (no regression). |
+| `src/mobile/` | **Mobile shell base** (web-only, design 5a–5c, task 0325) — ported `IOSDevice` frame + bottom 4-Tab nav (会话/线程/任务/机器 from `useVocab`, active state + live active-thread badge + amber approval dot, ≥44px touch) + `/m/*` routing with 5 STUB screen slots (5a/5b/5c/10e/10f) siblings replace. See its CORTEX.md |
+| `src/i18n/` | Viewport-driven vocab (mobile→zh / desktop→en) + `useVocab`/`useLang`/**`useIsMobile`** (task 0325 added `isMobile` off the same `matchMedia` breakpoint + a `sessions` label key). See `lang.ts`/`vocab.ts`/`LangProvider.tsx`. |
+| `src/providers.tsx` | `QueryClientProvider` + tRPC `TRPCProvider` + `design/TooltipProvider` + `LangProvider` |
 | `src/lib/trpc.ts` | `@trpc/tanstack-react-query` context + vanilla client + **conditional transport** (task 1b60). `splitLink`: query/mutate → `httpBatchLink`, subscription → `httpSubscriptionLink`. **Two modes**: browser/ui-http (no config) — relative `/trpc`, same-origin, proxy injects token; desktop/remote (injected `RemoteConfig{serverUrl,token}`) — absolute URL, `x-cortex-token` in batch headers, `eventsource` npm ponyfill for SSE (fetch-based, injects token in custom fetch). Exports `trpcUrl(config?)`, `buildBatchHeaders(config?)`, `buildSseFetch(token)` for unit testing. `src/lib/trpc.test.ts` covers both modes. |
 | `src/router.tsx` | `createBrowserRouter`: `AppShell` layout; `/workbench` → `WorkbenchPage` (design 3a, task 5b0f), `/tasks` → `TasksPage` (task 5), `/kit` → `KitPage` (design demo, task e794), other routes still `EmptyPane` |
 | `src/design/` | Design-system core primitives (design §5 Stage 2, tasks e794/2add) — token-driven StatusPill/MonoText/ID/Card/SectionHeader/Button/Tabs/Tooltip/EmptyState/DegradedState (10c status language). See its CORTEX.md |
