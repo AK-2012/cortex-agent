@@ -10,6 +10,10 @@ test('cost.summary delegates to costSummary and returns CostSummary', async () =
     byProject: {}, byTrigger: {}, bySource: {}, byBackend: {},
     tokens: { today: { input: 100, output: 50 }, month: { input: 500, output: 250 }, total: { input: 5000, output: 2500 } },
     entryCount: 42,
+    // additive real-data fields (task c489) — the facade must pass them through unchanged
+    dailyBudget: 300, forecastToday: 24.5,
+    dailyCost: [{ date: '2026-07-10', cost: 10 }],
+    byTriggerScoped: { thread: { today: 10, week: 50, month: 200, total: 1000 } },
   };
 
   const deps: UiServiceDeps = {
@@ -52,7 +56,7 @@ test('cost.summary passes projectId filter', async () => {
     runningExecutions: { getAll: () => [] } as any,
     costSummary: async (projectId?: string | null) => {
       capturedProjectId = projectId;
-      return { today: 0, week: 0, month: 0, total: 0, byMode: {} as any, byProject: {}, byTrigger: {}, bySource: {}, byBackend: {}, tokens: {} as any, entryCount: 0 };
+      return { today: 0, week: 0, month: 0, total: 0, byMode: {} as any, byProject: {}, byTrigger: {}, bySource: {}, byBackend: {}, tokens: {} as any, entryCount: 0, dailyBudget: 0, forecastToday: 0, dailyCost: [], byTriggerScoped: {} };
     },
     bus: { subscribe: () => ({ unsubscribe: () => {} }), publish: () => {} } as any,
     adapter: {} as any,
