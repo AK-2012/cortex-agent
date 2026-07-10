@@ -9,6 +9,7 @@ import {
   formatMoney,
   deriveActiveProjectId,
   scheduleIntervalLabel,
+  scheduleProfileLabel,
   nextRunLabel,
   lastRunLabel,
   execDurationMs,
@@ -326,6 +327,16 @@ export function OverviewView(): JSX.Element {
                       ? `${lastRunLabel(s.lastRun, now)}`
                       : `${nextRunLabel(s.nextRun, now)} · ${lastRunLabel(s.lastRun, now)}`}
                   </span>
+                  {/* Real agent profile from ScheduleInfo.profile (schedule config source). Omitted
+                      when the schedule has no recorded profile — honest placeholder, no fabrication. */}
+                  {scheduleProfileLabel(s) && (
+                    <span
+                      title="profile"
+                      style={{ marginLeft: 7, font: "400 9.5px 'IBM Plex Mono',monospace", color: '#98A1B0' }}
+                    >
+                      {scheduleProfileLabel(s)}
+                    </span>
+                  )}
                   {s.paused && (
                     <span
                       onClick={() => !resume.isPending && resume.mutate({ scheduleId: s.id })}

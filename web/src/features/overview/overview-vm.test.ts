@@ -4,6 +4,7 @@ import {
   formatMoney,
   deriveActiveProjectId,
   scheduleIntervalLabel,
+  scheduleProfileLabel,
   nextRunLabel,
   lastRunLabel,
   execDurationMs,
@@ -19,6 +20,7 @@ const sched = (p: Partial<ScheduleInfo>): ScheduleInfo => ({
   type: 'interval',
   message: 'x',
   projectId: 'proj',
+  profile: null,
   nextRun: null,
   lastRun: null,
   paused: false,
@@ -98,6 +100,15 @@ describe('scheduleIntervalLabel', () => {
     expect(l.startsWith('daily ')).toBe(true);
     expect(l).toMatch(/daily \d\d:\d\d/);
     expect(scheduleIntervalLabel(sched({ type: 'weekly', nextRun: null }))).toBe('weekly');
+  });
+});
+
+describe('scheduleProfileLabel', () => {
+  it('returns the real profile from the schedule config source', () => {
+    expect(scheduleProfileLabel(sched({ profile: 'claude-haiku' }))).toBe('claude-haiku');
+  });
+  it('returns empty string when the schedule has no profile (honest placeholder)', () => {
+    expect(scheduleProfileLabel(sched({ profile: null }))).toBe('');
   });
 });
 

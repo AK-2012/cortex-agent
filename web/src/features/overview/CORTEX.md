@@ -11,13 +11,15 @@ mirroring the prototype's `isOverview` state. Diffed vs `proto-shots/10-overview
 |---|---|
 | `OverviewPage.tsx` | Route `/overview`. The 240/fluid/400 flex frame (same as `WorkbenchPage`) assembling `<LeftRail/> <OverviewView/> <RightPanel/>`. |
 | `OverviewView.tsx` | The center pane 1:1 (prototype L525–655): header bar (‹ back → `/workbench` · projName · Overview · Adjust-budget · ⋯) + cost summary bar + 2-col card grid (Last-14-days · Project memory · Where-it-goes · Schedules · Executions span-2). Exact inline styles/px/hex/font/weight/EN copy; real tRPC data substituted. |
-| `overview-vm.ts` | **Pure** VM helpers (TDD): `formatMoney` · `deriveActiveProjectId` (mirrors LeftRail) · `scheduleIntervalLabel` · `nextRunLabel`/`lastRunLabel` (relative humanize) · `execDurationMs`/`formatDuration` · `execMachine`/`execCost`/`execStatusPill` (verbatim §5 pill hexes)/`execSummary`. |
+| `overview-vm.ts` | **Pure** VM helpers (TDD): `formatMoney` · `deriveActiveProjectId` (mirrors LeftRail) · `scheduleIntervalLabel` · `scheduleProfileLabel` (real `ScheduleInfo.profile`, `''` when absent) · `nextRunLabel`/`lastRunLabel` (relative humanize) · `execDurationMs`/`formatDuration` · `execMachine`/`execCost`/`execStatusPill` (verbatim §5 pill hexes)/`execSummary`. |
 | `overview-vm.test.ts` | vitest for `overview-vm.ts` (19 tests, written first). |
 
 ## Real data vs data-gap placeholders
 
 - **REAL**: cost header today/week/month = `cost.summary({projectId})` (project-scoped); **Schedules** =
-  `schedules.list({projectId})` (name · interval-label · next-in/last · paused badge + **Resume** =
+  `schedules.list({projectId})` (name · interval-label · next-in/last · **agent profile** (real
+  `ScheduleInfo.profile` from the schedule config source, via `scheduleProfileLabel`; chip omitted when
+  the schedule has no recorded profile — honest placeholder) · paused badge + **Resume** =
   real `schedules.resume` mutation → invalidate `schedules.list`); **Executions** = `executions.list`
   filtered client-side by project (id · summary · machine · dur · cost · status pill · Logs →
   `useExecutionLogDrawer().open(id)`, the b963 execution-log drawer overlay). Active project =
@@ -33,5 +35,6 @@ mirroring the prototype's `isOverview` state. Diffed vs `proto-shots/10-overview
 
 ## Notes
 
-- **No backend change** — existing ui-service contract only (`projects.list`/`sessions.list`/
-  `cost.summary`/`schedules.list`/`schedules.resume`/`executions.list`). Web-only.
+- Existing ui-service contract (`projects.list`/`sessions.list`/`cost.summary`/`schedules.list`/
+  `schedules.resume`/`executions.list`), plus the `ScheduleInfo.profile` field added to `schedules.list`
+  (surfaces the schedule's configured agent profile; the only paired backend change for this card).

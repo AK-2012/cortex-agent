@@ -118,6 +118,23 @@ test('schedules.add interval creates a schedule and returns ScheduleInfo', async
   assert.equal(spy.calls[0].options.intervalMs, 60_000);
 });
 
+test('schedules.add returns the profile it was given in ScheduleInfo', async () => {
+  const spy = makeAddSpy();
+  const deps = makeDeps({ scheduler: { list: async () => [], get: async () => null, pause: async () => null, resume: async () => null, remove: async () => false, add: spy.add } });
+  const result = await handleAddSchedule(deps, { type: 'interval', message: 'ping', intervalMs: 60_000, profile: 'claude-haiku' });
+  assert.equal(result.ok, true);
+  if (result.ok) assert.equal(result.data.profile, 'claude-haiku');
+  assert.equal(spy.calls[0].options.profile, 'claude-haiku');
+});
+
+test('schedules.add ScheduleInfo profile is null when omitted (honest placeholder)', async () => {
+  const spy = makeAddSpy();
+  const deps = makeDeps({ scheduler: { list: async () => [], get: async () => null, pause: async () => null, resume: async () => null, remove: async () => false, add: spy.add } });
+  const result = await handleAddSchedule(deps, { type: 'once', message: 'm', delay: 1_000 });
+  assert.equal(result.ok, true);
+  if (result.ok) assert.equal(result.data.profile, null);
+});
+
 test('schedules.add daily creates a schedule', async () => {
   const spy = makeAddSpy();
   const deps = makeDeps({ scheduler: { list: async () => [], get: async () => null, pause: async () => null, resume: async () => null, remove: async () => false, add: spy.add } });

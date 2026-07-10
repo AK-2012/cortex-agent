@@ -12,6 +12,7 @@ function toScheduleInfo(s: ScheduleTask): ScheduleInfo {
     type: s.type,
     message: s.message,
     projectId: s.projectId,
+    profile: s.profile ?? null,
     nextRun: s.nextRun != null ? new Date(s.nextRun).toISOString() : null,
     lastRun: s.lastRun != null ? new Date(s.lastRun).toISOString() : null,
     paused: s.isPaused ?? false,
