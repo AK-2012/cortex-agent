@@ -5,10 +5,14 @@
 // inline styles / px / hex / font / weight reproduced verbatim from the scheme; real tRPC data
 // substituted into the design's structure: cost header = real `cost.summary`; memory rows = real
 // `memory.tree`; schedules = real `schedules.list` (+ real `schedules.resume`); exec-flow = real
-// `executions.list`. Backend-uncovered fields render as neutral placeholders, NEVER fabricated
-// numbers (precedent df67 / memory 7b):
-//   - budget bar / budget-per-day / forecast today — CostSummary has no budget or forecast field
-//   - Last 14 days chart — no per-day cost series (design skeleton heights, not real data)
+// `executions.list`.
+//   REAL cost fields (task bbfe, backed by the `CostSummary` c489 additions; mirrors desktop 6a 302b):
+//   - budget-per-day denominator = real `dailyBudget` (`formatPerDay`; `—` when unset — honest)
+//   - budget bar % = today's scoped spend ÷ `dailyBudget` (`budgetPercent`; empty bar + `—%` when no denom)
+//   - Last 14 days chart = real per-calendar-day `dailyCost` series (`dailySeriesBars`, last = today)
+//   - forecast today = real `forecastToday`
+//   Remaining backend-uncovered fields still render as neutral placeholders, NEVER fabricated
+//   numbers (precedent df67 / memory 7b):
 //   - memory per-file +/- diff · 草稿 status — MemoryTree has none → badge omitted
 //   - schedule last-run outcome (`✓ N 篇入库`) — ScheduleInfo has none → time-since only
 //   - `全部 →` / `+ 新建` / exec `→` — no mobile memory route / schedule modal not in mobile tree /
@@ -20,7 +24,13 @@ import type { ScheduleInfo, ExecutionInfo, MemoryFileEntry } from '@cortex-agent
 import { useTRPC } from '@/lib/trpc';
 import { useVocab } from '@/i18n';
 import { threadScopeFilter } from '@/features/workbench/scope';
-import { deriveActiveProjectId, formatMoney } from '@/features/overview/overview-vm';
+import {
+  deriveActiveProjectId,
+  formatMoney,
+  budgetPercent,
+  formatPerDay,
+  dailySeriesBars,
+} from '@/features/overview/overview-vm';
 import {
   projectAvatarInitials,
   relTimeZh,
@@ -29,11 +39,8 @@ import {
   lastRunLabelZh,
   countTodayExecutions,
   activeThreadCountLabelZh,
+  budgetPercentLabel,
 } from './overview-mobile-vm';
-
-// design-placeholder heights for the 14-day chart (no per-day cost series — Stage 7); the appended
-// last bar is the highlighted "today" column. NOT real data.
-const CHART_SKELETON = [22, 34, 18, 41, 12, 8, 29, 47, 36, 64, 52, 58, 71] as const;
 
 function FileIcon() {
   return (
@@ -74,6 +81,11 @@ export function MobileOverviewScreen(): JSX.Element {
     enabled: !!activeProjectId,
   });
   const cost = costQuery.data;
+
+  // Real cost-derived view models (task bbfe). budgetPct is null when there is no positive daily-budget
+  // denominator → the bar renders empty + `—%`. dailyBars is the honest empty [] when there is no series.
+  const budgetPct = budgetPercent(cost?.today, cost?.dailyBudget);
+  const dailyBars = useMemo(() => dailySeriesBars(cost?.dailyCost), [cost?.dailyCost]);
 
   const memoryQuery = useQuery({
     ...trpc.memory.tree.queryOptions({ projectId: activeProjectId ?? '' }),
@@ -208,27 +220,35 @@ export function MobileOverviewScreen(): JSX.Element {
         <div style={{ background: '#fff', border: '1px solid #E7E9EE', borderRadius: 14, padding: '13px 14px' }}>
           <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
             <span style={{ fontSize: 10, color: '#98A1B0' }}>{v.today}</span>
-            {/* GAP: no daily-budget field (Stage 7) → "预算 —/日" */}
+            {/* REAL: dailyBudget from budget.json (global daily cap). `—` when unset (honest). */}
             <span style={{ marginLeft: 'auto', font: "400 9.5px 'IBM Plex Mono',monospace", color: '#98A1B0' }}>
-              {v.budgetPerDay} —{v.perDay}
+              {v.budgetPerDay} {formatPerDay(cost?.dailyBudget)}{v.perDay}
             </span>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 4 }}>
             <span style={{ font: "600 24px 'IBM Plex Mono',monospace", color: '#191C22', letterSpacing: '-.02em' }}>
               {formatMoney(cost?.today)}
             </span>
-            {/* GAP: no budget → empty track + "—%" (df67 precedent) */}
+            {/* REAL: today's scoped spend as % of the daily budget (empty track + `—%` when no denom) */}
             <div style={{ flex: 1, height: 6, borderRadius: 999, background: '#EFF1F5', overflow: 'hidden' }}>
-              <div style={{ width: '0%', height: '100%', background: '#4655D4' }} />
+              <div style={{ width: `${budgetPct ?? 0}%`, height: '100%', background: '#4655D4' }} />
             </div>
-            <span style={{ font: "400 10px 'IBM Plex Mono',monospace", color: '#98A1B0' }}>—%</span>
+            <span style={{ font: "400 10px 'IBM Plex Mono',monospace", color: '#98A1B0' }}>{budgetPercentLabel(budgetPct)}</span>
           </div>
-          {/* GAP: no per-day cost series → design skeleton, appended bar = today column */}
+          {/* REAL: per-calendar-day scoped cost series (oldest→newest, last = today, highlighted). */}
           <div style={{ display: 'flex', alignItems: 'flex-end', gap: 3, height: 44, marginTop: 12 }}>
-            {CHART_SKELETON.map((h, i) => (
-              <div key={i} style={{ flex: 1, background: '#E3E6F0', borderRadius: '2px 2px 0 0', height: `${h}%` }} />
+            {dailyBars.map((bar) => (
+              <div
+                key={bar.date}
+                title={`${bar.date} · ${formatMoney(bar.cost)}`}
+                style={{
+                  flex: 1,
+                  background: bar.isToday ? '#4655D4' : '#E3E6F0',
+                  borderRadius: '2px 2px 0 0',
+                  height: `${bar.pct}%`,
+                }}
+              />
             ))}
-            <div style={{ flex: 1, background: '#4655D4', borderRadius: '2px 2px 0 0', height: '42%' }} />
           </div>
           <div
             style={{
@@ -246,8 +266,8 @@ export function MobileOverviewScreen(): JSX.Element {
             <span>
               {v.month} <b style={{ color: '#22262E' }}>{formatMoney(cost?.month)}</b>
             </span>
-            {/* GAP: no forecast field (Stage 7) → "预测今日 —" */}
-            <span style={{ marginLeft: 'auto', color: '#A96B0B' }}>{v.forecastToday} —</span>
+            {/* REAL: forecastToday = scoped spend extrapolated by the elapsed fraction of the local day */}
+            <span style={{ marginLeft: 'auto', color: '#A96B0B' }}>{v.forecastToday} {formatMoney(cost?.forecastToday)}</span>
           </div>
         </div>
 

@@ -96,3 +96,12 @@ export function countTodayExecutions(execs: ExecutionInfo[], now: number): numbe
 export function activeThreadCountLabelZh(n: number): string {
   return `${n} 线程运行中`;
 }
+
+/**
+ * Text label for the budget progress bar. `null` (no positive daily-budget denominator, from
+ * `overview-vm.budgetPercent`) → the honest `—%` placeholder; a real percent rounds to an integer.
+ */
+export function budgetPercentLabel(pct: number | null): string {
+  if (pct == null) return '—%';
+  return `${Math.round(pct)}%`;
+}
