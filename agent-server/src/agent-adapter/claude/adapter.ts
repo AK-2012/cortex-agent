@@ -205,7 +205,12 @@ class ClaudeSession {
       this.currentTurn = null;
       this.closeTurnLogs(turn);
       if (this.turnIdleTimer) clearTimeout(this.turnIdleTimer);
-      if (turn.killed) {
+      if (turn.spontaneous) {
+        // The process died mid-continuation. The spontaneous turn has no awaiting caller —
+        // its reject would only log — so deliver the interruption to the sink directly
+        // (single-fire; the resolve path never ran because no result event arrived).
+        this.notifyBgInterrupted(true);
+      } else if (turn.killed) {
         turn.reject(new CancelledError());
       } else {
         const result = extractResult(turn.resultData, this.sessionId, false, code || 1, this.stderr,
@@ -215,7 +220,31 @@ class ClaudeSession {
         else turn.reject(result.error);
       }
     }
+    // Waiting-window case (no active turn, background tasks pending): the held status would
+    // otherwise wait forever — any process death (restart / crash / kill / timeout) must
+    // seal it. No-op when nothing is pending; always releases the sink (session is gone).
+    this.notifyBgInterrupted();
     sessions.delete(this.sessionKey);
+  }
+
+  /** Deliver a synthetic interrupted result to the continuation sink (single-fire: the sink
+   *  reference is cleared before invoking). Fires only when background work may still produce
+   *  a continuation (or `force`, for a dying spontaneous turn); otherwise just clears the sink. */
+  private notifyBgInterrupted(force = false): void {
+    const sink = this.continuationSink;
+    if (!sink) return;
+    this.continuationSink = null;
+    if (!force && !this.bgTracker.hasPending() && !this.bgTracker.continuationArmed) return;
+    const result: AgentResult = {
+      sessionId: this.sessionId,
+      total_cost_usd: null, num_turns: null,
+      rateLimited: false, rateLimitMessage: null,
+      planFilePath: null, enteredPlanMode: false, exitedPlanMode: false,
+      finalOutput: null,
+      pendingBackgroundTasks: 0, undeliveredBackgroundTasks: 0,
+      backgroundInterrupted: true,
+    };
+    try { sink.onResult(result); } catch (e) { log.warn('bg-interrupted sink onResult threw:', (e as Error).message); }
   }
 
   private spawnProcess(): void {
@@ -416,10 +445,15 @@ class ClaudeSession {
     const result = extractResult(turn.resultData, this.sessionId, false, 0, '',
       turn.planFilePath, turn.enteredPlanMode, turn.exitedPlanMode, turn.askUserQuestions,
       turn.finalOutput, turn.longestOutput);
-    // Surface how many background tasks are still running. >0 tells orchestration to hold
-    // the status in a "waiting" state; the CLI will spontaneously emit a continuation turn
-    // once they finish (routed via continuationSink).
-    if (result.resolved) (result.value as AgentResult).pendingBackgroundTasks = this.bgTracker.pendingCount;
+    // Surface background-task state. pendingBackgroundTasks = still running (the CLI will
+    // spontaneously emit a continuation turn when they finish, routed via continuationSink).
+    // undeliveredBackgroundTasks = work done but task_notification not observed — may arrive
+    // seconds later or never (old-CLI same-turn completions / killed tasks); orchestration
+    // holds the status but arms a grace watchdog for these.
+    if (result.resolved) {
+      (result.value as AgentResult).pendingBackgroundTasks = this.bgTracker.pendingCount;
+      (result.value as AgentResult).undeliveredBackgroundTasks = this.bgTracker.undeliveredCount;
+    }
     this.currentTurn = null;
     if (this.turnIdleTimer) clearTimeout(this.turnIdleTimer);
     this.turnIdleTimer = null;
@@ -536,8 +570,12 @@ class ClaudeSession {
     if (this.idleTimer) clearTimeout(this.idleTimer);
     if (this.maxTimer) clearTimeout(this.maxTimer);
     if (this.turnIdleTimer) clearTimeout(this.turnIdleTimer);
-    this.continuationSink = null;
+    // Do NOT clear continuationSink here: if background tasks are pending, the process
+    // 'close' event (handleProcessClose) must still deliver the interruption to the sink
+    // so the held "background task running" status seals instead of waiting forever.
     if (!this.proc || !this.alive) {
+      // Process already gone (or never spawned): no 'close' event will come — seal now.
+      this.notifyBgInterrupted();
       sessions.delete(this.sessionKey);
       return;
     }
@@ -566,7 +604,8 @@ class ClaudeSession {
     if (this.idleTimer) clearTimeout(this.idleTimer);
     if (this.maxTimer) clearTimeout(this.maxTimer);
     if (this.turnIdleTimer) clearTimeout(this.turnIdleTimer);
-    this.continuationSink = null;
+    // Sink intentionally NOT cleared: handleProcessClose (via the SIGTERM 'close' event)
+    // delivers the background-task interruption to it, then clears it.
     if (!this.proc || this.proc.exitCode !== null) return false;
     this.alive = false;
     sessions.delete(this.sessionKey);

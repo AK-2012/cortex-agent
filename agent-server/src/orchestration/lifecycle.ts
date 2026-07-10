@@ -27,6 +27,7 @@ import { projectStore } from '@domain/projects/index.js';
 import { setStreamingCallback, clearStreamingCallback } from './routing/hook-bridge.js';
 import { maybeNotifyTurnComplete } from './turn-notify.js';
 import { buildContinuationSink } from './bg-continuation.js';
+import { startBgWaitGuard } from './bg-wait-guard.js';
 import { recordCost } from '@domain/costs/cost-tracker.js';
 import type { ContinuationSink } from '../agent-adapter/types.js';
 import { maybeNotifyCodexLowUsage } from '@domain/costs/codex-usage-monitor.js';
@@ -54,23 +55,60 @@ export async function handleAgentSuccess({ result, channel, adapter, statusMsg, 
   const sessionTag = buildSessionTag(sessionName, result?.sessionId);
   const stream = (onAssistantMessage as any)?.stream ?? null;
   const askCount = await askUserQuestion.sendMessages(result, channel, adapter, statusMsg.messageId, threadAnchorId, stream);
-  // Background-task continuation: a run_in_background task is still running. Hold the status
-  // in a "waiting" state (don't seal) and register a sink so the spontaneous continuation turn
-  // the CLI emits on completion merges into this reply and seals the status then. Only when
-  // there are no pending user questions and the assistant reply stream is available to merge into.
+  // Background-task continuation: background work remains — either still running
+  // (pendingBackgroundTasks) or finished-but-unnotified (undeliveredBackgroundTasks; CC may
+  // deliver the notification seconds later, or never — 2026-07-10 investigation). Hold the
+  // status in a "waiting" state (don't seal) and register a sink so the spontaneous
+  // continuation turn merges into this reply and seals the status then. A bg-wait-guard
+  // bounds the hold: busy bracket for the whole window (F1: a deferred daemon restart must
+  // not fire and kill the Claude child), a grace watchdog for undelivered-only work (F5),
+  // and a max-wait cap for never-ending tasks (F6). Only when there are no pending user
+  // questions and the assistant reply stream is available to merge into.
   const pendingBg = result?.pendingBackgroundTasks ?? 0;
-  if (registerContinuationSink && stream && askCount === 0 && pendingBg > 0) {
+  const undeliveredBg = result?.undeliveredBackgroundTasks ?? 0;
+  if (registerContinuationSink && stream && askCount === 0 && pendingBg + undeliveredBg > 0) {
     const projectId = projectStore.resolveFromMessage(userMessage)?.id ?? 'general';
     const backend = resolveBackendForChannel(channel);
-    const waitingText = (pending: number) =>
-      `${Icons.waiting} ${sessionTag}${t('status.backgroundRunning')} (${pending}) (${elapsedStr}${metrics})`;
-    await writeStatus(adapter, statusMsg, waitingText(pendingBg));
+    const waitingText = (remaining: number) =>
+      `${Icons.waiting} ${sessionTag}${t('status.backgroundRunning')} (${remaining}) (${elapsedStr}${metrics})`;
+    await writeStatus(adapter, statusMsg, waitingText(pendingBg + undeliveredBg));
     let finalized = false;
+    const guard = startBgWaitGuard({
+      running: pendingBg,
+      undelivered: undeliveredBg,
+      track: trackPendingTask,
+      // F5: work finished but CC never delivered the notification (old-CLI same-turn
+      // completions / killed tasks). The model already saw the task's outcome inside the
+      // turn, so finalize as a normal completion with a zero-cost continuation.
+      onGraceTimeout: () => {
+        if (finalized) return;
+        finalized = true;
+        log.info(`bg-wait-guard grace timeout: sealing ${channel} without a continuation`);
+        void finalizeBackgroundContinuation({
+          adapter, statusMsg, channel, sessionName, sessionId: result?.sessionId ?? null,
+          startTime, baseResult: result, contResult: { total_cost_usd: null, num_turns: null } as AgentResult,
+          userMessageTs, executionId, trigger, projectId, backend,
+        }).catch((e) => log.error('finalizeBackgroundContinuation (grace) failed:', (e as Error)?.message ?? e));
+      },
+      // F6: still-running work exceeded the cap (tunnels / monitors can run forever). Seal
+      // the status as "still running" and release the busy bracket, but KEEP the sink and
+      // streaming callback — a very late continuation still merges and re-seals as done.
+      onMaxWait: () => {
+        if (finalized) return;
+        const { elapsedStr: fullElapsed } = computeElapsed(startTime);
+        const capText = `${Icons.waiting} ${sessionTag}${t('status.backgroundStillRunning')} (${fullElapsed}${metrics})`;
+        void sealStatus(adapter, statusMsg, capText, buildSealedStatusActionBlocks(capText, { channel, sessionName, isDm: true }));
+      },
+    });
     const sink = buildContinuationSink({
       stream,
       onToolUse: onToolUse || null,
-      onWaiting: (pending) => { void writeStatus(adapter, statusMsg, waitingText(pending)); },
+      onWaiting: (remaining, split) => {
+        guard.rearm(split?.running ?? remaining, split?.undelivered ?? 0);
+        void writeStatus(adapter, statusMsg, waitingText(remaining));
+      },
       onRateLimited: (contResult) => {
+        guard.settle();
         if (finalized) return;
         finalized = true;
         // Record for auto-resume when the rate-limit window resets.
@@ -82,6 +120,7 @@ export async function handleAgentSuccess({ result, channel, adapter, statusMsg, 
         clearStreamingCallback(channel);
       },
       onComplete: (contResult) => {
+        guard.settle();
         if (finalized) return;
         finalized = true;
         void finalizeBackgroundContinuation({
@@ -89,9 +128,23 @@ export async function handleAgentSuccess({ result, channel, adapter, statusMsg, 
           startTime, baseResult: result, contResult, userMessageTs, executionId, trigger, projectId, backend,
         }).catch((e) => log.error('finalizeBackgroundContinuation failed:', (e as Error)?.message ?? e));
       },
+      // F2: the Claude process died while background tasks were pending (restart / crash /
+      // kill / timeout) — seal honestly as interrupted, never leave the waiting state.
+      onInterrupted: () => {
+        guard.settle();
+        if (finalized) return;
+        finalized = true;
+        const { elapsedStr: fullElapsed } = computeElapsed(startTime);
+        const interruptedText = `${Icons.warning} ${sessionTag}${t('status.backgroundInterrupted')} (${fullElapsed}${metrics})`;
+        void sealStatus(adapter, statusMsg, interruptedText, buildSealedStatusActionBlocks(interruptedText, { channel, sessionName, isDm: true }));
+        if (userMessageTs) {
+          void conversationLedger.completeTurn(channel, userMessageTs, { executionId }).catch((e) => log.error('completeTurn (bg-interrupted) failed:', (e as Error).message));
+        }
+        clearStreamingCallback(channel);
+      },
     });
     registerContinuationSink(sink);
-    return; // status held; finalization deferred to the continuation turn
+    return; // status held; finalization deferred to the continuation turn / guard
   }
 
   const statusText = askCount > 0

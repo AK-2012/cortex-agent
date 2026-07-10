@@ -33,7 +33,7 @@ import { recordResume } from '@domain/costs/resume-registry.js';
 import { getAgent } from '@domain/threads/index.js';
 import { runConversation } from './conversation-runner.js';
 import { tryAnswerFromHuman } from './manager-qa.js';
-import { isBgContinuationEnabled, isInteractiveChannel } from './bg-continuation.js';
+import { shouldHoldForBg } from './bg-continuation.js';
 import type { ContinuationSink } from '../agent-adapter/types.js';
 import { downloadFiles as downloadPlatformFiles } from './routing/file-handler.js';
 import { WORKSPACE_DIR } from '@core/utils.js';
@@ -186,15 +186,13 @@ export class AgentRunner {
         onPlanWritten: interactiveCallbacks.onPlanWritten,
         onAskUserQuestion: interactiveCallbacks.onAskUserQuestion,
       });
-      // Background-task continuation: if the turn left a run_in_background task running and the
-      // feature is enabled for this interactive channel, keep the streaming callback alive so the
-      // spontaneous continuation turn merges into the same reply (handleAgentSuccess holds the
-      // status and registers a sink). Otherwise clear the callback as usual.
-      const pendingBg = convResult.result?.pendingBackgroundTasks ?? 0;
+      // Background-task continuation: if the turn left background work remaining (running OR
+      // finished-but-unnotified) and the feature is enabled for this interactive channel, keep
+      // the streaming callback alive so the spontaneous continuation turn merges into the same
+      // reply (handleAgentSuccess holds the status, registers a sink, and arms the bg-wait-guard).
+      // Otherwise clear the callback as usual.
       const proc = convResult.agentProcess as { setContinuationSink?: (s: ContinuationSink) => void } | undefined;
-      const holdForBg = isBgContinuationEnabled() && isInteractiveChannel(channel)
-        && pendingBg > 0 && !convResult.result?.rateLimited
-        && typeof proc?.setContinuationSink === 'function';
+      const holdForBg = shouldHoldForBg(convResult.result, channel, typeof proc?.setContinuationSink === 'function');
       if (!holdForBg) clearStreamingCallback(channel);
       await maybeNotifyCodexLowUsage({ adapter, result: convResult.result });
       await handleDefaultAgentResult({

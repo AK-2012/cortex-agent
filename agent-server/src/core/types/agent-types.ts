@@ -27,6 +27,14 @@ export interface AgentResult {
    *  once they finish; orchestration holds the status in a "waiting" state instead of
    *  sealing it as complete. Absent/0 for backends without background-task support. */
   pendingBackgroundTasks?: number;
+  /** Number of background tasks whose WORK finished (task_updated terminal status) but whose
+   *  task_notification has not been observed. The CLI may deliver it seconds later — or never
+   *  (old-CLI same-turn completions; 2026-07-10 investigation). Orchestration holds the status
+   *  but arms a grace watchdog for these instead of waiting forever. */
+  undeliveredBackgroundTasks?: number;
+  /** Set on a synthetic continuation result produced when the Claude process died while
+   *  background tasks were pending — the waiting status must seal as "interrupted". */
+  backgroundInterrupted?: boolean;
 }
 
 export interface AgentHandle {

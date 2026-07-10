@@ -13,8 +13,8 @@ DR-0008 §4.5 fixture-replay tests. Lock down three-backend NormalizedEvent sequ
 | `claude-cost-from-usage.test.ts` | Test | DR-0012 usageToCost pricing math + model normalization |
 | `claude-jsonl-tail.test.ts` | Test | DR-0012 JsonlEventNormalizer + JsonlTail file watcher |
 | `claude-adapter-tui.test.ts` | Test | DR-0012 ClaudeTuiSession turn lifecycle + cancel + cost (mocked tmux/tail) |
-| `claude-bg-task-tracker.test.ts` | Test | BgTaskTracker pending-count + routeLine + isContinuationResult (background-task continuation detection) |
-| `claude-bg-continuation.test.ts` | Test | ClaudeSession handleLine wiring: pendingBackgroundTasks on result + spontaneous continuation routing to sink + compact_boundary → onCompact (no child process) |
+| `claude-bg-task-tracker.test.ts` | Test | BgTaskTracker running/undelivered dual-set semantics (updated{completed/failed}→undelivered, killed→dropped, notification clears) + routeLine + isContinuationResult |
+| `claude-bg-continuation.test.ts` | Test | ClaudeSession handleLine wiring: pending/undelivered counts on result + spontaneous continuation routing to sink + handleProcessClose → backgroundInterrupted sink delivery (waiting window / mid-continuation crash, single-fire) + compact_boundary → onCompact (no child process) |
 | `fixtures/claude/` | Data | 5 Claude stream-json fixtures + golden |
 | `fixtures/codex/` | Data | 2 Codex JSON-RPC fixtures + golden |
 | `fixtures/pi/` | Data | 3 PI RPC fixtures + golden |

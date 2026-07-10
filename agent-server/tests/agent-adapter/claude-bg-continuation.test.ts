@@ -24,6 +24,7 @@ function fakeTurn(capture: { value?: any; error?: any }) {
 }
 
 const TASK_STARTED = JSON.stringify({ type: 'system', subtype: 'task_started', task_id: 'b6vp8rywx', task_type: 'local_bash' });
+const TASK_UPDATED_DONE = JSON.stringify({ type: 'system', subtype: 'task_updated', task_id: 'b6vp8rywx', patch: { status: 'completed' } });
 const TASK_NOTIFICATION = JSON.stringify({ type: 'system', subtype: 'task_notification', task_id: 'b6vp8rywx', status: 'completed', summary: 'done' });
 const RESULT_FIRST = JSON.stringify({ type: 'result', subtype: 'success', is_error: false, total_cost_usd: 0.02, num_turns: 2, session_id: 'test-session' });
 const ASSISTANT_CONT = JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text: 'Background task done: DONE' }] } });
@@ -107,6 +108,78 @@ test('integration: real captured line sequence merges continuation text + dispat
   assert.ok(completedWith, 'production sink dispatched onComplete (seal)');
   assert.equal(completedWith.pendingBackgroundTasks, 0);
   assert.equal(waitingCalls, 0, 'no waiting dispatch when no tasks remain');
+});
+
+// 2026-07-10 investigation: CC does not always deliver task_notification (old-CLI same-turn
+// completions never notify; TaskStop-killed tasks never notify). The result snapshot therefore
+// distinguishes truly-running tasks (pendingBackgroundTasks) from work-done-but-unnotified
+// tasks (undeliveredBackgroundTasks) so orchestration can arm a grace watchdog for the latter.
+test('handleLine: task completed without notification → undelivered, not pending, on result', (t) => {
+  const s: any = _test.makeSessionForTest();
+  s.createTurnStreams = () => ({ rawStream: FAKE_STREAM, txtStream: FAKE_STREAM });
+  t.after(() => s.close());
+
+  const cap: { value?: any } = {};
+  s.currentTurn = fakeTurn(cap);
+
+  s.handleLine(TASK_STARTED);       // background task launched
+  s.handleLine(TASK_UPDATED_DONE);  // work finished mid-turn — no notification yet
+  s.handleLine(RESULT_FIRST);       // turn ends
+
+  assert.ok(cap.value, 'turn resolved');
+  assert.equal(cap.value.pendingBackgroundTasks, 0, 'not counted as still running');
+  assert.equal(cap.value.undeliveredBackgroundTasks, 1, 'reported as undelivered completion');
+});
+
+// F2 (2026-07-10): any process death during the waiting window must notify the sink so the
+// held "background task running" status can be sealed instead of waiting forever.
+test('handleProcessClose: waiting window (bg pending, no active turn) → sink gets backgroundInterrupted exactly once', (t) => {
+  const s: any = _test.makeSessionForTest();
+  s.createTurnStreams = () => ({ rawStream: FAKE_STREAM, txtStream: FAKE_STREAM });
+  t.after(() => s.close());
+
+  const results: any[] = [];
+  s.setContinuationSink({ onAssistantText: () => {}, onResult: (r: any) => results.push(r) });
+
+  s.handleLine(TASK_STARTED); // pending → 1, then the turn ends (no currentTurn: waiting window)
+  s.handleProcessClose(1);    // process dies (restart / crash / kill)
+
+  assert.equal(results.length, 1, 'sink notified once');
+  assert.equal(results[0].backgroundInterrupted, true, 'result flagged as interrupted');
+  assert.equal(s.continuationSink, null, 'sink cleared after notify');
+
+  s.handleProcessClose(1);    // double close must not re-notify
+  assert.equal(results.length, 1, 'no double delivery');
+});
+
+test('handleProcessClose: nothing pending → sink cleared silently (no interrupted call)', (t) => {
+  const s: any = _test.makeSessionForTest();
+  s.createTurnStreams = () => ({ rawStream: FAKE_STREAM, txtStream: FAKE_STREAM });
+  t.after(() => s.close());
+
+  const results: any[] = [];
+  s.setContinuationSink({ onAssistantText: () => {}, onResult: (r: any) => results.push(r) });
+  s.handleProcessClose(0);
+
+  assert.equal(results.length, 0, 'no interrupted delivery for a clean close');
+  assert.equal(s.continuationSink, null, 'sink still cleared (session is gone)');
+});
+
+test('handleProcessClose: crash mid-continuation (spontaneous turn open) → sink gets backgroundInterrupted', (t) => {
+  const s: any = _test.makeSessionForTest();
+  s.createTurnStreams = () => ({ rawStream: FAKE_STREAM, txtStream: FAKE_STREAM });
+  t.after(() => s.close());
+
+  const results: any[] = [];
+  s.setContinuationSink({ onAssistantText: () => {}, onResult: (r: any) => results.push(r) });
+
+  s.handleLine(TASK_STARTED);
+  s.handleLine(TASK_NOTIFICATION);  // arms continuation
+  s.handleLine(ASSISTANT_CONT);     // opens the spontaneous continuation turn
+  s.handleProcessClose(1);          // process dies before the continuation result
+
+  assert.equal(results.length, 1, 'sink notified despite the open spontaneous turn');
+  assert.equal(results[0].backgroundInterrupted, true);
 });
 
 test('handleLine: compact_boundary fires onCompact with trigger + preTokens', (t) => {
