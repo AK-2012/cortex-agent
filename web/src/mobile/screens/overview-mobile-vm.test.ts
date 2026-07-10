@@ -8,6 +8,7 @@ import {
   lastRunLabelZh,
   countTodayExecutions,
   activeThreadCountLabelZh,
+  budgetPercentLabel,
 } from './overview-mobile-vm';
 
 const sched = (p: Partial<ScheduleInfo>): ScheduleInfo => ({
@@ -132,5 +133,16 @@ describe('activeThreadCountLabelZh', () => {
   it('renders N 线程运行中', () => {
     expect(activeThreadCountLabelZh(2)).toBe('2 线程运行中');
     expect(activeThreadCountLabelZh(0)).toBe('0 线程运行中');
+  });
+});
+
+describe('budgetPercentLabel', () => {
+  it('renders the honest — placeholder when there is no budget denominator', () => {
+    expect(budgetPercentLabel(null)).toBe('—%');
+  });
+  it('renders a rounded integer percent for a real value', () => {
+    expect(budgetPercentLabel(0)).toBe('0%');
+    expect(budgetPercentLabel(42.6)).toBe('43%');
+    expect(budgetPercentLabel(100)).toBe('100%');
   });
 });
