@@ -88,7 +88,7 @@ desktop/
 
 | Script | Command | What it does |
 |---|---|---|
-| `copy-connect` | `mkdir -p ../web/dist && cp -f ui/connect.html ../web/dist/connect.html` | Stage connect screen into web/dist |
+| `copy-connect` | `node -e "fs.mkdirSync('../web/dist',{recursive:true}); fs.copyFileSync('ui/connect.html','../web/dist/connect.html')"` | Stage connect screen into web/dist (cross-platform node one-liner — the old `mkdir -p && cp` shell form failed on Windows cmd.exe) |
 | `dev` | `npm run copy-connect && tauri dev` | Copy connect.html + launch Tauri dev window |
 | `build` | `npm run copy-connect && tauri build` | Copy connect.html + produce app bundle |
 
