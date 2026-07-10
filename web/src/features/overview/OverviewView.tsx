@@ -18,17 +18,23 @@ import {
   execCost,
   execStatusPill,
   execSummary,
+  budgetPercent,
+  formatPerDay,
+  dailySeriesBars,
+  dailyAverage,
+  whereItGoesRows,
 } from './overview-vm';
 
 // PROJECT OVERVIEW 6a — 1:1 from prototype.dc.html L525–655 (Stage-R R2, task df67). Exact inline
 // styles / px / hex / font / weight / EN copy reproduced verbatim; real tRPC data substituted into
 // the design's structure: cost header (today/week/month) = real cost.summary; Schedules = real
-// schedules.list; Executions = real executions.list. Data-gap regions render the prototype's
-// structural chrome 1:1 with neutral placeholders (NOT fabricated numbers), each flagged:
-//   - budget bar / budget-per-day / forecast today — CostSummary has no budget or forecast field (Stage 7)
-//   - Last 14 days chart — no per-day cost series (structural skeleton, real todayCost label; Stage 7)
-//   - Where it goes — byTrigger is free-form + global, no threads/sessions/schedules breakdown (Stage 7)
-//   - Project memory — no fs-read tRPC scope → EXPLICIT placeholder (Stage 6)
+// schedules.list; Executions = real executions.list.
+//   - REAL (task 302b, CostSummary c489 fields): budget bar + `$/day` = real dailyBudget denom + today %;
+//     forecast today = real forecastToday; Last 14 days = real dailyCost per-day series + real avg;
+//     Where it goes = real project-scoped byTriggerScoped breakdown. Honest guards remain: absent/0
+//     dailyBudget → empty bar + `—`; empty byTriggerScoped → no-spend line (never fabricated numbers).
+//   - Project memory — real memory viewer link (memory.tree/memory.file fs scope).
+//   - Adjust-budget + ⋯ are inert (no budget-mutate scope).
 
 const CARD: CSSProperties = {
   background: '#fff',
@@ -83,6 +89,14 @@ export function OverviewView(): JSX.Element {
     enabled: !!activeProjectId,
   });
   const cost = costQuery.data;
+
+  // Real cost-derived view models (task 302b). budgetPct is null when there is no daily-budget
+  // denominator → the bar renders empty. dailyBars / avg / whereRows are the honest empty [] / null
+  // when the scoped series or breakdown carries no spend.
+  const budgetPct = budgetPercent(cost?.today, cost?.dailyBudget);
+  const dailyBars = useMemo(() => dailySeriesBars(cost?.dailyCost), [cost?.dailyCost]);
+  const avgPerDay = useMemo(() => dailyAverage(cost?.dailyCost), [cost?.dailyCost]);
+  const whereRows = useMemo(() => whereItGoesRows(cost?.byTriggerScoped, 'week'), [cost?.byTriggerScoped]);
 
   const schedulesQuery = useQuery({
     ...trpc.schedules.list.queryOptions({ projectId: activeProjectId ?? undefined }),
@@ -171,9 +185,10 @@ export function OverviewView(): JSX.Element {
             <span style={{ font: "600 22px 'IBM Plex Mono',monospace", color: '#191C22', letterSpacing: '-.02em' }}>
               {formatMoney(cost?.today)}
             </span>
-            {/* budget progress bar — GAP: no daily-budget field, empty track (Stage 7) */}
+            {/* budget progress bar — REAL: today's scoped spend as % of the daily budget (empty when
+                there is no positive daily-budget denominator, honest placeholder) */}
             <div style={{ flex: 1, height: 5, borderRadius: 999, background: '#EFF1F5', overflow: 'hidden', marginTop: 2 }}>
-              <div style={{ width: '0%', height: '100%', background: '#4655D4' }} />
+              <div style={{ width: `${budgetPct ?? 0}%`, height: '100%', background: '#4655D4' }} />
             </div>
           </div>
         </div>
@@ -187,15 +202,16 @@ export function OverviewView(): JSX.Element {
         </div>
         <div>
           <div style={{ fontSize: 10, color: '#98A1B0', marginBottom: 3 }}>budget</div>
-          {/* GAP: no budget scope (Stage 7) */}
+          {/* REAL: dailyBudget from budget.json (global daily cap). `—` when unset (honest). */}
           <div style={{ font: "600 15px 'IBM Plex Mono',monospace", color: '#22262E' }}>
-            —<span style={{ fontSize: 10, color: '#98A1B0', fontWeight: 400 }}> /day</span>
+            {formatPerDay(cost?.dailyBudget)}
+            <span style={{ fontSize: 10, color: '#98A1B0', fontWeight: 400 }}> /day</span>
           </div>
         </div>
         <div style={{ marginLeft: 'auto', textAlign: 'right' }}>
           <div style={{ fontSize: 10, color: '#98A1B0', marginBottom: 3 }}>forecast today</div>
-          {/* GAP: no forecast field (Stage 7) */}
-          <div style={{ font: "600 15px 'IBM Plex Mono',monospace", color: '#A96B0B' }}>—</div>
+          {/* REAL: forecastToday = scoped spend extrapolated by elapsed fraction of the local day */}
+          <div style={{ font: "600 15px 'IBM Plex Mono',monospace", color: '#A96B0B' }}>{formatMoney(cost?.forecastToday)}</div>
         </div>
       </div>
 
@@ -214,33 +230,45 @@ export function OverviewView(): JSX.Element {
           alignContent: 'start',
         }}
       >
-        {/* Last 14 days — GAP: no per-day cost series; structural skeleton + real today label (Stage 7) */}
+        {/* Last 14 days — REAL: per-calendar-day scoped cost series (oldest→newest, last = today),
+            normalized to the series max; the today bar carries its real cost label. avg = real mean. */}
         <div style={CARD}>
-          <CardHeader title="Last 14 days" right="avg —/day" />
+          <CardHeader title="Last 14 days" right={`avg ${avgPerDay == null ? '—' : formatMoney(avgPerDay)}/day`} />
           <div style={{ padding: '14px 14px 10px' }}>
             <div style={{ display: 'flex', alignItems: 'flex-end', gap: 5, height: 96 }}>
-              {[22, 34, 18, 41, 12, 8, 29, 47, 36, 64, 52, 58, 71].map((h, i) => (
-                <div key={i} style={{ flex: 1, background: '#E3E6F0', borderRadius: '3px 3px 0 0', height: `${h}%` }} />
-              ))}
-              <div style={{ flex: 1, position: 'relative', background: '#4655D4', borderRadius: '3px 3px 0 0', height: '42%' }}>
-                <div
-                  style={{
-                    position: 'absolute',
-                    bottom: '100%',
-                    left: '50%',
-                    transform: 'translateX(-50%)',
-                    marginBottom: 5,
-                    font: "600 9.5px 'IBM Plex Mono',monospace",
-                    color: '#4655D4',
-                    whiteSpace: 'nowrap',
-                  }}
-                >
-                  {formatMoney(cost?.today)}
-                </div>
-              </div>
+              {dailyBars.map((bar) =>
+                bar.isToday ? (
+                  <div
+                    key={bar.date}
+                    title={`${bar.date} · ${formatMoney(bar.cost)}`}
+                    style={{ flex: 1, position: 'relative', background: '#4655D4', borderRadius: '3px 3px 0 0', height: `${bar.pct}%` }}
+                  >
+                    <div
+                      style={{
+                        position: 'absolute',
+                        bottom: '100%',
+                        left: '50%',
+                        transform: 'translateX(-50%)',
+                        marginBottom: 5,
+                        font: "600 9.5px 'IBM Plex Mono',monospace",
+                        color: '#4655D4',
+                        whiteSpace: 'nowrap',
+                      }}
+                    >
+                      {formatMoney(bar.cost)}
+                    </div>
+                  </div>
+                ) : (
+                  <div
+                    key={bar.date}
+                    title={`${bar.date} · ${formatMoney(bar.cost)}`}
+                    style={{ flex: 1, background: '#E3E6F0', borderRadius: '3px 3px 0 0', height: `${bar.pct}%` }}
+                  />
+                ),
+              )}
             </div>
             <div style={{ display: 'flex', alignItems: 'center', marginTop: 7, font: "400 9px 'IBM Plex Mono',monospace", color: '#B6BDC9' }}>
-              <span>—</span>
+              <span>{dailyBars[0]?.date ?? '—'}</span>
               <span style={{ marginLeft: 'auto', color: '#4655D4', fontWeight: 600 }}>today</span>
             </div>
           </div>
@@ -257,17 +285,42 @@ export function OverviewView(): JSX.Element {
           </div>
         </div>
 
-        {/* Where it goes — GAP: byTrigger is free-form + global, no per-category breakdown (Stage 7) */}
+        {/* Where it goes — REAL: project-scoped byTriggerScoped weekly breakdown. Rows are real trigger
+            names (not the prototype's mock threads/sessions/schedules labels), sorted desc + capped;
+            proportional bars. Empty → honest no-spend line (never fabricated bars). */}
         <div style={CARD}>
           <CardHeader title="Where it goes" right="this week" />
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10, padding: '13px 14px 14px' }}>
-            {(['threads', 'sessions', 'schedules'] as const).map((label, i) => (
-              <div key={label} style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
-                <span style={{ fontSize: 10.5, color: '#5B6472', width: 56 }}>{label}</span>
+            {whereRows.length === 0 && (
+              <div style={{ fontSize: 10.5, color: '#B6BDC9', padding: '2px 0' }}>No spend recorded this week.</div>
+            )}
+            {whereRows.map((row, i) => (
+              <div key={row.label} style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
+                <span
+                  title={row.label}
+                  style={{
+                    fontSize: 10.5,
+                    color: '#5B6472',
+                    width: 56,
+                    whiteSpace: 'nowrap',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                  }}
+                >
+                  {row.label}
+                </span>
                 <div style={{ flex: 1, height: 6, borderRadius: 999, background: '#EFF1F5', overflow: 'hidden' }}>
-                  <div style={{ width: '0%', height: '100%', background: ['#4655D4', '#9AA3E8', '#D4D8F4'][i] }} />
+                  <div
+                    style={{
+                      width: `${row.pct}%`,
+                      height: '100%',
+                      background: ['#4655D4', '#9AA3E8', '#D4D8F4'][i % 3],
+                    }}
+                  />
                 </div>
-                <span style={{ font: "500 10px 'IBM Plex Mono',monospace", color: '#191C22', width: 40, textAlign: 'right' }}>—</span>
+                <span style={{ font: "500 10px 'IBM Plex Mono',monospace", color: '#191C22', width: 40, textAlign: 'right' }}>
+                  {formatMoney(row.cost)}
+                </span>
               </div>
             ))}
           </div>

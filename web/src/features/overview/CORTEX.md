@@ -11,8 +11,8 @@ mirroring the prototype's `isOverview` state. Diffed vs `proto-shots/10-overview
 |---|---|
 | `OverviewPage.tsx` | Route `/overview`. The 240/fluid/400 flex frame (same as `WorkbenchPage`) assembling `<LeftRail/> <OverviewView/> <RightPanel/>`. |
 | `OverviewView.tsx` | The center pane 1:1 (prototype L525–655): header bar (‹ back → `/workbench` · projName · Overview · Adjust-budget · ⋯) + cost summary bar + 2-col card grid (Last-14-days · Project memory · Where-it-goes · Schedules · Executions span-2). Exact inline styles/px/hex/font/weight/EN copy; real tRPC data substituted. |
-| `overview-vm.ts` | **Pure** VM helpers (TDD): `formatMoney` · `deriveActiveProjectId` (mirrors LeftRail) · `scheduleIntervalLabel` · `scheduleProfileLabel` (real `ScheduleInfo.profile`, `''` when absent) · `nextRunLabel`/`lastRunLabel` (relative humanize) · `execDurationMs`/`formatDuration` · `execMachine`/`execCost`/`execStatusPill` (verbatim §5 pill hexes)/`execSummary`. |
-| `overview-vm.test.ts` | vitest for `overview-vm.ts` (19 tests, written first). |
+| `overview-vm.ts` | **Pure** VM helpers (TDD): `formatMoney` · `deriveActiveProjectId` (mirrors LeftRail) · `scheduleIntervalLabel` · `scheduleProfileLabel` (real `ScheduleInfo.profile`, `''` when absent) · `nextRunLabel`/`lastRunLabel` (relative humanize) · `execDurationMs`/`formatDuration` · `execMachine`/`execCost`/`execStatusPill` (verbatim §5 pill hexes)/`execSummary` · **real cost fields (task 302b)** `budgetPercent` (today ÷ dailyBudget, clamp [0,100], `null` when no positive denom) · `formatPerDay` (dailyBudget or `—`) · `dailySeriesBars` (14-day series → bars normalized to series max + `isToday`) · `dailyAverage` (series mean or `null`) · `whereItGoesRows` (byTriggerScoped → weekly rows, drop-zero + sort-desc + cap 5 + proportional pct). Nested cost types reached via indexed access on `CostSummary` (no ui-contract re-export churn). |
+| `overview-vm.test.ts` | vitest for `overview-vm.ts` (36 tests, written first). |
 
 ## Real data vs data-gap placeholders
 
@@ -24,17 +24,23 @@ mirroring the prototype's `isOverview` state. Diffed vs `proto-shots/10-overview
   filtered client-side by project (id · summary · machine · dur · cost · status pill · Logs →
   `useExecutionLogDrawer().open(id)`, the b963 execution-log drawer overlay). Active project =
   most-recent session's project (`deriveActiveProjectId`).
-- **EXPLICIT placeholder** (mandated): **Project memory** — no fs-read tRPC scope → placeholder note
-  (**Stage 6**), not fabricated file rows.
-- **Structural chrome 1:1 + neutral placeholder (flagged, no fabricated numbers)**: budget bar +
-  `budget /day` + `forecast today` — `CostSummary` has no budget/forecast field (**Stage 7**); **Last
-  14 days** — no per-day cost series → structural bar skeleton + real `today` label, `avg —/day`
-  (**Stage 7**); **Where it goes** — `byTrigger` is free-form + global, no threads/sessions/schedules
-  breakdown → empty bars + `—` (**Stage 7**). Adjust-budget + ⋯ are inert (no budget mutate scope).
-  The Schedules `+ New` now opens the New-schedule overlay (`features/schedule`, real `schedules.add`).
+- **REAL cost (task 302b, backed by the `CostSummary` c489 fields)**: **budget bar** = today's scoped
+  spend as a % of `dailyBudget` (`budgetPercent`); **`budget /day`** = real `dailyBudget` (`formatPerDay`);
+  **`forecast today`** = real `forecastToday`; **Last 14 days** = real `dailyCost` per-calendar-day series
+  (`dailySeriesBars`, normalized to the series max, today bar carries its real cost label) + real `avg`
+  (`dailyAverage`); **Where it goes** = real project-scoped `byTriggerScoped` weekly breakdown
+  (`whereItGoesRows`, real trigger names — not the prototype's mock threads/sessions/schedules labels —
+  sorted desc, capped, proportional bars). **Honest guards** (never fabricated): absent/0 `dailyBudget`
+  → empty bar + `—`; empty `byTriggerScoped` → "No spend recorded this week." line. NOTE `dailyBudget` is
+  the global `budget.json` daily cap while `today` is project-scoped — the ratio mixes a system-wide
+  denominator with scoped spend, by contract.
+- **EXPLICIT placeholder** (mandated): **Project memory** — real memory viewer link (memory.tree/
+  memory.file fs scope). Adjust-budget + ⋯ are inert (no budget-mutate scope). The Schedules `+ New`
+  opens the New-schedule overlay (`features/schedule`, real `schedules.add`).
 
 ## Notes
 
-- Existing ui-service contract (`projects.list`/`sessions.list`/`cost.summary`/`schedules.list`/
-  `schedules.resume`/`executions.list`), plus the `ScheduleInfo.profile` field added to `schedules.list`
-  (surfaces the schedule's configured agent profile; the only paired backend change for this card).
+- ui-service contract used: `projects.list`/`sessions.list`/`cost.summary` (incl. the c489 additive
+  `dailyBudget`/`forecastToday`/`dailyCost`/`byTriggerScoped` fields, type-only re-exported by
+  `@cortex-agent/ui-contract`)/`schedules.list`/`schedules.resume`/`executions.list`, plus the
+  `ScheduleInfo.profile` field. No backend change in task 302b — the cost fields already flow.
