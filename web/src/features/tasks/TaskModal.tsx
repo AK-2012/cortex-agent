@@ -7,8 +7,10 @@ import { buildTaskModalVm } from './task-modal-vm';
 // `tasks.list` data substituted into the structure (see task-modal-vm.ts). Backdrop / esc-chip /
 // Escape-key all close. Complete → tasks.complete, Unblock → tasks.unblock (owned by TasksPanel).
 //
+// REAL centerpiece: WHY + DONE-WHEN in Card A now bind the real `TaskInfo.why` / `TaskInfo.doneWhen`
+// (task store `why` / `done-when`); when a task genuinely has neither, the honest placeholder shows
+// (null-safe — no fabrication).
 // DATA GAPS rendered structurally + flagged (workbench precedent):
-//   • GAP-WHY / GAP-DW : TaskInfo has no `why` / `doneWhen` → placeholder text in Card A.
 //   • GAP-VERIFY       : no done-when evidence tRPC scope → verification card is a placeholder.
 //   • GAP-HIST         : no per-task execution join → dispatch-history card is a placeholder.
 //   • GAP-GPU          : no gpu on TaskInfo → Fields gpu renders "—" (matches the T-046 proto-shot).
@@ -181,8 +183,11 @@ export function TaskModal({ task, allTasks, pending, onClose, onComplete, onUnbl
                 >
                   WHY
                 </span>
-                {/* GAP-WHY: TaskInfo has no `why` field. */}
-                <GapNote>— not exposed by tasks.list (no `why` field)</GapNote>
+                {task.why != null ? (
+                  <span>{task.why}</span>
+                ) : (
+                  <GapNote>— no `why` recorded on this task</GapNote>
+                )}
               </div>
               <div
                 style={{
@@ -196,7 +201,8 @@ export function TaskModal({ task, allTasks, pending, onClose, onComplete, onUnbl
                 DONE-WHEN
               </div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
-                {/* GAP-DW: TaskInfo has no `doneWhen` list. One placeholder row (prototype checklist shape). */}
+                {/* Real `doneWhen` (single done-when string from the task store) rendered in the
+                    prototype checklist-row shape; honest placeholder when the task has none. */}
                 <div
                   style={{
                     display: 'flex',
@@ -222,7 +228,11 @@ export function TaskModal({ task, allTasks, pending, onClose, onComplete, onUnbl
                       marginTop: 1.5,
                     }}
                   />
-                  <GapNote>— done-when checklist not exposed by tasks.list</GapNote>
+                  {task.doneWhen != null ? (
+                    <span>{task.doneWhen}</span>
+                  ) : (
+                    <GapNote>— no done-when recorded on this task</GapNote>
+                  )}
                 </div>
               </div>
             </div>

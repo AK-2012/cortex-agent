@@ -375,6 +375,10 @@ export interface TaskInfo {
   dependsOn: string[];
   plan: string | null;
   template: string;
+  /** The task's rationale (task store `why`). Null when absent/empty (null-safe). */
+  why: string | null;
+  /** The task's completion criteria (task store `done-when`). Null when absent/empty (null-safe). */
+  doneWhen: string | null;
 }
 
 export interface ScheduleInfo {

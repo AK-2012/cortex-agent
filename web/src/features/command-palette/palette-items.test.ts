@@ -46,6 +46,8 @@ function task(over: Partial<TaskInfo> = {}): TaskInfo {
     dependsOn: [],
     plan: null,
     template: 'coder-review',
+    why: null,
+    doneWhen: null,
     ...over,
   };
 }

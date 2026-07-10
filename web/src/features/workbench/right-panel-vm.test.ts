@@ -200,6 +200,8 @@ describe('actionableCount', () => {
       dependsOn: [],
       plan: null,
       template: 'coder-review',
+      why: null,
+      doneWhen: null,
     });
     expect(actionableCount([t(true), t(false), t(true)])).toBe(2);
     expect(actionableCount([])).toBe(0);

@@ -143,13 +143,19 @@ function ClaimableCard({
               >
                 {vocab.mDoneWhen}
               </div>
-              {/* Honest data-gap placeholder: TaskInfo carries no structured done-when; web-only, no
-                  backend scope to fetch it. No fabricated checklist (守则11). */}
-              <div
-                style={{ fontSize: 11.5, lineHeight: 1.5, color: '#8A93A2', fontStyle: 'italic' }}
-              >
-                {vocab.mDoneWhenGap}
-              </div>
+              {/* Real `doneWhen` (task store done-when) when present; honest placeholder when the
+                  task has none (null-safe, no fabrication — 守则11). */}
+              {task.doneWhen != null ? (
+                <div style={{ fontSize: 11.5, lineHeight: 1.5, color: '#22262E' }}>
+                  {task.doneWhen}
+                </div>
+              ) : (
+                <div
+                  style={{ fontSize: 11.5, lineHeight: 1.5, color: '#8A93A2', fontStyle: 'italic' }}
+                >
+                  {vocab.mDoneWhenGap}
+                </div>
+              )}
             </div>
           )}
         </div>
