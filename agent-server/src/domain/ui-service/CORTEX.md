@@ -1,15 +1,15 @@
 # ui-service/ — M3 Cortex UI Service
 
 Transport-agnostic facade over domain modules providing `query`, `mutate`, and `subscribe` primitives.
-No transport coupling (no ws/http imports; the tRPC router uses @trpc/server CORE only — HTTP/SSE adapters
-live in the transport-host). Consumed by M5 TUI dashboard and the Web UI (tRPC AppRouter below).
+This module is `@trpc`-free (facade only): the tRPC binding (`trpc.ts` + `app-router.ts`) and the
+HTTP/SSE transport-host moved to the optional `@cortex-agent/ui-server` package in Stage 9 §9.1, so
+Slack/TUI-only core carries no @trpc weight. Consumed directly by the M5 TUI dashboard (createUiService),
+and — via the AppRouter that ui-server builds over this facade — by the Web UI.
 
 | filename | role | function |
 |---|---|---|
 | `types.ts` | types | Result, QueryScope, MutateOp, SubscribeFilter, UiEvent, UiService interface, DTOs |
-| `input-schemas.ts` | schemas | Source-of-truth zod input schema per QueryScope / MutateOp + `queryInputSchemas` / `mutateInputSchemas` keyed maps. Consumed by the AppRouter; re-exported (runtime) by `@cortex-agent/ui-contract` for the browser. Kept here (not in ui-contract) so the router can consume it without agent-server importing ui-contract, which would close a workspace build cycle |
-| `trpc.ts` | tRPC init | Shared `initTRPC.create()` — exports `router` / `publicProcedure` / `createCallerFactory` (transport-agnostic) |
-| `app-router.ts` | tRPC router | `createAppRouter(uiService): AppRouter` — mirrors the full contract (14 query + 16 mutation + 2 subscriptions: generic `subscribe` + `executions.log`; `subscribeFilterInput` carries `sessionId` for the S4 `session.message` stream) over the injected UiService; unwraps `Result`, maps `Err`→`TRPCError`. `AppRouter` type re-exported by `@cortex-agent/ui-contract` |
+| `input-schemas.ts` | schemas | Source-of-truth zod input schema per QueryScope / MutateOp + `queryInputSchemas` / `mutateInputSchemas` keyed maps. Consumed by `@cortex-agent/ui-server`'s AppRouter (deep-imports the built dist) + re-exported (runtime) by `@cortex-agent/ui-contract` for the browser. Kept here (not in ui-contract) so the router can consume it without agent-server importing ui-contract, which would close a workspace build cycle |
 | `ui-service.ts` | facade | createUiService(deps) — routes scope/op strings to per-module handlers; `subscribeExecutionLog(executionId)` (B2-C) resolves the run's log location, ref-counts the tailer, streams `execution.log` over the bounded queue |
 | `subscribe.ts` | subscribe | EventBus → AsyncIterable&lt;UiEvent&gt; with bounded queue (cap 256, drop-oldest + synthetic `ui-subscribe.dropped`); post-filters by projectId, (B2-C) executionId, and (S4) sessionId — scopes `session.message` to one session (no cross-session leak) |
 | `index.ts` | barrel | re-exports createUiService and public types |

@@ -8,9 +8,9 @@ Cortex is an autonomous research agent system for robotics and AI/ML. It runs as
 |-----------|---------|
 | `agent-server/` | Main server application (TypeScript, Node.js >=20). Slack/Feishu bot, LLM orchestration, scheduling, task system, MCP tools. See [agent-server/CORTEX.md](agent-server/CORTEX.md). |
 | `client/` | Remote agent client (TypeScript, Node.js >=20). Connects to agent-server via WebSocket, executes bash/read/write/edit/glob/grep commands locally, supports cortex-run for long-running task execution. See [client/src/CORTEX.md](client/src/CORTEX.md). |
-| `web/` | Web SPA (Vite + React 18, tRPC client). Built to `web/dist` which is served by agent-server's `ui-http-server` and by the desktop shell. |
+| `web/` | Web SPA (Vite + React 18, tRPC client). Built to `web/dist` which is served same-origin by the `@cortex-agent/ui-server` package's HTTP host and by the desktop shell. |
 | `desktop/` | Tauri v2 desktop shell. Loads `web/dist` via asset protocol in a native webview. Exposes `get_connection_config` / `set_connection_config` Tauri commands plus `window.__CORTEX_DESKTOP_CONFIG` for injecting `{serverUrl, token}` into the SPA. See [desktop/CORTEX.md](desktop/CORTEX.md). |
-| `packages/` | Shared packages (e.g. `ui-contract` — re-exported tRPC types for the web SPA). |
+| `packages/` | Shared packages: `ui-contract` (re-exported tRPC types for the web SPA) and `ui-server` (`@cortex-agent/ui-server` — optional Web UI transport: tRPC AppRouter binding + HTTP/SSE host + SPA serving, loaded on demand by agent-server behind CORTEX_UI_HTTP). |
 | `context/` | Structured knowledge repository for research projects (experiments, knowledge entries, patterns). |
 | `tmp/` | Experiment artifacts, analysis scripts, logs, and working files. |
 | `.claude/` | Claude Code configuration (settings.json, hooks, plans). |

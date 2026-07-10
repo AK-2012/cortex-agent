@@ -61,7 +61,13 @@ Project→conduit mapping (formerly `channel-repo.ts`) has moved into `platform/
 | `status-helpers.ts` | execution / status-message / streaming-VM helpers (pure subset has been sunk to `core/status-format.ts`) |
 
 ### L5: entry/
-`app.ts` (composition root, S13: <200 lines) `daemon.ts` `startup-helpers.ts` `startup-notify.ts` `start-ui-http.ts` (Web UI wiring: build createAppRouter(uiService) + start createUiHttpServer on CORTEX_UI_PORT/3004 behind getClientToken, opt-in via CORTEX_UI_HTTP; null when off; **CORS allow-list resolved from opts.corsOrigins else CORTEX_UI_CORS_ORIGINS env (comma-separated)** and passed to the transport-host, so app.ts honors CORS for the Tauri desktop webview via env with no code change)
+`app.ts` (composition root, S13: <200 lines; the Web UI transport-host is loaded on demand via a CORTEX_UI_HTTP-gated `await import('@cortex-agent/ui-server')` — dynamic so core stays @trpc-free when the flag is off) `daemon.ts` `startup-helpers.ts` `startup-notify.ts`
+
+The Web UI transport (tRPC AppRouter binding + HTTP/SSE host + same-origin SPA serving; formerly
+`entry/start-ui-http.ts` + `domain/ui-service/{trpc,app-router}.ts` + `platform/ui-http/`) moved to
+the optional **`@cortex-agent/ui-server`** workspace package in Stage 9 §9.1, keeping `@trpc/server`
+out of the core runtime dependency tree. CORS is still resolved from `CORTEX_UI_CORS_ORIGINS` and the
+SPA is served same-origin from `CORTEX_UI_SPA_DIR` (else the monorepo `web/dist`).
 
 ### Other static directories
 | Directory | Contents |
