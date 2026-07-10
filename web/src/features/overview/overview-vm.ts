@@ -3,6 +3,7 @@ import type {
   ExecutionInfo,
   SessionInfo,
   ProjectConduitInfo,
+  CostSummary,
 } from '@cortex-agent/ui-contract';
 
 // Pure view-model helpers for the project Overview 6a center view (prototype.dc.html L525–655,
@@ -12,6 +13,105 @@ import type {
 /** `$4.21` — two decimals, null/undefined → `$0.00`. */
 export function formatMoney(n: number | null | undefined): string {
   return '$' + (n ?? 0).toFixed(2);
+}
+
+// ── Real cost fields (task 302b) — backed by the CostSummary c489 additions:
+//    dailyBudget / forecastToday / dailyCost (14-day series) / byTriggerScoped (where-it-goes).
+//    Nested element/value types are reached via indexed access on CostSummary so ui-contract needs
+//    no extra re-export (DailyCostPoint / PeriodBucket are not exported by name).
+
+type DailyCost = CostSummary['dailyCost'];
+type TriggerBreakdown = CostSummary['byTriggerScoped'];
+
+/** How many where-it-goes trigger rows fit the card before truncating. */
+const WHERE_IT_GOES_MAX_ROWS = 5;
+
+/**
+ * Today's scoped spend as a percent of the daily budget, clamped to [0, 100]. Returns `null` when
+ * the budget is absent or non-positive (no denominator → the bar renders empty, honest placeholder).
+ * NOTE: `dailyBudget` is the global `budget.json` daily cap (not per-project) while `today` is
+ * project-scoped — the ratio mixes a system-wide denominator with scoped spend, by contract.
+ */
+export function budgetPercent(
+  today: number | null | undefined,
+  dailyBudget: number | null | undefined,
+): number | null {
+  if (dailyBudget == null || dailyBudget <= 0) return null;
+  const pct = ((today ?? 0) / dailyBudget) * 100;
+  return Math.max(0, Math.min(100, pct));
+}
+
+/** The `budget` column value, e.g. `$50.00` (`/day` suffix rendered separately). `—` when absent. */
+export function formatPerDay(dailyBudget: number | null | undefined): string {
+  if (dailyBudget == null || dailyBudget <= 0) return '—';
+  return formatMoney(dailyBudget);
+}
+
+export interface DailyBar {
+  /** Bar height as a percent of the series max cost (0 when the series max is 0). */
+  pct: number;
+  /** `YYYY-MM-DD` local calendar day. */
+  date: string;
+  /** Real cost for this day. */
+  cost: number;
+  /** True for the last (most-recent) point — today. */
+  isToday: boolean;
+}
+
+/**
+ * Map the real 14-day cost series (oldest→newest, last = today) to bar descriptors normalized to the
+ * series max. Empty/undefined → `[]`; an all-zero series → all `0%` (no div-by-zero / NaN).
+ */
+export function dailySeriesBars(dailyCost: DailyCost | null | undefined): DailyBar[] {
+  if (!dailyCost || dailyCost.length === 0) return [];
+  const max = dailyCost.reduce((m, d) => Math.max(m, d.cost), 0);
+  const last = dailyCost.length - 1;
+  return dailyCost.map((d, i) => ({
+    pct: max > 0 ? (d.cost / max) * 100 : 0,
+    date: d.date,
+    cost: d.cost,
+    isToday: i === last,
+  }));
+}
+
+/** Mean cost across the 14-day series; `null` for an empty/undefined series. */
+export function dailyAverage(dailyCost: DailyCost | null | undefined): number | null {
+  if (!dailyCost || dailyCost.length === 0) return null;
+  const sum = dailyCost.reduce((s, d) => s + d.cost, 0);
+  return sum / dailyCost.length;
+}
+
+export interface WhereItGoesRow {
+  /** Trigger name (real, free-form key). */
+  label: string;
+  /** This-week scoped cost for the trigger. */
+  cost: number;
+  /** Share of the shown rows' total spend, as a percent. */
+  pct: number;
+}
+
+/**
+ * Project-scoped "where it goes" rows from the real `byTriggerScoped` breakdown. Reads each bucket's
+ * weekly spend (the card header reads "this week"), drops zero-spend triggers, sorts desc, caps to
+ * what fits the card, and computes each row's share of the shown total. Empty/undefined → `[]` (the
+ * card then shows an honest no-spend line — never fabricated bars).
+ */
+export function whereItGoesRows(
+  byTriggerScoped: TriggerBreakdown | null | undefined,
+  period: 'week' | 'today' | 'month' = 'week',
+): WhereItGoesRow[] {
+  if (!byTriggerScoped) return [];
+  const entries = Object.entries(byTriggerScoped)
+    .map(([label, bucket]) => ({ label, cost: bucket[period] }))
+    .filter((e) => e.cost > 0)
+    .sort((a, b) => b.cost - a.cost)
+    .slice(0, WHERE_IT_GOES_MAX_ROWS);
+  const total = entries.reduce((s, e) => s + e.cost, 0);
+  return entries.map((e) => ({
+    label: e.label,
+    cost: e.cost,
+    pct: total > 0 ? (e.cost / total) * 100 : 0,
+  }));
 }
 
 /** Active project = project of the most-recently-used session, else the first listed project. */
