@@ -16,6 +16,7 @@
   },
   "dependencies": {
     "@trpc/server": "^11",
+    "jose": "^6",
     "zod": "^4.4.3",
     "@cortex-agent/server": "workspace:*"
   },

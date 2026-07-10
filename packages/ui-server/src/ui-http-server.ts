@@ -1,12 +1,16 @@
-// input:  an AnyRouter (injected) + a token accessor + core/auth + @trpc/server standalone adapter
-// output: createUiHttpServer({ router, getToken, port, host?, spaDir?, corsOrigins? }) -> { server, close() }
+// input:  an AnyRouter (injected) + a token accessor + optional Access-JWT verifier + core/auth +
+//          @trpc/server standalone adapter
+// output: createUiHttpServer({ router, getToken, port, host?, spaDir?, corsOrigins?, verifyAccessJwt? }) -> { server, close() }
 // pos:    Web UI transport-host, in the @cortex-agent/ui-server package. Mounts the injected tRPC
 //         router on the standalone HTTP adapter (query/mutate over HTTP, subscription over SSE —
-//         tRPC v11), gated by an x-cortex-token bearer check BEFORE tRPC (mirrors webhook +
-//         WS-upgrade), and serves the built SPA static files for non-tRPC paths. Generic over
-//         AnyRouter — the concrete AppRouter is injected by start-ui-http.ts, keeping this file
-//         router-agnostic. Bound 127.0.0.1 by default. Reads AUTH_HEADER / timingSafeEqualStr and
-//         createLogger from the core package's built dist (narrow deep-import).
+//         tRPC v11), gated by a DUAL-PATH auth check BEFORE tRPC, and serves the built SPA static
+//         files for non-tRPC paths. Generic over AnyRouter — the concrete AppRouter is injected by
+//         start-ui-http.ts, keeping this file router-agnostic. Bound 127.0.0.1 by default. Reads
+//         AUTH_HEADER / timingSafeEqualStr and createLogger from the core package's built dist.
+//         Auth gate: (1) a matching x-cortex-token (desktop/machine clients — byte-for-byte the
+//         prior behaviour, checked first, synchronous) OR (2) a validly-signed Cf-Access-Jwt-Assertion
+//         (Cloudflare Access JWT — the browser path; verified via the injected verifyAccessJwt).
+//         Neither/invalid → 401. When no verifier is injected, only the token path is live.
 //         CORS allow-list: optional corsOrigins[] lets the Tauri desktop webview (cross-origin,
 //         e.g. tauri://localhost) reach tRPC endpoints directly without a proxy. Non-wildcard only
 //         — the origin is echoed verbatim when it's in the allow-list.
@@ -19,8 +23,12 @@ import { createHTTPServer } from '@trpc/server/adapters/standalone';
 import type { AnyRouter } from '@trpc/server';
 import { AUTH_HEADER, timingSafeEqualStr } from '@cortex-agent/server/dist/core/auth.js';
 import { createLogger } from '@cortex-agent/server/dist/core/log.js';
+import type { AccessJwtVerifier } from './access-jwt.js';
 
 const log = createLogger('ui-http');
+
+/** Header carrying the Cloudflare Access assertion JWT the edge injects (lowercased by Node). */
+const ACCESS_JWT_HEADER = 'cf-access-jwt-assertion';
 
 /** tRPC is mounted under this base path (matches the web client `httpBatchLink({ url: '/trpc' })`). */
 const TRPC_BASE_PATH = '/trpc/';
@@ -50,6 +58,13 @@ export interface UiHttpServerOptions {
    * When absent or empty, no CORS headers are emitted — backward-compatible default.
    */
   corsOrigins?: string[];
+  /**
+   * Optional Cloudflare Access JWT verifier. When present, a request that fails the x-cortex-token
+   * check is admitted if it carries a valid `Cf-Access-Jwt-Assertion` (signature/aud/iss/exp all
+   * pass). When absent, only the token path is live — the browser (Access) path is disabled, so an
+   * unconfigured Access deployment degrades to token-only rather than admitting requests.
+   */
+  verifyAccessJwt?: AccessJwtVerifier;
 }
 
 export interface UiHttpServer {
@@ -76,6 +91,22 @@ function isAuthorized(req: http.IncomingMessage, getToken: () => string): boolea
   const provided = req.headers[AUTH_HEADER];
   const headerVal = Array.isArray(provided) ? provided[0] : provided;
   return timingSafeEqualStr(getToken(), headerVal);
+}
+
+/**
+ * Cloudflare Access path: verify the `Cf-Access-Jwt-Assertion` JWT the edge injects. Returns false
+ * when no verifier is configured, the header is absent, or verification fails — so this leg only
+ * ever admits a genuinely valid Access assertion.
+ */
+async function isAccessAuthorized(
+  req: http.IncomingMessage,
+  verifyAccessJwt: AccessJwtVerifier | undefined,
+): Promise<boolean> {
+  if (!verifyAccessJwt) return false;
+  const provided = req.headers[ACCESS_JWT_HEADER];
+  const jwt = Array.isArray(provided) ? provided[0] : provided;
+  if (!jwt) return false;
+  return verifyAccessJwt(jwt);
 }
 
 /**
@@ -158,8 +189,9 @@ function serveSpaStub(req: http.IncomingMessage, res: http.ServerResponse, spaDi
 
 /**
  * Build (but do not stop) an HTTP server exposing the injected tRPC router over HTTP+SSE behind
- * an x-cortex-token bearer gate, plus the SPA static server. The server is already listening
- * when this returns. Call `close()` for a clean shutdown (force-closes live SSE sockets).
+ * the dual-path auth gate (x-cortex-token OR a verified Cf-Access-Jwt-Assertion), plus the SPA
+ * static server. The server is already listening when this returns. Call `close()` for a clean
+ * shutdown (force-closes live SSE sockets).
  *
  * CORS: if `corsOrigins` is provided, a matching `Origin` header causes non-wildcard CORS headers
  * to be set on all responses (including 401s, so the browser can read the error body). OPTIONS
@@ -173,8 +205,8 @@ export function createUiHttpServer(opts: UiHttpServerOptions): UiHttpServer {
     router: opts.router,
     basePath: TRPC_BASE_PATH,
     createContext: () => ({}),
-    // Runs BEFORE the tRPC handler. tRPC paths are token-gated here; everything else is the SPA stub.
-    middleware: (req, res, next) => {
+    // Runs BEFORE the tRPC handler. tRPC paths are auth-gated here; everything else is the SPA stub.
+    middleware: async (req, res, next) => {
       const url = req.url ?? '/';
 
       // ── CORS ──────────────────────────────────────────────────────────────────
@@ -195,8 +227,13 @@ export function createUiHttpServer(opts: UiHttpServerOptions): UiHttpServer {
       }
 
       // ── tRPC paths ────────────────────────────────────────────────────────────
+      // Dual-path auth: a matching x-cortex-token (desktop/machine — checked first, synchronous, so
+      // that path is byte-for-byte unchanged and never awaits) OR a valid Cf-Access-Jwt-Assertion
+      // (Cloudflare Access — the browser path). Neither → 401.
       if (url.startsWith(TRPC_BASE_PATH)) {
-        if (!isAuthorized(req, opts.getToken)) {
+        const authorized =
+          isAuthorized(req, opts.getToken) || (await isAccessAuthorized(req, opts.verifyAccessJwt));
+        if (!authorized) {
           log.warn(`ui-http auth rejected: ${req.method} ${url}`);
           res.writeHead(401, { 'Content-Type': 'text/plain; charset=utf-8' });
           res.end('Unauthorized');

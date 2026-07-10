@@ -9,4 +9,6 @@ export { createUiHttpServer } from './ui-http-server.js';
 export type { UiHttpServer, UiHttpServerOptions } from './ui-http-server.js';
 export { startUiHttpServer } from './start-ui-http.js';
 export type { StartUiHttpOptions } from './start-ui-http.js';
+export { createAccessJwtVerifier, accessVerifierFromEnv } from './access-jwt.js';
+export type { AccessJwtVerifier, AccessJwtConfig } from './access-jwt.js';
 export { createCallerFactory } from './trpc.js';

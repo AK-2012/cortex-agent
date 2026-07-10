@@ -1,10 +1,10 @@
 // input:  a real UiService (injected) + env (CORTEX_UI_HTTP gate, CORTEX_UI_PORT,
 //          CORTEX_UI_CORS_ORIGINS, CORTEX_UI_SPA_DIR)
 // output: startUiHttpServer(opts) -> UiHttpServer | null — builds the tRPC AppRouter over the
-//         injected UiService and starts the Web UI HTTP+SSE transport-host behind the
-//         x-cortex-token bearer gate (getClientToken), bound 127.0.0.1. Returns null (clean
-//         skip) when the env gate is off. Same-origin: serves the built SPA (web/dist) and /trpc
-//         on one port.
+//         injected UiService and starts the Web UI HTTP+SSE transport-host behind the dual-path
+//         auth gate — x-cortex-token (getClientToken) OR a Cloudflare Access JWT verifier built
+//         from env (accessVerifierFromEnv) — bound 127.0.0.1. Returns null (clean skip) when the
+//         env gate is off. Same-origin: serves the built SPA (web/dist) and /trpc on one port.
 // pos:    Web UI wiring, in the @cortex-agent/ui-server package. The only place that binds the
 //         AppRouter (createAppRouter) to the transport-host (createUiHttpServer) — kept out of
 //         both so the router stays transport-agnostic and the transport-host stays router-agnostic.
@@ -23,6 +23,8 @@ import { fileURLToPath } from 'node:url';
 import { createAppRouter } from './app-router.js';
 import { createUiHttpServer } from './ui-http-server.js';
 import type { UiHttpServer } from './ui-http-server.js';
+import { accessVerifierFromEnv } from './access-jwt.js';
+import type { AccessJwtVerifier } from './access-jwt.js';
 import type { UiService } from '@cortex-agent/server/dist/domain/ui-service/types.js';
 import { getClientToken } from '@cortex-agent/server/dist/core/auth.js';
 import { createLogger } from '@cortex-agent/server/dist/core/log.js';
@@ -75,6 +77,13 @@ export interface StartUiHttpOptions {
    * CORS headers.
    */
   corsOrigins?: string[];
+  /**
+   * Explicit Cloudflare Access JWT verifier forwarded to the transport-host (the browser auth path).
+   * When omitted, it is built from env via accessVerifierFromEnv (CORTEX_ACCESS_TEAM_DOMAIN +
+   * CORTEX_ACCESS_AUD, optional CORTEX_ACCESS_CERTS_URL). When those are unset the verifier is
+   * undefined and the gate degrades to token-only. Injectable for tests.
+   */
+  verifyAccessJwt?: AccessJwtVerifier;
 }
 
 /**
@@ -104,10 +113,12 @@ export function startUiHttpServer(opts: StartUiHttpOptions): UiHttpServer | null
   const router = createAppRouter(opts.uiService);
   const corsOrigins = opts.corsOrigins ?? parseCorsOrigins(env.CORTEX_UI_CORS_ORIGINS);
   const spaDir = opts.spaDir ?? env.CORTEX_UI_SPA_DIR ?? defaultSpaDir();
+  const verifyAccessJwt = opts.verifyAccessJwt ?? accessVerifierFromEnv(env);
   log.info(
     `Web UI enabled — starting tRPC HTTP+SSE on 127.0.0.1:${port}` +
       (spaDir ? ` (SPA: ${spaDir})` : ' (SPA: not built — non-tRPC paths 404)') +
-      (corsOrigins ? ` (CORS allow-list: ${corsOrigins.join(', ')})` : ''),
+      (corsOrigins ? ` (CORS allow-list: ${corsOrigins.join(', ')})` : '') +
+      (verifyAccessJwt ? ' (Cloudflare Access JWT path enabled)' : ''),
   );
   return createUiHttpServer({
     router,
@@ -116,5 +127,6 @@ export function startUiHttpServer(opts: StartUiHttpOptions): UiHttpServer | null
     host: '127.0.0.1',
     spaDir,
     corsOrigins,
+    verifyAccessJwt,
   });
 }
