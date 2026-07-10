@@ -12,6 +12,8 @@ function task(partial: Partial<TaskInfo> & Pick<TaskInfo, 'id' | 'status' | 'pri
     dependsOn: [],
     plan: null,
     template: 'coder-review',
+    why: null,
+    doneWhen: null,
     ...partial,
   };
 }

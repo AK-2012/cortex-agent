@@ -4,9 +4,9 @@ import { handleTasksList } from '../../../src/domain/ui-service/query/tasks.js';
 import type { UiServiceDeps } from '../../../src/domain/ui-service/types.js';
 
 const mockTasks = [
-  { id: 't1', text: 'Task one', project: 'proj1', status: 'open', priority: 'high', claimed_by: null, blocked_by: null, paused: false, depends_on: [], plan: 'plan1', template: 'coder-review' },
-  { id: 't2', text: 'Task two', project: 'proj1', status: 'open', priority: 'medium', claimed_by: 'agent1', blocked_by: null, paused: false, depends_on: ['t1'], plan: null, template: 'research' },
-  { id: 't3', text: 'Task three', project: 'proj1', status: 'done', priority: 'low', claimed_by: 'agent1', blocked_by: null, paused: false, depends_on: [], plan: 'plan3', template: 'bugfix' },
+  { id: 't1', text: 'Task one', project: 'proj1', status: 'open', priority: 'high', claimed_by: null, blocked_by: null, paused: false, depends_on: [], plan: 'plan1', template: 'coder-review', why: 'because one', done_when: 'tests green' },
+  { id: 't2', text: 'Task two', project: 'proj1', status: 'open', priority: 'medium', claimed_by: 'agent1', blocked_by: null, paused: false, depends_on: ['t1'], plan: null, template: 'research', why: '', done_when: '' },
+  { id: 't3', text: 'Task three', project: 'proj1', status: 'done', priority: 'low', claimed_by: 'agent1', blocked_by: null, paused: false, depends_on: [], plan: 'plan3', template: 'bugfix', why: 'because three', done_when: 'shipped' },
   { id: 't4', text: 'Blocked task', project: 'proj2', status: 'open', priority: 'high', claimed_by: null, blocked_by: 'something', paused: false, depends_on: [], plan: null, template: 'coder-review' },
 ];
 
@@ -73,4 +73,25 @@ test('tasks.list DTO shape is correct', async () => {
   assert.deepEqual(t1.dependsOn, []);
   assert.equal(t1.plan, 'plan1');
   assert.equal(t1.template, 'coder-review');
+});
+
+test('tasks.list exposes real why + doneWhen from the task store', async () => {
+  const result = await handleTasksList(makeDeps(), { projectId: 'proj1' });
+  const t1 = result.find(t => t.id === 't1')!;
+  assert.equal(t1.why, 'because one');
+  assert.equal(t1.doneWhen, 'tests green');
+});
+
+test('tasks.list maps empty why/done_when to null (null-safe)', async () => {
+  const result = await handleTasksList(makeDeps(), { projectId: 'proj1' });
+  const t2 = result.find(t => t.id === 't2')!;
+  assert.equal(t2.why, null);
+  assert.equal(t2.doneWhen, null);
+});
+
+test('tasks.list maps absent why/done_when to null', async () => {
+  const result = await handleTasksList(makeDeps(), { projectId: 'proj2' });
+  const t4 = result.find(t => t.id === 't4')!;
+  assert.equal(t4.why, null);
+  assert.equal(t4.doneWhen, null);
 });

@@ -29,8 +29,8 @@ a later pass replaces behind its own export (RB f528 frame-owner precedent). Raw
 | `screens/mobile-approvals-vm.ts` | **Pure** VM `buildMobileApprovalsVm(entries, now?)` → `{ pendingCount, firstCard, queueRows, processedRows }` (851f honest field mapping + 7-day this-week window). |
 | `screens/mobile-approvals-vm.test.ts` · `screens/mobile-approvals-render.test.tsx` | vitest units (TDD, written first) + `react-dom/server` render checks. |
 | `screens/MobileTasksScreen.tsx` | **5c 任务 (real)** — binds `tasks.list` + `useTasksLiveSync` + `tasks.unblock`; owns segment (可执行/全部) + per-card expand + pending state. |
-| `screens/MobileTasksView.tsx` | Presentational 5c view (1:1 scheme L3110-3186, raw px/hex/font §8.3): 任务 header + 可执行/全部 segmented + grouped list (进行中/可认领/等依赖/已阻塞, status dots) + claimable-card expand→DONE-WHEN (honest placeholder, no `doneWhen` field) + blocked-card 「解除」 (≥44px). Bottom Tab is shell-owned, not rendered here. |
-| `screens/MobileTasksView.test.tsx` | `react-dom/server` render checks (marker/gutter/segments/4 groups/expand placeholder/blocked 解除/deps). |
+| `screens/MobileTasksView.tsx` | Presentational 5c view (1:1 scheme L3110-3186, raw px/hex/font §8.3): 任务 header + 可执行/全部 segmented + grouped list (进行中/可认领/等依赖/已阻塞, status dots) + claimable-card expand→DONE-WHEN (**real `TaskInfo.doneWhen`**; honest placeholder `mDoneWhenGap` only when the task has none) + blocked-card 「解除」 (≥44px). Bottom Tab is shell-owned, not rendered here. |
+| `screens/MobileTasksView.test.tsx` | `react-dom/server` render checks (marker/gutter/segments/4 groups/expand real done-when + null→placeholder/blocked 解除/deps). |
 | `screens/screens.test.tsx` | render checks for the remaining STUB slot (机器; 5a/5b/5c/10e/10f excluded — they need tRPC providers). |
 
 ### 5b 移动端线程 (task ad9c) — REAL, 1:1 from `scheme.dc.html` L3005–3108

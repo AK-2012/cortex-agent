@@ -18,6 +18,8 @@ function task(over: Partial<TaskInfo>): TaskInfo {
     dependsOn: [],
     plan: null,
     template: 'coder-review',
+    why: null,
+    doneWhen: null,
     ...over,
   };
 }
@@ -85,11 +87,32 @@ describe('MobileTasksView', () => {
     expect(html).not.toContain('T-041'); // scheme mock id must not leak
   });
 
-  it('expands a claimable card to the DONE-WHEN section with an honest placeholder (no checklist)', () => {
+  it('expands a claimable card to the DONE-WHEN section with an honest placeholder when the task has none', () => {
     const html = view({ expanded: ['B'] });
     expect(html).toContain('完成标准（DONE WHEN）');
     expect(html).toContain(zh.mDoneWhenGap);
     expect(html).toContain('aria-expanded="true"');
+  });
+
+  it('renders the real done-when text (not the placeholder) when the claimable task has one', () => {
+    const withDoneWhen = [task({ id: 'B', actionable: true, priority: 'high', doneWhen: 'suite passes and build is green' })];
+    const html = renderToStaticMarkup(
+      <MobileTasksView
+        vocab={zh}
+        groups={orderedGroups(groupMobileTasks(withDoneWhen), 'all')}
+        segment="all"
+        executableCount={1}
+        allCount={1}
+        onSegment={() => {}}
+        expandedIds={new Set(['B'])}
+        onToggleExpand={() => {}}
+        pendingId={null}
+        onUnblock={() => {}}
+        empty={zh.mNoTasks}
+      />,
+    );
+    expect(html).toContain('suite passes and build is green');
+    expect(html).not.toContain(zh.mDoneWhenGap);
   });
 
   it('does not show the DONE-WHEN section when the claimable card is collapsed', () => {

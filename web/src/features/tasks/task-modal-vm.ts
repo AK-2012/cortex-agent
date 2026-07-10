@@ -3,12 +3,14 @@
 // real `TaskInfo` DTO → the prototype's exact values is unit-tested in isolation (TDD). Consumed by
 // TaskModal.tsx.
 //
+// why / doneWhen are now real (`TaskInfo.why` / `TaskInfo.doneWhen`) and rendered directly by
+// TaskModal (raw passthrough, not derived here); null → honest placeholder in TaskModal.
 // DATA GAPS (the DTO exposes less than the mock — rendered structurally, flagged):
-//   • why / done-when checklist  — no `why`/`doneWhen` on TaskInfo → placeholder (see TaskModal)
 //   • done-when verification card — no evidence tRPC scope → placeholder card
 //   • dispatch history card       — no per-task execution join → placeholder card
 //   • gpu field                   — not on TaskInfo → "—" (matches the T-046 proto-shot)
-// Real: id · title · status pill · priority color · template · claimed-by · dependencies join.
+// Real: id · title · status pill · priority color · template · claimed-by · why · doneWhen ·
+// dependencies join.
 
 import type { TaskInfo } from '@cortex-agent/ui-contract';
 

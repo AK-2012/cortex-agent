@@ -19,20 +19,21 @@ when a task mutation is routed through the daemon. Proves the full stack end-to-
 
 ## Task detail modal (10a) — data gaps
 
-The modal is built 1:1 from the prototype but `TaskInfo` exposes less than the prototype's mock, so
-several fields render as **explicit data-gap placeholders** (workbench precedent):
+The modal is built 1:1 from the prototype. Card A's WHY line + DONE-WHEN row now bind the **real**
+`TaskInfo.why` / `TaskInfo.doneWhen` (task store `why` / `done-when`; `doneWhen` is a single string,
+not a checklist array — the store has no array field). When a task genuinely records neither, the
+italic-muted placeholder shows (null-safe, no fabrication). The remaining prototype-only fields still
+render as **explicit data-gap placeholders** (workbench precedent):
 
-- **GAP-WHY / GAP-DW** — `TaskInfo` has no `why` / `doneWhen` → Card A's WHY line + DONE-WHEN checklist
-  are italic-muted placeholders. (Biggest gap; a future backend task should add `why`/`doneWhen[]`.)
 - **GAP-VERIFY** — no done-when evidence tRPC scope → "Done-when verification" card is a placeholder.
 - **GAP-HIST** — no per-task execution/dispatch join → "Dispatch history" card is a placeholder.
 - **GAP-GPU** — no `gpu` on `TaskInfo` → Fields `gpu` renders `—` (matches the T-046 proto-shot).
 
 **Real** in the modal: id · title (`text`) · derived status pill · priority color · template ·
-claimed-by · **Dependencies** (real `dependsOn` + reverse join) · Complete/Unblock mutations.
-The two gated cards (verification / dispatch history) render **always** as placeholders (no per-task
-hasVerify/hasHist real signal), which deviates from the T-046 proto-shot (which gated them off) but
-satisfies the task's "复刻结构 + 缺字段显式占位" mandate.
+claimed-by · **why · doneWhen** · **Dependencies** (real `dependsOn` + reverse join) · Complete/Unblock
+mutations. The two gated cards (verification / dispatch history) render **always** as placeholders (no
+per-task hasVerify/hasHist real signal), which deviates from the T-046 proto-shot (which gated them off)
+but satisfies the task's "复刻结构 + 缺字段显式占位" mandate.
 
 ## Notes
 

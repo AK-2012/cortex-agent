@@ -15,6 +15,8 @@ function task(partial: Partial<TaskInfo>): TaskInfo {
     dependsOn: [],
     plan: null,
     template: 'experiment-pipeline',
+    why: null,
+    doneWhen: null,
     ...partial,
   };
 }

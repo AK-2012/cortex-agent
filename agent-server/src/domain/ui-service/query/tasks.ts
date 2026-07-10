@@ -35,5 +35,7 @@ export async function handleTasksList(
     dependsOn: t.depends_on || [],
     plan: t.plan ?? null,
     template: t.template || 'coder-review',
+    why: t.why || null,
+    doneWhen: t.done_when || null,
   }));
 }
