@@ -202,6 +202,92 @@ test('disabled flag drains the queue without dispatching', async () => {
   if (prev === undefined) delete process.env.CORTEX_AUTO_RESUME; else process.env.CORTEX_AUTO_RESUME = prev;
 });
 
+// --- Busy-gate bracket (2026-07-09 regression) ---
+// A rate-limit-resumed thread ran with NO trackPendingTask bracket, so the daemon's busy/idle
+// gate saw count=0 while the thread was mid-stream; a .restart trigger then fired immediately
+// and SIGKILLed app.ts, killing 3 streaming threads. The fire-and-forget thread resume must
+// hold the busy gate (+1 sync at fire, -1 after run AND settle), mirroring runThreadDetached.
+
+/** Flush the fire-and-forget resume promise chain (resume → settle → finally). */
+const flushDetached = () => new Promise((r) => setImmediate(r));
+
+test('thread resume holds the busy gate across the run AND the settle', async () => {
+  const adapter = new MockAdapter({ adminChannel: 'admin' });
+  const order: string[] = [];
+  const { deps } = baseDeps(
+    [{ kind: 'thread', threadId: 'thr_a', channel: 'C2', userMessage: 'go', recordedAt: NOW }],
+    {
+      track: (d: number) => order.push(`track:${d}`),
+      resumeThread: async (threadId: string) => { order.push(`resume:${threadId}`); },
+      settleResumedThread: async (threadId: string) => { order.push(`settle:${threadId}`); },
+    },
+  );
+  await dispatchPendingResumes(adapter as any, deps);
+  await flushDetached();
+  assert.deepEqual(order, ['track:1', 'resume:thr_a', 'settle:thr_a', 'track:-1'],
+    '+1 fires synchronously before the run; -1 only after settle completes');
+});
+
+test('busy gate never leaks when the resumed run rejects', async () => {
+  const adapter = new MockAdapter({ adminChannel: 'admin' });
+  const trackCalls: number[] = [];
+  const { deps, calls } = baseDeps(
+    [{ kind: 'thread', threadId: 'thr_a', channel: 'C2', userMessage: 'go', recordedAt: NOW }],
+    {
+      track: (d: number) => trackCalls.push(d),
+      resumeThread: async () => { throw new Error('boom'); },
+    },
+  );
+  await dispatchPendingResumes(adapter as any, deps);
+  await flushDetached();
+  assert.deepEqual(trackCalls, [1, -1], 'gate released exactly once despite the rejection');
+  assert.equal(calls.settled.length, 0, 'settle skipped on failure (unchanged behavior)');
+});
+
+test('guard-skipped thread never touches the busy gate', async () => {
+  const adapter = new MockAdapter({ adminChannel: 'admin' });
+  const trackCalls: number[] = [];
+  const { deps } = baseDeps(
+    [{ kind: 'thread', threadId: 'thr_a', channel: 'C2', userMessage: 'go', recordedAt: NOW }],
+    {
+      track: (d: number) => trackCalls.push(d),
+      getThread: (_id: string) => ({ id: _id, status: 'completed', channel: 'C2', projectId: 'proj' }) as any,
+    },
+  );
+  await dispatchPendingResumes(adapter as any, deps);
+  await flushDetached();
+  assert.deepEqual(trackCalls, [], 'no +1/-1 for a thread that was never resumed');
+});
+
+test('direct resume does NOT double-track (agentRunner brackets internally)', async () => {
+  const adapter = new MockAdapter({ adminChannel: 'admin' });
+  const trackCalls: number[] = [];
+  const { deps, calls } = baseDeps(
+    [{ kind: 'direct', channel: 'C1', userMessage: 'orig', recordedAt: NOW }],
+    { track: (d: number) => trackCalls.push(d) },
+  );
+  await dispatchPendingResumes(adapter as any, deps);
+  await flushDetached();
+  assert.equal(calls.route.length, 1);
+  assert.deepEqual(trackCalls, [], 'direct path relies on agentRunner internal tracking');
+});
+
+test('multiple thread resumes hold and release the gate in balance', async () => {
+  const adapter = new MockAdapter({ adminChannel: 'admin' });
+  let count = 0; let peak = 0;
+  const { deps } = baseDeps([
+    { kind: 'thread', threadId: 'thr_a', channel: 'C1', userMessage: 'a', recordedAt: NOW },
+    { kind: 'thread', threadId: 'thr_b', channel: 'C1', userMessage: 'b', recordedAt: NOW },
+    { kind: 'thread', threadId: 'thr_c', channel: 'C1', userMessage: 'c', recordedAt: NOW },
+  ], {
+    track: (d: number) => { count += d; peak = Math.max(peak, count); },
+  });
+  await dispatchPendingResumes(adapter as any, deps);
+  await flushDetached();
+  assert.equal(count, 0, 'all +1s released');
+  assert.ok(peak >= 1, 'gate was actually held');
+});
+
 test('takeAll is invoked exactly once per dispatch', async () => {
   const adapter = new MockAdapter({ adminChannel: 'admin' });
   const { deps, calls } = baseDeps([
