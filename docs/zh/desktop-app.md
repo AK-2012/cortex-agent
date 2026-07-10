@@ -58,6 +58,12 @@ sudo apt-get install libwebkit2gtk-4.1-0 libgtk-3-0
 桌面应用通过 HTTP 或 HTTPS 与 Cortex 服务器的 **Web UI HTTP 端点** 通信。
 该端点是**可选启用**的——连接前必须先在服务器上启用它。
 
+该端点由一个可选的、进程内加载的附加包 `@cortex-agent/ui-server` 提供，核心服务器仅在
+设置了 `CORTEX_UI_HTTP` 时才按需加载它（它携带 `@trpc/server` 与 SPA 托管，从仅
+Slack/TUI 的核心中剥离出去）。启用它与此前一样只需一行标志——**桌面应用不受任何影响**，
+它仍以 Bearer `clientToken` 认证。同一端点也驱动浏览器工作台，见
+[浏览器访问与部署](browser-access.md)。
+
 在运行 Cortex 服务器的机器的 `~/.cortex/config/.env` 中添加以下内容：
 
 ```bash
