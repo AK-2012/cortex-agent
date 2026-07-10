@@ -2,6 +2,7 @@
 // output: DTO drift guard — enumerates every QueryScope/MutateOp string and asserts the facade has a registered handler
 // pos:    CI-fails on missing impl for a newly added scope/op
 
+import '../../_test-home.js'; // MUST be first: isolate CORTEX_HOME before paths.ts loads
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
