@@ -16,7 +16,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { initTRPC } from '@trpc/server';
 import { z } from 'zod';
-import { createUiHttpServer } from '../src/platform/ui-http/ui-http-server.js';
+import { createUiHttpServer } from '../src/ui-http-server.js';
 
 const TOKEN = 'test-ui-token-xyz';
 const INDEX_MARKER = '<!-- CORTEX-UI-STUB-INDEX -->';

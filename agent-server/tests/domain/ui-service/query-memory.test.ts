@@ -3,11 +3,8 @@ import assert from 'node:assert/strict';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { TRPCError } from '@trpc/server';
 import { handleMemoryTree, handleMemoryFile } from '../../../src/domain/ui-service/query/memory.js';
 import { createUiService } from '../../../src/domain/ui-service/ui-service.js';
-import { createAppRouter } from '../../../src/domain/ui-service/app-router.js';
-import { createCallerFactory } from '../../../src/domain/ui-service/trpc.js';
 import { mutateInputSchemas } from '../../../src/domain/ui-service/input-schemas.js';
 import type { UiServiceDeps } from '../../../src/domain/ui-service/types.js';
 
@@ -191,15 +188,19 @@ test('memory.tree / memory.file reachable via the ui-service facade', async () =
   assert.equal((bad as any).code, 'invalid-args');
 });
 
-test('memory.tree / memory.file reachable via the tRPC AppRouter, traversal → BAD_REQUEST', async () => {
+// The tRPC router binding (traversal → TRPCError BAD_REQUEST) is covered in
+// @cortex-agent/ui-server's app-router.test.ts; here we assert the facade reads STATUS.md and
+// rejects traversal with invalid-args.
+test('memory.tree / memory.file via facade read a file and reject traversal', async () => {
   const { root } = makeProject();
-  const caller = createCallerFactory(createAppRouter(createUiService(makeDeps('my-project', root))))({});
-  const tree = await caller.memory.tree({ projectId: 'my-project' });
-  assert.equal(tree.projectId, 'my-project');
-  const file = await caller.memory.file({ projectId: 'my-project', path: 'STATUS.md' });
-  assert.equal(file.content, '# status\nline2\n');
-  await assert.rejects(
-    () => caller.memory.file({ projectId: 'my-project', path: '../secret.txt' }),
-    (e: unknown) => e instanceof TRPCError && e.code === 'BAD_REQUEST',
-  );
+  const ui = createUiService(makeDeps('my-project', root));
+  const tree = await ui.query('memory.tree', { projectId: 'my-project' });
+  assert.ok(tree.ok);
+  assert.equal(tree.data.projectId, 'my-project');
+  const file = await ui.query('memory.file', { projectId: 'my-project', path: 'STATUS.md' });
+  assert.ok(file.ok);
+  assert.equal(file.data.content, '# status\nline2\n');
+  const bad = await ui.query('memory.file', { projectId: 'my-project', path: '../secret.txt' });
+  assert.equal(bad.ok, false);
+  if (!bad.ok) assert.equal(bad.code, 'invalid-args');
 });

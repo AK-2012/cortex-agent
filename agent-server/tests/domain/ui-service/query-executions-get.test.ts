@@ -1,10 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { TRPCError } from '@trpc/server';
 import { handleExecutionsGet } from '../../../src/domain/ui-service/query/executions.js';
 import { createUiService } from '../../../src/domain/ui-service/ui-service.js';
-import { createAppRouter } from '../../../src/domain/ui-service/app-router.js';
-import { createCallerFactory } from '../../../src/domain/ui-service/trpc.js';
 import type { UiServiceDeps } from '../../../src/domain/ui-service/types.js';
 
 const now = Date.now();
@@ -101,12 +98,6 @@ test('executions.get via facade returns not-found Err for a missing id', async (
   assert.equal((result as any).code, 'not-found');
 });
 
-test('executions.get via app-router rejects with TRPCError NOT_FOUND for a missing id', async () => {
-  const caller = createCallerFactory(createAppRouter(createUiService(makeDeps())))({});
-  await assert.rejects(
-    () => caller.executions.get({ executionId: 'missing' }),
-    (e: unknown) => e instanceof TRPCError && e.code === 'NOT_FOUND',
-  );
-  const dto = await caller.executions.get({ executionId: 'exec_known' });
-  assert.equal(dto.id, 'exec_known');
-});
+// The tRPC router binding (missing id → TRPCError NOT_FOUND) is covered in
+// @cortex-agent/ui-server's app-router.test.ts; the facade data + not-found paths are asserted
+// in the two facade tests above.

@@ -1,8 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { TRPCError } from '@trpc/server';
-import { createAppRouter } from '../../../src/domain/ui-service/app-router.js';
-import { createCallerFactory } from '../../../src/domain/ui-service/trpc.js';
+import { createAppRouter } from '../src/app-router.js';
+import { createCallerFactory } from '../src/trpc.js';
 import type {
   UiService,
   QueryScope,
@@ -10,7 +10,7 @@ import type {
   Result,
   UiEvent,
   SubscribeFilter,
-} from '../../../src/domain/ui-service/index.js';
+} from '@cortex-agent/server/dist/domain/ui-service/index.js';
 
 // ── Fake UiService ────────────────────────────────────────────────────────────────
 interface QueryCall { scope: QueryScope; params: unknown; }

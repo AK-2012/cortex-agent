@@ -6,8 +6,6 @@ import os from 'node:os';
 import path from 'node:path';
 import { readConfigSnapshot, handleConfigGet } from '../../../src/domain/ui-service/query/config.js';
 import { createUiService } from '../../../src/domain/ui-service/ui-service.js';
-import { createAppRouter } from '../../../src/domain/ui-service/app-router.js';
-import { createCallerFactory } from '../../../src/domain/ui-service/trpc.js';
 import type { UiServiceDeps } from '../../../src/domain/ui-service/types.js';
 
 const RAW_SECRET = 'sk-super-secret-value-123456';
@@ -137,8 +135,10 @@ test('config.get via facade returns ok', async () => {
   assert.ok(Array.isArray(result.data.machines));
 });
 
-test('config.get via app-router caller returns the snapshot', async () => {
-  const caller = createCallerFactory(createAppRouter(createUiService(makeMinimalDeps())))({});
-  const snap = await caller.config.get({});
-  assert.ok(Array.isArray(snap.env));
+// The tRPC router binding (Result-unwrap + Err→TRPCError mapping) is covered in
+// @cortex-agent/ui-server's app-router.test.ts; here we assert the facade snapshot shape.
+test('config.get via facade exposes the env snapshot array', async () => {
+  const result = await createUiService(makeMinimalDeps()).query('config.get', {});
+  assert.ok(result.ok);
+  assert.ok(Array.isArray(result.data.env));
 });

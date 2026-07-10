@@ -4,12 +4,9 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { TRPCError } from '@trpc/server';
 import { writeBudget, handleConfigSet } from '../../../src/domain/ui-service/mutate/config.js';
 import { configSetInput } from '../../../src/domain/ui-service/input-schemas.js';
 import { createUiService } from '../../../src/domain/ui-service/ui-service.js';
-import { createAppRouter } from '../../../src/domain/ui-service/app-router.js';
-import { createCallerFactory } from '../../../src/domain/ui-service/trpc.js';
 import type { UiServiceDeps } from '../../../src/domain/ui-service/types.js';
 
 function makeMinimalDeps(): UiServiceDeps {
@@ -95,10 +92,12 @@ test('config.set via facade writes to the isolated CONFIG_DIR and returns writte
   assert.deepEqual(got.data.budget, { daily_usd: 55, monthly_usd: 1234 });
 });
 
-test('config.set via app-router caller maps invalid input to TRPCError BAD_REQUEST', async () => {
-  const caller = createCallerFactory(createAppRouter(createUiService(makeMinimalDeps())))({});
-  await assert.rejects(
-    () => caller.config.set({ section: 'budget', value: { daily_usd: -1, monthly_usd: 2000 } } as any),
-    (e: unknown) => e instanceof TRPCError && e.code === 'BAD_REQUEST',
-  );
+// The tRPC router binding (invalid-args → TRPCError BAD_REQUEST) is covered in
+// @cortex-agent/ui-server's app-router.test.ts; here we assert the facade rejects invalid input
+// with the invalid-args Err code (no write).
+test('config.set via facade rejects invalid input with invalid-args', async () => {
+  const result = await createUiService(makeMinimalDeps())
+    .mutate('config.set', { section: 'budget', value: { daily_usd: -1, monthly_usd: 2000 } } as any);
+  assert.equal(result.ok, false);
+  if (!result.ok) assert.equal(result.code, 'invalid-args');
 });

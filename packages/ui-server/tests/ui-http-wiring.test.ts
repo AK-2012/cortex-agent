@@ -14,8 +14,8 @@ import './_test-home.js'; // MUST be first: isolate CORTEX_HOME before paths.ts 
 import test, { after } from 'node:test';
 import assert from 'node:assert/strict';
 import * as http from 'node:http';
-import { startUiHttpServer } from '../src/entry/start-ui-http.js';
-import type { UiService, UiEvent } from '../src/domain/ui-service/types.js';
+import { startUiHttpServer } from '../src/start-ui-http.js';
+import type { UiService, UiEvent } from '@cortex-agent/server/dist/domain/ui-service/types.js';
 
 const TOKEN = 'test-wiring-token';
 const SSE_MARKER = 'WIRING_EVENT_MARKER';
@@ -107,9 +107,21 @@ test('env gate: disabled (unset) returns null — clean skip', () => {
 });
 
 test('env gate: enabled binds 127.0.0.1 and defaults to port 3004', async () => {
-  const inst = await boot({ CORTEX_UI_HTTP: '1' });
+  // Intent: with CORTEX_UI_HTTP set and CORTEX_UI_PORT unset, the wiring targets the default 3004.
+  // 3004 is a fixed real port, so on a dev box where a live daemon already holds 3004 the bind
+  // throws EADDRINUSE for :3004 — which still proves the default is 3004. Accept either a clean
+  // bind to 127.0.0.1:3004, or an EADDRINUSE naming :3004.
+  let inst: Awaited<ReturnType<typeof boot>> | null = null;
+  try {
+    inst = await boot({ CORTEX_UI_HTTP: '1' });
+  } catch (e) {
+    const msg = String((e as Error).message ?? e);
+    assert.ok(msg.includes('EADDRINUSE') && msg.includes('3004'),
+      `expected a clean bind to 3004 or an EADDRINUSE on :3004, got: ${msg}`);
+    return;
+  }
   assert.ok(inst, 'expected a server when enabled');
-  const addr = inst!.server.address();
+  const addr = inst.server.address();
   assert.ok(addr && typeof addr !== 'string');
   assert.equal((addr as { address: string }).address, '127.0.0.1');
   assert.equal((addr as { port: number }).port, 3004);

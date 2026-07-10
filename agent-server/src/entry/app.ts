@@ -76,8 +76,6 @@ import { ensurePIAgentDirs } from '../agent-adapter/pi/agent-dir.js';
 import { initOutboundQueue, getOutboundQueue } from '@store/outbound-queue.js';
 import { createUiService } from '@domain/ui-service/index.js';
 import { sendWebUserMessage } from '../orchestration/session-send.js';
-import { startUiHttpServer } from './start-ui-http.js';
-import type { UiHttpServer } from '@platform/ui-http/ui-http-server.js';
 import { createTuiSessionService } from '@domain/tui-session/index.js';
 import { enqueue, conduitQueues } from '@orch/conduit-queue.js';
 import { getCostSummary } from '@domain/costs/cost-tracker.js';
@@ -247,7 +245,10 @@ registerMessageHandler(adapter, { dispatchCommand, handleMessageEdit });
 
 // --- Profile watcher (hot-reload profiles.json without restart) ---
 let _stopProfileWatcher: (() => void) | null = null;
-let _uiHttpServer: UiHttpServer | null = null;
+// Web UI transport-host handle. The concrete type lives in the optional @cortex-agent/ui-server
+// package (not a runtime dep of core); app.ts only ever calls close(), so a structural type keeps
+// the composition root free of the package's types (and of @trpc).
+let _uiHttpServer: { close: () => Promise<void> } | null = null;
 
 // --- Graceful shutdown ---
 process.on('SIGTERM', async () => {
@@ -348,10 +349,22 @@ process.on('SIGTERM', async () => {
   extractTuiAdapter(adapter)?.setUiService(uiService);
 
   // ── Web UI tRPC HTTP+SSE transport-host (opt-in via CORTEX_UI_HTTP) ──────
-  // Builds the AppRouter over the same uiService and serves it on 127.0.0.1:CORTEX_UI_PORT
-  // (default 3004) behind the x-cortex-token gate (getClientToken). Returns null (clean skip)
-  // when the env gate is off; closed on SIGTERM.
-  _uiHttpServer = startUiHttpServer({ uiService });
+  // The Web UI transport (tRPC AppRouter + HTTP/SSE host + SPA serving) lives in the OPTIONAL
+  // @cortex-agent/ui-server package, which pulls @trpc/server. Core (Slack/TUI-only) must not
+  // load it: gate on CORTEX_UI_HTTP and load the package on demand via dynamic import, so an
+  // unset flag means the package (and @trpc) never enters the runtime graph. A non-literal
+  // specifier keeps tsc from resolving a package core does not declare as a dependency.
+  const uiFlag = (process.env.CORTEX_UI_HTTP || '').trim().toLowerCase();
+  if (uiFlag === '1' || uiFlag === 'true' || uiFlag === 'on' || uiFlag === 'yes') {
+    try {
+      const uiServerPkg = '@cortex-agent/ui-server';
+      const { startUiHttpServer } = await import(uiServerPkg);
+      // The package re-reads CORTEX_UI_HTTP and returns null when off — always truthy here.
+      _uiHttpServer = startUiHttpServer({ uiService }) ?? null;
+    } catch (e) {
+      log.warn(`CORTEX_UI_HTTP is set but @cortex-agent/ui-server failed to load: ${(e as Error).message}`);
+    }
+  }
 
   await adapter.start();
 

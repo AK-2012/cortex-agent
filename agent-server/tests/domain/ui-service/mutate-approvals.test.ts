@@ -3,7 +3,6 @@ import assert from 'node:assert/strict';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { TRPCError } from '@trpc/server';
 import {
   applyApprovalDecision,
   handleApproveApproval,
@@ -11,8 +10,6 @@ import {
 } from '../../../src/domain/ui-service/mutate/approvals.js';
 import { parseApprovals } from '../../../src/domain/ui-service/query/approvals.js';
 import { createUiService } from '../../../src/domain/ui-service/ui-service.js';
-import { createAppRouter } from '../../../src/domain/ui-service/app-router.js';
-import { createCallerFactory } from '../../../src/domain/ui-service/trpc.js';
 import type { UiServiceDeps } from '../../../src/domain/ui-service/types.js';
 
 const SAMPLE = `# Pending Approvals
@@ -129,8 +126,10 @@ test('handleRejectApproval returns not-found for unknown id', async () => {
   if (!res.ok) assert.equal(res.code, 'not-found');
 });
 
-// ── (6) facade + tRPC wiring ─────────────────────────────────────────────────
-test('approvals.approve / approvals.reject reachable via facade + tRPC', async () => {
+// ── (6) facade wiring ────────────────────────────────────────────────────────
+// The tRPC router binding (missing id → TRPCError NOT_FOUND) is covered in
+// @cortex-agent/ui-server's app-router.test.ts; here we assert the facade Result path.
+test('approvals.approve / approvals.reject reachable via facade (approve, reject, missing→not-found)', async () => {
   const p = writeTemp(SAMPLE);
   const ui = createUiService(makeDeps(p));
   const alphaId = idOf(fs.readFileSync(p, 'utf8'), 'Alpha: promote a rule');
@@ -138,12 +137,12 @@ test('approvals.approve / approvals.reject reachable via facade + tRPC', async (
   assert.ok(okd.ok);
   assert.equal(okd.data.status, 'approved');
 
-  const caller = createCallerFactory(createAppRouter(createUiService(makeDeps(p))))({});
   const betaId = idOf(fs.readFileSync(p, 'utf8'), 'Beta: bump idle timeout');
-  const r = await caller.approvals.reject({ id: betaId, feedback: 'no' });
-  assert.equal(r.status, 'rejected');
-  await assert.rejects(
-    () => caller.approvals.approve({ id: 'missing00' }),
-    (e: unknown) => e instanceof TRPCError && e.code === 'NOT_FOUND',
-  );
+  const r = await ui.mutate('approvals.reject', { id: betaId, feedback: 'no' });
+  assert.ok(r.ok);
+  assert.equal(r.data.status, 'rejected');
+
+  const missing = await ui.mutate('approvals.approve', { id: 'missing00' });
+  assert.equal(missing.ok, false);
+  if (!missing.ok) assert.equal(missing.code, 'not-found');
 });

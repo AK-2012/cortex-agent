@@ -1,23 +1,24 @@
-// input:  an AnyRouter (injected) + a token accessor + @core/auth + @trpc/server standalone adapter
+// input:  an AnyRouter (injected) + a token accessor + core/auth + @trpc/server standalone adapter
 // output: createUiHttpServer({ router, getToken, port, host?, spaDir?, corsOrigins? }) -> { server, close() }
-// pos:    Web UI transport-host (platform layer, L3). Mounts the injected tRPC router on the
-//         standalone HTTP adapter (query/mutate over HTTP, subscription over SSE — tRPC v11),
-//         gated by an x-cortex-token bearer check BEFORE tRPC (mirrors webhook + WS-upgrade),
-//         and serves a minimal SPA static stub for non-tRPC paths. Generic over AnyRouter — the
-//         concrete AppRouter is injected by the entry-layer wiring, keeping this file router-
-//         agnostic and layer-clean (platform -> core only). Bound 127.0.0.1 by default.
-//         CORS allow-list (task 1b60): optional corsOrigins[] lets the Tauri desktop webview
-//         (cross-origin, e.g. tauri://localhost) reach tRPC endpoints directly without a proxy.
-//         Non-wildcard only — the origin is echoed verbatim when it's in the allow-list.
-// >>> If I am updated, update CORTEX.md and the parent folder's CORTEX.md <<<
+// pos:    Web UI transport-host, in the @cortex-agent/ui-server package. Mounts the injected tRPC
+//         router on the standalone HTTP adapter (query/mutate over HTTP, subscription over SSE —
+//         tRPC v11), gated by an x-cortex-token bearer check BEFORE tRPC (mirrors webhook +
+//         WS-upgrade), and serves the built SPA static files for non-tRPC paths. Generic over
+//         AnyRouter — the concrete AppRouter is injected by start-ui-http.ts, keeping this file
+//         router-agnostic. Bound 127.0.0.1 by default. Reads AUTH_HEADER / timingSafeEqualStr and
+//         createLogger from the core package's built dist (narrow deep-import).
+//         CORS allow-list: optional corsOrigins[] lets the Tauri desktop webview (cross-origin,
+//         e.g. tauri://localhost) reach tRPC endpoints directly without a proxy. Non-wildcard only
+//         — the origin is echoed verbatim when it's in the allow-list.
+// >>> If I am updated, update CORTEX.md <<<
 
 import * as http from 'http';
 import * as fs from 'fs';
 import * as path from 'path';
 import { createHTTPServer } from '@trpc/server/adapters/standalone';
 import type { AnyRouter } from '@trpc/server';
-import { AUTH_HEADER, timingSafeEqualStr } from '@core/auth.js';
-import { createLogger } from '@core/log.js';
+import { AUTH_HEADER, timingSafeEqualStr } from '@cortex-agent/server/dist/core/auth.js';
+import { createLogger } from '@cortex-agent/server/dist/core/log.js';
 
 const log = createLogger('ui-http');
 
@@ -104,7 +105,7 @@ function applyCorsHeaders(
 }
 
 /**
- * SPA static-serving STUB (Stage 1 — web/ not built yet, kept minimal). For a non-tRPC path:
+ * SPA static serving. For a non-tRPC path:
  *  - no spaDir / missing dir  → 404 plain-text placeholder.
  *  - spaDir present           → serve an existing file under it (path-traversal safe); otherwise
  *    fall back to index.html (SPA client-side routing); if index.html is absent → 404.
@@ -157,7 +158,7 @@ function serveSpaStub(req: http.IncomingMessage, res: http.ServerResponse, spaDi
 
 /**
  * Build (but do not stop) an HTTP server exposing the injected tRPC router over HTTP+SSE behind
- * an x-cortex-token bearer gate, plus a minimal SPA static stub. The server is already listening
+ * an x-cortex-token bearer gate, plus the SPA static server. The server is already listening
  * when this returns. Call `close()` for a clean shutdown (force-closes live SSE sockets).
  *
  * CORS: if `corsOrigins` is provided, a matching `Origin` header causes non-wildcard CORS headers

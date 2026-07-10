@@ -8,8 +8,6 @@ import {
   handleApprovalsList,
 } from '../../../src/domain/ui-service/query/approvals.js';
 import { createUiService } from '../../../src/domain/ui-service/ui-service.js';
-import { createAppRouter } from '../../../src/domain/ui-service/app-router.js';
-import { createCallerFactory } from '../../../src/domain/ui-service/trpc.js';
 import type { UiServiceDeps } from '../../../src/domain/ui-service/types.js';
 
 // A representative PENDING_APPROVALS.md with a preamble + 4 entries covering every status,
@@ -146,11 +144,15 @@ test('approvals.list reachable via the ui-service facade', async () => {
   assert.equal(filtered.data[0].status, 'approved');
 });
 
-test('approvals.list reachable via the tRPC AppRouter', async () => {
+// The tRPC router binding is covered in @cortex-agent/ui-server's app-router.test.ts;
+// here we assert the facade's pending-status filter (distinct from the approved filter above).
+test('approvals.list via facade honors the pending-status filter', async () => {
   const deps = makeDeps(writeTemp(SAMPLE));
-  const caller = createCallerFactory(createAppRouter(createUiService(deps)))({});
-  const list = await caller.approvals.list({});
-  assert.equal(list.length, 4);
-  const pending = await caller.approvals.list({ status: 'pending' });
-  assert.equal(pending.length, 1);
+  const ui = createUiService(deps);
+  const list = await ui.query('approvals.list', {});
+  assert.ok(list.ok);
+  assert.equal(list.data.length, 4);
+  const pending = await ui.query('approvals.list', { status: 'pending' });
+  assert.ok(pending.ok);
+  assert.equal(pending.data.length, 1);
 });
