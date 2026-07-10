@@ -6,12 +6,14 @@
 
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import { execFileSync } from 'node:child_process';
 import type {
   UiServiceDeps,
   MemoryTreeParams,
   MemoryFileParams,
   MemoryTree,
   MemoryFile,
+  MemoryLineDiff,
 } from '../types.js';
 
 // Canonical top-level memory files, in display order. Missing ones are omitted (not errored).
@@ -97,6 +99,36 @@ export async function handleMemoryTree(
   return { projectId: params.projectId, files, dirs };
 }
 
+// Real working-tree-vs-HEAD line counts via `git diff --numstat`. Returns null (honest placeholder,
+// never fabricated) when the project dir is not a git work tree, git is unavailable, or the diff is
+// binary/unresolvable. Read-only; array args (no shell) — `relPath` is the already-validated
+// project-relative path, so there is no injection surface.
+function gitLineDiff(root: string, relPath: string): MemoryLineDiff | null {
+  let out: string;
+  try {
+    out = execFileSync('git', ['diff', '--numstat', 'HEAD', '--', relPath], {
+      cwd: root,
+      encoding: 'utf8',
+      timeout: 5000,
+      maxBuffer: 1024 * 1024,
+      stdio: ['ignore', 'pipe', 'ignore'],
+      env: { ...process.env, GIT_TERMINAL_PROMPT: '0' },
+    });
+  } catch {
+    // git missing / not a repo / non-zero exit → unknown, not fabricated.
+    return null;
+  }
+  const line = out.split('\n').find((l) => l.trim().length > 0);
+  // No diff vs HEAD (e.g. a clean auto-committed file) → the real answer is 0/0.
+  if (!line) return { added: 0, removed: 0 };
+  const [addedRaw, removedRaw] = line.split('\t');
+  // Binary files report `-\t-\t<path>` → counts are unknowable, honest null.
+  const added = Number(addedRaw);
+  const removed = Number(removedRaw);
+  if (!Number.isFinite(added) || !Number.isFinite(removed)) return null;
+  return { added, removed };
+}
+
 export async function handleMemoryFile(
   deps: UiServiceDeps,
   params: MemoryFileParams,
@@ -112,5 +144,6 @@ export async function handleMemoryFile(
     content,
     sizeBytes: st.size,
     modifiedAt: st.mtime.toISOString(),
+    lineDiff: gitLineDiff(root, params.path),
   };
 }

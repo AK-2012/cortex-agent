@@ -1,4 +1,4 @@
-import type { MemoryTree } from '@cortex-agent/ui-contract';
+import type { MemoryTree, MemoryLineDiff } from '@cortex-agent/ui-contract';
 
 // Pure view-model helpers for the memory viewer 7b center view (prototype.dc.html L658–719). No JSX,
 // no fabricated data. Precedent: features/overview/overview-vm.ts. `deriveActiveProjectId` is reused
@@ -76,4 +76,21 @@ export function diffToggle(on: boolean): DiffToggleStyle {
   return on
     ? { label: 'Viewing diff', color: '#fff', bg: '#4655D4', border: '#4655D4' }
     : { label: 'Diff hidden', color: '#4655D4', bg: '#fff', border: '#C9CFF2' };
+}
+
+export interface LineDiffLabel {
+  /** e.g. `+42` (green). */
+  added: string;
+  /** e.g. `−7` with a real U+2212 minus (red). */
+  removed: string;
+}
+
+/**
+ * Real per-file git line counts (`memory.file.lineDiff`) → display chips. Returns `null` when the
+ * backend reports no diff data (git unavailable / not a repo / binary) so the caller falls back to an
+ * honest placeholder — NEVER a fabricated `+42 −7`. `0/0` (a clean file) is real data and rendered.
+ */
+export function formatLineDiff(d: MemoryLineDiff | null | undefined): LineDiffLabel | null {
+  if (!d) return null;
+  return { added: `+${d.added}`, removed: `−${d.removed}` };
 }

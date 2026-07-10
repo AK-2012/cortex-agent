@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
+import { execFileSync } from 'node:child_process';
 import { handleMemoryTree, handleMemoryFile } from '../../../src/domain/ui-service/query/memory.js';
 import { createUiService } from '../../../src/domain/ui-service/ui-service.js';
 import { mutateInputSchemas } from '../../../src/domain/ui-service/input-schemas.js';
@@ -203,4 +204,58 @@ test('memory.tree / memory.file via facade read a file and reject traversal', as
   const bad = await ui.query('memory.file', { projectId: 'my-project', path: '../secret.txt' });
   assert.equal(bad.ok, false);
   if (!bad.ok) assert.equal(bad.code, 'invalid-args');
+});
+
+// ── (5) git line-level +/− via numstat (working tree vs HEAD) ─────────────────
+// A real git repo fixture: commit a file, then modify the working tree so numstat is non-zero.
+function makeGitProject(): { root: string } {
+  const base = fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), 'cortex-mem-git-'));
+  const root = path.join(base, 'projects', 'my-project');
+  fs.mkdirSync(root, { recursive: true });
+  const git = (...args: string[]) =>
+    execFileSync('git', ['-C', root, ...args], { stdio: ['ignore', 'ignore', 'ignore'] });
+  git('init', '-q');
+  git('config', 'user.email', 'test@example.com');
+  git('config', 'user.name', 'test');
+  git('config', 'commit.gpgsign', 'false');
+  // Committed baseline: 3 lines.
+  fs.writeFileSync(path.join(root, 'STATUS.md'), 'a\nb\nc\n', 'utf8');
+  git('add', 'STATUS.md');
+  git('commit', '-q', '-m', 'baseline');
+  return { root };
+}
+
+test('memory.file reports real +/− from git numstat when the file is modified vs HEAD', async () => {
+  const { root } = makeGitProject();
+  // Working-tree edit: remove line 'b', add two new lines → +2 / −1 (numstat counts changed hunks).
+  fs.writeFileSync(path.join(root, 'STATUS.md'), 'a\nc\nd\ne\n', 'utf8');
+  const dto = await handleMemoryFile(makeDeps('my-project', root), {
+    projectId: 'my-project',
+    path: 'STATUS.md',
+  });
+  // Cross-check against git's own numstat output (avoid pinning brittle exact numbers).
+  const raw = execFileSync('git', ['-C', root, 'diff', '--numstat', 'HEAD', '--', 'STATUS.md'], {
+    encoding: 'utf8',
+  }).trim();
+  const [added, removed] = raw.split('\t');
+  assert.deepEqual(dto.lineDiff, { added: Number(added), removed: Number(removed) });
+  assert.ok(dto.lineDiff!.added > 0 && dto.lineDiff!.removed > 0);
+});
+
+test('memory.file reports {added:0,removed:0} for a clean tracked file (no diff vs HEAD)', async () => {
+  const { root } = makeGitProject();
+  const dto = await handleMemoryFile(makeDeps('my-project', root), {
+    projectId: 'my-project',
+    path: 'STATUS.md',
+  });
+  assert.deepEqual(dto.lineDiff, { added: 0, removed: 0 });
+});
+
+test('memory.file lineDiff is null (honest placeholder) when the project dir is not a git repo', async () => {
+  const { root } = makeProject(); // makeProject fixture is a plain temp dir, NOT a git repo
+  const dto = await handleMemoryFile(makeDeps('my-project', root), {
+    projectId: 'my-project',
+    path: 'STATUS.md',
+  });
+  assert.equal(dto.lineDiff, null);
 });
