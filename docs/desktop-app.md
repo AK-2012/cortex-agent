@@ -59,6 +59,13 @@ fails to launch with a WebView2 error, download the Evergreen bootstrapper from
 The desktop app talks to the Cortex server's **Web UI HTTP endpoint** over HTTP or HTTPS.
 This endpoint is **opt-in** — you must enable it before the desktop can connect.
 
+The endpoint is served by an optional, in-process add-on package, `@cortex-agent/ui-server`,
+which the core server loads on demand only when `CORTEX_UI_HTTP` is set (it carries
+`@trpc/server` and the SPA host, kept out of the Slack/TUI-only core). Enabling it is the same
+one-line flag as before — **nothing changes for the desktop app**, which still authenticates
+with a bearer `clientToken`. The same endpoint also powers the browser workbench; see
+[Browser Access & Deployment](browser-access.md).
+
 Add the following to `~/.cortex/config/.env` on the machine running the Cortex server:
 
 ```bash

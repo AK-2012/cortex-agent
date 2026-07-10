@@ -62,6 +62,7 @@ plugins:
             Home: 首页
             Quickstart: 快速入门
             Desktop App: 桌面应用
+            Browser Access: 浏览器访问
             Slack Setup: Slack 设置
             Configuration: 配置
             CLI Reference: CLI 参考
@@ -81,6 +82,7 @@ nav:
   - Home: index.md
   - Quickstart: quickstart.md
   - Desktop App: desktop-app.md
+  - Browser Access: browser-access.md
   - Slack Setup: slack-setup.md
   - Configuration: configuration.md
   - CLI Reference: cli-reference.md
