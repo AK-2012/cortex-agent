@@ -6,6 +6,7 @@ import { setSessionAsync, deleteSessionAsync } from './session.js';
 import { conversationLedger } from '@store/conversation-ledger-repo.js';
 import { setActiveProfile } from '@domain/agents/index.js';
 import * as sessionBackup from './session-backup.js';
+import type { SessionOrigin } from '@store/session-registry-repo.js';
 
 export const SESSION_BACKENDS = ['claude', 'pi', 'codex'] as const;
 
@@ -13,7 +14,7 @@ export interface SessionRegistryWriter {
   generateSessionName(): Promise<string>;
   registerSession(name: string, opts: {
     sessionId: string; channel: string; backend: string;
-    kind: 'local' | 'scheduled'; projectId: string;
+    kind: 'local' | 'scheduled'; origin?: SessionOrigin; projectId: string;
     label?: string | null; profileName?: string | null;
   }): Promise<void>;
 }
@@ -24,6 +25,9 @@ export interface RegisterNamedSessionOpts {
   backend: string;
   projectId: string;
   kind?: 'local' | 'scheduled';
+  /** How the session was initiated. Defaults to 'direct' — the only caller path here
+   *  (inbound direct message + TUI fresh session) is user-initiated. */
+  origin?: SessionOrigin;
   label?: string | null;
   profileName?: string | null;
 }
@@ -38,6 +42,7 @@ export async function registerNamedSession(store: SessionRegistryWriter, opts: R
     channel: opts.channel,
     backend: opts.backend,
     kind: opts.kind ?? 'local',
+    origin: opts.origin ?? 'direct',
     projectId: opts.projectId,
     label: opts.label ?? null,
     profileName: opts.profileName ?? null,

@@ -15,6 +15,7 @@ External callers should import from index.ts, not reference sub-files directly.
 | `tree.ts` | tree (DR-0014) | getRootThreadId / getTreeThreads / summarizeTree / checkSpawnGuards (width+nodes+budget) / registerChildSpawn / buildThreadTree — recursive thread-tree identity, resource guards, tree view |
 | `contract.ts` | contract (DR-0014) | buildContractPrompt / buildMissionChain / checkContractBudget — structured delegation contracts, ancestor goal chain, per-thread budget breaker |
 | `hook-runner.ts` | hook | executeLifecycleHook — lifecycle hook script executor + hook agent runner |
+| `thread-transcript.ts` | transcript | createStepTranscriptBuffer / flushStepTranscript — records a thread step's FULL conversation (assistant text + tool calls) into conversation-history keyed by the resolved result.sessionId, so thread sessions render in the UI (sessions.transcript). Events are buffered during the step (setupStepCallbacks) and flushed at step end (recordStepOutcome), because a fresh slot's sessionId is only known after the agent runs. |
 | `index.ts` | entry | barrel re-export, the only import point for all external callers |
 
 ## Internal dependency order (acyclic)

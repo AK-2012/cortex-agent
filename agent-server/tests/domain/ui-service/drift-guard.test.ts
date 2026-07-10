@@ -23,6 +23,7 @@ function makeMinimalDeps(): UiServiceDeps {
     },
     sessionStore: {
       listByProject: async () => [],
+      listByOrigin: async () => [],
       listResumable: async () => [],
       getById: async () => null,
     },

@@ -9,6 +9,7 @@ function session(over: Partial<SessionInfo> = {}): SessionInfo {
     projectId: 'cortex-self',
     backend: 'claude',
     kind: 'local',
+    origin: 'direct',
     createdAt: '2026-07-06T07:00:00Z',
     lastUsedAt: '2026-07-06T07:42:00Z',
     resumable: true,

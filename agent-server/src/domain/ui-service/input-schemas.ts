@@ -18,6 +18,7 @@ export const projectsListInput = z.object({});
 export const sessionsListInput = z.object({
   projectId: z.string().optional(),
   resumable: z.boolean().optional(),
+  origin: z.enum(['direct', 'thread', 'scheduled']).optional(),
 });
 
 export const sessionsTranscriptInput = z.object({

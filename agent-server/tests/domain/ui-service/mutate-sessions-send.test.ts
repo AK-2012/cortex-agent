@@ -8,7 +8,7 @@ interface SendCall { sessionId: string; channel: string; text: string }
 
 function makeDeps(session: Session | null, sink: SendCall[]): UiServiceDeps {
   return {
-    sessionStore: { listByProject: async () => [], listResumable: async () => [], getById: async () => session },
+    sessionStore: { listByProject: async () => [], listByOrigin: async () => [], listResumable: async () => [], getById: async () => session },
     sendSessionMessage: (opts) => { sink.push(opts); },
   } as unknown as UiServiceDeps;
 }

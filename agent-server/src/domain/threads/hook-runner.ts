@@ -256,6 +256,7 @@ async function runHookAgent(
       channel: opts.channel,
       backend: getActiveBackend(),
       kind: 'local',
+      origin: 'thread',
       label: `[${threadId}:${slotId}]`,
       profileName: getActiveProfile(opts.channel),
       projectId: thread.projectId,

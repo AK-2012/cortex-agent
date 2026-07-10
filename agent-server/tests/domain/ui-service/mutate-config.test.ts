@@ -14,7 +14,7 @@ import type { UiServiceDeps } from '../../../src/domain/ui-service/types.js';
 function makeMinimalDeps(): UiServiceDeps {
   return {
     projectStore: { list: () => [], get: () => undefined, exists: () => false, getDefault: () => ({ id: 'general', name: 'general', kind: 'general' as const, contextDir: '/tmp' }), createProject: () => ({} as any) },
-    sessionStore: { listByProject: async () => [], listResumable: async () => [], getById: async () => null },
+    sessionStore: { listByProject: async () => [], listByOrigin: async () => [], listResumable: async () => [], getById: async () => null },
     conversationHistory: { getHistory: async () => null },
     sendSessionMessage: () => {},
     threadStore: { getAll: () => [], get: () => null },

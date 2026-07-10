@@ -1,5 +1,5 @@
 // input:  session-registry.json + JsonRepository
-// output: SessionRegistryRepo (async generateSessionName / registerSession / updateSession / lookupSession / lookupBySessionId / getById / listRecentSessions / listByProject / listResumable / markUsed / pruneStale / getActiveSessionName)
+// output: SessionRegistryRepo (async generateSessionName / registerSession / updateSession / lookupSession / lookupBySessionId / getById / listRecentSessions / listByProject / listByOrigin / listResumable / markUsed / pruneStale / getActiveSessionName) + deriveSessionOrigin + SessionOrigin type
 // pos:    cortex-XXXX short name ↔ session UUID registry persistence layer (Pattern A, JsonRepository)
 // >>> If I am updated, update my header comment and the parent folder's CORTEX.md <<<
 
@@ -20,6 +20,27 @@ import { threadStore } from './thread-repo.js';
 
 export const REGISTRY_FILE = path.join(STORE_DIR, 'session-registry.json');
 
+/** How a session was initiated. Orthogonal, finer-grained companion to `kind`:
+ *  - 'direct'    — a user-initiated conversation (Slack/Feishu/TUI/Web direct chat)
+ *  - 'thread'    — an agent session spawned by a thread step (pipeline / task-dispatch)
+ *  - 'scheduled' — a session created by a scheduled job
+ *  The UI session list shows only `origin === 'direct'`; thread/scheduled sessions are
+ *  surfaced through the Thread and Schedule views. `kind` is retained for resumable
+ *  semantics (`kind !== 'scheduled'`); origin never replaces it. */
+export type SessionOrigin = 'direct' | 'thread' | 'scheduled';
+
+/** Thread-step sessions are registered with a `[threadId:agentSlotId]` label. Used to
+ *  back-fill `origin` for legacy records that predate the field. */
+const THREAD_LABEL_RE = /^\[[^\]]+:[^\]]+\]$/;
+
+/** Derive a session's origin from its kind + label. Single source of truth shared by
+ *  registerSession (default when a caller omits origin) and the migration back-fill. */
+export function deriveSessionOrigin(kind: 'local' | 'scheduled', label: string | null | undefined): SessionOrigin {
+  if (kind === 'scheduled') return 'scheduled';
+  if (label && THREAD_LABEL_RE.test(label)) return 'thread';
+  return 'direct';
+}
+
 export interface Session {
   name: string;
   sessionId: string;
@@ -27,6 +48,8 @@ export interface Session {
   channel: string;
   backend: string;
   kind: 'local' | 'scheduled';
+  /** How the session was initiated (direct chat / thread step / scheduled job). */
+  origin: SessionOrigin;
   createdAt: string;
   lastUsedAt: string;
   label: string | null;
@@ -61,6 +84,12 @@ export class SessionRegistryRepo {
         // Detect new format: first entry's value has 'name' field
         const firstVal = entries[0][1];
         if (firstVal && typeof firstVal === 'object' && 'name' in firstVal) {
+          // Back-fill `origin` for records that predate the field (derive from kind + label).
+          for (const rec of Object.values(data)) {
+            if (rec && typeof rec === 'object' && !('origin' in rec)) {
+              rec.origin = deriveSessionOrigin(rec.kind, rec.label);
+            }
+          }
           return data as SessionRegistryData;
         }
 
@@ -98,6 +127,7 @@ export class SessionRegistryRepo {
             ...record,
             name,
             projectId: channelToProject[channel] || 'general',
+            origin: record.origin ?? deriveSessionOrigin(record.kind, record.label),
           };
         }
         return result as SessionRegistryData;
@@ -146,8 +176,9 @@ export class SessionRegistryRepo {
     return `cortex-${crypto.randomBytes(4).toString('hex')}`;
   }
 
-  async registerSession(name: string, opts: { sessionId: string; channel: string; backend: string; kind: 'local' | 'scheduled'; projectId?: string; label?: string | null; profileName?: string | null }): Promise<void> {
+  async registerSession(name: string, opts: { sessionId: string; channel: string; backend: string; kind: 'local' | 'scheduled'; origin?: SessionOrigin; projectId?: string; label?: string | null; profileName?: string | null }): Promise<void> {
     const now = new Date().toISOString();
+    const label = opts.label?.substring(0, 60) || null;
     await this._repo.mutate((registry) => {
       registry[opts.sessionId] = {
         name,
@@ -156,9 +187,10 @@ export class SessionRegistryRepo {
         channel: opts.channel,
         backend: opts.backend,
         kind: opts.kind,
+        origin: opts.origin ?? deriveSessionOrigin(opts.kind, label),
         createdAt: now,
         lastUsedAt: now,
-        label: opts.label?.substring(0, 60) || null,
+        label,
         profileName: opts.profileName ?? null,
       };
       this._nameIndex.set(name, opts.sessionId);
@@ -219,6 +251,16 @@ export class SessionRegistryRepo {
     const registry = await this._repo.read();
     return Object.values(registry)
       .filter((s) => s.projectId === projectId)
+      .sort((a, b) => b.lastUsedAt.localeCompare(a.lastUsedAt));
+  }
+
+  /** List sessions of a given origin (direct / thread / scheduled), most recent first,
+   *  optionally scoped to a project. Drives the UI's origin-filtered session list. */
+  async listByOrigin(origin: SessionOrigin, projectId?: string): Promise<Session[]> {
+    const registry = await this._repo.read();
+    return Object.values(registry)
+      .filter((s) => s.origin === origin)
+      .filter((s) => projectId === undefined || s.projectId === projectId)
       .sort((a, b) => b.lastUsedAt.localeCompare(a.lastUsedAt));
   }
 

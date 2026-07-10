@@ -75,6 +75,7 @@ How to run tests without tripping it:
 | `task-mutations.test.ts` | Test | addTask/batchEdit/decompose |
 | `thread-manager.test.ts` | Test | resolveSystemVars/evaluateTransitions |
 | `thread-runner.test.ts` | Test | buildThreadSummary/initThreadContext |
+| `threads/thread-transcript.test.ts` | Test | createStepTranscriptBuffer accumulation (assistant/tool, summarized input) + flushStepTranscript (prompt→user turn then buffer in order, keyed by sessionId, empty-buffer still records prompt, onEvent live-publish) |
 | `conversation-runner.test.ts` | Test | buildConversationPrompt golden-prompt fidelity vs legacy default-thread prompt |
 | `user-context.test.ts` | Test | loadUserContext env-gate/file-present/absent + USER.md injected into buildConversationPrompt, never into thread steps |
 | `thread-abort.test.ts` | Test | DR-0015 control plane: peekPendingControl/clearPendingControl(abort)/abortThread + THREAD_PROTOCOL_PREAMBLE (tool-based) + regression (artifact "[ABORT]" prose must NOT trigger) |

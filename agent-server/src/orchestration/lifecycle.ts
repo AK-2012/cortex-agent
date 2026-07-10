@@ -184,6 +184,7 @@ async function registerOrUpdateSession(result: AgentResult | null, sessionName: 
       sessionId: result.sessionId, channel,
       backend: resolveBackendForChannel(channel),
       kind: trigger === 'scheduled' ? 'scheduled' : 'local',
+      origin: trigger === 'scheduled' ? 'scheduled' : 'direct',
       label: null,
       profileName: getActiveProfile(channel),
       projectId,
@@ -262,7 +263,7 @@ async function persistErrorSession(resolvedSessionId: string | null, sessionName
   if (!sessionName) return;
   const existing = await sessionStore.lookupBySessionId(resolvedSessionId);
   if (!existing) {
-    await sessionStore.registerSession(sessionName, { sessionId: resolvedSessionId, channel, backend, kind: 'local', profileName: getActiveProfile(channel), projectId: (await adapter.resolveInboundProject(channel)) ?? 'general' });
+    await sessionStore.registerSession(sessionName, { sessionId: resolvedSessionId, channel, backend, kind: 'local', origin: 'direct', profileName: getActiveProfile(channel), projectId: (await adapter.resolveInboundProject(channel)) ?? 'general' });
   }
 }
 

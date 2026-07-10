@@ -38,6 +38,10 @@ import { runningExecutions } from '../../core/running-executions.js';
 import type { RunningExecution } from '../../core/running-executions.js';
 import { executeLifecycleHook } from './hook-runner.js';
 import { createToolTrace } from '@platform/index.js';
+import { conversationHistory } from '@store/conversation-history-repo.js';
+import { createStepTranscriptBuffer, flushStepTranscript, type StepTranscriptBuffer } from './thread-transcript.js';
+import { ctx as jobCtx } from '@domain/scheduling/job-registry.js';
+import { createLogger } from '@core/log.js';
 import type {
   ThreadRecord,
   AgentSlotId,
@@ -45,6 +49,8 @@ import type {
   ThreadTemplate,
   RunThreadOptions,
 } from '@core/types/thread-types.js';
+
+const log = createLogger('thread-runner');
 
 // --- Result types ---
 
@@ -93,6 +99,9 @@ interface StepContext {
   execution: { id: string; [k: string]: any };
   /** Always set in buildStepConfig — never an empty placeholder. */
   stepStartTime: string;
+  /** Buffers this step's streamed assistant/tool events; flushed to conversation-history in
+   *  recordStepOutcome once result.sessionId is known (thread transcript recording). */
+  transcriptBuffer: StepTranscriptBuffer;
 }
 
 /** Per-step callbacks resolved from opts/vm by setupStepCallbacks. */
@@ -227,6 +236,7 @@ async function buildStepConfig(
     sessionName: await sessionStore.generateSessionName(),
     profileName, execution,
     stepStartTime: new Date().toISOString(),
+    transcriptBuffer: createStepTranscriptBuffer(),
   };
 }
 
@@ -255,14 +265,28 @@ function setupStepCallbacks(
   // first; the caller (interactive) fires after, preserving the onToolUse-before-ask ordering.
   const callerOnToolUse = opts.onToolUse ?? null;
   const toolTrace = createToolTrace(stream, { slotPrefix });
-  const onAssistantMessage = toolTrace
+  const streamAssistantMessage = toolTrace
     ? (text: string) => { toolTrace.flush(); baseAssistantMessage(text); }
     : baseAssistantMessage;
   const traceToolUse = toolTrace ? (name: string, input: any) => toolTrace.onToolUse(name, input) : null;
-  const onToolUse: ((name: string, input: any) => void) | null =
+  const composedToolUse: ((name: string, input: any) => void) | null =
     traceToolUse && callerOnToolUse
       ? (name: string, input: any) => { traceToolUse(name, input); callerOnToolUse(name, input); }
       : (traceToolUse ?? callerOnToolUse);
+
+  // Transcript recording: mirror the direct path — every assistant message + tool call is buffered
+  // (keyed later by result.sessionId in recordStepOutcome) so the thread session has a full
+  // conversation-history transcript renderable in the UI. Recording wraps (never replaces) the
+  // display callbacks, so streaming/tool-trace behaviour is unchanged.
+  const buffer = stepCtx.transcriptBuffer;
+  const onAssistantMessage = (text: string) => {
+    streamAssistantMessage(text);
+    if (text) buffer.recordAssistant(text);
+  };
+  const onToolUse = (name: string, input: any) => {
+    composedToolUse?.(name, input);
+    buffer.recordTool(name, input);
+  };
 
   // onProgress: caller override (e.g. scheduler's buildUserProcessingMessage) takes precedence;
   // fallback to thread-specific status format for multi-agent pipelines
@@ -418,10 +442,31 @@ async function recordStepOutcome(
       channel: opts.channel,
       backend: getActiveBackend(),
       kind: 'local',
+      origin: 'thread',
       label: `[${threadId}:${agentSlotId}]`,
       profileName: getActiveProfile(opts.channel),
       projectId: currentThread.projectId,
     });
+  }
+
+  // Record this step's full transcript into conversation-history, keyed by the resolved
+  // sessionId (same key the registry entry above uses), so the thread session renders in the
+  // UI (sessions.transcript). Fire-and-forget: a history write must never break the step. Each
+  // event is also published on the bus for live UI reconciliation (best-effort). The rate-limit
+  // early-return above skips this, so an interrupted step is not half-recorded.
+  if (result?.sessionId) {
+    const sid = result.sessionId;
+    void flushStepTranscript(conversationHistory, sid, prompt, stepCtx.transcriptBuffer, (ev) => {
+      jobCtx.bus?.publish({
+        type: 'session.message',
+        sessionId: sid,
+        channel: opts.channel,
+        role: ev.role,
+        text: ev.text ?? '',
+        ...(ev.toolName !== undefined ? { toolName: ev.toolName } : {}),
+        ...(ev.toolInput !== undefined ? { toolInput: ev.toolInput } : {}),
+      });
+    }).catch((e) => log.error('thread transcript flush failed:', (e as Error).message));
   }
 
   // Finalize execution: persistent record + registry teardown + balanced agent.* event.

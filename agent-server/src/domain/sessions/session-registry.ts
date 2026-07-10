@@ -7,14 +7,14 @@
 //       continues to compile until the S12 git-mv sweep.
 // >>> If I am updated, update my header comment and the parent folder's CORTEX.md <<<
 
-import { sessionStore } from '@store/session-registry-repo.js';
-export { sessionStore, sessionRegistryRepo, type Session, type SessionRegistryData } from '@store/session-registry-repo.js';
+import { sessionStore, type SessionOrigin } from '@store/session-registry-repo.js';
+export { sessionStore, sessionRegistryRepo, type Session, type SessionOrigin, type SessionRegistryData } from '@store/session-registry-repo.js';
 
 export function generateSessionName(): Promise<string> {
   return sessionStore.generateSessionName();
 }
 
-export function registerSession(name: string, opts: { sessionId: string; channel: string; backend: string; kind: 'local' | 'scheduled'; projectId?: string; label?: string | null; profileName?: string | null }): Promise<void> {
+export function registerSession(name: string, opts: { sessionId: string; channel: string; backend: string; kind: 'local' | 'scheduled'; origin?: SessionOrigin; projectId?: string; label?: string | null; profileName?: string | null }): Promise<void> {
   return sessionStore.registerSession(name, opts);
 }
 

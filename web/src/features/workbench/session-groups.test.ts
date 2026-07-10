@@ -10,6 +10,7 @@ function mk(p: Partial<SessionInfo> & { sessionId: string }): SessionInfo {
     projectId: p.projectId ?? 'proj',
     backend: p.backend ?? 'claude',
     kind: p.kind ?? 'local',
+    origin: p.origin ?? 'direct',
     createdAt: created,
     lastUsedAt: p.lastUsedAt ?? created,
     resumable: p.resumable ?? true,

@@ -28,15 +28,20 @@ export function buildProgressUpdater(adapter: PlatformAdapter, statusMsg: Messag
   };
 }
 
-export async function finalizeThreadSuccess(adapter: PlatformAdapter, channel: string, statusMsg: MessageRef | null, { startTime, sessionName, result, threadResult, project, trigger, label, sessionKind, statusPrefix }: {
+export async function finalizeThreadSuccess(adapter: PlatformAdapter, channel: string, statusMsg: MessageRef | null, { startTime, sessionName, result, threadResult, project, trigger, label, sessionKind, sessionOrigin, statusPrefix }: {
   startTime: number; sessionName: string; result: AgentResult | null; threadResult: Record<string, any>;
-  project: string; trigger: string; label: string | null; sessionKind: 'scheduled' | 'local'; statusPrefix: string;
+  project: string; trigger: string; label: string | null; sessionKind: 'scheduled' | 'local';
+  /** How the finalized session was initiated: scheduled jobs pass 'scheduled', task-dispatch
+   *  threads pass 'thread'. Passed explicitly because sessionKind='local' cannot distinguish
+   *  a dispatch thread (origin 'thread') from a direct session. */
+  sessionOrigin: 'scheduled' | 'thread'; statusPrefix: string;
 }): Promise<void> {
   const { elapsedStr, elapsedS } = computeElapsed(startTime);
   if (result?.sessionId) {
     await sessionStore.registerSession(sessionName, {
       sessionId: result.sessionId, channel,
       backend: getActiveBackend(), kind: sessionKind,
+      origin: sessionOrigin,
       label,
       profileName: getActiveProfile(channel),
       projectId: project,

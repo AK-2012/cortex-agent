@@ -15,10 +15,14 @@ export async function handleSessionsList(
   deps: UiServiceDeps,
   params: SessionsListParams,
 ): Promise<SessionInfo[]> {
-  const { projectId, resumable } = params;
+  const { projectId, resumable, origin } = params;
 
   let sessions: any[];
-  if (resumable) {
+  if (origin) {
+    // Origin filter takes precedence: the workbench left rail passes origin='direct' so only
+    // user conversations show (thread/scheduled sessions live in their own views).
+    sessions = await deps.sessionStore.listByOrigin(origin, projectId);
+  } else if (resumable) {
     sessions = await deps.sessionStore.listResumable(projectId);
   } else if (projectId) {
     sessions = await deps.sessionStore.listByProject(projectId);
@@ -40,6 +44,7 @@ export async function handleSessionsList(
     projectId: s.projectId,
     backend: s.backend,
     kind: s.kind,
+    origin: s.origin ?? 'direct',
     createdAt: s.createdAt,
     lastUsedAt: s.lastUsedAt,
     resumable: s.kind !== 'scheduled',

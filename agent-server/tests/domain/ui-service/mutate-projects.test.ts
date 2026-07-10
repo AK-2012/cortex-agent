@@ -12,7 +12,7 @@ function makeDeps(createProject: UiServiceDeps['projectStore']['createProject'])
       getDefault: () => ({ id: 'general', name: 'general', kind: 'general' as const, contextDir: '/g' }),
       createProject,
     },
-    sessionStore: { listByProject: async () => [], listResumable: async () => [], getById: async () => null },
+    sessionStore: { listByProject: async () => [], listByOrigin: async () => [], listResumable: async () => [], getById: async () => null },
     conversationHistory: { getHistory: async () => null },
     sendSessionMessage: () => {},
     threadStore: { getAll: () => [], get: () => null },

@@ -274,6 +274,7 @@ async function executeDispatchTask({ selected, selectedTask, channel, scheduleTa
   await finalizeThreadSuccess(adapter, channel, statusMsg, {
     startTime, sessionName, result, threadResult, project: selectedTask.project, trigger: 'task-dispatch',
     label: selectedTask.text?.substring(0, 60) || null, sessionKind: 'scheduled' as 'scheduled' | 'local',
+    sessionOrigin: 'thread',
     statusPrefix: `Done: [${selectedTask.project}] ${selectedTask.text.substring(0, 80)}`,
   });
   if (selectedTask.id) {

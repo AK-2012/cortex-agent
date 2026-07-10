@@ -6,7 +6,7 @@ import type { UiServiceDeps } from '../../../src/domain/ui-service/types.js';
 test('executions.cancel returns not-found when execution does not exist', async () => {
   const deps: UiServiceDeps = {
     projectStore: { list: () => [], get: () => undefined, exists: () => false, getDefault: () => ({ id: 'general', name: 'general', kind: 'general' as const, contextDir: '/g' }), createProject: () => ({ ok: false, code: 'invalid-name' as const, message: 'stub' }) },
-    sessionStore: { listByProject: async () => [], listResumable: async () => [], getById: async () => null },
+    sessionStore: { listByProject: async () => [], listByOrigin: async () => [], listResumable: async () => [], getById: async () => null },
     threadStore: { getAll: () => [], get: () => null },
     taskStore: { getAll: () => [], getById: () => null, load: () => {}, refresh: () => {} },
     scheduler: { list: async () => [], get: async () => null, pause: async () => null, resume: async () => null, remove: async () => false, add: async () => ({ id: 'sch_new' } as any) },
@@ -29,7 +29,7 @@ test('executions.cancel returns not-found when execution does not exist', async 
 test('executions.cancel returns ok when cancellation succeeds', async () => {
   const deps: UiServiceDeps = {
     projectStore: { list: () => [], get: () => undefined, exists: () => false, getDefault: () => ({ id: 'general', name: 'general', kind: 'general' as const, contextDir: '/g' }), createProject: () => ({ ok: false, code: 'invalid-name' as const, message: 'stub' }) },
-    sessionStore: { listByProject: async () => [], listResumable: async () => [], getById: async () => null },
+    sessionStore: { listByProject: async () => [], listByOrigin: async () => [], listResumable: async () => [], getById: async () => null },
     threadStore: { getAll: () => [], get: () => null },
     taskStore: { getAll: () => [], getById: () => null, load: () => {}, refresh: () => {} },
     scheduler: { list: async () => [], get: async () => null, pause: async () => null, resume: async () => null, remove: async () => false, add: async () => ({ id: 'sch_new' } as any) },

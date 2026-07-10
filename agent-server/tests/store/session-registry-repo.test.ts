@@ -8,7 +8,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
-import { SessionRegistryRepo } from '../../src/store/session-registry-repo.js';
+import { SessionRegistryRepo, deriveSessionOrigin } from '../../src/store/session-registry-repo.js';
 
 // ── Shared tmp directory ───────────────────────────────────────
 
@@ -296,6 +296,114 @@ test('SessionRegistryRepo - pruneStale returns 0 when no sessions', async () => 
   const { repo } = createRepoWithPath();
   const removed = await repo.pruneStale(86_400_000);
   assert.equal(removed, 0);
+});
+
+// ── (j) origin classification ───────────────────────────────────
+
+test('deriveSessionOrigin - scheduled kind → scheduled, thread label → thread, else direct', () => {
+  assert.equal(deriveSessionOrigin('scheduled', null), 'scheduled');
+  assert.equal(deriveSessionOrigin('scheduled', '[thr_abc:coder]'), 'scheduled', 'scheduled kind wins over label');
+  assert.equal(deriveSessionOrigin('local', '[thr_abc:coder]'), 'thread');
+  assert.equal(deriveSessionOrigin('local', '[thr_x123:main]'), 'thread');
+  assert.equal(deriveSessionOrigin('local', 'hello world question'), 'direct');
+  assert.equal(deriveSessionOrigin('local', null), 'direct');
+  assert.equal(deriveSessionOrigin('local', '[not a thread label'), 'direct', 'unbalanced bracket is not a thread label');
+});
+
+test('SessionRegistryRepo - registerSession persists an explicit origin', async () => {
+  const { repo } = createRepoWithPath();
+  await repo.registerSession('cortex-origin-1', makeOpts('sess-o1', { origin: 'thread' }));
+  const rec = await repo.getById('sess-o1');
+  assert.ok(rec);
+  assert.equal(rec!.origin, 'thread');
+});
+
+test('SessionRegistryRepo - registerSession derives origin from thread label when omitted', async () => {
+  const { repo } = createRepoWithPath();
+  await repo.registerSession('cortex-origin-2', makeOpts('sess-o2', { label: '[thr_zzz:reviewer]' }));
+  const rec = await repo.getById('sess-o2');
+  assert.ok(rec);
+  assert.equal(rec!.origin, 'thread', 'thread-labelled local session defaults to thread origin');
+});
+
+test('SessionRegistryRepo - registerSession defaults origin to direct for a plain local session', async () => {
+  const { repo } = createRepoWithPath();
+  await repo.registerSession('cortex-origin-3', makeOpts('sess-o3', { label: 'a normal user message' }));
+  const rec = await repo.getById('sess-o3');
+  assert.ok(rec);
+  assert.equal(rec!.origin, 'direct');
+});
+
+test('SessionRegistryRepo - registerSession derives origin=scheduled from scheduled kind', async () => {
+  const { repo } = createRepoWithPath();
+  await repo.registerSession('cortex-origin-4', makeOpts('sess-o4', { kind: 'scheduled', label: null }));
+  const rec = await repo.getById('sess-o4');
+  assert.ok(rec);
+  assert.equal(rec!.origin, 'scheduled');
+});
+
+test('SessionRegistryRepo - migrate backfills origin for old-format records', async () => {
+  const idx = _testIdx++;
+  const filePath = path.join(tmpDir, `session-registry-${idx}.json`);
+  const oldFormat = {
+    'cortex-direct': { sessionId: 'sess-d', channel: 'C001', backend: 'claude', kind: 'local', createdAt: '2025-01-01T00:00:00.000Z', lastUsedAt: '2025-06-01T00:00:00.000Z', label: 'plain chat', profileName: null },
+    'cortex-thread': { sessionId: 'sess-t', channel: 'C002', backend: 'claude', kind: 'local', createdAt: '2025-02-01T00:00:00.000Z', lastUsedAt: '2025-06-02T00:00:00.000Z', label: '[thr_abc:coder]', profileName: null },
+    'cortex-sched': { sessionId: 'sess-s', channel: 'C003', backend: 'claude', kind: 'scheduled', createdAt: '2025-03-01T00:00:00.000Z', lastUsedAt: '2025-06-03T00:00:00.000Z', label: null, profileName: null },
+  };
+  await fs.writeFile(filePath, JSON.stringify(oldFormat, null, 2));
+
+  const repo = new SessionRegistryRepo(filePath);
+  const direct = await repo.getById('sess-d');
+  const thread = await repo.getById('sess-t');
+  const sched = await repo.getById('sess-s');
+  assert.equal(direct!.origin, 'direct');
+  assert.equal(thread!.origin, 'thread');
+  assert.equal(sched!.origin, 'scheduled');
+});
+
+test('SessionRegistryRepo - migrate backfills origin for new-format records missing it', async () => {
+  const idx = _testIdx++;
+  const filePath = path.join(tmpDir, `session-registry-${idx}.json`);
+  const newFormat = {
+    'sess-nt': { name: 'cortex-nt', sessionId: 'sess-nt', projectId: 'p', channel: 'C1', backend: 'claude', kind: 'local', createdAt: '2025-01-01T00:00:00.000Z', lastUsedAt: '2025-06-01T00:00:00.000Z', label: '[thr_q:main]', profileName: null },
+  };
+  await fs.writeFile(filePath, JSON.stringify(newFormat, null, 2));
+
+  const repo = new SessionRegistryRepo(filePath);
+  const rec = await repo.getById('sess-nt');
+  assert.ok(rec);
+  assert.equal(rec!.origin, 'thread', 'new-format record without origin gets it derived');
+});
+
+test('SessionRegistryRepo - migrate preserves an existing origin', async () => {
+  const idx = _testIdx++;
+  const filePath = path.join(tmpDir, `session-registry-${idx}.json`);
+  const newFormat = {
+    'sess-keep': { name: 'cortex-keep', sessionId: 'sess-keep', projectId: 'p', channel: 'C1', backend: 'claude', kind: 'local', origin: 'direct', createdAt: '2025-01-01T00:00:00.000Z', lastUsedAt: '2025-06-01T00:00:00.000Z', label: '[thr_q:main]', profileName: null },
+  };
+  await fs.writeFile(filePath, JSON.stringify(newFormat, null, 2));
+
+  const repo = new SessionRegistryRepo(filePath);
+  const rec = await repo.getById('sess-keep');
+  assert.ok(rec);
+  assert.equal(rec!.origin, 'direct', 'explicit origin must not be overwritten by derivation');
+});
+
+// ── (k) listByOrigin filtering ──────────────────────────────────
+
+test('SessionRegistryRepo - listByOrigin filters by origin (optionally scoped to project)', async () => {
+  const { repo } = createRepoWithPath();
+  await repo.registerSession('cortex-d1', makeOpts('sess-d1', { origin: 'direct', projectId: 'pa' }));
+  await repo.registerSession('cortex-d2', makeOpts('sess-d2', { origin: 'direct', projectId: 'pb' }));
+  await repo.registerSession('cortex-th1', makeOpts('sess-th1', { origin: 'thread', label: '[thr:main]', projectId: 'pa' }));
+
+  const directs = await repo.listByOrigin('direct');
+  assert.equal(directs.length, 2);
+  assert.ok(directs.every((s) => s.origin === 'direct'));
+
+  const directsPa = await repo.listByOrigin('direct', 'pa');
+  assert.equal(directsPa.length, 1);
+  assert.equal(directsPa[0].name, 'cortex-d1');
 });
 
 // ── (i) name index: lookupSession O(1) after mutations ──────────

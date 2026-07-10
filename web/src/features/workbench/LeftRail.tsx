@@ -19,7 +19,9 @@ export function LeftRail(): JSX.Element {
   const navigate = useNavigate();
   const trpc = useTRPC();
   const projectsQuery = useQuery(trpc.projects.list.queryOptions({}));
-  const sessionsQuery = useQuery(trpc.sessions.list.queryOptions({}));
+  // Only user-initiated conversations belong in the left rail. Thread-agent sessions and
+  // scheduled-job sessions are surfaced through the Thread and Schedule views, not here.
+  const sessionsQuery = useQuery(trpc.sessions.list.queryOptions({ origin: 'direct' }));
 
   const projects = projectsQuery.data ?? [];
   const sessions = sessionsQuery.data ?? [];

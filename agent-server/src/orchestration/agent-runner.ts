@@ -12,7 +12,7 @@ import { trackPendingTask } from './busy-tracker.js';
 import { getSessionAsync } from '@domain/sessions/session.js';
 import { sessionStore } from '@store/session-registry-repo.js';
 import { conversationLedger } from '@store/conversation-ledger-repo.js';
-import { conversationHistory } from '@store/conversation-history-repo.js';
+import { conversationHistory, summarizeToolInputForHistory } from '@store/conversation-history-repo.js';
 import { getActiveProfile, getDefaultAgent, resolveBackendForChannel } from '@domain/agents/index.js';
 import { registerNamedSession } from '@domain/sessions/session-lifecycle.js';
 import { handleAgentSuccess, handleAgentError, initTurnTracking } from './lifecycle.js';
@@ -305,19 +305,6 @@ function buildAgentCallbacks(adapter: PlatformAdapter, destination: Destination,
 async function downloadFiles(files: PlatformFileRef[] | undefined, hasFiles: boolean, adapter: PlatformAdapter): Promise<DownloadedFile[]> {
   if (!hasFiles || !files) return [];
   return downloadPlatformFiles(files, adapter, TEMP_DIR);
-}
-
-/** Compact, backend-agnostic one-line summary of a tool call's input for the history. */
-export function summarizeToolInputForHistory(input: any): string {
-  if (input == null || typeof input !== 'object') return '';
-  const pick = (k: string) => (typeof input[k] === 'string' ? input[k] : undefined);
-  const primary = pick('command') ?? pick('file_path') ?? pick('path') ?? pick('pattern') ?? pick('url') ?? pick('prompt') ?? pick('description') ?? pick('query');
-  let s = primary ?? '';
-  if (!s) {
-    try { s = JSON.stringify(input); } catch { s = ''; }
-  }
-  s = s.replace(/\s+/g, ' ').trim();
-  return s.length > 120 ? s.slice(0, 117) + '…' : s;
 }
 
 /** Fire-and-forget history append; never let a logging write break the turn. */

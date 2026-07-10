@@ -53,6 +53,21 @@ function nowIso(): string {
   return new Date().toISOString();
 }
 
+/** Compact, backend-agnostic one-line summary of a tool call's input for the history.
+ *  Shared by the direct conversation path (agent-runner) and thread steps (thread-transcript)
+ *  so both record identical tool-input summaries. */
+export function summarizeToolInputForHistory(input: any): string {
+  if (input == null || typeof input !== 'object') return '';
+  const pick = (k: string) => (typeof input[k] === 'string' ? input[k] : undefined);
+  const primary = pick('command') ?? pick('file_path') ?? pick('path') ?? pick('pattern') ?? pick('url') ?? pick('prompt') ?? pick('description') ?? pick('query');
+  let s = primary ?? '';
+  if (!s) {
+    try { s = JSON.stringify(input); } catch { s = ''; }
+  }
+  s = s.replace(/\s+/g, ' ').trim();
+  return s.length > 120 ? s.slice(0, 117) + '…' : s;
+}
+
 function isPrefixRelated(a: string, b: string): boolean {
   return a.startsWith(b) || b.startsWith(a);
 }

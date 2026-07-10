@@ -13,7 +13,7 @@ const mockTasks = [
 function makeDeps(overrides: Partial<UiServiceDeps> = {}): UiServiceDeps {
   return {
     projectStore: { list: () => [], get: () => undefined, exists: () => false, getDefault: () => ({ id: 'general', name: 'general', kind: 'general' as const, contextDir: '/g' }), createProject: () => ({ ok: false, code: 'invalid-name' as const, message: 'stub' }) },
-    sessionStore: { listByProject: async () => [], listResumable: async () => [], getById: async () => null },
+    sessionStore: { listByProject: async () => [], listByOrigin: async () => [], listResumable: async () => [], getById: async () => null },
     threadStore: { getAll: () => [], get: () => null },
     taskStore: { getAll: (project?: string) => project ? mockTasks.filter(t => t.project === project) : mockTasks, getById: () => null, load: () => {}, refresh: () => {} },
     scheduler: { list: async () => [], get: async () => null, pause: async () => null, resume: async () => null, remove: async () => false, add: async () => ({ id: 'sch_new' } as any) },

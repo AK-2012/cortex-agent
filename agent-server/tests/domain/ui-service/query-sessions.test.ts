@@ -4,9 +4,9 @@ import { handleSessionsList } from '../../../src/domain/ui-service/query/session
 import type { UiServiceDeps } from '../../../src/domain/ui-service/types.js';
 
 const mockSessions = [
-  { sessionId: 's1', name: 'cortex-abc', projectId: 'proj1', channel: 'C1', backend: 'claude', kind: 'local' as const, createdAt: '2026-01-01T00:00:00Z', lastUsedAt: '2026-05-01T00:00:00Z', label: 'dev', profileName: 'default' },
-  { sessionId: 's2', name: 'cortex-def', projectId: 'proj2', channel: 'C2', backend: 'codex', kind: 'scheduled' as const, createdAt: '2026-02-01T00:00:00Z', lastUsedAt: '2026-04-01T00:00:00Z', label: null as string | null, profileName: null },
-  { sessionId: 's3', name: 'cortex-ghi', projectId: 'proj1', channel: 'C3', backend: 'claude', kind: 'local' as const, createdAt: '2026-03-01T00:00:00Z', lastUsedAt: '2026-05-15T00:00:00Z', label: 'test', profileName: 'pi' },
+  { sessionId: 's1', name: 'cortex-abc', projectId: 'proj1', channel: 'C1', backend: 'claude', kind: 'local' as const, origin: 'direct' as const, createdAt: '2026-01-01T00:00:00Z', lastUsedAt: '2026-05-01T00:00:00Z', label: 'dev', profileName: 'default' },
+  { sessionId: 's2', name: 'cortex-def', projectId: 'proj2', channel: 'C2', backend: 'codex', kind: 'scheduled' as const, origin: 'scheduled' as const, createdAt: '2026-02-01T00:00:00Z', lastUsedAt: '2026-04-01T00:00:00Z', label: null as string | null, profileName: null },
+  { sessionId: 's3', name: 'cortex-ghi', projectId: 'proj1', channel: 'C3', backend: 'claude', kind: 'local' as const, origin: 'thread' as const, createdAt: '2026-03-01T00:00:00Z', lastUsedAt: '2026-05-15T00:00:00Z', label: '[thr_x:main]', profileName: 'pi' },
 ];
 
 function makeDeps(overrides: Partial<UiServiceDeps> = {}): UiServiceDeps {
@@ -22,6 +22,7 @@ function makeDeps(overrides: Partial<UiServiceDeps> = {}): UiServiceDeps {
     },
     sessionStore: {
       listByProject: async (pid: string) => mockSessions.filter(s => s.projectId === pid),
+      listByOrigin: async (origin: string, pid?: string) => mockSessions.filter(s => s.origin === origin && (!pid || s.projectId === pid)),
       listResumable: async (pid?: string) => mockSessions.filter(s => s.kind !== 'scheduled' && (!pid || s.projectId === pid)),
       getById: async () => null,
     },
@@ -71,4 +72,34 @@ test('sessions.list sets resumable correctly for scheduled sessions', async () =
   const result = await handleSessionsList(makeDeps(), { projectId: 'proj2' });
   assert.equal(result.length, 1);
   assert.equal(result[0].resumable, false);
+});
+
+test('sessions.list maps the origin field onto SessionInfo', async () => {
+  const result = await handleSessionsList(makeDeps(), {});
+  const byId = Object.fromEntries(result.map(s => [s.sessionId, s.origin]));
+  assert.equal(byId['s1'], 'direct');
+  assert.equal(byId['s2'], 'scheduled');
+  assert.equal(byId['s3'], 'thread');
+});
+
+test('sessions.list with origin=direct returns only direct sessions', async () => {
+  const result = await handleSessionsList(makeDeps(), { origin: 'direct' });
+  assert.equal(result.length, 1);
+  assert.equal(result[0].sessionId, 's1');
+  assert.ok(result.every(s => s.origin === 'direct'));
+});
+
+test('sessions.list with origin=thread returns only thread sessions', async () => {
+  const result = await handleSessionsList(makeDeps(), { origin: 'thread' });
+  assert.equal(result.length, 1);
+  assert.equal(result[0].sessionId, 's3');
+});
+
+test('sessions.list with origin + projectId scopes to both', async () => {
+  const result = await handleSessionsList(makeDeps(), { origin: 'direct', projectId: 'proj1' });
+  assert.equal(result.length, 1);
+  assert.equal(result[0].sessionId, 's1');
+
+  const none = await handleSessionsList(makeDeps(), { origin: 'direct', projectId: 'proj2' });
+  assert.equal(none.length, 0);
 });

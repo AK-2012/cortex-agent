@@ -152,7 +152,7 @@ async function runScheduledTaskAsync({ normalizedMessage, message, projectId, sc
     } else {
       await finalizeThreadSuccess(adapter, projectId, statusMsg, {
         startTime, sessionName, result, threadResult, project: projectId, trigger: 'scheduled',
-        label: message?.substring(0, 60) || null, sessionKind: 'scheduled', statusPrefix: 'Done',
+        label: message?.substring(0, 60) || null, sessionKind: 'scheduled', sessionOrigin: 'scheduled', statusPrefix: 'Done',
       });
     }
   } catch (error) {

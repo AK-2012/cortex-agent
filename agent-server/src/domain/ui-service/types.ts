@@ -84,6 +84,9 @@ export interface ExecutionsLogParams {
 export interface SessionsListParams {
   projectId?: string;
   resumable?: boolean;
+  /** Restrict to a single initiation origin. The workbench left rail passes 'direct' so
+   *  only user conversations show; thread/scheduled sessions live in their own views. */
+  origin?: 'direct' | 'thread' | 'scheduled';
 }
 
 export interface SessionsTranscriptParams {
@@ -229,6 +232,9 @@ export interface SessionInfo {
   projectId: string;
   backend: string;
   kind: 'local' | 'scheduled';
+  /** How the session was initiated: 'direct' (user chat), 'thread' (pipeline/dispatch
+   *  step), or 'scheduled' (scheduled job). The workbench session list shows only 'direct'. */
+  origin: 'direct' | 'thread' | 'scheduled';
   createdAt: string;
   lastUsedAt: string;
   resumable: boolean;
@@ -673,6 +679,7 @@ export interface UiServiceDeps {
   };
   sessionStore: {
     listByProject(projectId: string): Promise<Session[]>;
+    listByOrigin(origin: 'direct' | 'thread' | 'scheduled', projectId?: string): Promise<Session[]>;
     listResumable(projectId?: string): Promise<Session[]>;
     getById(sessionId: string): Promise<Session | null>;
   };

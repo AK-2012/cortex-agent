@@ -67,6 +67,7 @@ describe('deriveActiveProjectId', () => {
     projectId,
     backend: 'claude',
     kind: 'local',
+    origin: 'direct',
     createdAt: lastUsedAt,
     lastUsedAt,
     resumable: true,
