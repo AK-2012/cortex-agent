@@ -56,6 +56,12 @@ interface TokenBucket {
   output: number;
 }
 
+/** One calendar day in the 14-day cost series (local day). date = `YYYY-MM-DD`. */
+export interface DailyCostPoint {
+  date: string;
+  cost: number;
+}
+
 export interface CostSummary {
   today: number;
   week: number;
@@ -68,6 +74,18 @@ export interface CostSummary {
   byBackend: Record<string, PeriodBucket>;
   tokens: { today: TokenBucket; month: TokenBucket; total: TokenBucket };
   entryCount: number;
+  // ── Additive real-data fields (task c489; ignored by Slack/TUI/MCP consumers) ──
+  /** Daily budget denominator from budget.json `daily_usd` (global, not per-project). */
+  dailyBudget: number;
+  /** Today's scoped spend extrapolated linearly by the elapsed fraction of the local day.
+   *  0 when nothing was spent today; noisy early in the day (small fraction) by construction. */
+  forecastToday: number;
+  /** Per-calendar-day scoped cost for the last 14 local days, oldest→newest, last = today.
+   *  Zero-filled for days with no entries; respects the `project` filter. */
+  dailyCost: DailyCostPoint[];
+  /** Project-scoped "where it goes" trigger breakdown (byTrigger with the project filter applied).
+   *  Categories with no scoped entries are simply absent (no fabricated placeholders). */
+  byTriggerScoped: Record<string, PeriodBucket>;
 }
 
 export interface BudgetStatus {
@@ -173,14 +191,44 @@ function createTokenBucket(): TokenBucket {
   return { input: 0, output: 0 };
 }
 
+const DAY_MS = 24 * 60 * 60 * 1000;
+const DAILY_SERIES_DAYS = 14;
+
+/** Local calendar day key `YYYY-MM-DD` for a Date. */
+function localDayKey(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+function addToBucket(bucket: PeriodBucket, cost: number, isToday: boolean, isWeek: boolean, isMonth: boolean): void {
+  bucket.total += cost;
+  if (isToday) bucket.today += cost;
+  if (isWeek) bucket.week += cost;
+  if (isMonth) bucket.month += cost;
+}
+
 /**
  * Get cost summary (global, optionally filtered by project).
+ * `opts.now` overrides the clock (default Date.now()) — used for deterministic tests of the
+ * time-relative fields (forecastToday / the 14-day dailyCost series).
  */
-async function getCostSummary(project?: string | null): Promise<CostSummary> {
+async function getCostSummary(project?: string | null, opts?: { now?: number }): Promise<CostSummary> {
   const data = await costRepo.readCosts();
-  const dayStart = new Date(); dayStart.setHours(0, 0, 0, 0);
-  const weekStart = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
-  const monthStart = new Date(); monthStart.setDate(1); monthStart.setHours(0, 0, 0, 0);
+  const budget = await costRepo.readBudget();
+  const now = opts?.now ?? Date.now();
+  const dayStart = new Date(now); dayStart.setHours(0, 0, 0, 0);
+  const weekStart = new Date(now - 7 * DAY_MS);
+  const monthStart = new Date(now); monthStart.setDate(1); monthStart.setHours(0, 0, 0, 0);
+
+  // 14-day series: pre-seed the last 14 local days (oldest→newest, last = today), zero-filled.
+  const dailyKeys: string[] = [];
+  for (let i = DAILY_SERIES_DAYS - 1; i >= 0; i--) {
+    const d = new Date(dayStart); d.setDate(d.getDate() - i);
+    dailyKeys.push(localDayKey(d));
+  }
+  const dailyMap = new Map<string, number>(dailyKeys.map(k => [k, 0]));
 
   const periods = {
     today: createPeriodBuckets(),
@@ -190,6 +238,7 @@ async function getCostSummary(project?: string | null): Promise<CostSummary> {
   };
   const byProject: Record<string, PeriodBucket> = {};
   const byTrigger: Record<string, PeriodBucket> = {};
+  const byTriggerScoped: Record<string, PeriodBucket> = {};
   const bySource: Record<string, PeriodBucket> = {};
   const byBackend: Record<string, PeriodBucket> = {};
   const tokens = { today: createTokenBucket(), month: createTokenBucket(), total: createTokenBucket() };
@@ -221,6 +270,14 @@ async function getCostSummary(project?: string | null): Promise<CostSummary> {
       tokens.total.output += outTok;
       if (isToday) { tokens.today.input += inTok; tokens.today.output += outTok; }
       if (isMonth) { tokens.month.input += inTok; tokens.month.output += outTok; }
+
+      // Scoped 14-day series (only days inside the window contribute).
+      const dayKey = localDayKey(entryTime);
+      if (dailyMap.has(dayKey)) dailyMap.set(dayKey, dailyMap.get(dayKey)! + cost);
+
+      // Scoped where-it-goes trigger breakdown.
+      if (!byTriggerScoped[rawEntry.trigger]) byTriggerScoped[rawEntry.trigger] = createBucket();
+      addToBucket(byTriggerScoped[rawEntry.trigger], cost, isToday, isWeek, isMonth);
     }
 
     // Global breakdowns (always all entries)
@@ -228,29 +285,15 @@ async function getCostSummary(project?: string | null): Promise<CostSummary> {
     if (!byTrigger[rawEntry.trigger]) byTrigger[rawEntry.trigger] = createBucket();
     if (!bySource[entrySource]) bySource[entrySource] = createBucket();
     if (!byBackend[entryBackend]) byBackend[entryBackend] = createBucket();
-    byProject[rawEntry.project].total += cost;
-    byTrigger[rawEntry.trigger].total += cost;
-    bySource[entrySource].total += cost;
-    byBackend[entryBackend].total += cost;
-    if (isToday) {
-      byProject[rawEntry.project].today += cost;
-      byTrigger[rawEntry.trigger].today += cost;
-      bySource[entrySource].today += cost;
-      byBackend[entryBackend].today += cost;
-    }
-    if (isWeek) {
-      byProject[rawEntry.project].week += cost;
-      byTrigger[rawEntry.trigger].week += cost;
-      bySource[entrySource].week += cost;
-      byBackend[entryBackend].week += cost;
-    }
-    if (isMonth) {
-      byProject[rawEntry.project].month += cost;
-      byTrigger[rawEntry.trigger].month += cost;
-      bySource[entrySource].month += cost;
-      byBackend[entryBackend].month += cost;
-    }
+    addToBucket(byProject[rawEntry.project], cost, isToday, isWeek, isMonth);
+    addToBucket(byTrigger[rawEntry.trigger], cost, isToday, isWeek, isMonth);
+    addToBucket(bySource[entrySource], cost, isToday, isWeek, isMonth);
+    addToBucket(byBackend[entryBackend], cost, isToday, isWeek, isMonth);
   }
+
+  const todayScoped = periods.today.total;
+  const fractionElapsed = (now - dayStart.getTime()) / DAY_MS;
+  const forecastToday = fractionElapsed > 0 ? todayScoped / fractionElapsed : todayScoped;
 
   return {
     today: periods.today.total,
@@ -264,6 +307,10 @@ async function getCostSummary(project?: string | null): Promise<CostSummary> {
     byBackend,
     tokens,
     entryCount: matchCount,
+    dailyBudget: budget.daily_usd,
+    forecastToday,
+    dailyCost: dailyKeys.map(date => ({ date, cost: dailyMap.get(date)! })),
+    byTriggerScoped,
   };
 }
 

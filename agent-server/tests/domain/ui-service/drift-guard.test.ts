@@ -75,6 +75,7 @@ function makeMinimalDeps(): UiServiceDeps {
       byProject: {}, byTrigger: {}, bySource: {}, byBackend: {},
       tokens: { today: { input: 0, output: 0 }, month: { input: 0, output: 0 }, total: { input: 0, output: 0 } },
       entryCount: 0,
+      dailyBudget: 0, forecastToday: 0, dailyCost: [], byTriggerScoped: {},
     }),
     bus: { subscribe: () => ({ unsubscribe: () => {} }), publish: () => {}, close: async () => {} } as any,
     adapter: {
