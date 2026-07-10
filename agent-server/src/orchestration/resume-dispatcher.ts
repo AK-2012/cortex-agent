@@ -9,8 +9,10 @@
 //         seals the live status message to its terminal summary, cascades the completion callback,
 //         and closeResumedTaskLoop re-emits task.completed/task.blocked (the dispatch cycle that
 //         normally publishes it is bypassed on resume) — mirrors the DR-0014 suspended-parent
-//         onSettled; otherwise the status message freezes and a waiting manager never wakes. All
-//         deps injectable for tests.
+//         onSettled; otherwise the status message freezes and a waiting manager never wakes.
+//         Each fire-and-forget thread resume holds the daemon busy gate (track ±1, run+settle)
+//         so a pending .restart cannot fire mid-resume (2026-07-09 fix). All deps injectable
+//         for tests.
 // >>> If I am updated, update my header comment and the parent folder's CORTEX.md <<<
 
 import type { PlatformAdapter, IncomingMessage } from '@platform/index.js';
@@ -19,6 +21,7 @@ import { takeAllResumes, type ResumeEntry } from '@domain/costs/resume-registry.
 import { agentRunner } from './agent-runner.js';
 import { resumeRateLimitedThread } from '@domain/threads/runner.js';
 import { buildResumeOptions, sealSuspendedStatusMsg, fireThreadCallback, closeResumedTaskLoop } from './thread-callback.js';
+import { trackPendingTask } from './busy-tracker.js';
 import { threadStore } from '@store/thread-repo.js';
 import { runningExecutions } from '@core/running-executions.js';
 import { createLogger } from '@core/log.js';
@@ -66,6 +69,12 @@ export interface ResumeDeps {
    *  interleave two assistant turns). Threads are channel-parallel-safe, so a rate-limited thread
    *  only needs to avoid a live direct session, not other threads. */
   directSessionBusy: (channel: string) => boolean;
+  /** Daemon busy-gate bracket (busyTracker.trackPendingTask). The fire-and-forget thread resume
+   *  must hold the gate for its ENTIRE run + settle — without it the resumed thread is invisible
+   *  to the busy/idle IPC, and a pending .restart fires mid-stream and SIGKILLs app.ts
+   *  (2026-07-09: three resumed threads killed). Direct resumes are NOT bracketed here:
+   *  agentRunner.route tracks internally and double-counting would be redundant. */
+  track: (delta: number) => void;
   delay: (ms: number) => Promise<void>;
 }
 
@@ -86,6 +95,7 @@ function defaultDeps(): ResumeDeps {
     getThread: (id) => threadStore.get(id),
     channelBusy: (ch) => runningExecutions.hasChannel(ch),
     directSessionBusy: (ch) => runningExecutions.getByChannel(ch).some(e => !e.threadId),
+    track: trackPendingTask,
     delay: (ms) => new Promise((r) => setTimeout(r, ms)),
   };
 }
@@ -121,8 +131,15 @@ export async function dispatchPendingResumes(adapter: PlatformAdapter, overrides
       } else {
         // Threads are channel-parallel-safe: fire-and-forget so multiple rate-limited threads on
         // the same channel resume concurrently instead of serializing behind the first one.
+        // Hold the daemon busy gate for the whole detached run (incl. the settle inside
+        // resumeThread): +1 synchronously so the daemon observes busy before it can act on any
+        // idle; -1 in finally so the gate never leaks. Mirrors runThreadDetached
+        // (thread-executor.ts) — 2026-07-09: untracked resumed threads were SIGKILLed by a
+        // .restart-triggered restart that fired while they were mid-stream.
+        deps.track(+1);
         void resumeThread(entry, deps.getThread(entry.threadId)!, adapter, deps)
-          .catch(e => log.error(`Resume failed (${entryKey(entry)}): ${(e as Error).message}`));
+          .catch(e => log.error(`Resume failed (${entryKey(entry)}): ${(e as Error).message}`))
+          .finally(() => deps.track(-1));
       }
       dispatched++;
     } catch (e) {
