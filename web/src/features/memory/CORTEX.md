@@ -27,18 +27,26 @@ proto-shots 11/12 show the right rail). Diffed vs `proto-shots/11-memory-exp.png
     `entryCount`. Active project = `deriveActiveProjectId` (most-recent session's project).
   - **Rendered markdown** = `memory.file({projectId,path})` raw content → frontmatter card + markdown body.
   - **`updated …` label** = real `memory.file.modifiedAt` (relative humanize).
+  - **Line-level `+/−`** = real `memory.file.lineDiff` (`git diff --numstat` working-tree vs HEAD). The diff
+    bar shows green `+N` / red `−M`; a clean file legitimately reads `+0 −0`. Pure `formatLineDiff()` maps the
+    DTO → chips (or `null` → placeholder). Since `~/.cortex/context` is auto-committed, most files show `0/0` —
+    the real, spec-faithful answer, not a placeholder.
 - **HONEST placeholder (mandated — NEVER fabricated numbers)**:
-  - **git-diff metadata** — the prototype's task ref, `+42 −7` line counts, and commit hash have **no
-    backend scope** → the diff bar shows a single muted `diff metadata unavailable` note (no numbers/hash).
-    The **diff toggle renders BOTH visual states 1:1** ("Viewing diff" filled / "Diff hidden" outline);
-    with diff ON, since there is no per-line diff data, an honest amber banner replaces the (impossible)
-    added/removed line highlights and the body renders the current content.
+  - **line `+/−` when unresolvable** — when `lineDiff` is `null` (project dir not a git work tree / git
+    unavailable / binary) the diff bar falls back to a muted `diff metadata unavailable` note and the amber
+    banner explains the file is not git-tracked. Never a fabricated `+42 −7`.
+  - **task ref + commit hash** — still have **no backend scope** → not shown (not fabricated). The **diff
+    toggle renders BOTH visual states 1:1** ("Viewing diff" filled / "Diff hidden" outline); with diff ON the
+    amber banner states the real aggregate (`+N / −M lines changed vs HEAD`) and notes per-line highlighting
+    is not available (only aggregate counts have a backend); the body renders the current working-tree content.
   - **Dir contents** — `memory.tree` returns dir names + counts only (no entry list) → dirs are
     non-selectable and their nested files are NOT enumerated (no dir-listing scope). Flagged gap.
 
 ## Notes
 
-- **No backend change** — consumes only the existing `memory.tree` / `memory.file` (+ `projects.list` /
-  `sessions.list` for the active project). Web-only; `/trpc` relative URL unchanged.
-- **Do NOT** add a git-diff backend scope. Line +/− data stays an honest placeholder.
+- Consumes `memory.tree` / `memory.file` (+ `projects.list` / `sessions.list` for the active project). The
+  `memory.file.lineDiff` git-numstat field is the only backend-side data added for the real `+/−`; `/trpc`
+  relative URL unchanged.
+- Line `+/−` is now REAL (git numstat). It stays an honest `null`→placeholder when the dir is not a git work
+  tree; do NOT fabricate counts. Per-line highlighting, task ref, and commit hash remain out (no backend).
 - Entry points: Overview "Project memory" card → `/memory`; header ‹back / projName → `/overview`.

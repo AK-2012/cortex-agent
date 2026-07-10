@@ -73,6 +73,7 @@ export type {
   MemoryFileEntry,
   MemoryDirEntry,
   MemoryFile,
+  MemoryLineDiff,
   ProjectCreateReturn,
   SessionsSendReturn,
   ThreadsCancelReturn,

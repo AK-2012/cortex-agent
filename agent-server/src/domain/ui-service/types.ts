@@ -510,6 +510,12 @@ export interface MemoryTree {
   dirs: MemoryDirEntry[];
 }
 
+/** Real per-file line-level diff counts vs HEAD (`git diff --numstat`). */
+export interface MemoryLineDiff {
+  added: number;
+  removed: number;
+}
+
 export interface MemoryFile {
   projectId: string;
   /** Project-root-relative path echoed back. */
@@ -517,6 +523,12 @@ export interface MemoryFile {
   content: string;
   sizeBytes: number;
   modifiedAt: string;
+  /**
+   * Working-tree-vs-HEAD line counts from `git diff --numstat`. `null` (honest placeholder, never
+   * fabricated) when the project dir is not in a git work tree, git is unavailable, or the diff is
+   * binary/unresolvable.
+   */
+  lineDiff: MemoryLineDiff | null;
 }
 
 // ── approvals DTO (DR-0018 §2.1 approval center 7a) ────────────────

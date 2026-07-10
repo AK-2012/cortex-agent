@@ -3,7 +3,14 @@ import { useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { useTRPC } from '@/lib/trpc';
 import { deriveActiveProjectId } from '@/features/overview/overview-vm';
-import { buildTreeRows, pickDefaultPath, relTimeAgo, diffToggle, type TreeRow } from './memory-vm';
+import {
+  buildTreeRows,
+  pickDefaultPath,
+  relTimeAgo,
+  diffToggle,
+  formatLineDiff,
+  type TreeRow,
+} from './memory-vm';
 import { MarkdownView } from './MarkdownView';
 
 // MEMORY VIEWER 7b — 1:1 from prototype.dc.html L658–719. CENTER-pane view mounted in the
@@ -94,6 +101,8 @@ export function MemoryView(): JSX.Element {
 
   const rows = tree ? buildTreeRows(tree, effectivePath) : [];
   const dt = diffToggle(diffOn);
+  // Real per-file git line counts (memory.file.lineDiff); null → honest placeholder (never fabricated).
+  const lineDiff = formatLineDiff(file?.lineDiff);
 
   return (
     <div data-pane="center" style={CENTER}>
@@ -167,8 +176,17 @@ export function MemoryView(): JSX.Element {
           >
             <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#4655D4', flex: 'none' }} />
             <span style={{ fontSize: 11, color: '#3A3F6E' }}>{relTimeAgo(file?.modifiedAt, now)}</span>
-            {/* HONEST placeholder: task ref / +42−7 / commit hash have no backend scope. Never fabricated. */}
-            <span style={{ font: `400 9.5px ${MONO}`, color: '#98A1B0' }}>diff metadata unavailable</span>
+            {/* Line-level +/− is REAL (git numstat vs HEAD). When the backend can't resolve it
+                (no git / not a repo / binary) lineDiff is null → honest placeholder, never fabricated.
+                Task ref + commit hash still have no backend scope → not shown (not fabricated). */}
+            {lineDiff ? (
+              <>
+                <span style={{ font: `600 10px ${MONO}`, color: '#23854F' }}>{lineDiff.added}</span>
+                <span style={{ font: `600 10px ${MONO}`, color: '#C03D33' }}>{lineDiff.removed}</span>
+              </>
+            ) : (
+              <span style={{ font: `400 9.5px ${MONO}`, color: '#98A1B0' }}>diff metadata unavailable</span>
+            )}
             <span
               onClick={() => setDiffOn((v) => !v)}
               style={{
@@ -202,8 +220,19 @@ export function MemoryView(): JSX.Element {
                   lineHeight: 1.5,
                 }}
               >
-                Line-level +/− diff is unavailable — there is no git-diff backend scope, so added/removed
-                lines are not highlighted. The file below is the current committed content.
+                {lineDiff ? (
+                  <>
+                    {lineDiff.added} / {lineDiff.removed} lines changed in the working tree vs HEAD
+                    (git numstat). Per-line highlighting is not available — the file below is the current
+                    working-tree content.
+                  </>
+                ) : (
+                  <>
+                    Line-level +/− diff is unavailable — this project directory is not a git work tree (or
+                    git is unavailable), so added/removed lines are not highlighted. The file below is the
+                    current content.
+                  </>
+                )}
               </div>
             )}
             {fileQuery.isLoading && <div style={{ fontSize: 11.5, color: '#B6BDC9' }}>Loading file…</div>}

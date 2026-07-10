@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import type { MemoryTree } from '@cortex-agent/ui-contract';
-import { buildTreeRows, pickDefaultPath, relTimeAgo, diffToggle } from './memory-vm';
+import { buildTreeRows, pickDefaultPath, relTimeAgo, diffToggle, formatLineDiff } from './memory-vm';
 
 function tree(over: Partial<MemoryTree> = {}): MemoryTree {
   return {
@@ -84,5 +84,18 @@ describe('diffToggle', () => {
       bg: '#fff',
       border: '#C9CFF2',
     });
+  });
+});
+
+describe('formatLineDiff', () => {
+  it('formats real counts as +N / −M chips (U+2212 minus)', () => {
+    expect(formatLineDiff({ added: 42, removed: 7 })).toEqual({ added: '+42', removed: '−7' });
+  });
+  it('renders a clean file (0/0) as real data, not a placeholder', () => {
+    expect(formatLineDiff({ added: 0, removed: 0 })).toEqual({ added: '+0', removed: '−0' });
+  });
+  it('returns null for null/undefined so the caller shows an honest placeholder (never fabricated)', () => {
+    expect(formatLineDiff(null)).toBeNull();
+    expect(formatLineDiff(undefined)).toBeNull();
   });
 });

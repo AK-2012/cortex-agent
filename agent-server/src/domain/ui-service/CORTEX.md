@@ -19,7 +19,7 @@ and — via the AppRouter that ui-server builds over this facade — by the Web 
 | `query/tasks.ts` | query | tasks.list handler |
 | `query/schedules.ts` | query | schedules.list handler |
 | `query/executions.ts` | query | executions.list + executions.get handlers |
-| `query/memory.ts` | query | memory.tree (project memory tree: top-level files + memory dirs w/ entry counts) + memory.file (raw file content + metadata) handlers — read-only, path-restricted to the project root; rejects `..` traversal / absolute paths / symlink escape |
+| `query/memory.ts` | query | memory.tree (project memory tree: top-level files + memory dirs w/ entry counts) + memory.file (raw file content + metadata + `lineDiff` = real working-tree-vs-HEAD line counts via `git diff --numstat`, `null` when not a git repo / git unavailable / binary — honest placeholder, never fabricated) handlers — read-only, path-restricted to the project root; rejects `..` traversal / absolute paths / symlink escape |
 | `query/approvals.ts` | query | approvals.list handler + pure `parseApprovals` (PENDING_APPROVALS.md → ApprovalInfo[], missing fields null, status filter); path via `deps.approvalsPath` |
 | `query/cost.ts` | query | cost.summary handler |
 | `query/config.ts` | query | config.get handler — redacted snapshot of `~/.cortex/config` (budget/profiles/machines/mcp/thread-templates/hooks/.env) for the settings panel (Stage 7); pure `readConfigSnapshot(configDir, hooksDir)` + thin handler. SECURITY: `.env` values + machine `ssh` are never returned, only redacted markers |
