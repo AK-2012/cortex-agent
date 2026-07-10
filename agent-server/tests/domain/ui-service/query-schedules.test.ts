@@ -4,8 +4,9 @@ import { handleSchedulesList } from '../../../src/domain/ui-service/query/schedu
 import type { UiServiceDeps } from '../../../src/domain/ui-service/types.js';
 
 const mockSchedules = [
-  { id: 'sch1', type: 'interval' as const, message: 'Check health', projectId: 'proj1', nextRun: Date.now() + 60000, lastRun: Date.now() - 300000, isPaused: false },
-  { id: 'sch2', type: 'daily' as const, message: 'Daily report', projectId: 'proj1', time: '09:00', nextRun: Date.now() + 3600000, lastRun: Date.now() - 86400000, isPaused: false },
+  { id: 'sch1', type: 'interval' as const, message: 'Check health', projectId: 'proj1', profile: 'claude-haiku', nextRun: Date.now() + 60000, lastRun: Date.now() - 300000, isPaused: false },
+  { id: 'sch2', type: 'daily' as const, message: 'Daily report', projectId: 'proj1', profile: 'claude-sonnet', time: '09:00', nextRun: Date.now() + 3600000, lastRun: Date.now() - 86400000, isPaused: false },
+  // sch3 has no profile (legacy record) → must map to null, not a fabricated default.
   { id: 'sch3', type: 'weekly' as const, message: 'Weekly review', projectId: 'proj2', dayOfWeek: 1, time: '10:00', nextRun: Date.now() + 7200000, lastRun: null, isPaused: true, pausedBy: 'user' },
 ];
 
@@ -64,4 +65,17 @@ test('schedules.list nextRun/lastRun are ISO strings', async () => {
 test('schedules.list paused schedule has pausedBy', async () => {
   const result = await handleSchedulesList(makeDeps(), { paused: true });
   assert.equal(result[0].pausedBy, 'user');
+});
+
+test('schedules.list carries the real profile from the schedule config source', async () => {
+  const result = await handleSchedulesList(makeDeps(), { projectId: 'proj1' });
+  const byId = Object.fromEntries(result.map((s) => [s.id, s]));
+  assert.equal(byId['sch1'].profile, 'claude-haiku');
+  assert.equal(byId['sch2'].profile, 'claude-sonnet');
+});
+
+test('schedules.list maps a schedule without a profile to null (honest placeholder)', async () => {
+  const result = await handleSchedulesList(makeDeps(), { projectId: 'proj2' });
+  assert.equal(result[0].id, 'sch3');
+  assert.equal(result[0].profile, null);
 });

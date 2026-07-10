@@ -47,6 +47,15 @@ export function scheduleIntervalLabel(s: ScheduleInfo): string {
   return s.type;
 }
 
+/**
+ * The agent profile a schedule runs under, from the real `ScheduleInfo.profile` (schedule config
+ * source). Empty string when the schedule has no recorded profile — the caller omits the chip
+ * (honest placeholder, no fabricated default).
+ */
+export function scheduleProfileLabel(s: ScheduleInfo): string {
+  return s.profile ?? '';
+}
+
 function humanizeShort(ms: number): string {
   const m = Math.round(ms / 60000);
   if (m < 1) return '<1m';

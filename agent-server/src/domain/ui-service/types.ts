@@ -382,6 +382,9 @@ export interface ScheduleInfo {
   type: 'interval' | 'daily' | 'weekly' | 'once';
   message: string;
   projectId: string;
+  /** The agent profile this schedule runs under, from the schedule config source.
+   *  null for legacy records that never recorded a profile (honest placeholder — no fabrication). */
+  profile: string | null;
   nextRun: string | null;
   lastRun: string | null;
   paused: boolean;

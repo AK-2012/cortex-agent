@@ -15,6 +15,7 @@ const sched = (p: Partial<ScheduleInfo>): ScheduleInfo => ({
   type: 'interval',
   message: 'x',
   projectId: 'proj',
+  profile: null,
   nextRun: null,
   lastRun: null,
   paused: false,
