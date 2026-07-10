@@ -64,6 +64,9 @@ export async function handleSessionsTranscript(
 
   const byTurn = new Map<number, TranscriptTurn>();
   const order: number[] = [];
+  // Real per-message elapsed: delta from the previous event in the flat chronological stream
+  // (history.events is already chronological). First message → null; either ts unparseable → null.
+  let prevMs: number | null = null;
   for (const ev of history.events) {
     let turn = byTurn.get(ev.turnIndex);
     if (!turn) {
@@ -71,13 +74,18 @@ export async function handleSessionsTranscript(
       byTurn.set(ev.turnIndex, turn);
       order.push(ev.turnIndex);
     }
+    const curMs = Date.parse(ev.ts);
+    const curValid = Number.isFinite(curMs);
+    const elapsedMs = prevMs !== null && curValid ? curMs - prevMs : null;
     turn.messages.push({
       type: ev.type,
       text: ev.type === 'tool' ? null : (ev.text ?? ''),
       toolName: ev.type === 'tool' ? (ev.toolName ?? '') : null,
       toolInput: ev.type === 'tool' ? (ev.toolInput ?? '') : null,
       ts: ev.ts,
+      elapsedMs,
     });
+    prevMs = curValid ? curMs : null;
   }
 
   return { sessionId: history.sessionId, turns: order.map((i) => byTurn.get(i)!) };
