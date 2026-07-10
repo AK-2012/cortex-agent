@@ -3,6 +3,8 @@ import {
   buildTranscriptRows,
   liveToMessage,
   turnCount,
+  sessionElapsedMs,
+  formatElapsed,
   type LiveSessionMessage,
 } from './transcript-vm';
 import type { SessionTranscript } from '@cortex-agent/ui-contract';
@@ -24,8 +26,8 @@ describe('buildTranscriptRows', () => {
         {
           turnIndex: 0,
           messages: [
-            { type: 'user', text: 'hi there', toolName: null, toolInput: null, ts: T },
-            { type: 'assistant', text: 'hello back', toolName: null, toolInput: null, ts: T },
+            { type: 'user', text: 'hi there', toolName: null, toolInput: null, ts: T, elapsedMs: null },
+            { type: 'assistant', text: 'hello back', toolName: null, toolInput: null, ts: T, elapsedMs: 1000 },
           ],
         },
       ]),
@@ -42,10 +44,10 @@ describe('buildTranscriptRows', () => {
         {
           turnIndex: 0,
           messages: [
-            { type: 'user', text: 'go', toolName: null, toolInput: null, ts: T },
-            { type: 'tool', text: null, toolName: 'read', toolInput: 'a.md', ts: T },
-            { type: 'tool', text: null, toolName: 'bash', toolInput: 'ls', ts: T },
-            { type: 'assistant', text: 'done', toolName: null, toolInput: null, ts: T },
+            { type: 'user', text: 'go', toolName: null, toolInput: null, ts: T, elapsedMs: null },
+            { type: 'tool', text: null, toolName: 'read', toolInput: 'a.md', ts: T, elapsedMs: 0 },
+            { type: 'tool', text: null, toolName: 'bash', toolInput: 'ls', ts: T, elapsedMs: 0 },
+            { type: 'assistant', text: 'done', toolName: null, toolInput: null, ts: T, elapsedMs: 0 },
           ],
         },
       ]),
@@ -68,8 +70,8 @@ describe('buildTranscriptRows', () => {
         {
           turnIndex: 0,
           messages: [
-            { type: 'assistant', text: 'first', toolName: null, toolInput: null, ts: T },
-            { type: 'assistant', text: 'second', toolName: null, toolInput: null, ts: T },
+            { type: 'assistant', text: 'first', toolName: null, toolInput: null, ts: T, elapsedMs: null },
+            { type: 'assistant', text: 'second', toolName: null, toolInput: null, ts: T, elapsedMs: 0 },
           ],
         },
       ]),
@@ -83,7 +85,7 @@ describe('buildTranscriptRows', () => {
 
   it('no streaming caret when streaming=false', () => {
     const rows = buildTranscriptRows(
-      tx([{ turnIndex: 0, messages: [{ type: 'assistant', text: 'x', toolName: null, toolInput: null, ts: T }] }]),
+      tx([{ turnIndex: 0, messages: [{ type: 'assistant', text: 'x', toolName: null, toolInput: null, ts: T, elapsedMs: null }] }]),
       [],
       { streaming: false },
     );
@@ -96,7 +98,7 @@ describe('buildTranscriptRows', () => {
       { sessionId: 's1', role: 'assistant', text: 'streamed reply', ts: T },
     ];
     const rows = buildTranscriptRows(
-      tx([{ turnIndex: 0, messages: [{ type: 'user', text: 'q', toolName: null, toolInput: null, ts: T }] }]),
+      tx([{ turnIndex: 0, messages: [{ type: 'user', text: 'q', toolName: null, toolInput: null, ts: T, elapsedMs: null }] }]),
       live,
       { streaming: true },
     );
@@ -107,7 +109,7 @@ describe('buildTranscriptRows', () => {
   });
 
   it('de-duplicates a live message already present in the fetched transcript', () => {
-    const msg = { type: 'assistant' as const, text: 'dup', toolName: null, toolInput: null, ts: T };
+    const msg = { type: 'assistant' as const, text: 'dup', toolName: null, toolInput: null, ts: T, elapsedMs: null };
     const live: LiveSessionMessage[] = [{ sessionId: 's1', role: 'assistant', text: 'dup', ts: T }];
     const rows = buildTranscriptRows(tx([{ turnIndex: 0, messages: [msg] }]), live);
     expect(rows.filter((r) => r.kind === 'assistant').length).toBe(1);
@@ -116,8 +118,8 @@ describe('buildTranscriptRows', () => {
   it('emits a fresh divider when the calendar day changes', () => {
     const rows = buildTranscriptRows(
       tx([
-        { turnIndex: 0, messages: [{ type: 'user', text: 'day1', toolName: null, toolInput: null, ts: '2026-07-06T10:00:00.000Z' }] },
-        { turnIndex: 1, messages: [{ type: 'user', text: 'day2', toolName: null, toolInput: null, ts: '2026-07-07T10:00:00.000Z' }] },
+        { turnIndex: 0, messages: [{ type: 'user', text: 'day1', toolName: null, toolInput: null, ts: '2026-07-06T10:00:00.000Z', elapsedMs: null }] },
+        { turnIndex: 1, messages: [{ type: 'user', text: 'day2', toolName: null, toolInput: null, ts: '2026-07-07T10:00:00.000Z', elapsedMs: 86400000 }] },
       ]),
       [],
     );
@@ -127,7 +129,7 @@ describe('buildTranscriptRows', () => {
   it('long real text passes through unmodified (ellipsis is a CSS concern)', () => {
     const long = 'exec_dispatch_mr9w9opu_uqdw '.repeat(20).trim();
     const rows = buildTranscriptRows(
-      tx([{ turnIndex: 0, messages: [{ type: 'tool', text: null, toolName: 'read', toolInput: long, ts: T }] }]),
+      tx([{ turnIndex: 0, messages: [{ type: 'tool', text: null, toolName: 'read', toolInput: long, ts: T, elapsedMs: null }] }]),
       [],
     );
     const tools = rows.find((r) => r.kind === 'tools') as { calls: { input: string }[] };
@@ -136,7 +138,7 @@ describe('buildTranscriptRows', () => {
 
   it('an optional formatDivider overrides the default divider label (mobile ZH dividers)', () => {
     const rows = buildTranscriptRows(
-      tx([{ turnIndex: 0, messages: [{ type: 'user', text: 'hi', toolName: null, toolInput: null, ts: T }] }]),
+      tx([{ turnIndex: 0, messages: [{ type: 'user', text: 'hi', toolName: null, toolInput: null, ts: T, elapsedMs: null }] }]),
       [],
       { formatDivider: () => '今天 07:42' },
     );
@@ -145,7 +147,7 @@ describe('buildTranscriptRows', () => {
 
   it('without formatDivider the default EN divider is unchanged', () => {
     const rows = buildTranscriptRows(
-      tx([{ turnIndex: 0, messages: [{ type: 'user', text: 'hi', toolName: null, toolInput: null, ts: T }] }]),
+      tx([{ turnIndex: 0, messages: [{ type: 'user', text: 'hi', toolName: null, toolInput: null, ts: T, elapsedMs: null }] }]),
       [],
     );
     expect((rows[0] as { text: string }).text.startsWith('TODAY') || (rows[0] as { text: string }).text.length > 0).toBe(true);
@@ -155,12 +157,46 @@ describe('buildTranscriptRows', () => {
 describe('liveToMessage', () => {
   it('maps a tool live event to a tool TranscriptMessage (text null, tool fields set)', () => {
     const m = liveToMessage({ sessionId: 's1', role: 'tool', text: '', toolName: 'grep', toolInput: 'foo', ts: T });
-    expect(m).toEqual({ type: 'tool', text: null, toolName: 'grep', toolInput: 'foo', ts: T });
+    expect(m).toEqual({ type: 'tool', text: null, toolName: 'grep', toolInput: 'foo', ts: T, elapsedMs: null });
   });
 
   it('maps an assistant live event to an assistant TranscriptMessage', () => {
     const m = liveToMessage({ sessionId: 's1', role: 'assistant', text: 'hi', ts: T });
-    expect(m).toEqual({ type: 'assistant', text: 'hi', toolName: null, toolInput: null, ts: T });
+    expect(m).toEqual({ type: 'assistant', text: 'hi', toolName: null, toolInput: null, ts: T, elapsedMs: null });
+  });
+});
+
+describe('sessionElapsedMs', () => {
+  const mk = (ts: string, elapsedMs: number | null): SessionTranscript['turns'][number]['messages'][number] => ({
+    type: 'assistant', text: 'x', toolName: null, toolInput: null, ts, elapsedMs,
+  });
+
+  it('sums the real per-message elapsedMs across all turns (null contributes 0)', () => {
+    const t = tx([
+      { turnIndex: 0, messages: [mk(T, null), mk(T, 2500)] },
+      { turnIndex: 1, messages: [mk(T, 7500), mk(T, 1000)] },
+    ]);
+    expect(sessionElapsedMs(t)).toBe(11000);
+  });
+
+  it('returns null when there is no elapsed signal (single message / all null)', () => {
+    expect(sessionElapsedMs(tx([{ turnIndex: 0, messages: [mk(T, null)] }]))).toBeNull();
+    expect(sessionElapsedMs(tx([]))).toBeNull();
+    expect(sessionElapsedMs(undefined)).toBeNull();
+  });
+});
+
+describe('formatElapsed', () => {
+  it('formats ms into compact human-readable durations', () => {
+    expect(formatElapsed(0)).toBe('0s');
+    expect(formatElapsed(2500)).toBe('2s');
+    expect(formatElapsed(65000)).toBe('1m 5s');
+    expect(formatElapsed(3_600_000)).toBe('1h 0m');
+    expect(formatElapsed(3_661_000)).toBe('1h 1m');
+  });
+
+  it('returns the em-dash placeholder for null (no fabrication)', () => {
+    expect(formatElapsed(null)).toBe('—');
   });
 });
 

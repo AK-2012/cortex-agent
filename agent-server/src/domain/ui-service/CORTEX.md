@@ -14,7 +14,7 @@ and — via the AppRouter that ui-server builds over this facade — by the Web 
 | `subscribe.ts` | subscribe | EventBus → AsyncIterable&lt;UiEvent&gt; with bounded queue (cap 256, drop-oldest + synthetic `ui-subscribe.dropped`); post-filters by projectId, (B2-C) executionId, and (S4) sessionId — scopes `session.message` to one session (no cross-session leak) |
 | `index.ts` | barrel | re-exports createUiService and public types |
 | `query/projects.ts` | query | projects.list handler |
-| `query/sessions.ts` | query | sessions.list + sessions.transcript (S4 chat: wraps `conversationHistory.getHistory`, groups user/assistant/tool events into turns) handlers |
+| `query/sessions.ts` | query | sessions.list + sessions.transcript (S4 chat: wraps `conversationHistory.getHistory`, groups user/assistant/tool events into turns; each `TranscriptMessage` carries a real per-message `elapsedMs` = ts-delta from the previous event, null for the first / unparseable ts. Per-message cost is deliberately absent — no real attribution source: conversation-history has no cost, and `costs.jsonl`/`CostEntry` is keyed by project/trigger, not session/message) handlers |
 | `query/threads.ts` | query | threads.list + threads.get (detail: steps/agent-flow/dispatches/child-tree≤5/artifacts, DR-0018 §6.3 B1) handlers |
 | `query/tasks.ts` | query | tasks.list handler |
 | `query/schedules.ts` | query | schedules.list handler |

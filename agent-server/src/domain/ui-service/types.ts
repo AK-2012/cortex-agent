@@ -255,6 +255,14 @@ export interface TranscriptMessage {
   /** compact tool input summary (tool events only). */
   toolInput: string | null;
   ts: string;
+  /**
+   * Real elapsed since the previous message in the session's chronological stream, in ms
+   * (derived from `ts` deltas). Null for the first message and when either ts is unparseable.
+   * Per-message cost has no real attribution source (conversation-history carries no cost; the
+   * cost store is keyed by project/trigger, not session/turn/message) — deliberately absent, not
+   * a fabricated null field.
+   */
+  elapsedMs: number | null;
 }
 
 export interface TranscriptTurn {

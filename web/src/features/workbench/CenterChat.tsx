@@ -5,7 +5,7 @@ import { ChatHeader } from './ChatHeader';
 import { MessageStream } from './MessageStream';
 import { Composer } from './Composer';
 import { useSessionMessageLiveSync } from './useSessionMessageLiveSync';
-import { buildTranscriptRows, turnCount } from './transcript-vm';
+import { buildTranscriptRows, turnCount, sessionElapsedMs, formatElapsed } from './transcript-vm';
 
 // CENTER CHAT pane — 1:1 rebuild from prototype.dc.html L103–395 (workspace-chat view). Task aba0
 // (S4 chat) makes the transcript body + composer send REAL, replacing 89e7's GAP-A (static transcript)
@@ -47,6 +47,7 @@ export function CenterChat(): JSX.Element {
     [transcript, liveTail, streaming],
   );
   const turns = turnCount(transcriptQuery.data);
+  const elapsed = useMemo(() => formatElapsed(sessionElapsedMs(transcriptQuery.data)), [transcriptQuery.data]);
   const running = streaming;
 
   const onCmdK = () => {
@@ -68,7 +69,7 @@ export function CenterChat(): JSX.Element {
     >
       <ChatHeader title={title} running={running} onCmdK={onCmdK} />
       <MessageStream rows={rows} loading={!!sessionId && transcriptQuery.isPending} />
-      <Composer sessionId={sessionId} running={running} turns={turns} />
+      <Composer sessionId={sessionId} running={running} turns={turns} elapsed={elapsed} />
     </div>
   );
 }
