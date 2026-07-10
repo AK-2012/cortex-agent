@@ -33,7 +33,9 @@ export interface BuildOpts {
   formatDivider?: (ts: string, now: Date) => string;
 }
 
-/** Map a live `session.message` event into a `TranscriptMessage` (same shape the fetched DTO uses). */
+/** Map a live `session.message` event into a `TranscriptMessage` (same shape the fetched DTO uses).
+ *  `elapsedMs` is null for live-tail messages — the backend derives real per-message elapsed at read
+ *  time, so it reconciles when the transcript refetches after the stream settles. */
 export function liveToMessage(m: LiveSessionMessage): TranscriptMessage {
   const isTool = m.role === 'tool';
   return {
@@ -42,11 +44,43 @@ export function liveToMessage(m: LiveSessionMessage): TranscriptMessage {
     toolName: isTool ? (m.toolName ?? '') : null,
     toolInput: isTool ? (m.toolInput ?? '') : null,
     ts: m.ts,
+    elapsedMs: null,
   };
 }
 
 export function turnCount(transcript: SessionTranscript | undefined | null): number {
   return transcript?.turns.length ?? 0;
+}
+
+/**
+ * Real session-level elapsed = sum of the backend's per-message `elapsedMs` (ts-derived) across all
+ * turns. Null messages (first message, unparseable ts) contribute 0. Returns null when there is no
+ * elapsed signal at all (empty / single-message / all-null) so the caller renders an honest `—`.
+ */
+export function sessionElapsedMs(transcript: SessionTranscript | undefined | null): number | null {
+  if (!transcript) return null;
+  let total = 0;
+  let seen = false;
+  for (const turn of transcript.turns) {
+    for (const m of turn.messages) {
+      if (m.elapsedMs != null) {
+        total += m.elapsedMs;
+        seen = true;
+      }
+    }
+  }
+  return seen ? total : null;
+}
+
+/** Compact human-readable duration for the composer status line; `—` for null (never fabricated). */
+export function formatElapsed(ms: number | null): string {
+  if (ms == null) return '—';
+  const totalS = Math.floor(ms / 1000);
+  if (totalS < 60) return `${totalS}s`;
+  const totalM = Math.floor(totalS / 60);
+  if (totalM < 60) return `${totalM}m ${totalS % 60}s`;
+  const h = Math.floor(totalM / 60);
+  return `${h}h ${totalM % 60}m`;
 }
 
 function msgKey(m: TranscriptMessage): string {

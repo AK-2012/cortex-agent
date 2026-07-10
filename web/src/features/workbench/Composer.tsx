@@ -7,10 +7,13 @@ import { SLASH_COMMANDS } from './chat-content';
 // line · input · "/ commands" chip + hint · stop/send. REAL send (task aba0): ⏎ / send-click routes the
 // message through the `sessions.send` mutate for the active session; the sent turn + assistant reply
 // echo back over the live `session.message` stream (fire-and-forget — no reply on the mutate return).
-// Status metrics: `turns` is the real transcript turn count; elapsed & session cost have NO tRPC scope
-// (SessionInfo carries no running/elapsed/cost) → rendered as explicit "—" placeholders, never
-// fabricated. Stop has no session-cancel op → inert affordance (flagged). Slash exec has no backend →
-// the slash menu is a local visual affordance only.
+// Status metrics: `turns` is the real transcript turn count; `elapsed` is the REAL session elapsed
+// derived from the transcript's per-message ts deltas (`sessions.transcript.elapsedMs` summed) — the
+// caller passes an em-dash when there is no elapsed signal. Session cost has NO real attribution source
+// (conversation-history carries no cost; the cost store is keyed by project/trigger, not
+// session/turn/message) → still rendered as an explicit "—" placeholder, never fabricated. Stop has no
+// session-cancel op → inert affordance (flagged). Slash exec has no backend → the slash menu is a local
+// visual affordance only.
 
 const mono = "'IBM Plex Mono',monospace";
 const DASH = '—';
@@ -19,10 +22,13 @@ export function Composer({
   sessionId,
   running,
   turns,
+  elapsed,
 }: {
   sessionId: string;
   running: boolean;
   turns: number;
+  /** Real session elapsed (formatted), or "—" when there is no elapsed signal. */
+  elapsed: string;
 }): JSX.Element {
   const trpc = useTRPC();
   const sendMut = useMutation(trpc.sessions.send.mutationOptions());
@@ -132,7 +138,7 @@ export function Composer({
               }}
             />
             <span>
-              running · {DASH} · {turns} turns · {DASH}
+              running · {elapsed} · {turns} turns · {DASH}
             </span>
           </div>
         ) : (
