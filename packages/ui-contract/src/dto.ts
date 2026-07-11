@@ -30,6 +30,7 @@ export type {
   ApprovalsListParams,
   CostSummaryParams,
   ConfigGetParams,
+  MachinesListParams,
   // Mutate args
   ProjectCreateArgs,
   SessionsSendArgs,
@@ -86,6 +87,7 @@ export type {
   ApprovalStatus,
   ApprovalInfo,
   ApprovalMutateReturn,
+  MachineInfo,
   // Mapped contract
   QueryParamMap,
   QueryReturnMap,

@@ -42,6 +42,7 @@ import {
   executionsLogInput,
   configGetInput,
   configSetInput,
+  machinesListInput,
 } from './input-schemas.js';
 import type {
   UiService,
@@ -185,6 +186,9 @@ export function createAppRouter(uiService: UiService) {
     config: router({
       get: makeQuery(uiService, 'config.get', configGetInput),
       set: makeMutation(uiService, 'config.set', configSetInput),
+    }),
+    machines: router({
+      list: makeQuery(uiService, 'machines.list', machinesListInput),
     }),
     subscribe: publicProcedure
       .input(subscribeFilterInput)

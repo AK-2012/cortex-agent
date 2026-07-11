@@ -36,6 +36,7 @@ export {
   executionsLogInput,
   configGetInput,
   configSetInput,
+  machinesListInput,
   queryInputSchemas,
   mutateInputSchemas,
 } from '@cortex-agent/server/dist/domain/ui-service/input-schemas.js';
