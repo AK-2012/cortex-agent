@@ -22,6 +22,7 @@ import * as executionRegistry from '@domain/executions/registry.js';
 import { executionLogTailer } from '@domain/executions/log-tailer.js';
 import { initHookBridge } from '@orch/routing/hook-bridge.js';
 import { registerCommands } from '@orch/routing/commands/index.js';
+import { cancelChannelRuns } from '@orch/routing/commands/cancel.js';
 import { taskStore } from '@domain/tasks/store.js';
 import { taskMutator } from '@domain/tasks/mutator.js';
 import { projectDirRepo } from '@store/project-dir-repo.js';
@@ -354,6 +355,10 @@ process.on('SIGTERM', async () => {
       isDeviceOnline,
       getMachineRegistry,
     },
+    // S4 chat Stop: cancel the agent(s) running on the session's channel via the orchestration
+    // channel-cancel path (same code the no-arg/`--all` !cancel command uses). Injected here so the
+    // ui-service domain never imports orchestration.
+    cancelSessionRun: ({ channel }) => cancelChannelRuns(channel),
     bus,
     adapter,
   });

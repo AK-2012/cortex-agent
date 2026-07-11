@@ -17,7 +17,7 @@ import { handleConfigGet } from './query/config.js';
 import { handleMachinesList } from './query/machines.js';
 import { handleConfigSet } from './mutate/config.js';
 import { handleCreateProject } from './mutate/projects.js';
-import { handleSendSession } from './mutate/sessions.js';
+import { handleSendSession, handleCancelSession } from './mutate/sessions.js';
 import { handleCancelThread } from './mutate/threads.js';
 import { handleCancelExecution } from './mutate/executions.js';
 import {
@@ -62,6 +62,7 @@ const queryHandlers: Record<string, QueryHandler> = {
 const mutateHandlers: Record<string, MutateHandler> = {
   'projects.create': (deps, args) => handleCreateProject(deps, args),
   'sessions.send': (deps, args) => handleSendSession(deps, args),
+  'sessions.cancel': (deps, args) => handleCancelSession(deps, args),
   'threads.cancel': (deps, args) => handleCancelThread(deps, args),
   'executions.cancel': (deps, args) => handleCancelExecution(deps, args),
   'schedules.pause': (deps, args) => handlePauseSchedule(deps, args),
