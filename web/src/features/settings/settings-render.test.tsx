@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
-import type { ConfigSnapshot } from '@cortex-agent/ui-contract';
+import type { ConfigSnapshot, ThreadTemplateEntry } from '@cortex-agent/ui-contract';
 import {
   PlatformPanel,
   ProfilesPanel,
@@ -69,11 +69,55 @@ describe('settings panels — real data render', () => {
     expect(html).toContain('presence flag only');
   });
 
-  it('Templates: real basenames grouped, no fabricated chips', () => {
+  it('Templates: real basenames grouped, no fabricated chips (fallback — no entries)', () => {
     const html = renderToStaticMarkup(<TemplatesPanel snapshot={snap} />);
     expect(html).toContain('coder-review');
     expect(html).toContain('coder');
     expect(html).toContain('bash');
+  });
+
+  it('Templates: entries prop renders rich template content with kind/name/description/key-count', () => {
+    const entries: ThreadTemplateEntry[] = [
+      {
+        kind: 'template',
+        name: 'coder-review',
+        description: 'Code review orchestration',
+        body: { entryAgent: 'coder', agents: {}, transitions: {} },
+      },
+      {
+        kind: 'agent',
+        name: 'coder',
+        description: null,
+        body: { profile: 'execute', directive: 'Write code', stages: [], tools: [], pluginDirs: [] },
+      },
+      {
+        kind: 'shell',
+        name: 'bash',
+        description: 'Bash worker shell',
+        body: null,
+      },
+    ];
+    const html = renderToStaticMarkup(<TemplatesPanel snapshot={snap} entries={entries} />);
+    // kind badges
+    expect(html).toContain('template');
+    expect(html).toContain('agent');
+    expect(html).toContain('shell');
+    // names
+    expect(html).toContain('coder-review');
+    expect(html).toContain('coder');
+    expect(html).toContain('bash');
+    // description present
+    expect(html).toContain('Code review orchestration');
+    expect(html).toContain('Bash worker shell');
+    // null description → honest em-dash
+    expect(html).toContain('—');
+    // body key count for template entry (3 keys)
+    expect(html).toContain('>3<');
+    // body null → key count — (for shell)
+    // entry count badge
+    expect(html).toContain('3 entries');
+    // real content note
+    expect(html).toContain('Real content from thread-templates');
   });
 
   it('MCP: real server names, variant toggle inert', () => {

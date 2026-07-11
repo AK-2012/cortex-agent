@@ -96,6 +96,8 @@ export type {
   ApprovalsRequestReturn,
   MachineInfo,
   SkillGroup,
+  ThreadTemplateEntry,
+  ThreadTemplatesGetParams,
   // Mapped contract
   QueryParamMap,
   QueryReturnMap,

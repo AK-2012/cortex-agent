@@ -82,6 +82,8 @@ export const machinesListInput = z.object({});
 
 export const skillsListInput = z.object({});
 
+export const threadTemplatesGetInput = z.object({});
+
 // ── Subscription input schemas ────────────────────────────────────
 // Subscriptions are not part of the query/mutate keyed maps; their input schemas live here too so
 // the AppRouter and the browser (@cortex-agent/ui-contract) share one source of truth (B2-C).
@@ -246,6 +248,7 @@ export const queryInputSchemas = {
   'config.get': configGetInput,
   'machines.list': machinesListInput,
   'skills.list': skillsListInput,
+  'threadTemplates.get': threadTemplatesGetInput,
 } satisfies Record<QueryScope, z.ZodType>;
 
 export const mutateInputSchemas = {

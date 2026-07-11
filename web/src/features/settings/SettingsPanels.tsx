@@ -1,5 +1,5 @@
 import type { CSSProperties } from 'react';
-import type { ConfigSnapshot } from '@cortex-agent/ui-contract';
+import type { ConfigSnapshot, ThreadTemplateEntry } from '@cortex-agent/ui-contract';
 import { SCard, SCardHeader, MonoKV, Toggle } from './settings-ui';
 import {
   indexEnv,
@@ -535,7 +535,135 @@ function MonoInfoRow({ k, v }: { k: string; v: string }) {
   );
 }
 
-export function TemplatesPanel({ snapshot }: { snapshot: ConfigSnapshot }) {
+const KIND_STYLE: Record<ThreadTemplateEntry['kind'], { bg: string; color: string }> = {
+  template: { bg: '#EEF0FA', color: '#4655D4' },
+  agent: { bg: '#E9F4EE', color: '#23854F' },
+  shell: { bg: '#FDF9F0', color: '#8B6914' },
+};
+
+function KindBadge({ kind }: { kind: ThreadTemplateEntry['kind'] }) {
+  const s = KIND_STYLE[kind];
+  return (
+    <span
+      style={{
+        fontSize: 9,
+        fontWeight: 700,
+        padding: '1px 6px',
+        borderRadius: 999,
+        background: s.bg,
+        color: s.color,
+        flex: 'none',
+        letterSpacing: '.02em',
+      }}
+    >
+      {kind}
+    </span>
+  );
+}
+
+// TemplatesPanel renders basenames from snapshot.threadTemplates when no entries are provided
+// (backward-compat / loading state). When entries are provided (threadTemplates.get data), it
+// renders real template content: kind badge, name, description, body key count.
+export function TemplatesPanel({
+  snapshot,
+  entries,
+}: {
+  snapshot: ConfigSnapshot;
+  entries?: ThreadTemplateEntry[];
+}) {
+  if (entries) {
+    const grid = '76px 140px 1fr 52px';
+    return (
+      <SCard style={{ marginTop: 12, maxWidth: 860, overflow: 'hidden' }}>
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            padding: '11px 14px',
+            borderBottom: '1px solid #EFF1F5',
+          }}
+        >
+          <span style={{ fontSize: 12, fontWeight: 650, color: '#191C22' }}>Templates</span>
+          <span
+            style={{ marginLeft: 10, font: `400 9.5px ${MONO}`, color: '#B6BDC9' }}
+          >
+            {entries.length} {entries.length === 1 ? 'entry' : 'entries'}
+          </span>
+          <span
+            title="Template editor out of scope — inert"
+            style={{ marginLeft: 'auto', fontSize: 11, fontWeight: 600, color: '#B6BDC9', cursor: 'not-allowed' }}
+          >
+            Open editor ↗
+          </span>
+        </div>
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns: grid,
+            padding: '6px 14px',
+            borderBottom: '1px solid #F3F4F7',
+            ...TH,
+          }}
+        >
+          <span>KIND</span>
+          <span>NAME</span>
+          <span>DESCRIPTION</span>
+          <span style={{ textAlign: 'right' }}>KEYS</span>
+        </div>
+        {entries.length === 0 ? (
+          <div style={{ padding: '12px 14px', fontSize: 11, color: '#98A1B0' }}>
+            No templates in thread-templates/
+          </div>
+        ) : (
+          entries.map((e, i) => {
+            const keyCount = e.body ? Object.keys(e.body).length : null;
+            return (
+              <div
+                key={`${e.kind}:${e.name}`}
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: grid,
+                  padding: '8px 14px',
+                  borderBottom: i < entries.length - 1 ? '1px solid #F7F8FA' : undefined,
+                  alignItems: 'center',
+                }}
+              >
+                <KindBadge kind={e.kind} />
+                <span style={{ font: `600 10.5px ${MONO}`, color: '#22262E' }}>{e.name}</span>
+                <span
+                  style={{
+                    fontSize: 10.5,
+                    color: e.description ? '#5B6472' : '#B6BDC9',
+                    whiteSpace: 'nowrap',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    paddingRight: 8,
+                  }}
+                >
+                  {e.description ?? '—'}
+                </span>
+                <span
+                  style={{
+                    font: `400 10px ${MONO}`,
+                    color: keyCount != null ? '#5B6472' : '#B6BDC9',
+                    textAlign: 'right',
+                  }}
+                >
+                  {keyCount != null ? keyCount : '—'}
+                </span>
+              </div>
+            );
+          })
+        )}
+        <div style={{ borderTop: '1px solid #EFF1F5', padding: '8px 14px', fontSize: 10, color: '#B6BDC9' }}>
+          Real content from thread-templates/. KEYS = top-level body keys. Template body shown as-read; no
+          fabricated structure.
+        </div>
+      </SCard>
+    );
+  }
+
+  // Fallback: basename list from config.get snapshot (no entries loaded yet)
   const tt = snapshot.threadTemplates;
   const groups: { label: string; items: string[] }[] = [
     { label: 'templates', items: tt.templates },
@@ -554,7 +682,7 @@ export function TemplatesPanel({ snapshot }: { snapshot: ConfigSnapshot }) {
       >
         <span style={{ fontSize: 12, fontWeight: 650, color: '#191C22' }}>Templates</span>
         <span
-          title="Template editor (canvas 9c) out of scope — inert"
+          title="Template editor out of scope — inert"
           style={{ marginLeft: 'auto', fontSize: 11, fontWeight: 600, color: '#B6BDC9', cursor: 'not-allowed' }}
         >
           Open editor ↗
