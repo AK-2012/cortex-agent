@@ -617,6 +617,19 @@ export interface MemoryLineDiff {
   removed: number;
 }
 
+/** Real per-line `git blame` attribution for one line of a memory file. */
+export interface MemoryBlameLine {
+  /** 1-based line number, aligned 1:1 with the file's content lines. */
+  line: number;
+  /** Short commit hash (8 hex) that last touched this line, from `git blame`. */
+  commit: string;
+  /**
+   * Task reference parsed from that commit's subject (a 4-hex id after a `task`/`manager`/`gate`
+   * keyword). `null` (honest placeholder, never fabricated) when the subject carries no such tag.
+   */
+  taskRef: string | null;
+}
+
 export interface MemoryFile {
   projectId: string;
   /** Project-root-relative path echoed back. */
@@ -630,6 +643,12 @@ export interface MemoryFile {
    * binary/unresolvable.
    */
   lineDiff: MemoryLineDiff | null;
+  /**
+   * Per-line `git blame` attribution (real commit hash + parsed task ref), aligned 1:1 with the
+   * content lines. `null` (honest placeholder, never fabricated) when the project dir is not a git
+   * work tree, git is unavailable, or the file is binary/unblameable.
+   */
+  blame: MemoryBlameLine[] | null;
 }
 
 // ── approvals DTO (DR-0018 §2.1 approval center 7a) ────────────────
