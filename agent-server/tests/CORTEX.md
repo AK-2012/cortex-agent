@@ -44,7 +44,7 @@ How to run tests without tripping it:
 | `agent-adapter-pi-mcp-bridge.test.ts` | Test | PI mcp-bridge content mapping and integration |
 | `agent-adapter-pi-tool-shims.test.ts` | Test | PI tool-shims + extension_ui |
 | `pi-cost-record.test.ts` | Test | PI agent_end produces cost integration |
-| `run-with-adapter.test.ts` | Test | mode-manager event to callback drive |
+| `run-with-adapter.test.ts` | Test | mode-manager event to callback drive + thread-turn inline bg-continuation wait (threadId gate: thread holds+merges, interactive resolves immediately) |
 | `facade-plugin-gating.test.ts` | Test | filterChannelScopedPlugins: cortex-feishu plugin gated to feishu: channels (exact basename match) |
 | `app.test.ts` | Test | Startup DM + scheduled success flow |
 | `auto-compound.test.ts` | Test | Compound skip conditions and concatenation |

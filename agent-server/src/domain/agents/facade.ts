@@ -4,6 +4,7 @@
 
 import { getAdapter } from '../../agent-adapter/index.js';
 import type { AgentAdapter, AgentSpawnConfig, Backend } from '../../agent-adapter/index.js';
+import { shouldAwaitBgInline, waitForBgContinuation } from '../../agent-adapter/bg-wait.js';
 import { resolveProfileConfig } from './profile-manager.js';
 import type { ResolvedProfileConfig } from './profile-manager.js';
 import type { AgentHandle, AgentResult } from '@core/types/agent-types.js';
@@ -261,6 +262,21 @@ export function runWithAdapter(
   const promise: Promise<AgentResult> = (async () => {
     try {
       const [result] = await Promise.all([turnPromise, eventLoop]);
+      // Thread/dispatch turns (threadId set) wait INLINE for background-task continuations:
+      // a thread step's deliverable is its result, so the step must not complete while a
+      // run_in_background task is still running — the continuation output belongs to it.
+      // (Interactive turns return immediately; orchestration/lifecycle holds their status
+      // asynchronously.) Registration is race-free here: the sink lands within the same
+      // microtask drain as the result line, before the CLI's next stdout line is processed.
+      if (shouldAwaitBgInline(adapter.backend, options.threadId, result, typeof proc.setContinuationSink === 'function')) {
+        log.info(`thread turn ${options.threadId} has background work remaining — waiting inline for the continuation`);
+        return await waitForBgContinuation({
+          proc,
+          baseResult: result,
+          onAssistantText: options.onAssistantMessage ?? null,
+          onToolUse: options.onToolUse ?? null,
+        });
+      }
       return result;
     } catch (err) {
       await eventLoop.catch(() => {});

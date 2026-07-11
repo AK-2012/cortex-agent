@@ -6,6 +6,7 @@
 import type { OutputStream } from '@platform/index.js';
 import type { AgentResult } from '@core/types/agent-types.js';
 import type { ContinuationSink } from '../agent-adapter/types.js';
+import { isBgContinuationEnabled } from '../agent-adapter/bg-wait.js';
 
 export interface ContinuationSinkDeps {
   /** The originating turn's OutputStream — continuation text is appended here so the
@@ -66,13 +67,9 @@ export function shouldHoldForBg(
   return remaining > 0;
 }
 
-/** Feature gate: background-task continuation is ON by default. Opt out by setting
- *  CORTEX_BG_CONTINUATION to a falsy value (0 / false / off / no). */
-export function isBgContinuationEnabled(): boolean {
-  const v = process.env.CORTEX_BG_CONTINUATION;
-  if (v === undefined) return true;
-  return !['0', 'false', 'off', 'no'].includes(v.trim().toLowerCase());
-}
+/** Feature gate (shared with the thread inline wait): re-exported from agent-adapter/bg-wait,
+ *  the single source of truth for CORTEX_BG_CONTINUATION. */
+export { isBgContinuationEnabled };
 
 /** Scope gate: only interactive user conduits (Slack / Feishu), never thread/dispatch. */
 export function isInteractiveChannel(channel: string): boolean {
