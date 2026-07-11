@@ -102,3 +102,13 @@ export function depthInfo(detail: ThreadDetail): DepthInfo {
 export function actionableCount(tasks: TaskInfo[]): number {
   return tasks.filter((t) => t.actionable).length;
 }
+
+/**
+ * Machine online status → status-pill colors + label, mirroring threadPill convention.
+ * Online maps to the done-green pair; offline to the default grey.
+ */
+export function machinePill(online: boolean): Pill {
+  return online
+    ? { bg: '#E9F4EE', fg: '#23854F', text: 'Online' }
+    : { bg: '#F1F2F5', fg: '#8A93A2', text: 'Offline' };
+}
