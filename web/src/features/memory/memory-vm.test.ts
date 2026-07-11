@@ -1,6 +1,13 @@
 import { describe, it, expect } from 'vitest';
-import type { MemoryTree } from '@cortex-agent/ui-contract';
-import { buildTreeRows, pickDefaultPath, relTimeAgo, diffToggle, formatLineDiff } from './memory-vm';
+import type { MemoryTree, MemoryBlameLine } from '@cortex-agent/ui-contract';
+import {
+  buildTreeRows,
+  pickDefaultPath,
+  relTimeAgo,
+  diffToggle,
+  formatLineDiff,
+  groupBlame,
+} from './memory-vm';
 
 function tree(over: Partial<MemoryTree> = {}): MemoryTree {
   return {
@@ -97,5 +104,40 @@ describe('formatLineDiff', () => {
   it('returns null for null/undefined so the caller shows an honest placeholder (never fabricated)', () => {
     expect(formatLineDiff(null)).toBeNull();
     expect(formatLineDiff(undefined)).toBeNull();
+  });
+});
+
+describe('groupBlame', () => {
+  const blame: MemoryBlameLine[] = [
+    { line: 1, commit: 'aaaa1111', taskRef: 'ab12' },
+    { line: 2, commit: 'aaaa1111', taskRef: 'ab12' },
+    { line: 3, commit: 'bbbb2222', taskRef: null },
+  ];
+
+  it('zips content lines with blame, flagging the first line of each commit run', () => {
+    const rows = groupBlame(blame, 'one\ntwo\nthree\n');
+    expect(rows).not.toBeNull();
+    expect(rows!.map((r) => r.lineNo)).toEqual([1, 2, 3]);
+    expect(rows!.map((r) => r.text)).toEqual(['one', 'two', 'three']);
+    expect(rows!.map((r) => r.groupStart)).toEqual([true, false, true]);
+    expect(rows![0]).toMatchObject({ commit: 'aaaa1111', taskRef: 'ab12' });
+    expect(rows![2]).toMatchObject({ commit: 'bbbb2222', taskRef: null });
+  });
+
+  it('returns null when blame is null (caller shows honest placeholder, never fabricated)', () => {
+    expect(groupBlame(null, 'one\ntwo\n')).toBeNull();
+    expect(groupBlame(undefined, 'one\ntwo\n')).toBeNull();
+  });
+
+  it('tolerates a content/blame length mismatch (missing blame → null attribution)', () => {
+    const rows = groupBlame([{ line: 1, commit: 'aaaa1111', taskRef: null }], 'one\ntwo\n');
+    expect(rows!.map((r) => r.lineNo)).toEqual([1, 2]);
+    expect(rows![0]).toMatchObject({ commit: 'aaaa1111', groupStart: true });
+    expect(rows![1]).toMatchObject({ commit: null, taskRef: null, groupStart: true });
+  });
+
+  it('drops a single trailing empty line from the final newline (no phantom blank row)', () => {
+    const rows = groupBlame(blame, 'one\ntwo\nthree\n');
+    expect(rows!.length).toBe(3);
   });
 });

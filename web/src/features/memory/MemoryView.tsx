@@ -9,17 +9,75 @@ import {
   relTimeAgo,
   diffToggle,
   formatLineDiff,
+  groupBlame,
   type TreeRow,
+  type BlameRow,
 } from './memory-vm';
 import { MarkdownView } from './MarkdownView';
 
 // MEMORY VIEWER 7b — 1:1 from prototype.dc.html L658–719. CENTER-pane view mounted in the
 // workbench frame (LeftRail + RightPanel persist, like Overview). Exact inline styles / px / hex /
 // font / weight / EN copy reproduced; real fs-read data substituted via the existing memory.tree /
-// memory.file tRPC scopes. HONEST placeholders (never fabricated numbers) where the prototype shows
-// git-diff data (task ref / +42−7 / commit hash) — there is no git-diff backend scope.
+// memory.file tRPC scopes. Aggregate +/− is real (git numstat). With diff ON, a per-line blame pane
+// shows the REAL commit hash + parsed task ref per line (memory.file.blame, git blame). When blame is
+// unavailable (not a git repo / git unavailable / binary) it falls back to an HONEST placeholder
+// (never fabricated); the task ref is null when the commit carries no task tag.
 
 const MONO = "'IBM Plex Mono',monospace";
+
+// Per-line blame pane (逐行高亮): real short commit hash + task-ref chip in the gutter (shown once per
+// commit run), a subtle background band alternating per commit group, monospace line text.
+export function BlamePane({ rows }: { rows: BlameRow[] }): JSX.Element {
+  let groupIdx = -1;
+  return (
+    <div style={{ font: `400 11px ${MONO}`, lineHeight: 1.55 }}>
+      {rows.map((r) => {
+        if (r.groupStart) groupIdx += 1;
+        const band = groupIdx % 2 === 0 ? '#FBFBFD' : '#F3F4FA';
+        return (
+          <div
+            key={r.lineNo}
+            style={{
+              display: 'flex',
+              alignItems: 'baseline',
+              gap: 10,
+              background: band,
+              borderLeft: r.groupStart ? '2px solid #4655D4' : '2px solid transparent',
+              padding: '0 8px',
+            }}
+          >
+            <span style={{ width: 34, flex: 'none', textAlign: 'right', color: '#C2C8D2', fontSize: 9.5 }}>
+              {r.lineNo}
+            </span>
+            <span style={{ width: 66, flex: 'none', color: '#8A93A2', fontSize: 9.5 }}>
+              {r.groupStart && r.commit ? r.commit : ''}
+            </span>
+            <span style={{ width: 52, flex: 'none' }}>
+              {r.groupStart && r.taskRef && (
+                <span
+                  style={{
+                    fontSize: 9,
+                    fontWeight: 600,
+                    color: '#4655D4',
+                    background: '#EEF0FA',
+                    border: '1px solid #C9CFF2',
+                    borderRadius: 999,
+                    padding: '1px 6px',
+                  }}
+                >
+                  {r.taskRef}
+                </span>
+              )}
+            </span>
+            <span style={{ flex: 1, minWidth: 0, color: '#22262E', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+              {r.text || ' '}
+            </span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
 
 function TreeRowView({ row, onPick }: { row: TreeRow; onPick: (path: string) => void }) {
   const [hover, setHover] = useState(false);
@@ -103,6 +161,8 @@ export function MemoryView(): JSX.Element {
   const dt = diffToggle(diffOn);
   // Real per-file git line counts (memory.file.lineDiff); null → honest placeholder (never fabricated).
   const lineDiff = formatLineDiff(file?.lineDiff);
+  // Real per-line git blame (memory.file.blame); null → honest placeholder (no per-line highlight).
+  const blameRows = groupBlame(file?.blame, file?.content ?? '');
 
   return (
     <div data-pane="center" style={CENTER}>
@@ -205,7 +265,7 @@ export function MemoryView(): JSX.Element {
             </span>
           </div>
 
-          {/* rendered markdown (prototype L685–716) */}
+          {/* rendered markdown / per-line blame (prototype L685–716) */}
           <div style={{ flex: 1, overflow: 'auto', minHeight: 0, padding: '18px 24px 24px' }}>
             {diffOn && (
               <div
@@ -220,17 +280,17 @@ export function MemoryView(): JSX.Element {
                   lineHeight: 1.5,
                 }}
               >
-                {lineDiff ? (
+                {blameRows ? (
                   <>
-                    {lineDiff.added} / {lineDiff.removed} lines changed in the working tree vs HEAD
-                    (git numstat). Per-line highlighting is not available — the file below is the current
-                    working-tree content.
+                    {lineDiff ? `${lineDiff.added} / ${lineDiff.removed} lines changed vs HEAD (git numstat). ` : ''}
+                    Each line below is annotated with its real last-touch commit hash and task ref (git
+                    blame); a task ref is blank when that commit carries no task tag.
                   </>
                 ) : (
                   <>
-                    Line-level +/− diff is unavailable — this project directory is not a git work tree (or
-                    git is unavailable), so added/removed lines are not highlighted. The file below is the
-                    current content.
+                    Per-line blame is unavailable — this project directory is not a git work tree (or git is
+                    unavailable), so commit hashes / task refs are not shown. The file below is the current
+                    content.
                   </>
                 )}
               </div>
@@ -239,7 +299,11 @@ export function MemoryView(): JSX.Element {
             {fileQuery.isError && (
               <div style={{ fontSize: 11.5, color: '#C03D33' }}>Could not read this file.</div>
             )}
-            {file && <MarkdownView content={file.content} />}
+            {file && diffOn && blameRows ? (
+              <BlamePane rows={blameRows} />
+            ) : (
+              file && <MarkdownView content={file.content} />
+            )}
             {!fileQuery.isLoading && !fileQuery.isError && !file && (
               <div style={{ fontSize: 11.5, color: '#B6BDC9' }}>Select a file to view.</div>
             )}

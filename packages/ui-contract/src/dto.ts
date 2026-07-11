@@ -30,6 +30,7 @@ export type {
   ApprovalsListParams,
   CostSummaryParams,
   ConfigGetParams,
+  MachinesListParams,
   // Mutate args
   ProjectCreateArgs,
   SessionsSendArgs,
@@ -80,6 +81,7 @@ export type {
   MemoryDirEntry,
   MemoryFile,
   MemoryLineDiff,
+  MemoryBlameLine,
   ProjectCreateReturn,
   SessionsSendReturn,
   ThreadsCancelReturn,
@@ -89,6 +91,7 @@ export type {
   ApprovalInfo,
   ApprovalMutateReturn,
   ApprovalsRequestReturn,
+  MachineInfo,
   // Mapped contract
   QueryParamMap,
   QueryReturnMap,

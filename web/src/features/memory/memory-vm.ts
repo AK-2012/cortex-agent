@@ -1,4 +1,4 @@
-import type { MemoryTree, MemoryLineDiff } from '@cortex-agent/ui-contract';
+import type { MemoryTree, MemoryLineDiff, MemoryBlameLine } from '@cortex-agent/ui-contract';
 
 // Pure view-model helpers for the memory viewer 7b center view (prototype.dc.html L658–719). No JSX,
 // no fabricated data. Precedent: features/overview/overview-vm.ts. `deriveActiveProjectId` is reused
@@ -93,4 +93,47 @@ export interface LineDiffLabel {
 export function formatLineDiff(d: MemoryLineDiff | null | undefined): LineDiffLabel | null {
   if (!d) return null;
   return { added: `+${d.added}`, removed: `−${d.removed}` };
+}
+
+export interface BlameRow {
+  /** 1-based line number. */
+  lineNo: number;
+  /** The raw content of the line. */
+  text: string;
+  /** Real short commit hash (from `git blame`), or null when this line has no blame attribution. */
+  commit: string | null;
+  /** Task ref parsed from the commit subject, or null (honest — never fabricated). */
+  taskRef: string | null;
+  /** True when this line begins a new commit run (drives the per-commit highlight band + gutter label). */
+  groupStart: boolean;
+}
+
+/**
+ * Zip the file's content lines with the real per-line `git blame` attribution for the逐行 highlight
+ * pane. Returns `null` when `blame` is null/undefined (git unavailable / not a repo / binary) so the
+ * caller falls back to an honest placeholder — NEVER a fabricated attribution. A line with no matching
+ * blame entry gets `commit: null` (honest), and `groupStart` is true at every commit boundary.
+ */
+export function groupBlame(
+  blame: MemoryBlameLine[] | null | undefined,
+  content: string,
+): BlameRow[] | null {
+  if (!blame) return null;
+  const byLine = new Map<number, MemoryBlameLine>();
+  for (const b of blame) byLine.set(b.line, b);
+
+  // Split into lines; drop the single trailing empty element produced by a final newline so a
+  // git-style N-line file yields N rows (not a phantom blank).
+  const lines = content.split('\n');
+  if (lines.length > 1 && lines[lines.length - 1] === '') lines.pop();
+
+  let prevCommit: string | null | undefined = undefined;
+  return lines.map((text, i) => {
+    const lineNo = i + 1;
+    const b = byLine.get(lineNo) ?? null;
+    const commit = b ? b.commit : null;
+    const groupStart = commit !== prevCommit;
+    prevCommit = commit;
+    return { lineNo, text, commit, taskRef: b ? b.taskRef : null, groupStart };
+  });
 }

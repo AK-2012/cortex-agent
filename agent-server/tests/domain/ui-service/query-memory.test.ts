@@ -4,7 +4,12 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { handleMemoryTree, handleMemoryFile } from '../../../src/domain/ui-service/query/memory.js';
+import {
+  handleMemoryTree,
+  handleMemoryFile,
+  parseTaskRef,
+  parseBlamePorcelain,
+} from '../../../src/domain/ui-service/query/memory.js';
 import { createUiService } from '../../../src/domain/ui-service/ui-service.js';
 import { mutateInputSchemas } from '../../../src/domain/ui-service/input-schemas.js';
 import type { UiServiceDeps } from '../../../src/domain/ui-service/types.js';
@@ -258,4 +263,101 @@ test('memory.file lineDiff is null (honest placeholder) when the project dir is 
     path: 'STATUS.md',
   });
   assert.equal(dto.lineDiff, null);
+});
+
+// ── (6) task-ref parser: keyword-anchored 4-hex, honest null otherwise ─────────
+test('parseTaskRef extracts a 4-hex ref after task/manager/gate keyword', () => {
+  assert.equal(parseTaskRef('complete task ddac'), 'ddac');
+  assert.equal(parseTaskRef('web: fill card (task b881)'), 'b881');
+  assert.equal(parseTaskRef('queue UI gap-fill manager 2169'), '2169');
+  assert.equal(parseTaskRef('GATE Stage R3 gate f82b verdict PROCEED'), 'f82b');
+  assert.equal(parseTaskRef('TASK ABCD uppercase normalizes'), 'abcd');
+});
+
+test('parseTaskRef returns null when there is no keyword-anchored ref (no fabrication)', () => {
+  assert.equal(parseTaskRef('daa4 §10.1 UI 占位真实化 manager 收口'), null); // bare token, no keyword
+  assert.equal(parseTaskRef('bump year to 2026'), null); // 4-digit but not a task ref
+  assert.equal(parseTaskRef('init commit'), null);
+  assert.equal(parseTaskRef(''), null);
+  assert.equal(parseTaskRef('task zzzz not hex'), null); // non-hex after keyword
+});
+
+// ── (7) blame porcelain parser ────────────────────────────────────────────────
+test('parseBlamePorcelain maps each line to short hash + parsed task ref', () => {
+  const porcelain = [
+    '1111111111111111111111111111111111111111 1 1 2',
+    'author fangxm',
+    'summary complete task ddac',
+    'filename STATUS.md',
+    '\tfirst line',
+    '1111111111111111111111111111111111111111 2 2',
+    '\tsecond line',
+    '2222222222222222222222222222222222222222 3 3 1',
+    'author fangxm',
+    'summary init commit',
+    'boundary',
+    'filename STATUS.md',
+    '\tthird line',
+  ].join('\n');
+  const rows = parseBlamePorcelain(porcelain);
+  assert.equal(rows.length, 3);
+  assert.deepEqual(rows[0], { line: 1, commit: '11111111', taskRef: 'ddac' });
+  assert.deepEqual(rows[1], { line: 2, commit: '11111111', taskRef: 'ddac' });
+  assert.deepEqual(rows[2], { line: 3, commit: '22222222', taskRef: null });
+});
+
+test('parseBlamePorcelain returns [] for empty output', () => {
+  assert.deepEqual(parseBlamePorcelain(''), []);
+});
+
+// ── (8) handler blame: real per-line hash + task ref from a git fixture ────────
+test('memory.file returns real per-line blame (commit hash + task ref) for a tracked file', async () => {
+  const { root } = makeGitProject();
+  // Rewrite + re-commit STATUS.md under a subject that carries a task ref, so blame attributes all
+  // lines to THIS commit (the content must actually change, else blame stays on the baseline).
+  const git = (...args: string[]) =>
+    execFileSync('git', ['-C', root, ...args], { stdio: ['ignore', 'ignore', 'ignore'] });
+  fs.writeFileSync(path.join(root, 'STATUS.md'), 'x\ny\nz\n', 'utf8');
+  git('add', 'STATUS.md');
+  git('commit', '-q', '-m', 'ui: update status (task abcd)');
+  const dto = await handleMemoryFile(makeDeps('my-project', root), {
+    projectId: 'my-project',
+    path: 'STATUS.md',
+  });
+  assert.ok(Array.isArray(dto.blame));
+  assert.equal(dto.blame!.length, 3);
+  // Real short hash = the actual HEAD short hash.
+  const headShort = execFileSync('git', ['-C', root, 'rev-parse', '--short=8', 'HEAD'], {
+    encoding: 'utf8',
+  }).trim();
+  for (const b of dto.blame!) {
+    assert.equal(b.commit, headShort);
+    assert.equal(b.taskRef, 'abcd');
+  }
+  assert.deepEqual(
+    dto.blame!.map((b) => b.line),
+    [1, 2, 3],
+  );
+});
+
+test('memory.file blame taskRef is null (honest) when the commit carries no task ref', async () => {
+  const { root } = makeGitProject(); // baseline commit subject = 'baseline' (no ref)
+  const dto = await handleMemoryFile(makeDeps('my-project', root), {
+    projectId: 'my-project',
+    path: 'STATUS.md',
+  });
+  assert.ok(Array.isArray(dto.blame));
+  for (const b of dto.blame!) {
+    assert.ok(typeof b.commit === 'string' && b.commit.length > 0);
+    assert.equal(b.taskRef, null);
+  }
+});
+
+test('memory.file blame is null (honest placeholder) when the project dir is not a git repo', async () => {
+  const { root } = makeProject();
+  const dto = await handleMemoryFile(makeDeps('my-project', root), {
+    projectId: 'my-project',
+    path: 'STATUS.md',
+  });
+  assert.equal(dto.blame, null);
 });

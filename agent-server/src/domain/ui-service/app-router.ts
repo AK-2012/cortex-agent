@@ -19,6 +19,7 @@ import {
   sessionsListInput,
   sessionsTranscriptInput,
   sessionsSendInput,
+  sessionsCancelInput,
   threadsListInput,
   threadsGetInput,
   tasksListInput,
@@ -43,6 +44,7 @@ import {
   executionsLogInput,
   configGetInput,
   configSetInput,
+  machinesListInput,
 } from './input-schemas.js';
 import type {
   UiService,
@@ -129,6 +131,7 @@ export function createAppRouter(uiService: UiService) {
       list: makeQuery(uiService, 'sessions.list', sessionsListInput),
       transcript: makeQuery(uiService, 'sessions.transcript', sessionsTranscriptInput),
       send: makeMutation(uiService, 'sessions.send', sessionsSendInput),
+      cancel: makeMutation(uiService, 'sessions.cancel', sessionsCancelInput),
     }),
     threads: router({
       list: makeQuery(uiService, 'threads.list', threadsListInput),
@@ -187,6 +190,9 @@ export function createAppRouter(uiService: UiService) {
     config: router({
       get: makeQuery(uiService, 'config.get', configGetInput),
       set: makeMutation(uiService, 'config.set', configSetInput),
+    }),
+    machines: router({
+      list: makeQuery(uiService, 'machines.list', machinesListInput),
     }),
     subscribe: publicProcedure
       .input(subscribeFilterInput)

@@ -78,6 +78,8 @@ export const costSummaryInput = z.object({
 
 export const configGetInput = z.object({});
 
+export const machinesListInput = z.object({});
+
 // ── Subscription input schemas ────────────────────────────────────
 // Subscriptions are not part of the query/mutate keyed maps; their input schemas live here too so
 // the AppRouter and the browser (@cortex-agent/ui-contract) share one source of truth (B2-C).
@@ -97,6 +99,10 @@ export const projectsCreateInput = z.object({
 export const sessionsSendInput = z.object({
   sessionId: z.string(),
   text: z.string().min(1),
+});
+
+export const sessionsCancelInput = z.object({
+  sessionId: z.string(),
 });
 
 export const threadsCancelInput = z.object({
@@ -232,11 +238,13 @@ export const queryInputSchemas = {
   'approvals.list': approvalsListInput,
   'cost.summary': costSummaryInput,
   'config.get': configGetInput,
+  'machines.list': machinesListInput,
 } satisfies Record<QueryScope, z.ZodType>;
 
 export const mutateInputSchemas = {
   'projects.create': projectsCreateInput,
   'sessions.send': sessionsSendInput,
+  'sessions.cancel': sessionsCancelInput,
   'threads.cancel': threadsCancelInput,
   'executions.cancel': executionsCancelInput,
   'schedules.pause': scheduleActionInput,

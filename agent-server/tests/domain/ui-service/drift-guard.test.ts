@@ -54,6 +54,7 @@ function makeMinimalDeps(): UiServiceDeps {
     executionLogTailer: { startTail: () => {}, stopTail: () => {}, refCount: () => 0 },
     conversationHistory: { getHistory: async () => null },
     sendSessionMessage: () => {},
+    cancelSessionRun: async () => 0,
     approvalsPath: '/tmp/nonexistent-approvals.md',
     runningExecutions: {
       register: () => {},
@@ -102,6 +103,7 @@ const queryScopes = [
 const mutateOps = [
   'projects.create',
   'sessions.send',
+  'sessions.cancel',
   'threads.cancel',
   'executions.cancel',
   'schedules.pause',

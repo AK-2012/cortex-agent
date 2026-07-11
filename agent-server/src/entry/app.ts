@@ -22,13 +22,14 @@ import * as executionRegistry from '@domain/executions/registry.js';
 import { executionLogTailer } from '@domain/executions/log-tailer.js';
 import { initHookBridge } from '@orch/routing/hook-bridge.js';
 import { registerCommands } from '@orch/routing/commands/index.js';
+import { cancelChannelRuns } from '@orch/routing/commands/cancel.js';
 import { taskStore } from '@domain/tasks/store.js';
 import { taskMutator } from '@domain/tasks/mutator.js';
 import { projectDirRepo } from '@store/project-dir-repo.js';
 import { projectStore } from '@domain/projects/index.js';
 import { sendStartupDmIfConfigured } from './startup-notify.js';
 import { startGateway, stopGateway } from '@domain/costs/gateway-manager.js';
-import { startClientManager, stopClientManager, startAllRemoteClients } from '@domain/remote/client-manager.js';
+import { startClientManager, stopClientManager, startAllRemoteClients, getOnlineDevices, isDeviceOnline } from '@domain/remote/client-manager.js';
 import { checkAndUpdateClients, formatUpdateSlackMessage } from '@domain/remote/client-hot-reload.js';
 import { checkServerUpdate } from '@domain/system/server-update-check.js';
 import { threadStore } from '@store/thread-repo.js';
@@ -72,7 +73,7 @@ import { profileRepo, startProfileWatcher, setAdminNotifier as setProfileNotifie
 import { sessionStore } from '@store/session-registry-repo.js';
 import { cleanupAllBackups } from '@domain/sessions/session-backup.js';
 import { initDiskMonitor, stopDiskMonitor } from '@domain/monitor/disk-monitor.js';
-import { loadMachinesFromFile, startMachineRegistryWatcher, stopMachineRegistryWatcher, setAdminNotifier as setMachineNotifier } from '@domain/tasks/dispatch-utils.js';
+import { loadMachinesFromFile, startMachineRegistryWatcher, stopMachineRegistryWatcher, setAdminNotifier as setMachineNotifier, getMachineRegistry } from '@domain/tasks/dispatch-utils.js';
 import { EventBus, createEventLogger } from '@events/index.js';
 import { registerHookBridgeSubscribers } from '@orch/routing/hook-bridge-subscribers.js';
 import { startDispatchReconciler } from '@orch/dispatch-reconciler.js';
@@ -347,6 +348,17 @@ process.on('SIGTERM', async () => {
     // S4 chat send: inject a genuine user turn into a session via the orchestration send path.
     // Injected here (entry layer) so the ui-service domain never imports orchestration.
     sendSessionMessage: ({ channel, text }) => sendWebUserMessage({ channel, text, adapter }),
+    // Machines screen: join static config (getMachineRegistry) + live WebSocket state (getOnlineDevices/
+    // isDeviceOnline). Injected here (entry layer) so the ui-service domain never imports remote/.
+    clientRegistry: {
+      getOnlineDevices,
+      isDeviceOnline,
+      getMachineRegistry,
+    },
+    // S4 chat Stop: cancel the agent(s) running on the session's channel via the orchestration
+    // channel-cancel path (same code the no-arg/`--all` !cancel command uses). Injected here so the
+    // ui-service domain never imports orchestration.
+    cancelSessionRun: ({ channel }) => cancelChannelRuns(channel),
     bus,
     adapter,
   });

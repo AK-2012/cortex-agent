@@ -7,11 +7,11 @@ backdrop L1291–1292), diffed vs `design/proto-shots/13-schedule-modal.png`. Wi
 
 | path | role |
 |---|---|
-| `schedule-modal-vm.ts` | **Pure** (TDD): `ScheduleForm` model + `defaultScheduleForm`; `visibleFields(type)` (TYPE→which cell shows); `buildScheduleAddArgs(form)→ScheduleAddArgs` (unit→raw ms for interval/once, `time`/`dayOfWeek` per type, target mapping); `validateScheduleForm`; `computeNextRun`/`nextRunLabel`/`nextRunParts` (footer); option lists (`SCHED_TYPES`/`DAY_OPTIONS`/`INTERVAL_UNITS`/`FALLBACK_OPTIONS`/`TARGET_OPTIONS`/`PROFILE_OPTIONS`). |
-| `schedule-modal-vm.test.ts` | vitest for the VM (30 tests, TDD — written first). |
-| `ScheduleModal.tsx` | **Presentational** 1:1 modal (exact inline styles/px/hex/font/weight/EN copy from the source). Backdrop + 560px card + header/esc + TYPE segmented control (selected `#4655D4`/`#EEF0FA`) + TIME/EVERY/IN cell (TYPE-driven) + DAY cell (weekly) + PROFILE + MESSAGE textarea + TARGET/FALLBACK + footer next-run + Cancel + Create schedule. Escape/backdrop/esc-chip close. `data-schedule-modal` / `data-action="create-schedule"` / `data-sched-type` for E2E. |
-| `schedule-render.test.tsx` | `react-dom/server` render assertions (9 tests): daily-state chrome, TYPE→visible-field switching, footer label, disabled Create. |
-| `ScheduleModalProvider.tsx` | Global mount + `useScheduleModal()` (`open({projectId?})`/`close()`). Owns the form state + the real `schedules.add` `useMutation` (onSuccess → invalidate `schedules.list` + toast + close; onError → toast). One modal instance; mounted in `shell/AppShell` (mirrors the ⌘K / execution-log-drawer mounts). |
+| `schedule-modal-vm.ts` | **Pure** (TDD): `ScheduleForm` model + `defaultScheduleForm`; `visibleFields(type)` (TYPE→which cell shows); `buildScheduleAddArgs(form)→ScheduleAddArgs` (unit→raw ms for interval/once, `time`/`dayOfWeek` per type, target mapping); `validateScheduleForm`; `computeNextRun`/`nextRunLabel`/`nextRunParts` (footer); static option lists (`SCHED_TYPES`/`DAY_OPTIONS`/`INTERVAL_UNITS`/`FALLBACK_OPTIONS`/`TARGET_OPTIONS`); `profileOptions(names, current)` — derives the PROFILE `<select>` options from the real profile names (guarantees `current` stays selectable; honest empty when no source). |
+| `schedule-modal-vm.test.ts` | vitest for the VM (35 tests, TDD — written first; incl. `profileOptions`). |
+| `ScheduleModal.tsx` | **Presentational** 1:1 modal (exact inline styles/px/hex/font/weight/EN copy from the source). Backdrop + 560px card + header/esc + TYPE segmented control (selected `#4655D4`/`#EEF0FA`) + TIME/EVERY/IN cell (TYPE-driven) + DAY cell (weekly) + PROFILE (options from the `profileOptions` prop) + MESSAGE textarea + TARGET/FALLBACK + footer next-run + Cancel + Create schedule. Escape/backdrop/esc-chip close. `data-schedule-modal` / `data-action="create-schedule"` / `data-sched-type` for E2E. |
+| `schedule-render.test.tsx` | `react-dom/server` render assertions (10 tests): daily-state chrome, TYPE→visible-field switching, PROFILE option list, footer label, disabled Create. |
+| `ScheduleModalProvider.tsx` | Global mount + `useScheduleModal()` (`open({projectId?})`/`close()`). Owns the form state + the real `schedules.add` `useMutation` (onSuccess → invalidate `schedules.list` + toast + close; onError → toast); reads `config.get` for the real profile names and feeds `profileOptions` into the modal. One modal instance; mounted in `shell/AppShell` (mirrors the ⌘K / execution-log-drawer mounts). |
 
 ## Real data vs data-gap placeholders
 
@@ -23,8 +23,11 @@ backdrop L1291–1292), diffed vs `design/proto-shots/13-schedule-modal.png`. Wi
 
 ## Flagged gaps / adaptations (no fabricated values)
 
-- **PROFILE** — no `profiles` tRPC scope (c3ce precedent) → `PROFILE_OPTIONS` is a **static
-  placeholder** list defaulting to the prototype's `claude-haiku`; sent as the optional `profile`.
+- **PROFILE** — **real**: the dropdown lists the actual agent profiles from `config.get`
+  (`ConfigSnapshot.profiles.profiles[].name`, read redacted from `~/.cortex/config/profiles.json`),
+  derived by `profileOptions(names, form.profile)`. Sent as the optional `ScheduleAddArgs.profile`.
+  Honest degrade: when profiles.json is absent (`config.get` returns `profiles: null`) the list holds
+  only the form's current value — never a fabricated set.
 - **TARGET** — `ScheduleTarget` is `fresh | project{projectId} | thread{threadId,channel}`. The web
   has no channel/threadId source, so only constructible choices are offered:
   `current-channel`→**omit `target`** (scheduler default; prototype default label kept 1:1),

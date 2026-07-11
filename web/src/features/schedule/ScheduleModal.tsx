@@ -7,7 +7,6 @@ import {
   INTERVAL_UNITS,
   FALLBACK_OPTIONS,
   TARGET_OPTIONS,
-  PROFILE_OPTIONS,
   type ScheduleForm,
   type SchedType,
 } from './schedule-modal-vm';
@@ -60,10 +59,12 @@ export interface ScheduleModalProps {
   onCreate: () => void;
   valid: boolean;
   pending: boolean;
+  /** Real selectable agent profiles (from config.get); already includes the form's current value. */
+  profileOptions: string[];
   now?: Date;
 }
 
-export function ScheduleModal({ form, onChange, onCancel, onCreate, valid, pending, now }: ScheduleModalProps) {
+export function ScheduleModal({ form, onChange, onCancel, onCreate, valid, pending, profileOptions, now }: ScheduleModalProps) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') onCancel();
@@ -273,7 +274,7 @@ export function ScheduleModal({ form, onChange, onCancel, onCreate, valid, pendi
                   onChange={(e) => onChange({ profile: e.target.value })}
                   style={bareSelectStyle("500 11.5px 'IBM Plex Mono',monospace")}
                 >
-                  {PROFILE_OPTIONS.map((p) => (
+                  {profileOptions.map((p) => (
                     <option key={p} value={p}>{p}</option>
                   ))}
                 </select>

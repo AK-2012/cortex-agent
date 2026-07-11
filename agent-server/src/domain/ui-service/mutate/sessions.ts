@@ -7,7 +7,14 @@
 // in the entry layer to the orchestration send path (agentRunner.route). Fire-and-forget: the
 // assistant reply returns over the `session.message` stream event, NOT this return.
 
-import type { UiServiceDeps, Result, SessionsSendArgs, SessionsSendReturn } from '../types.js';
+import type {
+  UiServiceDeps,
+  Result,
+  SessionsSendArgs,
+  SessionsSendReturn,
+  SessionsCancelArgs,
+  SessionsCancelReturn,
+} from '../types.js';
 
 export async function handleSendSession(
   deps: UiServiceDeps,
@@ -19,4 +26,19 @@ export async function handleSendSession(
   }
   deps.sendSessionMessage({ sessionId: args.sessionId, channel: session.channel, text: args.text });
   return { ok: true, data: { accepted: true } };
+}
+
+// S4 chat Stop: cancel the agent(s) currently running for this session. Resolves the session's
+// channel and delegates to the injected orchestration channel-cancel path (kills the live handle,
+// preserves the session, cancels the thread record, tears the execution down as `cancelled`).
+export async function handleCancelSession(
+  deps: UiServiceDeps,
+  args: SessionsCancelArgs,
+): Promise<Result<SessionsCancelReturn>> {
+  const session = await deps.sessionStore.getById(args.sessionId);
+  if (!session) {
+    return { ok: false, code: 'not-found', message: `Session not found: ${args.sessionId}` };
+  }
+  const count = await deps.cancelSessionRun({ channel: session.channel });
+  return { ok: true, data: { cancelled: count > 0, count } };
 }
