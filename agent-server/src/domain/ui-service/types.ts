@@ -829,6 +829,7 @@ export interface MutateReturnMap {
   'tasks.unblock': void;
   'approvals.approve': ApprovalMutateReturn;
   'approvals.reject': ApprovalMutateReturn;
+  'approvals.request': ApprovalsRequestReturn;
   'config.set': ConfigSetReturn;
 }
 
