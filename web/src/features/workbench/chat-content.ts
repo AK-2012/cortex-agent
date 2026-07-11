@@ -2,8 +2,9 @@
 // (divider / user / tool-calls / assistant) is now driven by the real `sessions.transcript` query +
 // live `session.message` stream (see transcript-vm.ts / MessageStream.tsx). What remains here:
 //   • the tool-call label helper + type (shared by ToolCallsRow)
-//   • the composer slash-command menu (18-slash-menu) — visual only; there is no backend that
-//     executes slash commands, so it stays a local affordance (verbatim EN copy from the prototype)
+//   • the composer slash-command menu (18-slash-menu) — verbatim EN copy from the prototype; running
+//     a menu item now dispatches its '/cmd' as a real slash command via sessions.send (task 970d,
+//     see composer-slash.ts / Composer.tsx) — the data below is unchanged, still the prototype set
 //   • a representative Approval card (Stage-5 GAP-B: no approvals tRPC scope yet) + default profile
 //     label — flagged, unchanged from 89e7; kept to preserve the 00-workbench composition.
 
@@ -28,8 +29,8 @@ export function toolCallsLabel(n: number): string {
 /** Default chat profile label (prototype chatProfile default, L1636). Profile has no tRPC scope. */
 export const DEFAULT_CHAT_PROFILE = 'research';
 
-/** slash-menu commands (prototype cmds L2115–2121; EN copy verbatim). The composer slash menu
- *  (18-slash-menu) is visual only — there is no backend op to execute a slash command. */
+/** slash-menu commands (prototype cmds L2115–2121; EN copy verbatim). Running an item dispatches
+ *  its '/cmd' as a real slash command through sessions.send (task 970d, no new backend op). */
 export const SLASH_COMMANDS = [
   { cmd: '/dispatch', desc: 'Dispatch a task to a remote machine' },
   { cmd: '/diff', desc: 'Show pending repo changes at the commit gate' },

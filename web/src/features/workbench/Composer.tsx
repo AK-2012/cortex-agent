@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useMutation } from '@tanstack/react-query';
 import { useTRPC } from '@/lib/trpc';
 import { SLASH_COMMANDS } from './chat-content';
+import { slashItemDispatch } from './composer-slash';
 
 // Composer — 1:1 from prototype.dc.html L359–395: slash palette (18-slash-menu) · running/idle status
 // line · input · "/ commands" chip + hint · stop/send. REAL send (task aba0): ⏎ / send-click routes the
@@ -14,8 +15,9 @@ import { SLASH_COMMANDS } from './chat-content';
 // session/turn/message) → still rendered as an explicit "—" placeholder, never fabricated. Stop is REAL
 // (task bdc2): click routes through the `sessions.cancel` mutate, which cancels the agent(s) running on
 // the session's channel (kills the live handle, preserves the session) — running collapses back to idle
-// as the live stream goes quiet. Slash exec has no backend → the slash menu is a local visual affordance
-// only.
+// as the live stream goes quiet. Slash exec is REAL (task 970d): running a slash-menu item routes its
+// '/cmd' through the same `sessions.send` mutate (the agent interprets the slash command) — ⏎/run
+// semantics really execute; the menu stays 1:1 visually, reusing the existing send (no new backend op).
 
 const mono = "'IBM Plex Mono',monospace";
 const DASH = '—';
@@ -50,13 +52,15 @@ export function Composer({
   const filtered = SLASH_COMMANDS.filter((c) => c.cmd.slice(1).startsWith(q));
   const slashList = filtered.length ? filtered : SLASH_COMMANDS;
 
-  const doSend = (): void => {
-    const text = composer.trim();
+  const doSendText = (raw: string): void => {
+    const text = raw.trim();
     if (!text || !sessionId) return;
     sendMut.mutate({ sessionId, text });
     setComposer('');
     setSlashOpen(false);
   };
+
+  const doSend = (): void => doSendText(composer);
 
   const doStop = (): void => {
     if (!sessionId || cancelMut.isPending) return;
@@ -97,8 +101,8 @@ export function Composer({
                 onMouseEnter={() => setSlashHover(i)}
                 onMouseLeave={() => setSlashHover((h) => (h === i ? null : h))}
                 onClick={() => {
-                  setComposer(c.cmd + ' ');
-                  setSlashOpen(false);
+                  const d = slashItemDispatch(c.cmd);
+                  if (d) doSendText(d.text);
                 }}
                 style={{
                   display: 'flex',
