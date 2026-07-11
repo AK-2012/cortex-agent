@@ -59,6 +59,9 @@ function makeDeps(approvalsPath: string): UiServiceDeps {
     runningExecutions: { getAll: () => [] } as any,
     costSummary: async () => ({ today: 0, week: 0, month: 0, total: 0, byMode: {} as any, byProject: {}, byTrigger: {}, bySource: {}, byBackend: {}, tokens: {} as any, entryCount: 0, dailyBudget: 0, forecastToday: 0, dailyCost: [], byTriggerScoped: {} }),
     bus: { subscribe: () => ({ unsubscribe: () => {} }), publish: () => {} } as any,
+    createDirectSession: async () => ({ sessionId: '', sessionName: '' }),
+    cancelSessionRun: async () => 0,
+    clientRegistry: { getOnlineDevices: () => [], isDeviceOnline: () => false, getMachineRegistry: () => ({}) },
     adapter: {} as any,
   };
 }
@@ -170,7 +173,7 @@ test('parseApprovals never fabricates a ttl/expiry field (zero-source)', () => {
   // TTL is the prototype amber "expires in …" slot; the markdown queue has no expiry concept at all.
   // Guard: the DTO must not carry a fabricated ttl value.
   for (const e of parseApprovals(PROV_SAMPLE)) {
-    assert.equal((e as Record<string, unknown>).ttl, undefined);
+    assert.equal((e as unknown as Record<string, unknown>).ttl, undefined);
   }
 });
 

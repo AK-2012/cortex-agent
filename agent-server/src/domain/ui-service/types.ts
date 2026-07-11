@@ -37,7 +37,8 @@ export type QueryScope =
   | 'approvals.list'
   | 'cost.summary'
   | 'config.get'
-  | 'machines.list';
+  | 'machines.list'
+  | 'skills.list';
 
 // ── Mutate ops ────────────────────────────────────────────────────
 
@@ -154,6 +155,8 @@ export interface CostSummaryParams {
 export type ConfigGetParams = Record<string, never>;
 
 export type MachinesListParams = Record<string, never>;
+
+export type SkillsListParams = Record<string, never>;
 
 // ── Mutate args ───────────────────────────────────────────────────
 
@@ -614,6 +617,18 @@ export interface MachineInfo {
   liveRuns: number;
 }
 
+// ── skills.list DTO (plan §12 A item 2 / 8a) ────────────────────────────────
+// One group per skill root: null plugin = user-mutable .claude/skills; non-null plugin = a
+// plugins/<plugin>/skills directory. Skills within each group are sorted alphabetically.
+// Data comes from domain/memory/skill-scanner.ts getDisplaySkillGroups() (60s cache).
+
+export interface SkillGroup {
+  /** Plugin name (e.g. 'cortex-common'); null for user-owned skills under DATA_DIR/.claude/skills */
+  plugin: string | null;
+  /** Sorted list of skill names in this group */
+  skills: string[];
+}
+
 // ── memory read-only fs DTOs (DR-0018 §6 Stage-6 memory viewer 7b) ─────────
 // A project's memory tree: top-level files + memory dirs with entry counts. Read-only;
 // the underlying handler restricts all paths to the project root under PROJECTS_DIR.
@@ -783,6 +798,7 @@ export interface QueryParamMap {
   'cost.summary': CostSummaryParams;
   'config.get': ConfigGetParams;
   'machines.list': MachinesListParams;
+  'skills.list': SkillsListParams;
 }
 
 export interface QueryReturnMap {
@@ -802,6 +818,7 @@ export interface QueryReturnMap {
   'cost.summary': CostSummary;
   'config.get': ConfigSnapshot;
   'machines.list': MachineInfo[];
+  'skills.list': SkillGroup[];
 }
 
 export interface MutateArgsMap {

@@ -46,6 +46,7 @@ import {
   configGetInput,
   configSetInput,
   machinesListInput,
+  skillsListInput,
 } from './input-schemas.js';
 import type {
   UiService,
@@ -119,7 +120,7 @@ function makeMutation<O extends MutateOp, Sch extends z.ZodType>(
 }
 
 // ── AppRouter ─────────────────────────────────────────────────────────────────────
-// 14 QueryScope + 17 MutateOp + 2 subscriptions (generic `subscribe` + `executions.log`;
+// 17 QueryScope + 17 MutateOp + 2 subscriptions (generic `subscribe` + `executions.log`;
 // `subscribeFilterInput` carries `sessionId` for the S4 `session.message` stream),
 // mirroring the ui-service contract.
 export function createAppRouter(uiService: UiService) {
@@ -195,6 +196,9 @@ export function createAppRouter(uiService: UiService) {
     }),
     machines: router({
       list: makeQuery(uiService, 'machines.list', machinesListInput),
+    }),
+    skills: router({
+      list: makeQuery(uiService, 'skills.list', skillsListInput),
     }),
     subscribe: publicProcedure
       .input(subscribeFilterInput)

@@ -27,6 +27,9 @@ function makeDeps(overrides: Partial<UiServiceDeps> = {}): UiServiceDeps {
     runningExecutions: { getAll: () => [] } as any,
     costSummary: async () => ({ today: 0, week: 0, month: 0, total: 0, byMode: {} as any, byProject: {}, byTrigger: {}, bySource: {}, byBackend: {}, tokens: {} as any, entryCount: 0, dailyBudget: 0, forecastToday: 0, dailyCost: [], byTriggerScoped: {} }),
     bus: { subscribe: () => ({ unsubscribe: () => {} }), publish: () => {} } as any,
+    createDirectSession: async () => ({ sessionId: '', sessionName: '' }),
+    cancelSessionRun: async () => 0,
+    clientRegistry: { getOnlineDevices: () => [], isDeviceOnline: () => false, getMachineRegistry: () => ({}) },
     adapter: { getProjectConduits: async () => ({ 'cortex-self': 'C123' }) } as any,
     ...overrides,
   };

@@ -54,6 +54,7 @@ function makeMinimalDeps(): UiServiceDeps {
     executionLogTailer: { startTail: () => {}, stopTail: () => {}, refCount: () => 0 },
     conversationHistory: { getHistory: async () => null },
     sendSessionMessage: () => {},
+    createDirectSession: async () => ({ sessionId: '', sessionName: '' }),
     cancelSessionRun: async () => 0,
     approvalsPath: '/tmp/nonexistent-approvals.md',
     runningExecutions: {
@@ -79,6 +80,7 @@ function makeMinimalDeps(): UiServiceDeps {
       dailyBudget: 0, forecastToday: 0, dailyCost: [], byTriggerScoped: {},
     }),
     bus: { subscribe: () => ({ unsubscribe: () => {} }), publish: () => {}, close: async () => {} } as any,
+    clientRegistry: { getOnlineDevices: () => [], isDeviceOnline: () => false, getMachineRegistry: () => ({}) },
     adapter: {
       getProjectConduits: async () => ({}),
     } as any,
@@ -98,6 +100,7 @@ const queryScopes = [
   'approvals.list',
   'cost.summary',
   'config.get',
+  'skills.list',
 ] as const;
 
 const mutateOps = [

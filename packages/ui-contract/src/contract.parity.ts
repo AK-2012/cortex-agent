@@ -39,6 +39,7 @@ import type {
   configGetInput,
   configSetInput,
   machinesListInput,
+  skillsListInput,
 } from './schemas.js';
 
 // Mutual assignability: true only when A and B are structurally equivalent.
@@ -69,6 +70,7 @@ const _approvalsList: QueryParity<'approvals.list', typeof approvalsListInput> =
 const _costSummary: QueryParity<'cost.summary', typeof costSummaryInput> = true;
 const _configGet: QueryParity<'config.get', typeof configGetInput> = true;
 const _machinesList: QueryParity<'machines.list', typeof machinesListInput> = true;
+const _skillsList: QueryParity<'skills.list', typeof skillsListInput> = true;
 
 // ── Mutate ops ────────────────────────────────────────────────────
 const _projectsCreate: MutateParity<'projects.create', typeof projectsCreateInput> = true;
@@ -100,7 +102,7 @@ const _executionsLog: Exact<z.infer<typeof executionsLogInput>, ExecutionsLogPar
 export const _contractParityChecked = [
   _projectsList, _sessionsList, _sessionsTranscript, _threadsList, _threadsGet, _tasksList, _schedulesList,
   _executionsList, _executionsGet, _memoryTree, _memoryFile, _approvalsList, _costSummary, _configGet,
-  _machinesList,
+  _machinesList, _skillsList,
   _projectsCreate, _sessionsCreate, _sessionsSend, _threadsCancel, _executionsCancel,
   _schedulesPause, _schedulesResume, _schedulesRemove, _schedulesAdd, _tasksClaim,
   _tasksUnclaim, _tasksComplete, _tasksBlock, _tasksUnblock,

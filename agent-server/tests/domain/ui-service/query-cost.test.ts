@@ -33,6 +33,9 @@ test('cost.summary delegates to costSummary and returns CostSummary', async () =
       return expected;
     },
     bus: { subscribe: () => ({ unsubscribe: () => {} }), publish: () => {} } as any,
+    createDirectSession: async () => ({ sessionId: '', sessionName: '' }),
+    cancelSessionRun: async () => 0,
+    clientRegistry: { getOnlineDevices: () => [], isDeviceOnline: () => false, getMachineRegistry: () => ({}) },
     adapter: {} as any,
   };
 
@@ -59,6 +62,9 @@ test('cost.summary passes projectId filter', async () => {
       return { today: 0, week: 0, month: 0, total: 0, byMode: {} as any, byProject: {}, byTrigger: {}, bySource: {}, byBackend: {}, tokens: {} as any, entryCount: 0, dailyBudget: 0, forecastToday: 0, dailyCost: [], byTriggerScoped: {} };
     },
     bus: { subscribe: () => ({ unsubscribe: () => {} }), publish: () => {} } as any,
+    createDirectSession: async () => ({ sessionId: '', sessionName: '' }),
+    cancelSessionRun: async () => 0,
+    clientRegistry: { getOnlineDevices: () => [], isDeviceOnline: () => false, getMachineRegistry: () => ({}) },
     adapter: {} as any,
   };
 
