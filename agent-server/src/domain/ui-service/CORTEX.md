@@ -29,6 +29,7 @@ by the Web UI.
 | `query/approvals.ts` | query | approvals.list handler + pure `parseApprovals` (PENDING_APPROVALS.md → ApprovalInfo[], missing fields null, status filter); path via `deps.approvalsPath` |
 | `query/cost.ts` | query | cost.summary handler |
 | `query/config.ts` | query | config.get handler — redacted snapshot of `~/.cortex/config` (budget/profiles/machines/mcp/thread-templates/hooks/.env) for the settings panel (Stage 7); pure `readConfigSnapshot(configDir, hooksDir)` + thin handler. SECURITY: `.env` values + machine `ssh` are never returned, only redacted markers |
+| `query/machines.ts` | query | machines.list handler — joined view of `getMachineRegistry()` (static config: cortexPath/gpuCount/ssh presence/os) + `getOnlineDevices()` (live WebSocket state: online/connectedAt/lastHeartbeat/capabilities) + `executionRegistry.getAll()` (running dispatch count per machine = liveRuns). SECURITY: ssh presence flag only, never raw user@host |
 | `mutate/projects.ts` | mutate | projects.create handler (reuses ProjectStore.createProject; maps invalid-name/already-exists → Err) |
 | `mutate/sessions.ts` | mutate | sessions.send handler (S4 chat: resolve session→channel, inject a genuine user turn via the injected `sendSessionMessage` dep; fire-and-forget `{accepted:true}` — assistant output returns over the `session.message` stream, not this return) |
 | `mutate/threads.ts` | mutate | threads.cancel handler |
