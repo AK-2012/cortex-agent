@@ -89,6 +89,7 @@ const QUERY_CASES: Array<{ scope: QueryScope; call: (c: any) => Promise<unknown>
   { scope: 'executions.list', call: (c) => c.executions.list({}), input: {} },
   { scope: 'executions.get', call: (c) => c.executions.get({ executionId: 'e1' }), input: {} },
   { scope: 'cost.summary', call: (c) => c.cost.summary({}), input: {} },
+  { scope: 'skills.list', call: (c) => c.skills.list({}), input: {} },
 ];
 
 test('every query routes to the correct scope and unwraps Result.data', async () => {

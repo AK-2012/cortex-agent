@@ -132,4 +132,10 @@ function normalizeSkillCommandPrefix(messageText) {
   return `/${trimmedStart}`;
 }
 
-export { getKnownSkillNames, getDisplaySkillNames, getDisplaySkillGroups, normalizeSkillCommandPrefix };
+/** Reset the in-process scan cache. Use only in tests that create/delete skill files mid-run. */
+function clearSkillScanCache(): void {
+  cachedDisplayGroupsAt = 0;
+  cachedKnownNamesAt = 0;
+}
+
+export { getKnownSkillNames, getDisplaySkillNames, getDisplaySkillGroups, normalizeSkillCommandPrefix, clearSkillScanCache };

@@ -79,6 +79,7 @@ function makeMinimalDeps(): UiServiceDeps {
       dailyBudget: 0, forecastToday: 0, dailyCost: [], byTriggerScoped: {},
     }),
     bus: { subscribe: () => ({ unsubscribe: () => {} }), publish: () => {}, close: async () => {} } as any,
+    clientRegistry: { getOnlineDevices: () => [], isDeviceOnline: () => false, getMachineRegistry: () => ({}) },
     adapter: {
       getProjectConduits: async () => ({}),
     } as any,
@@ -98,6 +99,7 @@ const queryScopes = [
   'approvals.list',
   'cost.summary',
   'config.get',
+  'skills.list',
 ] as const;
 
 const mutateOps = [

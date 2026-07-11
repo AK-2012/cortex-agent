@@ -32,6 +32,8 @@ function makeDeps(bus: EventBus, tailer: ExecutionLogTailer, records: Record<str
     conversationHistory: { getHistory: async () => null },
     sendSessionMessage: () => {},
     bus,
+    cancelSessionRun: async () => 0,
+    clientRegistry: { getOnlineDevices: () => [], isDeviceOnline: () => false, getMachineRegistry: () => ({}) },
     adapter: { getProjectConduits: async () => ({}) } as any,
   };
 }

@@ -31,6 +31,7 @@ export type {
   CostSummaryParams,
   ConfigGetParams,
   MachinesListParams,
+  SkillsListParams,
   // Mutate args
   ProjectCreateArgs,
   SessionsCreateArgs,
@@ -94,6 +95,7 @@ export type {
   ApprovalMutateReturn,
   ApprovalsRequestReturn,
   MachineInfo,
+  SkillGroup,
   // Mapped contract
   QueryParamMap,
   QueryReturnMap,
