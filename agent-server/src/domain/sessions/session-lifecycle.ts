@@ -2,6 +2,7 @@
 // output: registerNamedSession / attachExistingSession / resetChannelSession — shared session lifecycle primitives
 // pos:    domain/sessions — centralized session lifecycle for agent-runner, tui-session-service, and commands/session
 
+import * as crypto from 'node:crypto';
 import { setSessionAsync, deleteSessionAsync } from './session.js';
 import { conversationLedger } from '@store/conversation-ledger-repo.js';
 import { setActiveProfile } from '@domain/agents/index.js';
@@ -48,6 +49,40 @@ export async function registerNamedSession(store: SessionRegistryWriter, opts: R
     profileName: opts.profileName ?? null,
   });
   return name;
+}
+
+export interface CreateDirectSessionDeps {
+  sessionStore: SessionRegistryWriter;
+  /** Point the channel's sessions.json entry at the new session (so a later send resumes it). */
+  setChannelSession(channel: string, sessionId: string, backend: string): Promise<void>;
+  /** Initialize the conversation ledger for the new channel/session. */
+  initConversation(channel: string, opts: { sessionId: string; sessionName: string; backend: string }): Promise<void>;
+  /** Resolve the backend the send path will use for the channel (agent-runner reads the same). */
+  resolveBackend(channel: string): string;
+}
+
+/** Create a fresh, live user-initiated (origin='direct') session for a web/UI conversation: mint a
+ *  sessionId, derive its own `web:<sessionId>` conduit channel, register the named session, bind the
+ *  channel→session mapping and conversation ledger. Returns the sessionId + generated name. Because
+ *  the channel is bound with the same backend the send path resolves, a subsequent send resumes THIS
+ *  session rather than spawning a new one. */
+export async function createDirectSession(
+  deps: CreateDirectSessionDeps,
+  opts: { projectId: string },
+): Promise<{ sessionId: string; sessionName: string }> {
+  const sessionId = crypto.randomUUID();
+  const channel = `web:${sessionId}`;
+  const backend = deps.resolveBackend(channel);
+  const sessionName = await registerNamedSession(deps.sessionStore, {
+    sessionId,
+    channel,
+    backend,
+    projectId: opts.projectId,
+    origin: 'direct',
+  });
+  await deps.setChannelSession(channel, sessionId, backend);
+  await deps.initConversation(channel, { sessionId, sessionName, backend });
+  return { sessionId, sessionName };
 }
 
 export interface AttachExistingSessionOpts {

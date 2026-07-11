@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { SessionInfo } from '@cortex-agent/ui-contract';
 import { useTRPC } from '@/lib/trpc';
 import { groupSessions, sessionMeta, projectInitials } from './session-groups';
@@ -18,6 +18,7 @@ import { useApprovals } from '@/features/approvals/ApprovalsProvider';
 export function LeftRail(): JSX.Element {
   const navigate = useNavigate();
   const trpc = useTRPC();
+  const queryClient = useQueryClient();
   const projectsQuery = useQuery(trpc.projects.list.queryOptions({}));
   // Only user-initiated conversations belong in the left rail. Thread-agent sessions and
   // scheduled-job sessions are surfaced through the Thread and Schedule views, not here.
@@ -102,16 +103,31 @@ export function LeftRail(): JSX.Element {
   const pendingLabel =
     pendingCount + ' ' + (pendingCount > 1 ? 'approvals pending' : 'approval pending');
 
-  // ⌘N — the "New session" affordance. No session-create mutate scope exists yet, so the shortcut
-  // is registered but inert (flagged); it mirrors the prototype's Cmd-N binding.
+  // + New session / ⌘N — creates a REAL direct session via the sessions.create mutation, then
+  // invalidates sessions.list (the fresh session is most-recent → the center chat resolves to it)
+  // and selects its row. There is no dedicated per-session route, so selection + most-recent
+  // resolution IS the navigation to the new session.
+  const createSession = useMutation(
+    trpc.sessions.create.mutationOptions({
+      onSuccess: (data) => {
+        queryClient.invalidateQueries(trpc.sessions.list.queryFilter());
+        setSelectedId(data.sessionId);
+      },
+    }),
+  );
   const onNewSession = () => {
-    /* inert stub — session create has no backend scope */
+    if (createSession.isPending) return;
+    createSession.mutate({ projectId: activeProjectId ?? undefined });
   };
+  // Keep a ref to the latest handler so the ⌘N listener (registered once) always calls the current
+  // closure without re-binding the window listener on every render.
+  const onNewSessionRef = useRef(onNewSession);
+  onNewSessionRef.current = onNewSession;
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && (e.key === 'n' || e.key === 'N')) {
         e.preventDefault();
-        onNewSession();
+        onNewSessionRef.current();
       }
     };
     window.addEventListener('keydown', onKey);

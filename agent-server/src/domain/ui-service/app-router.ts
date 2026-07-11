@@ -18,6 +18,7 @@ import {
   projectsCreateInput,
   sessionsListInput,
   sessionsTranscriptInput,
+  sessionsCreateInput,
   sessionsSendInput,
   sessionsCancelInput,
   threadsListInput,
@@ -130,6 +131,7 @@ export function createAppRouter(uiService: UiService) {
     sessions: router({
       list: makeQuery(uiService, 'sessions.list', sessionsListInput),
       transcript: makeQuery(uiService, 'sessions.transcript', sessionsTranscriptInput),
+      create: makeMutation(uiService, 'sessions.create', sessionsCreateInput),
       send: makeMutation(uiService, 'sessions.send', sessionsSendInput),
       cancel: makeMutation(uiService, 'sessions.cancel', sessionsCancelInput),
     }),

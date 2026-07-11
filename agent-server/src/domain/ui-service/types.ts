@@ -43,6 +43,7 @@ export type QueryScope =
 
 export type MutateOp =
   | 'projects.create'
+  | 'sessions.create'
   | 'sessions.send'
   | 'sessions.cancel'
   | 'threads.cancel'
@@ -158,6 +159,11 @@ export type MachinesListParams = Record<string, never>;
 
 export interface ProjectCreateArgs {
   name: string;
+}
+
+export interface SessionsCreateArgs {
+  /** Project the new session belongs to. Omitted → the default project (handler fallback). */
+  projectId?: string;
 }
 
 export interface SessionsSendArgs {
@@ -701,6 +707,11 @@ export interface ProjectCreateReturn {
   id: string;
 }
 
+export interface SessionsCreateReturn {
+  /** The id of the newly created direct session. */
+  sessionId: string;
+}
+
 export interface SessionsSendReturn {
   /** The message was accepted and routed. Assistant output returns via the `session.message`
    *  stream event, NOT this return (fire-and-forget). */
@@ -780,6 +791,7 @@ export interface QueryReturnMap {
 
 export interface MutateArgsMap {
   'projects.create': ProjectCreateArgs;
+  'sessions.create': SessionsCreateArgs;
   'sessions.send': SessionsSendArgs;
   'sessions.cancel': SessionsCancelArgs;
   'threads.cancel': ThreadsCancelArgs;
@@ -801,6 +813,7 @@ export interface MutateArgsMap {
 
 export interface MutateReturnMap {
   'projects.create': ProjectCreateReturn;
+  'sessions.create': SessionsCreateReturn;
   'sessions.send': SessionsSendReturn;
   'sessions.cancel': SessionsCancelReturn;
   'threads.cancel': ThreadsCancelReturn;
@@ -873,6 +886,12 @@ export interface UiServiceDeps {
    * domain never imports orchestration (layer safety / depcruise).
    */
   cancelSessionRun: (opts: { channel: string }) => Promise<number>;
+  /**
+   * Create a fresh, live user-initiated (origin='direct') session for the workbench and return its
+   * id. Injected in the entry layer (app.ts) to the domain `createDirectSession` primitive with the
+   * real session/ledger singletons, so the ui-service domain never imports store internals.
+   */
+  createDirectSession: (opts: { projectId: string }) => Promise<{ sessionId: string; sessionName: string }>;
   threadStore: {
     getAll(): any[];
     get(id: string): any | null;

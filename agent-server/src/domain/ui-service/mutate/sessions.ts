@@ -10,11 +10,26 @@
 import type {
   UiServiceDeps,
   Result,
+  SessionsCreateArgs,
+  SessionsCreateReturn,
   SessionsSendArgs,
   SessionsSendReturn,
   SessionsCancelArgs,
   SessionsCancelReturn,
 } from '../types.js';
+
+// Create a fresh, live direct session for the workbench "+ New session" control. Resolves the target
+// project (falling back to the default project when omitted), delegates the real creation to the
+// injected `createDirectSession` dep (domain primitive wired in entry/app.ts), and returns the new
+// session's id.
+export async function handleCreateSession(
+  deps: UiServiceDeps,
+  args: SessionsCreateArgs,
+): Promise<Result<SessionsCreateReturn>> {
+  const projectId = args.projectId ?? deps.projectStore.getDefault().id;
+  const { sessionId } = await deps.createDirectSession({ projectId });
+  return { ok: true, data: { sessionId } };
+}
 
 export async function handleSendSession(
   deps: UiServiceDeps,

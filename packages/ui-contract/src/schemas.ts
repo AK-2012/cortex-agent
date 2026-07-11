@@ -12,6 +12,7 @@ export {
   projectsCreateInput,
   sessionsListInput,
   sessionsTranscriptInput,
+  sessionsCreateInput,
   sessionsSendInput,
   threadsListInput,
   threadsGetInput,
