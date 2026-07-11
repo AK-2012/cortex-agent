@@ -1,6 +1,5 @@
-import { useMemo, useState } from 'react';
+import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import type { SessionInfo } from '@cortex-agent/ui-contract';
 import { useTRPC } from '@/lib/trpc';
 import { TasksPanel } from '@/features/tasks/TasksPanel';
 import { RightThreadCard } from './RightThreadCard';
@@ -8,6 +7,7 @@ import { RightMachinesTab } from './RightMachinesTab';
 import { actionableCount, formatCost } from './right-panel-vm';
 import { threadScopeFilter, taskScopeFilter, type Scope } from './scope';
 import { useThreadsLiveSync } from './useThreadsLiveSync';
+import { useCurrentProject } from './CurrentProjectProvider';
 
 // RIGHT PANEL — 1:1 from prototype.dc.html L1091–1276 (Stage-R RB sibling C, task 1e96). Exact inline
 // styles / px / hex / font / weight / EN copy reproduced verbatim; real tRPC data (cost.summary /
@@ -65,19 +65,9 @@ export function RightPanel(): JSX.Element {
 
   useThreadsLiveSync();
 
-  // Active project = project of the most-recently-used session (mirrors LeftRail) for cost scoping.
-  const sessionsQuery = useQuery(trpc.sessions.list.queryOptions({}));
-  const sessions = sessionsQuery.data ?? [];
-  const activeProjectId = useMemo<string | null>(() => {
-    if (sessions.length) {
-      const latest = [...sessions].sort(
-        (a: SessionInfo, b: SessionInfo) =>
-          Date.parse(b.lastUsedAt || b.createdAt) - Date.parse(a.lastUsedAt || a.createdAt),
-      )[0];
-      if (latest?.projectId) return latest.projectId;
-    }
-    return null;
-  }, [sessions]);
+  // Cost scoping follows the shared cross-pane current project (task 569c): switching the project in
+  // the LeftRail switcher re-scopes this cost bar to the selected project.
+  const { currentProjectId: activeProjectId } = useCurrentProject();
 
   const costQuery = useQuery({
     ...trpc.cost.summary.queryOptions({ projectId: activeProjectId ?? undefined }),
