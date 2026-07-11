@@ -55,7 +55,15 @@ node --import tsx scripts/lint-no-slack-shortcodes.ts
 
 # ── Run tests ────────────────────────────────────────────────────
 
-echo "[run-tests] running test suite"
+# node --test runs test *files* in parallel, defaulting to
+# os.availableParallelism() concurrent processes. On many-core machines (e.g. 72
+# cores) this spawns dozens of heavy tsx processes at once, overloading the box
+# and timing the whole suite out. Cap the concurrency; override via env.
+TEST_CONCURRENCY="${CORTEX_TEST_CONCURRENCY:-20}"
+# Integration tests fork real server subprocesses, so keep their fan-out lower.
+INTEGRATION_CONCURRENCY="${CORTEX_INTEGRATION_CONCURRENCY:-20}"
+
+echo "[run-tests] running test suite (concurrency=$TEST_CONCURRENCY)"
 
 # Match the same glob pattern as the original npm test command.
 # Use nullglob to handle the case where no files match a pattern.
@@ -91,10 +99,10 @@ done
 
 # --import ./tests/_test-home.ts is a belt-and-suspenders isolation guard (no-op here
 # since CORTEX_HOME is already set above; protects ad-hoc invocations of this command).
-node --import tsx --import ./tests/_test-home.ts --test --test-force-exit --test-timeout=15000 "${FILTERED[@]}"
+node --import tsx --import ./tests/_test-home.ts --test --test-force-exit --test-concurrency="$TEST_CONCURRENCY" --test-timeout=15000 "${FILTERED[@]}"
 
 # ── Integration tests (forked servers; longer timeout, run last) ─────
 if [[ ${#INTEGRATION[@]} -gt 0 ]]; then
-  echo "[run-tests] running integration tests"
-  node --import tsx --test --test-force-exit --test-timeout=120000 "${INTEGRATION[@]}"
+  echo "[run-tests] running integration tests (concurrency=$INTEGRATION_CONCURRENCY)"
+  node --import tsx --test --test-force-exit --test-concurrency="$INTEGRATION_CONCURRENCY" --test-timeout=120000 "${INTEGRATION[@]}"
 fi
