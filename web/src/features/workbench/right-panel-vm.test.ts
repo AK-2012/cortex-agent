@@ -10,6 +10,7 @@ import {
   threadMetaLine,
   depthInfo,
   actionableCount,
+  machinePill,
 } from './right-panel-vm';
 
 function step(partial: Partial<ThreadStepDetail>): ThreadStepDetail {
@@ -183,6 +184,15 @@ describe('depthInfo — dots filled = deepest child level, total = 5', () => {
     });
     // depth 2 → level 4
     expect(depthInfo(tree)).toEqual({ filled: 4, total: 5, text: '4/5' });
+  });
+});
+
+describe('machinePill — online/offline status pill', () => {
+  it('online → #E9F4EE/#23854F Online', () => {
+    expect(machinePill(true)).toEqual({ bg: '#E9F4EE', fg: '#23854F', text: 'Online' });
+  });
+  it('offline → #F1F2F5/#8A93A2 Offline', () => {
+    expect(machinePill(false)).toEqual({ bg: '#F1F2F5', fg: '#8A93A2', text: 'Offline' });
   });
 });
 

@@ -1,10 +1,93 @@
-// Machines tab — STRUCTURAL STUB (prototype.dc.html L1237–1274). GAP-M: there is no tRPC machines
-// scope (machines.json + client-manager registry is a Stage-7 backend extension, plan §2.1/§6
-// Stage 7). Reproduces the prototype's aggregate-header + list shell with an empty body + a flagged
-// note, so the tab's structure/spacing matches; real machine cards land with the Stage-7 scope.
+import { useQuery } from '@tanstack/react-query';
+import type { MachineInfo } from '@cortex-agent/ui-contract';
+import { useTRPC } from '@/lib/trpc';
+import { machinePill } from './right-panel-vm';
+
+// Machines tab — 1:1 from prototype.dc.html L1237–1274. Replaces the GAP-M structural stub with
+// real machines.list data: aggregate-header (count), machine cards (name / online pill / GPU ×N /
+// live-runs indicator), empty/loading/error states. Only MachineInfo DTO consumed — no backend internals.
+
+// Server-rack icon: two shelf rows with a status LED each (14×14 viewport, stroke 1.6).
+const MACHINE_ICON = (
+  <svg width="13" height="13" viewBox="0 0 14 14" fill="none" strokeWidth="1.6">
+    <rect x="1.5" y="2" width="11" height="4" rx="1" stroke="currentColor" />
+    <rect x="1.5" y="8" width="11" height="4" rx="1" stroke="currentColor" />
+    <circle cx="11" cy="4" r="0.9" fill="currentColor" stroke="none" />
+    <circle cx="11" cy="10" r="0.9" fill="currentColor" stroke="none" />
+  </svg>
+);
+
+function MachineCard({ machine }: { machine: MachineInfo }) {
+  const pill = machinePill(machine.online);
+  const iconColor = machine.online ? '#4655D4' : '#8A93A2';
+
+  const subParts: string[] = [];
+  if (machine.gpuCount != null) subParts.push(`GPU ×${machine.gpuCount}`);
+  subParts.push(machine.os);
+  if (machine.liveRuns > 0) subParts.push(`${machine.liveRuns} live run${machine.liveRuns !== 1 ? 's' : ''}`);
+
+  return (
+    <div
+      style={{
+        background: '#fff',
+        border: '1px solid #E7E9EE',
+        borderRadius: 10,
+        boxShadow: '0 1px 2px rgba(16,24,40,.03)',
+        padding: '11px 14px 9px',
+      }}
+    >
+      {/* header row: icon · name · pill */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <span style={{ display: 'inline-flex', color: iconColor }}>{MACHINE_ICON}</span>
+        <span style={{ font: "600 12.5px 'IBM Plex Mono',monospace", color: '#191C22' }}>
+          {machine.name}
+        </span>
+        <span
+          style={{
+            marginLeft: 'auto',
+            fontSize: 10.5,
+            fontWeight: 600,
+            padding: '2px 8px',
+            borderRadius: 999,
+            background: pill.bg,
+            color: pill.fg,
+          }}
+        >
+          {pill.text}
+        </span>
+      </div>
+      {/* sub-line: GPU count · os · live-runs indicator */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 5 }}>
+        <span style={{ font: "400 10.5px 'IBM Plex Mono',monospace", color: '#98A1B0' }}>
+          {subParts.join(' · ')}
+        </span>
+        {machine.liveRuns > 0 && (
+          <span
+            style={{
+              marginLeft: 'auto',
+              width: 6,
+              height: 6,
+              borderRadius: '50%',
+              background: '#4655D4',
+              flexShrink: 0,
+              animation: 'cxpulse 1.6s ease-in-out infinite',
+            }}
+          />
+        )}
+      </div>
+    </div>
+  );
+}
+
 export function RightMachinesTab() {
+  const trpc = useTRPC();
+  const machinesQuery = useQuery(trpc.machines.list.queryOptions({}));
+  const machines = machinesQuery.data ?? [];
+  const countLabel = machinesQuery.isSuccess ? String(machines.length) : '—';
+
   return (
     <>
+      {/* aggregate header (prototype L1237–1243): label + machine count */}
       <div
         style={{
           display: 'flex',
@@ -17,9 +100,11 @@ export function RightMachinesTab() {
       >
         <span style={{ fontSize: 10.5, color: '#5B6472' }}>Machines</span>
         <span style={{ marginLeft: 'auto', font: "500 10.5px 'IBM Plex Mono',monospace", color: '#5B6472' }}>
-          —
+          {countLabel}
         </span>
       </div>
+
+      {/* machine list body */}
       <div
         style={{
           flex: 1,
@@ -31,20 +116,38 @@ export function RightMachinesTab() {
           minHeight: 0,
         }}
       >
-        <div
-          style={{
-            textAlign: 'center',
-            padding: '26px 12px',
-            border: '1px dashed #E7E9EE',
-            borderRadius: 10,
-          }}
-        >
-          <div style={{ fontSize: 11.5, fontWeight: 600, color: '#8A93A2' }}>No machines scope yet</div>
-          <div style={{ fontSize: 10.5, color: '#B6BDC9', marginTop: 4, lineHeight: 1.6 }}>
-            Connected machines and their live runs will appear here once the machines registry query
-            (machines.json + client-manager) lands in a later stage.
+        {machines.map((m) => (
+          <MachineCard key={m.name} machine={m} />
+        ))}
+
+        {/* empty state — neutral placeholder names (atlas, nimbus), no private machine names */}
+        {machinesQuery.isSuccess && machines.length === 0 && (
+          <div
+            style={{
+              textAlign: 'center',
+              padding: '26px 12px',
+              border: '1px dashed #E7E9EE',
+              borderRadius: 10,
+            }}
+          >
+            <div style={{ fontSize: 11.5, fontWeight: 600, color: '#8A93A2' }}>No machines connected</div>
+            <div style={{ fontSize: 10.5, color: '#B6BDC9', marginTop: 4, lineHeight: 1.6 }}>
+              Connected machines (atlas, nimbus…) appear here once registered in machines.json.
+            </div>
           </div>
-        </div>
+        )}
+
+        {machinesQuery.isPending && (
+          <div style={{ textAlign: 'center', fontSize: 11, color: '#98A1B0', padding: '24px 0' }}>
+            Loading machines…
+          </div>
+        )}
+
+        {machinesQuery.isError && (
+          <div style={{ textAlign: 'center', fontSize: 11, color: '#C03D33', padding: '24px 0' }}>
+            Failed to load machines.
+          </div>
+        )}
       </div>
     </>
   );

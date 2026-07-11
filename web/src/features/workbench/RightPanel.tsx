@@ -84,11 +84,13 @@ export function RightPanel(): JSX.Element {
     enabled: !!activeProjectId,
   });
 
-  // Tab counts: real threads.list (Active) length; real tasks.list (open) actionable count.
+  // Tab counts: real threads.list (Active) length; real tasks.list (open) actionable count; real machines.list length.
   const activeThreadsQuery = useQuery(trpc.threads.list.queryOptions({ status: threadScopeFilter('active') }));
   const openTasksQuery = useQuery(trpc.tasks.list.queryOptions({ status: 'open' }));
+  const machinesQuery = useQuery(trpc.machines.list.queryOptions({}));
   const activeThreadCount = activeThreadsQuery.data?.length ?? 0;
   const actionable = openTasksQuery.data ? actionableCount(openTasksQuery.data) : 0;
+  const machineCount = machinesQuery.data?.length ?? 0;
 
   // Threads list for the current Active/History filter.
   const threadsQuery = useQuery(trpc.threads.list.queryOptions({ status: threadScopeFilter(filter) }));
@@ -131,7 +133,7 @@ export function RightPanel(): JSX.Element {
         />
         <TabButton
           label="Machines"
-          count="0"
+          count={String(machineCount)}
           countColor="#8A93A2"
           active={tab === 'machines'}
           dot
@@ -244,7 +246,7 @@ export function RightPanel(): JSX.Element {
         </div>
       )}
 
-      {/* machines tab — structural stub (GAP-M) */}
+      {/* machines tab — real machines.list (plan §12 A item 1, task 2a13) */}
       {tab === 'machines' && <RightMachinesTab />}
     </div>
   );
