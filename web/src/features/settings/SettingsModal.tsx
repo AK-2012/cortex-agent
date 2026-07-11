@@ -1,7 +1,8 @@
 import * as RadixDialog from '@radix-ui/react-dialog';
 import { useState, type CSSProperties } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useTRPC } from '@/lib/trpc';
+import { useToast } from '@/design';
 import { SETTINGS_NAV, sectionMeta, type SettingsSectionKey } from './settings-nav';
 import {
   PlatformPanel,
@@ -89,12 +90,42 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
 
 function SettingsBody({ onClose }: { onClose: () => void }) {
   const trpc = useTRPC();
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
   const [section, setSection] = useState<SettingsSectionKey>('platform');
 
   const configQuery = useQuery(trpc.config.get.queryOptions({}));
   const costQuery = useQuery(trpc.cost.summary.queryOptions({}));
   const snapshot = configQuery.data;
   const meta = sectionMeta(section);
+
+  // profiles: a REAL config.set write — re-point defaultProfile, then read back (invalidate).
+  const setProfile = useMutation(
+    trpc.config.set.mutationOptions({
+      onSuccess: (_d, vars) => {
+        queryClient.invalidateQueries(trpc.config.get.queryFilter({}));
+        const name = vars.section === 'profiles' ? vars.value.defaultProfile : '';
+        toast({ title: `Default profile → ${name} · profiles.json written`, tone: 'done' });
+      },
+      onError: (e) => toast({ title: `Write failed: ${e.message}`, tone: 'failed' }),
+    }),
+  );
+
+  // high-privilege gate: queue an approval request instead of bare-executing (Reconnect / Add machine).
+  const requestApproval = useMutation(
+    trpc.approvals.request.mutationOptions({
+      onSuccess: () =>
+        toast({ title: 'Queued for approval — review in the Approval Center', tone: 'waiting' }),
+      onError: (e) => toast({ title: `Could not queue: ${e.message}`, tone: 'failed' }),
+    }),
+  );
+
+  const onSetDefaultProfile = (name: string) =>
+    setProfile.mutate({ section: 'profiles', value: { defaultProfile: name } });
+  const onReconnect = (platform: 'slack' | 'feishu') =>
+    requestApproval.mutate({ kind: 'reconnect-platform', platform });
+  const onAddMachine = (machineName: string) =>
+    requestApproval.mutate({ kind: 'add-machine', machineName });
 
   return (
     <>
@@ -203,7 +234,14 @@ function SettingsBody({ onClose }: { onClose: () => void }) {
               Failed to load config: {configQuery.error.message}
             </div>
           ) : snapshot ? (
-            <PanelBody section={section} snapshot={snapshot} cost={costQuery.data} />
+            <PanelBody
+              section={section}
+              snapshot={snapshot}
+              cost={costQuery.data}
+              onSetDefaultProfile={onSetDefaultProfile}
+              onReconnect={onReconnect}
+              onAddMachine={onAddMachine}
+            />
           ) : null}
         </div>
       </div>
@@ -215,20 +253,26 @@ function PanelBody({
   section,
   snapshot,
   cost,
+  onSetDefaultProfile,
+  onReconnect,
+  onAddMachine,
 }: {
   section: SettingsSectionKey;
   snapshot: import('@cortex-agent/ui-contract').ConfigSnapshot;
   cost: import('@cortex-agent/ui-contract').CostSummary | undefined;
+  onSetDefaultProfile: (name: string) => void;
+  onReconnect: (platform: 'slack' | 'feishu') => void;
+  onAddMachine: (machineName: string) => void;
 }) {
   switch (section) {
     case 'platform':
-      return <PlatformPanel snapshot={snapshot} />;
+      return <PlatformPanel snapshot={snapshot} onReconnect={onReconnect} />;
     case 'profiles':
-      return <ProfilesPanel snapshot={snapshot} />;
+      return <ProfilesPanel snapshot={snapshot} onSetDefaultProfile={onSetDefaultProfile} />;
     case 'budget':
       return <BudgetPanel snapshot={snapshot} cost={cost} />;
     case 'machines':
-      return <MachinesPanel snapshot={snapshot} />;
+      return <MachinesPanel snapshot={snapshot} onAddMachine={onAddMachine} />;
     case 'templates':
       return <TemplatesPanel snapshot={snapshot} />;
     case 'mcp':

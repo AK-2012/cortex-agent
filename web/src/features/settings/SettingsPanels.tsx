@@ -62,6 +62,40 @@ function PlatformAvatar({ glyph }: { glyph: string }) {
   );
 }
 
+// Reconnect is a HIGH-PRIVILEGE action (it restarts a live platform gateway). It is never
+// bare-executed from the browser: when a handler is wired, clicking QUEUES an approval request
+// (approvals.request → PENDING_APPROVALS.md); with no handler it stays inert. See b983 triage.
+function ReconnectAction({
+  platform,
+  onReconnect,
+}: {
+  platform: 'slack' | 'feishu';
+  onReconnect?: (platform: 'slack' | 'feishu') => void;
+}) {
+  const active = !!onReconnect;
+  return (
+    <span
+      onClick={active ? () => onReconnect!(platform) : undefined}
+      role={active ? 'button' : undefined}
+      data-reconnect={platform}
+      title={
+        active
+          ? 'Queues a reconnect request for approval — never runs directly from the browser'
+          : 'No reconnect backend op — inert'
+      }
+      style={{
+        marginLeft: 'auto',
+        fontSize: 10.5,
+        fontWeight: 600,
+        color: active ? '#4655D4' : '#B6BDC9',
+        cursor: active ? 'pointer' : 'not-allowed',
+      }}
+    >
+      Reconnect
+    </span>
+  );
+}
+
 function PlatformEnvBlock({ index, keys }: { index: ReturnType<typeof indexEnv>; keys: string[] }) {
   return (
     <div style={{ font: `400 10px/2 ${MONO}`, color: '#5B6472', marginTop: 5, paddingLeft: 31 }}>
@@ -88,7 +122,13 @@ function PlatformEnvBlock({ index, keys }: { index: ReturnType<typeof indexEnv>;
   );
 }
 
-export function PlatformPanel({ snapshot }: { snapshot: ConfigSnapshot }) {
+export function PlatformPanel({
+  snapshot,
+  onReconnect,
+}: {
+  snapshot: ConfigSnapshot;
+  onReconnect?: (platform: 'slack' | 'feishu') => void;
+}) {
   const idx = indexEnv(snapshot.env);
   const slackPresent = hasAnyKey(snapshot.env, 'SLACK_');
   const feishuPresent = hasAnyKey(snapshot.env, 'FEISHU_');
@@ -111,12 +151,7 @@ export function PlatformPanel({ snapshot }: { snapshot: ConfigSnapshot }) {
             <PlatformAvatar glyph="S" />
             <span style={{ fontSize: 12, fontWeight: 600, color: '#191C22' }}>Slack</span>
             <PresencePill present={slackPresent} />
-            <span
-              title="No reconnect backend op — inert"
-              style={{ marginLeft: 'auto', fontSize: 10.5, fontWeight: 600, color: '#B6BDC9', cursor: 'not-allowed' }}
-            >
-              Reconnect
-            </span>
+            <ReconnectAction platform="slack" onReconnect={onReconnect} />
           </div>
           <PlatformEnvBlock index={idx} keys={SLACK_KEYS} />
         </div>
@@ -125,12 +160,7 @@ export function PlatformPanel({ snapshot }: { snapshot: ConfigSnapshot }) {
             <PlatformAvatar glyph="飞" />
             <span style={{ fontSize: 12, fontWeight: 600, color: '#191C22' }}>飞书</span>
             <PresencePill present={feishuPresent} />
-            <span
-              title="No reconnect backend op — inert"
-              style={{ marginLeft: 'auto', fontSize: 10.5, fontWeight: 600, color: '#B6BDC9', cursor: 'not-allowed' }}
-            >
-              Reconnect
-            </span>
+            <ReconnectAction platform="feishu" onReconnect={onReconnect} />
           </div>
           <PlatformEnvBlock index={idx} keys={FEISHU_KEYS} />
         </div>
@@ -198,10 +228,21 @@ const TH: CSSProperties = {
   color: '#98A1B0',
 };
 
-export function ProfilesPanel({ snapshot }: { snapshot: ConfigSnapshot }) {
+export function ProfilesPanel({
+  snapshot,
+  onSetDefaultProfile,
+}: {
+  snapshot: ConfigSnapshot;
+  onSetDefaultProfile?: (name: string) => void;
+}) {
   const p = snapshot.profiles;
   const rows = p?.profiles ?? [];
   const grid = '84px 1fr 74px 52px';
+  // The default-profile picker is a REAL write when wired (config.set 'profiles' → re-points
+  // profiles.json defaultProfile, read at each agent start). It can only SELECT an existing profile
+  // (the option list is the real profiles.json rows), so it can never break startup. Inert when no
+  // handler is passed (e.g. the pure render test).
+  const canWrite = !!onSetDefaultProfile && rows.length > 0;
   return (
     <>
       <SCard
@@ -214,20 +255,43 @@ export function ProfilesPanel({ snapshot }: { snapshot: ConfigSnapshot }) {
         }}
       >
         <span style={{ fontSize: 11, color: '#5B6472' }}>default profile</span>
-        <span
-          title="No profiles write backend op — inert"
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 7,
-            border: '1px solid #E7E9EE',
-            borderRadius: 7,
-            padding: '4px 10px',
-          }}
-        >
-          <span style={{ font: `600 11px ${MONO}`, color: '#191C22' }}>{p?.defaultProfile ?? '—'}</span>
-          <span style={{ color: '#98A1B0', fontSize: 8 }}>▾</span>
-        </span>
+        {canWrite ? (
+          <select
+            data-default-profile-select
+            value={p?.defaultProfile ?? ''}
+            onChange={(e) => onSetDefaultProfile!(e.target.value)}
+            style={{
+              font: `600 11px ${MONO}`,
+              color: '#191C22',
+              border: '1px solid #E7E9EE',
+              borderRadius: 7,
+              padding: '4px 10px',
+              background: '#fff',
+              cursor: 'pointer',
+            }}
+          >
+            {rows.map((r) => (
+              <option key={r.name} value={r.name}>
+                {r.name}
+              </option>
+            ))}
+          </select>
+        ) : (
+          <span
+            title="Select a profile to write profiles.json defaultProfile"
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 7,
+              border: '1px solid #E7E9EE',
+              borderRadius: 7,
+              padding: '4px 10px',
+            }}
+          >
+            <span style={{ font: `600 11px ${MONO}`, color: '#191C22' }}>{p?.defaultProfile ?? '—'}</span>
+            <span style={{ color: '#98A1B0', fontSize: 8 }}>▾</span>
+          </span>
+        )}
         <span style={{ marginLeft: 'auto', font: `400 9.5px ${MONO}`, color: '#B6BDC9' }}>
           读取于每次 agent 启动 — 免重启
         </span>
@@ -312,9 +376,16 @@ export function ProfilesPanel({ snapshot }: { snapshot: ConfigSnapshot }) {
   );
 }
 
-export function MachinesPanel({ snapshot }: { snapshot: ConfigSnapshot }) {
+export function MachinesPanel({
+  snapshot,
+  onAddMachine,
+}: {
+  snapshot: ConfigSnapshot;
+  onAddMachine?: (machineName: string) => void;
+}) {
   const machines = snapshot.machines;
   const grid = '110px 1fr 44px 120px 90px 96px';
+  const canAdd = !!onAddMachine;
   return (
     <div style={{ marginTop: 12, maxWidth: 980 }}>
       <SCard style={{ overflow: 'hidden' }}>
@@ -379,11 +450,38 @@ export function MachinesPanel({ snapshot }: { snapshot: ConfigSnapshot }) {
             </div>
           ))
         )}
+        {/* Add machine is HIGH-PRIVILEGE (registers a new remote client). It never writes
+            machines.json from the browser: when wired it QUEUES an approval request
+            (approvals.request) with the entered name; a human/agent completes the registration
+            after approval. Inert with no handler. See b983 triage. */}
         <div
-          title="Writes machines.json — no add-machine backend op (form out of scope)"
-          style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '9px 14px', cursor: 'not-allowed' }}
+          onClick={
+            canAdd
+              ? () => {
+                  const name = window.prompt('Machine name to request (queued for approval, not added directly):');
+                  const trimmed = name?.trim();
+                  if (trimmed) onAddMachine!(trimmed);
+                }
+              : undefined
+          }
+          role={canAdd ? 'button' : undefined}
+          data-add-machine={canAdd ? '' : undefined}
+          title={
+            canAdd
+              ? 'Queues an add-machine request for approval — never writes machines.json directly'
+              : 'Writes machines.json — no add-machine backend op (form out of scope)'
+          }
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 7,
+            padding: '9px 14px',
+            cursor: canAdd ? 'pointer' : 'not-allowed',
+          }}
         >
-          <span style={{ fontSize: 11, fontWeight: 600, color: '#B6BDC9' }}>+ Add machine</span>
+          <span style={{ fontSize: 11, fontWeight: 600, color: canAdd ? '#4655D4' : '#B6BDC9' }}>
+            + Add machine
+          </span>
           <span style={{ font: `400 9px ${MONO}`, color: '#B6BDC9' }}>
             name · cortexPath · gpuCount · ssh · win · clientCommand
           </span>

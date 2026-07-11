@@ -100,3 +100,35 @@ describe('settings panels — real data render', () => {
     expect(html).toContain('CORTEX_SERVER_UPDATE_DISABLE');
   });
 });
+
+// Wired affordances (task b983): when a handler is passed the panel renders the REAL control —
+// a default-profile <select> (config.set write) and clickable Reconnect / Add-machine buttons
+// (approvals.request gate). Handlers are plain functions, so react-dom/server needs no tRPC provider.
+describe('settings panels — wired affordances (b983)', () => {
+  it('Profiles: renders a real default-profile select with an option per profile', () => {
+    const html = renderToStaticMarkup(<ProfilesPanel snapshot={snap} onSetDefaultProfile={() => {}} />);
+    expect(html).toContain('data-default-profile-select');
+    expect(html).toContain('<option');
+    expect(html).toContain('>plan<');
+    expect(html).toContain('>execute<');
+  });
+
+  it('Profiles: stays inert (no select) when no handler is wired', () => {
+    const html = renderToStaticMarkup(<ProfilesPanel snapshot={snap} />);
+    expect(html).not.toContain('data-default-profile-select');
+  });
+
+  it('Platform: Reconnect becomes an approval-gated button for both platforms when wired', () => {
+    const html = renderToStaticMarkup(<PlatformPanel snapshot={snap} onReconnect={() => {}} />);
+    expect(html).toContain('data-reconnect="slack"');
+    expect(html).toContain('data-reconnect="feishu"');
+    // honest: it queues an approval, it does not bare-execute
+    expect(html).toContain('never runs directly');
+  });
+
+  it('Machines: Add-machine becomes an approval-gated button when wired', () => {
+    const html = renderToStaticMarkup(<MachinesPanel snapshot={snap} onAddMachine={() => {}} />);
+    expect(html).toContain('data-add-machine');
+    expect(html).toContain('never writes machines.json directly');
+  });
+});
