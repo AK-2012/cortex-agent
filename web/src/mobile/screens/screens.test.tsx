@@ -1,32 +1,27 @@
 import { describe, it, expect } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { LangProvider } from '@/i18n';
-import { MobileMachinesScreen } from './MobileMachinesScreen';
-// 机器 (MobileMachinesScreen) is the only remaining neutral STUB slot that a sibling thread replaces
-// behind the same export (RB f528 frame-owner precedent). It asserts the slot renders with its design
-// id marker + a title, and reserves the status-bar gutter (padding-top:62px). 5a (MobileSessionsScreen,
-// task c880), 5b (MobileThreadsScreen, task ad9c), 5c (MobileTasksScreen), 10e (MobileApprovalsScreen)
-// and 10f (MobileOverviewScreen, task 82ff) are now real tRPC-bound screens — they need query providers
-// to mount, so they are covered by their own render tests + live harnesses, not this provider-free stub test.
+import { en } from '@/i18n';
+import { MobileMachinesView } from './MobileMachinesScreen';
+// All 6 mobile screen slots are now real tRPC-bound screens — there are no more STUB slots.
+// 5a (MobileSessionsScreen), 5b (MobileThreadsScreen), 5c (MobileTasksScreen),
+// 10e (MobileApprovalsScreen), 10f (MobileOverviewScreen), and 机器 (MobileMachinesScreen, 12c)
+// all need query providers — they are covered by their own render tests + live harnesses.
+// This file retains the structural screen contract for the machines screen via its exported
+// pure presentational MobileMachinesView (no providers needed), as the slot-continuity guard.
 
-function render(node: React.ReactElement) {
-  return renderToStaticMarkup(<LangProvider>{node}</LangProvider>);
-}
+describe('mobile screens structural contract', () => {
+  it('machines: renders slot marker and reserves the status-bar gutter', () => {
+    const html = renderToStaticMarkup(
+      <MobileMachinesView cards={[]} vocab={en} now={0} />,
+    );
+    expect(html).toContain('data-screen-label="machines"');
+    expect(html).toContain('padding-top:62px');
+  });
 
-const cases: [string, React.ReactElement][] = [
-  ['machines', <MobileMachinesScreen />],
-];
-
-describe('mobile STUB screens', () => {
-  for (const [id, node] of cases) {
-    it(`${id} renders its slot marker and reserves the status-bar gutter`, () => {
-      const html = render(node);
-      expect(html).toContain(`data-screen-label="${id}"`);
-      expect(html).toContain('padding-top:62px');
-    });
-  }
-
-  it('renders the (en, node-default) titles from vocab', () => {
-    expect(render(<MobileMachinesScreen />)).toContain('Machines');
+  it('machines: renders the title from vocab (en)', () => {
+    const html = renderToStaticMarkup(
+      <MobileMachinesView cards={[]} vocab={en} now={0} />,
+    );
+    expect(html).toContain('Machines');
   });
 });
