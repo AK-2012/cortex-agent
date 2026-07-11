@@ -38,7 +38,8 @@ export type QueryScope =
   | 'cost.summary'
   | 'config.get'
   | 'machines.list'
-  | 'skills.list';
+  | 'skills.list'
+  | 'threadTemplates.get';
 
 // ── Mutate ops ────────────────────────────────────────────────────
 
@@ -157,6 +158,8 @@ export type ConfigGetParams = Record<string, never>;
 export type MachinesListParams = Record<string, never>;
 
 export type SkillsListParams = Record<string, never>;
+
+export type ThreadTemplatesGetParams = Record<string, never>;
 
 // ── Mutate args ───────────────────────────────────────────────────
 
@@ -617,6 +620,23 @@ export interface MachineInfo {
   liveRuns: number;
 }
 
+// ── threadTemplates.get DTO (plan §12 A item 3 / 9c) ────────────────────────
+// Full body of every thread-template JSON file under
+// config/thread-templates/{templates,agents,shells}/*.json.
+// `body` is the parsed JSON object (null on parse error). Thread-template files contain
+// no secrets (they are orchestration configs); the full body is safe to expose.
+
+export interface ThreadTemplateEntry {
+  /** Subdir origin: 'template' (orchestration), 'agent' (execution), 'shell' (shorthand). */
+  kind: 'template' | 'agent' | 'shell';
+  /** Basename without .json extension. */
+  name: string;
+  /** Top-level `description` field from the file; null if absent. */
+  description: string | null;
+  /** Full parsed JSON body; null when the file cannot be parsed. */
+  body: Record<string, unknown> | null;
+}
+
 // ── skills.list DTO (plan §12 A item 2 / 8a) ────────────────────────────────
 // One group per skill root: null plugin = user-mutable .claude/skills; non-null plugin = a
 // plugins/<plugin>/skills directory. Skills within each group are sorted alphabetically.
@@ -799,6 +819,7 @@ export interface QueryParamMap {
   'config.get': ConfigGetParams;
   'machines.list': MachinesListParams;
   'skills.list': SkillsListParams;
+  'threadTemplates.get': ThreadTemplatesGetParams;
 }
 
 export interface QueryReturnMap {
@@ -819,6 +840,7 @@ export interface QueryReturnMap {
   'config.get': ConfigSnapshot;
   'machines.list': MachineInfo[];
   'skills.list': SkillGroup[];
+  'threadTemplates.get': ThreadTemplateEntry[];
 }
 
 export interface MutateArgsMap {

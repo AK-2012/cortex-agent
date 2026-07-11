@@ -47,6 +47,7 @@ import {
   configSetInput,
   machinesListInput,
   skillsListInput,
+  threadTemplatesGetInput,
 } from './input-schemas.js';
 import type {
   UiService,
@@ -199,6 +200,9 @@ export function createAppRouter(uiService: UiService) {
     }),
     skills: router({
       list: makeQuery(uiService, 'skills.list', skillsListInput),
+    }),
+    threadTemplates: router({
+      get: makeQuery(uiService, 'threadTemplates.get', threadTemplatesGetInput),
     }),
     subscribe: publicProcedure
       .input(subscribeFilterInput)

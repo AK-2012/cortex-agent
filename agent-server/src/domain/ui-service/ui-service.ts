@@ -16,6 +16,7 @@ import { handleCostSummary } from './query/cost.js';
 import { handleConfigGet } from './query/config.js';
 import { handleMachinesList } from './query/machines.js';
 import { handleSkillsList } from './query/skills.js';
+import { handleThreadTemplatesGet } from './query/thread-templates.js';
 import { handleConfigSet } from './mutate/config.js';
 import { handleCreateProject } from './mutate/projects.js';
 import { handleCreateSession, handleSendSession, handleCancelSession } from './mutate/sessions.js';
@@ -59,6 +60,7 @@ const queryHandlers: Record<string, QueryHandler> = {
   'config.get': (deps, params) => handleConfigGet(deps, params),
   'machines.list': (deps, params) => handleMachinesList(deps, params),
   'skills.list': (deps, params) => handleSkillsList(deps, params),
+  'threadTemplates.get': (deps, params) => handleThreadTemplatesGet(deps, params),
 };
 
 const mutateHandlers: Record<string, MutateHandler> = {
