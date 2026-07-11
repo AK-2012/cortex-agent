@@ -125,6 +125,13 @@ export const en = {
   execFlow: 'Executions',
   paused: 'Paused',
   execCountUnit: 'today',
+
+  // ── Group I: mobile machines screen (plan §12 A item 1, 12c) ──
+  mOnline: 'online',
+  mOffline: 'offline',
+  mNoMachines: 'No machines configured',
+  mLiveRuns: 'live',
+  mGpu: 'GPU',
 };
 
 export type Vocab = typeof en;
@@ -250,4 +257,11 @@ export const zh: Record<keyof Vocab, string> = {
   execFlow: '执行流水',
   paused: '已暂停',
   execCountUnit: '今日',
+
+  // ── Group I: mobile machines screen (plan §12 A item 1, 12c) ──
+  mOnline: '在线',
+  mOffline: '离线',
+  mNoMachines: '暂无机器',
+  mLiveRuns: '运行',
+  mGpu: 'GPU',
 };
