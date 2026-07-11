@@ -25,6 +25,18 @@ async function cancelLive(exec: RunningExecution, channel: string): Promise<void
   }
 }
 
+/** Cancel every live execution running on a channel; returns the number cancelled. Shared by the
+ *  no-arg / `--all` `!cancel` branches and the Web UI Stop path (ui-service `sessions.cancel`, wired
+ *  via the `cancelSessionRun` dep in entry/app.ts). Clears the conduit queue when anything ran. */
+export async function cancelChannelRuns(channel: string): Promise<number> {
+  const executions = runningExecutions.getByChannel(channel);
+  for (const exec of executions) {
+    await cancelLive(exec, channel);
+  }
+  if (executions.length > 0) conduitQueues.delete(channel);
+  return executions.length;
+}
+
 /** Matches thread IDs like `thr_a1b2c3d4`. */
 const THREAD_ID_RE = /^thr_[0-9a-f]{8}$/;
 
@@ -67,16 +79,12 @@ export function createCancelHandler(cancelDispatchedTask: ((opts: { taskId: stri
 
       // --all: kill all running executions in the current channel
       if (firstArg === '--all') {
-        const executions = runningExecutions.getByChannel(channel);
-        if (executions.length === 0) {
+        const n = await cancelChannelRuns(channel);
+        if (n === 0) {
           await adapter.postMessage(dest, { text: t('cmd.cancel.nothingRunning') });
           return;
         }
-        for (const exec of executions) {
-          await cancelLive(exec, channel);
-        }
-        conduitQueues.delete(channel);
-        await adapter.postMessage(dest, { text: `${Icons.stopped} ${t('cmd.cancel.cancelledN', { n: executions.length })}` });
+        await adapter.postMessage(dest, { text: `${Icons.stopped} ${t('cmd.cancel.cancelledN', { n })}` });
         return;
       }
 

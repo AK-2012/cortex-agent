@@ -9,7 +9,7 @@ const QUERY_SCOPES = [
 ] as const;
 
 const MUTATE_OPS = [
-  'projects.create', 'sessions.send', 'threads.cancel', 'executions.cancel', 'schedules.pause', 'schedules.resume',
+  'projects.create', 'sessions.send', 'sessions.cancel', 'threads.cancel', 'executions.cancel', 'schedules.pause', 'schedules.resume',
   'schedules.remove', 'schedules.add', 'tasks.claim', 'tasks.unclaim', 'tasks.complete',
   'tasks.block', 'tasks.unblock', 'approvals.approve', 'approvals.reject', 'config.set',
 ] as const;
@@ -98,6 +98,9 @@ test('mutate schemas require their mandatory fields', () => {
   );
   assert.throws(() => mutateInputSchemas['sessions.send'].parse({ sessionId: 'sess-1', text: '' }));
   assert.throws(() => mutateInputSchemas['sessions.send'].parse({ sessionId: 'sess-1' }));
+  // sessions.cancel requires sessionId
+  assert.deepEqual(mutateInputSchemas['sessions.cancel'].parse({ sessionId: 'sess-1' }), { sessionId: 'sess-1' });
+  assert.throws(() => mutateInputSchemas['sessions.cancel'].parse({}));
   // missing required id
   assert.throws(() => mutateInputSchemas['threads.cancel'].parse({}));
   assert.throws(() => mutateInputSchemas['tasks.claim'].parse({ projectId: 'p' }));

@@ -30,7 +30,7 @@ by the Web UI.
 | `query/cost.ts` | query | cost.summary handler |
 | `query/config.ts` | query | config.get handler — redacted snapshot of `~/.cortex/config` (budget/profiles/machines/mcp/thread-templates/hooks/.env) for the settings panel (Stage 7); pure `readConfigSnapshot(configDir, hooksDir)` + thin handler. SECURITY: `.env` values + machine `ssh` are never returned, only redacted markers |
 | `mutate/projects.ts` | mutate | projects.create handler (reuses ProjectStore.createProject; maps invalid-name/already-exists → Err) |
-| `mutate/sessions.ts` | mutate | sessions.send handler (S4 chat: resolve session→channel, inject a genuine user turn via the injected `sendSessionMessage` dep; fire-and-forget `{accepted:true}` — assistant output returns over the `session.message` stream, not this return) |
+| `mutate/sessions.ts` | mutate | sessions.send handler (S4 chat: resolve session→channel, inject a genuine user turn via the injected `sendSessionMessage` dep; fire-and-forget `{accepted:true}` — assistant output returns over the `session.message` stream, not this return) + sessions.cancel handler (S4 chat Stop, task bdc2: resolve session→channel, cancel the live agent(s) on that channel via the injected `cancelSessionRun` dep → `{cancelled,count}`; not-found when the session is missing) |
 | `mutate/threads.ts` | mutate | threads.cancel handler |
 | `mutate/executions.ts` | mutate | executions.cancel handler |
 | `mutate/schedules.ts` | mutate | schedules.{pause,resume,remove,add} handlers (add: reuses injected scheduler.add + schedule-repo backfill of target/fallback, returns the created ScheduleInfo) |

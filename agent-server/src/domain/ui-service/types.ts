@@ -43,6 +43,7 @@ export type QueryScope =
 export type MutateOp =
   | 'projects.create'
   | 'sessions.send'
+  | 'sessions.cancel'
   | 'threads.cancel'
   | 'executions.cancel'
   | 'schedules.pause'
@@ -158,6 +159,10 @@ export interface ProjectCreateArgs {
 export interface SessionsSendArgs {
   sessionId: string;
   text: string;
+}
+
+export interface SessionsCancelArgs {
+  sessionId: string;
 }
 
 export interface ThreadsCancelArgs {
@@ -633,6 +638,13 @@ export interface SessionsSendReturn {
   accepted: boolean;
 }
 
+export interface SessionsCancelReturn {
+  /** True when at least one running execution on the session's channel was cancelled. */
+  cancelled: boolean;
+  /** How many live executions were cancelled on the session's channel. */
+  count: number;
+}
+
 export interface ThreadsCancelReturn {
   cancelled: boolean;
 }
@@ -692,6 +704,7 @@ export interface QueryReturnMap {
 export interface MutateArgsMap {
   'projects.create': ProjectCreateArgs;
   'sessions.send': SessionsSendArgs;
+  'sessions.cancel': SessionsCancelArgs;
   'threads.cancel': ThreadsCancelArgs;
   'executions.cancel': ExecutionsCancelArgs;
   'schedules.pause': ScheduleActionArgs;
@@ -711,6 +724,7 @@ export interface MutateArgsMap {
 export interface MutateReturnMap {
   'projects.create': ProjectCreateReturn;
   'sessions.send': SessionsSendReturn;
+  'sessions.cancel': SessionsCancelReturn;
   'threads.cancel': ThreadsCancelReturn;
   'executions.cancel': ExecutionsCancelReturn;
   'schedules.pause': void;
@@ -773,6 +787,14 @@ export interface UiServiceDeps {
    * callback so the ui-service domain never imports orchestration (layer safety / depcruise).
    */
   sendSessionMessage: (opts: { sessionId: string; channel: string; text: string }) => void;
+  /**
+   * Cancel every live execution running on a session's channel (S4 chat Stop). Wired in the entry
+   * layer (app.ts) to the orchestration channel-cancel path (`cancelChannelRuns`), which kills the
+   * live agent handle, preserves the session, cancels the thread record, and tears the execution
+   * down as `cancelled`. Returns the number cancelled. Kept as an injected callback so the ui-service
+   * domain never imports orchestration (layer safety / depcruise).
+   */
+  cancelSessionRun: (opts: { channel: string }) => Promise<number>;
   threadStore: {
     getAll(): any[];
     get(id: string): any | null;

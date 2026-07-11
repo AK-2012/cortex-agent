@@ -99,6 +99,10 @@ export const sessionsSendInput = z.object({
   text: z.string().min(1),
 });
 
+export const sessionsCancelInput = z.object({
+  sessionId: z.string(),
+});
+
 export const threadsCancelInput = z.object({
   threadId: z.string(),
 });
@@ -209,6 +213,7 @@ export const queryInputSchemas = {
 export const mutateInputSchemas = {
   'projects.create': projectsCreateInput,
   'sessions.send': sessionsSendInput,
+  'sessions.cancel': sessionsCancelInput,
   'threads.cancel': threadsCancelInput,
   'executions.cancel': executionsCancelInput,
   'schedules.pause': scheduleActionInput,

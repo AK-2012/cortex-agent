@@ -11,9 +11,11 @@ import { SLASH_COMMANDS } from './chat-content';
 // derived from the transcript's per-message ts deltas (`sessions.transcript.elapsedMs` summed) — the
 // caller passes an em-dash when there is no elapsed signal. Session cost has NO real attribution source
 // (conversation-history carries no cost; the cost store is keyed by project/trigger, not
-// session/turn/message) → still rendered as an explicit "—" placeholder, never fabricated. Stop has no
-// session-cancel op → inert affordance (flagged). Slash exec has no backend → the slash menu is a local
-// visual affordance only.
+// session/turn/message) → still rendered as an explicit "—" placeholder, never fabricated. Stop is REAL
+// (task bdc2): click routes through the `sessions.cancel` mutate, which cancels the agent(s) running on
+// the session's channel (kills the live handle, preserves the session) — running collapses back to idle
+// as the live stream goes quiet. Slash exec has no backend → the slash menu is a local visual affordance
+// only.
 
 const mono = "'IBM Plex Mono',monospace";
 const DASH = '—';
@@ -32,6 +34,7 @@ export function Composer({
 }): JSX.Element {
   const trpc = useTRPC();
   const sendMut = useMutation(trpc.sessions.send.mutationOptions());
+  const cancelMut = useMutation(trpc.sessions.cancel.mutationOptions());
   const [composer, setComposer] = useState('');
   const [slashOpen, setSlashOpen] = useState(false);
   const [slashHover, setSlashHover] = useState<number | null>(null);
@@ -53,6 +56,11 @@ export function Composer({
     sendMut.mutate({ sessionId, text });
     setComposer('');
     setSlashOpen(false);
+  };
+
+  const doStop = (): void => {
+    if (!sessionId || cancelMut.isPending) return;
+    cancelMut.mutate({ sessionId });
   };
 
   const onKey = (e: React.KeyboardEvent<HTMLInputElement>): void => {
@@ -206,6 +214,7 @@ export function Composer({
             {running ? (
               <div
                 title="Stop · esc"
+                onClick={doStop}
                 onMouseEnter={() => setBtnHover(true)}
                 onMouseLeave={() => setBtnHover(false)}
                 style={{
@@ -217,7 +226,7 @@ export function Composer({
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
-                  cursor: 'pointer',
+                  cursor: cancelMut.isPending ? 'default' : 'pointer',
                 }}
               >
                 <span style={{ width: 11, height: 11, background: '#fff', borderRadius: 2 }} />

@@ -23,7 +23,7 @@ LeftRail (f528) + CenterChat (89e7) + RightPanel (1e96) are all real 1:1 — the
 | `MessageStream.tsx` | Message stream (prototype L131–357), **rows-driven** (task aba0): renders the `ChatRow[]` built from REAL `sessions.transcript` + live tail — TODAY divider · right-aligned user bubble · `ToolCallsRow` · assistant text (streaming `cxblink` caret on the last row while live). Empty session → the prototype `chatEmpty` empty-state (L133–143, verbatim EN copy). Kept 1:1 surfaces: `InlineThreadCardProto` (LIVE `threads.get`) + `ApprovalCard` (Stage-5 GAP-B, representative). |
 | `ToolCallsRow.tsx` | Collapsed/expanded tool-call row (prototype L152–172); local toggle. Fed real tool events (`toolName`/`toolInput`) mapped from the transcript. |
 | `ApprovalCard.tsx` | Inline approval-required card (prototype L247–276, pending·unarmed); INERT Approve/Deny (Stage-5 GAP-B, `REPRESENTATIVE_APPROVAL`). |
-| `Composer.tsx` | Composer (prototype L359–395): slash palette (18-slash-menu, local visual) · running/idle status line (real `turns`; running-line **elapsed = REAL** session elapsed from `sessions.transcript.elapsedMs`; cost = `—`) · input · `/ commands` chip · **REAL send** (task aba0): ⏎/click → `sessions.send` mutate. Stop inert (no session-cancel op). |
+| `Composer.tsx` | Composer (prototype L359–395): slash palette (18-slash-menu, local visual) · running/idle status line (real `turns`; running-line **elapsed = REAL** session elapsed from `sessions.transcript.elapsedMs`; cost = `—`) · input · `/ commands` chip · **REAL send** (task aba0): ⏎/click → `sessions.send` mutate. **REAL Stop** (task bdc2): click → `sessions.cancel` mutate cancels the agent(s) running on the session's channel; running collapses to idle as the live stream quiets. |
 | `transcript-vm.ts` / `transcript-vm.test.ts` | **Pure** (TDD, 18 tests): `buildTranscriptRows(transcript, liveTail, {streaming})` → prototype `ChatRow[]` (divider on day-change · user · collapsed tools · assistant + streaming caret); `liveToMessage` (session.message→TranscriptMessage; live `elapsedMs`=null, reconciles on refetch); `turnCount`; `sessionElapsedMs` (sums the DTO's per-message `elapsedMs`) + `formatElapsed` (ms→`Xs`/`Xm Ys`/`Xh Ym`; null→`—`). De-dups the live tail against the fetched transcript. |
 | `useSessionMessageLiveSync.ts` | Thin React/SSE glue (task aba0): one `subscribe({events:['session.message'], sessionId})` → bounded live-tail buffer (streams assistant/tool output) + `streaming` idle-timer flag + invalidates `sessions.transcript` for reconciliation. Mirrors `useThreadGetLiveSync`. |
 | `InlineThreadCardProto.tsx` | **LIVE inline thread card** (prototype L180–246) bound to REAL `threads.get` (B1): picks the first running/waiting thread from `threads.list`, maps `ThreadDetail`→prototype rows via `thread-card-proto`, re-flows live via `useThreadGetLiveSync`. The one live-data surface of the chat. |
@@ -52,9 +52,11 @@ Remaining Center-Chat gaps: GAP-B approval card — no approvals scope → repre
 (**Stage 5**); session **elapsed** — now REAL: `sessions.transcript` carries per-message `elapsedMs`
 (ts-derived), summed to the running-line elapsed readout. Session **cost** stays `—`: **no real
 attribution source** — conversation-history carries no cost; `costs.jsonl`/`CostEntry` is keyed by
-project/trigger with no session/turn/message linkage (escalated to manager, task 30da). composer **Stop** — no session-cancel
-MutateOp → inert affordance; **slash execution** — no backend op → the 18-slash-menu is a local visual
-affordance only. The other LIVE center surface (inline thread card, `threads.get`) is kept. Right Panel
+project/trigger with no session/turn/message linkage (escalated to manager, task 30da). composer **Stop** — RESOLVED
+(task bdc2): the `sessions.cancel` MutateOp resolves session→channel and cancels the live agent(s) on that channel
+(reuses the `!cancel` channel-cancel path via an injected `cancelSessionRun` dep); **slash execution** — no backend op
+→ the 18-slash-menu is a local visual affordance only. The other LIVE center surface (inline thread card,
+`threads.get`) is kept. Right Panel
 (1e96): **GAP-M** Machines tab — no machines tRPC
 scope (**Stage 7**); **GAP-P** Pause — no `threads` pause MutateOp (inert affordance); **GAP-B**
 budget denominator — `CostSummary` has `today` only, no budget scope (rendered `today` real, `/ —` +

@@ -19,6 +19,7 @@ import {
   sessionsListInput,
   sessionsTranscriptInput,
   sessionsSendInput,
+  sessionsCancelInput,
   threadsListInput,
   threadsGetInput,
   tasksListInput,
@@ -115,7 +116,7 @@ function makeMutation<O extends MutateOp, Sch extends z.ZodType>(
 }
 
 // ── AppRouter ─────────────────────────────────────────────────────────────────────
-// 14 QueryScope + 16 MutateOp + 2 subscriptions (generic `subscribe` + `executions.log`;
+// 14 QueryScope + 17 MutateOp + 2 subscriptions (generic `subscribe` + `executions.log`;
 // `subscribeFilterInput` carries `sessionId` for the S4 `session.message` stream),
 // mirroring the ui-service contract.
 export function createAppRouter(uiService: UiService) {
@@ -128,6 +129,7 @@ export function createAppRouter(uiService: UiService) {
       list: makeQuery(uiService, 'sessions.list', sessionsListInput),
       transcript: makeQuery(uiService, 'sessions.transcript', sessionsTranscriptInput),
       send: makeMutation(uiService, 'sessions.send', sessionsSendInput),
+      cancel: makeMutation(uiService, 'sessions.cancel', sessionsCancelInput),
     }),
     threads: router({
       list: makeQuery(uiService, 'threads.list', threadsListInput),
