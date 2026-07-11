@@ -8,4 +8,4 @@ Session domain — stateful session lifecycle (CRUD + registry + backup + hooks)
 | `session-registry.ts` | persistence | sessionStore re-export + lookupSessionName helper (store/session-registry-repo) |
 | `session-backup.ts` | persistence | Claude session JSONL per-turn backup and restore |
 | `session-hooks.ts` | lifecycle | Unified onNew/onMessageEnd hook pipeline — spawn + OutputStream display + optional agent injection (onNew pre-close turn runs on an isolated pool key via `onNewInjectSessionKey`, closed after, so `!new` does not resurrect the old session onto the channel slot) |
-| `session-lifecycle.ts` | lifecycle | Shared session-lifecycle primitives: registerNamedSession, attachExistingSession, resetChannelSession |
+| `session-lifecycle.ts` | lifecycle | Shared session-lifecycle primitives: registerNamedSession, attachExistingSession, resetChannelSession, createDirectSession (mint a fresh origin='direct' web/UI session on its own `web:<sessionId>` channel + bind sessions.json/ledger so a later send resumes it — backs the ui-service `sessions.create` op) |

@@ -72,6 +72,9 @@ import { costRepo } from '@store/cost-repo.js';
 import { profileRepo, startProfileWatcher, setAdminNotifier as setProfileNotifier } from '@store/profile-repo.js';
 import { sessionStore } from '@store/session-registry-repo.js';
 import { cleanupAllBackups } from '@domain/sessions/session-backup.js';
+import { createDirectSession } from '@domain/sessions/session-lifecycle.js';
+import { setSessionAsync } from '@domain/sessions/session.js';
+import { resolveBackendForChannel } from '@domain/agents/index.js';
 import { initDiskMonitor, stopDiskMonitor } from '@domain/monitor/disk-monitor.js';
 import { loadMachinesFromFile, startMachineRegistryWatcher, stopMachineRegistryWatcher, setAdminNotifier as setMachineNotifier, getMachineRegistry } from '@domain/tasks/dispatch-utils.js';
 import { EventBus, createEventLogger } from '@events/index.js';
@@ -359,6 +362,14 @@ process.on('SIGTERM', async () => {
     // channel-cancel path (same code the no-arg/`--all` !cancel command uses). Injected here so the
     // ui-service domain never imports orchestration.
     cancelSessionRun: ({ channel }) => cancelChannelRuns(channel),
+    // Workbench "+ New session": create a fresh live direct session. Wired here (entry layer) to the
+    // domain primitive with the real session/ledger singletons, so ui-service never imports store.
+    createDirectSession: (opts) => createDirectSession({
+      sessionStore,
+      setChannelSession: setSessionAsync,
+      initConversation: async (channel, a) => { await conversationLedger.initConversation(channel, a); },
+      resolveBackend: resolveBackendForChannel,
+    }, opts),
     bus,
     adapter,
   });

@@ -2,7 +2,7 @@ import '../../_test-home.js';
 import * as assert from 'node:assert';
 import { describe, it } from 'node:test';
 
-import { registerNamedSession, attachExistingSession, resetChannelSession, SESSION_BACKENDS } from '@domain/sessions/session-lifecycle.js';
+import { registerNamedSession, attachExistingSession, resetChannelSession, createDirectSession, SESSION_BACKENDS } from '@domain/sessions/session-lifecycle.js';
 import type { SessionRegistryWriter } from '@domain/sessions/session-lifecycle.js';
 import { setSessionAsync, getSessionAsync } from '@domain/sessions/session.js';
 import { conversationLedger } from '@store/conversation-ledger-repo.js';
@@ -61,6 +61,68 @@ describe('registerNamedSession', () => {
     assert.strictEqual(registered.kind, 'scheduled');
     assert.strictEqual(registered.label, 'my-label');
     assert.strictEqual(registered.profileName, 'my-profile');
+  });
+});
+
+// ── createDirectSession ─────────────────────────────────────────
+
+describe('createDirectSession', () => {
+  it('generates a fresh direct session, binds the channel + ledger, returns the id', async () => {
+    let registered: any = null;
+    let bound: any = null;
+    let ledger: any = null;
+    const resolveCalls: string[] = [];
+
+    const fakeStore: SessionRegistryWriter = {
+      generateSessionName: async () => 'cortex-new',
+      registerSession: async (name, opts) => { registered = { name, ...opts }; },
+    };
+
+    const result = await createDirectSession(
+      {
+        sessionStore: fakeStore,
+        setChannelSession: async (channel, sessionId, backend) => { bound = { channel, sessionId, backend }; },
+        initConversation: async (channel, opts) => { ledger = { channel, ...opts }; },
+        resolveBackend: (channel) => { resolveCalls.push(channel); return 'claude'; },
+      },
+      { projectId: 'proj-web' },
+    );
+
+    assert.ok(result.sessionId, 'returns a non-empty sessionId');
+    assert.strictEqual(result.sessionName, 'cortex-new', 'returns the generated name');
+
+    const expectedChannel = 'web:' + result.sessionId;
+    assert.strictEqual(resolveCalls[0], expectedChannel, 'backend resolved for the web channel');
+
+    assert.ok(registered, 'registerSession was called');
+    assert.strictEqual(registered.sessionId, result.sessionId);
+    assert.strictEqual(registered.channel, expectedChannel, 'registered on the web:<id> channel');
+    assert.strictEqual(registered.backend, 'claude');
+    assert.strictEqual(registered.origin, 'direct', 'origin is direct');
+    assert.strictEqual(registered.projectId, 'proj-web');
+
+    assert.deepStrictEqual(bound, { channel: expectedChannel, sessionId: result.sessionId, backend: 'claude' },
+      'channel session bound so a later send resumes it');
+    assert.strictEqual(ledger.channel, expectedChannel);
+    assert.strictEqual(ledger.sessionId, result.sessionId);
+    assert.strictEqual(ledger.sessionName, 'cortex-new');
+    assert.strictEqual(ledger.backend, 'claude');
+  });
+
+  it('generates a distinct sessionId + channel per call', async () => {
+    const fakeStore: SessionRegistryWriter = {
+      generateSessionName: async () => 'cortex-x',
+      registerSession: async () => {},
+    };
+    const deps = {
+      sessionStore: fakeStore,
+      setChannelSession: async () => {},
+      initConversation: async () => {},
+      resolveBackend: () => 'claude',
+    };
+    const a = await createDirectSession(deps, { projectId: 'p' });
+    const b = await createDirectSession(deps, { projectId: 'p' });
+    assert.notStrictEqual(a.sessionId, b.sessionId, 'unique ids');
   });
 });
 

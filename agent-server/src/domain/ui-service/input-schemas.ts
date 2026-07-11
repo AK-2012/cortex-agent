@@ -96,6 +96,10 @@ export const projectsCreateInput = z.object({
   name: z.string(),
 });
 
+export const sessionsCreateInput = z.object({
+  projectId: z.string().optional(),
+});
+
 export const sessionsSendInput = z.object({
   sessionId: z.string(),
   text: z.string().min(1),
@@ -243,6 +247,7 @@ export const queryInputSchemas = {
 
 export const mutateInputSchemas = {
   'projects.create': projectsCreateInput,
+  'sessions.create': sessionsCreateInput,
   'sessions.send': sessionsSendInput,
   'sessions.cancel': sessionsCancelInput,
   'threads.cancel': threadsCancelInput,

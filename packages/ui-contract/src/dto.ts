@@ -33,6 +33,7 @@ export type {
   MachinesListParams,
   // Mutate args
   ProjectCreateArgs,
+  SessionsCreateArgs,
   SessionsSendArgs,
   ThreadsCancelArgs,
   ExecutionsCancelArgs,
@@ -83,6 +84,7 @@ export type {
   MemoryLineDiff,
   MemoryBlameLine,
   ProjectCreateReturn,
+  SessionsCreateReturn,
   SessionsSendReturn,
   ThreadsCancelReturn,
   ExecutionsCancelReturn,

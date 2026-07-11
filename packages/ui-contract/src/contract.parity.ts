@@ -12,6 +12,7 @@ import type {
   projectsCreateInput,
   sessionsListInput,
   sessionsTranscriptInput,
+  sessionsCreateInput,
   sessionsSendInput,
   threadsListInput,
   threadsGetInput,
@@ -71,6 +72,7 @@ const _machinesList: QueryParity<'machines.list', typeof machinesListInput> = tr
 
 // ── Mutate ops ────────────────────────────────────────────────────
 const _projectsCreate: MutateParity<'projects.create', typeof projectsCreateInput> = true;
+const _sessionsCreate: MutateParity<'sessions.create', typeof sessionsCreateInput> = true;
 const _sessionsSend: MutateParity<'sessions.send', typeof sessionsSendInput> = true;
 const _threadsCancel: MutateParity<'threads.cancel', typeof threadsCancelInput> = true;
 const _executionsCancel: MutateParity<'executions.cancel', typeof executionsCancelInput> = true;
@@ -99,7 +101,7 @@ export const _contractParityChecked = [
   _projectsList, _sessionsList, _sessionsTranscript, _threadsList, _threadsGet, _tasksList, _schedulesList,
   _executionsList, _executionsGet, _memoryTree, _memoryFile, _approvalsList, _costSummary, _configGet,
   _machinesList,
-  _projectsCreate, _sessionsSend, _threadsCancel, _executionsCancel,
+  _projectsCreate, _sessionsCreate, _sessionsSend, _threadsCancel, _executionsCancel,
   _schedulesPause, _schedulesResume, _schedulesRemove, _schedulesAdd, _tasksClaim,
   _tasksUnclaim, _tasksComplete, _tasksBlock, _tasksUnblock,
   _approvalsApprove, _approvalsReject, _approvalsRequest, _configSet, _executionsLog,

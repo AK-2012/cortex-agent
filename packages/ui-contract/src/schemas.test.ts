@@ -9,7 +9,7 @@ const QUERY_SCOPES = [
 ] as const;
 
 const MUTATE_OPS = [
-  'projects.create', 'sessions.send', 'sessions.cancel', 'threads.cancel', 'executions.cancel', 'schedules.pause', 'schedules.resume',
+  'projects.create', 'sessions.create', 'sessions.send', 'sessions.cancel', 'threads.cancel', 'executions.cancel', 'schedules.pause', 'schedules.resume',
   'schedules.remove', 'schedules.add', 'tasks.claim', 'tasks.unclaim', 'tasks.complete',
   'tasks.block', 'tasks.unblock', 'approvals.approve', 'approvals.reject', 'approvals.request',
   'config.set',
@@ -81,6 +81,9 @@ test('query schemas reject invalid input', () => {
 test('mutate schemas require their mandatory fields', () => {
   assert.deepEqual(mutateInputSchemas['projects.create'].parse({ name: 'nimbus' }), { name: 'nimbus' });
   assert.throws(() => mutateInputSchemas['projects.create'].parse({}));
+  // sessions.create: projectId optional (accepts empty + a project id)
+  assert.deepEqual(mutateInputSchemas['sessions.create'].parse({}), {});
+  assert.deepEqual(mutateInputSchemas['sessions.create'].parse({ projectId: 'nimbus' }), { projectId: 'nimbus' });
   assert.deepEqual(mutateInputSchemas['threads.cancel'].parse({ threadId: 't1' }), { threadId: 't1' });
   assert.deepEqual(
     mutateInputSchemas['tasks.claim'].parse({ projectId: 'p', taskId: 'f184' }),
