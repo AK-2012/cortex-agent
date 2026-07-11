@@ -6,9 +6,10 @@ import type { SwitchProjectRow } from './project-menu';
 // design's exact structure. Fixed-position overlay (click-catcher z-58 / menu z-59) anchored at
 // left:10px;top:106px — matching the LeftRail project card. Esc-close is wired by the host.
 //
-// DATA GAPS (flagged, paired stage): per-row phase vocabulary ("M3.1 · idle"/"paused") has no
-// backing field → meta = real running count (else "idle"); "+ New project" has no create scope
-// (inert); a project row click has no cross-pane current-project state / switch op (closes only).
+// A project row click updates the shared cross-pane current-project state (task 569c): onSwitch(id)
+// re-scopes the LeftRail project card + cost and the RightPanel cost bar (pure front-end selection;
+// no backend switch op). DATA GAP (flagged): per-row phase vocabulary ("M3.1 · idle"/"paused") has
+// no backing field → meta = real running count (else "idle").
 
 const mono = "'IBM Plex Mono',monospace";
 

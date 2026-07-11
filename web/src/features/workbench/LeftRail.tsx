@@ -8,6 +8,7 @@ import { buildSwitchList, projMenuSubLabel, runningCountByProject } from './proj
 import { ProjectMenu } from './ProjectMenu';
 import { NewProjectModal } from './NewProjectModal';
 import { useApprovals } from '@/features/approvals/ApprovalsProvider';
+import { useCurrentProject } from './CurrentProjectProvider';
 
 // LEFT RAIL — 1:1 from prototype.dc.html L42–100 (Stage-R RB, task f528). Exact inline styles /
 // px / hex / font / weight / EN copy reproduced verbatim; real tRPC data (projects.list /
@@ -27,17 +28,10 @@ export function LeftRail(): JSX.Element {
   const projects = projectsQuery.data ?? [];
   const sessions = sessionsQuery.data ?? [];
 
-  // Active project = project of the most-recently-used session, else the first listed project.
-  const activeProjectId = useMemo<string | null>(() => {
-    if (sessions.length) {
-      const latest = [...sessions].sort(
-        (a, b) =>
-          Date.parse(b.lastUsedAt || b.createdAt) - Date.parse(a.lastUsedAt || a.createdAt),
-      )[0];
-      if (latest?.projectId) return latest.projectId;
-    }
-    return projects[0]?.id ?? null;
-  }, [sessions, projects]);
+  // Active project = the shared cross-pane current project (task 569c): the switcher's explicit
+  // selection, else the derived default (most-recent session's project, else first listed project).
+  // The provider owns the derivation; the same value scopes the RightPanel cost bar.
+  const { currentProjectId: activeProjectId, setCurrentProject } = useCurrentProject();
 
   const costQuery = useQuery({
     ...trpc.cost.summary.queryOptions({ projectId: activeProjectId ?? undefined }),
@@ -73,8 +67,13 @@ export function LeftRail(): JSX.Element {
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [projMenuOpen]);
-  // GAP: switching has no backend scope or cross-pane current-project state.
-  const onSwitchProject = () => setProjMenuOpen(false);
+  // Switching updates the shared cross-pane current-project state (task 569c) — the project card,
+  // cost scope, switch list and the RightPanel cost bar all re-scope. There is still no backend
+  // switch op (pure front-end selection); a project's data is fetched per-scope on demand.
+  const onSwitchProject = (id: string) => {
+    setCurrentProject(id);
+    setProjMenuOpen(false);
+  };
   // New project — wired to the real projects.create mutation via NewProjectModal (task c551).
   const onNewProject = () => {
     setProjMenuOpen(false);
