@@ -132,6 +132,39 @@ describe('settings panels — real data render', () => {
     expect(html).toContain('审批提醒固定开启');
   });
 
+  it('Notifications: channel routing shows SLACK_ADMIN_CHANNEL key presence when Slack configured', () => {
+    const snapWithSlack: ConfigSnapshot = {
+      ...snap,
+      env: [
+        { key: 'SLACK_BOT_TOKEN', present: true, masked: '••••••••' },
+        { key: 'SLACK_ADMIN_CHANNEL', present: true, masked: '••••••••' },
+      ],
+    };
+    const html = renderToStaticMarkup(<NotificationsPanel snapshot={snapWithSlack} />);
+    expect(html).toContain('SLACK_ADMIN_CHANNEL');
+    // channel value shown as mask — never cleartext
+    expect(html).toContain('••••••••');
+  });
+
+  it('Notifications: channel routing omitted when platform not configured', () => {
+    const snapNoSlack: ConfigSnapshot = {
+      ...snap,
+      env: [],
+    };
+    const html = renderToStaticMarkup(<NotificationsPanel snapshot={snapNoSlack} />);
+    // channel detail not shown when Slack absent
+    expect(html).not.toContain('SLACK_ADMIN_CHANNEL');
+  });
+
+  it('Notifications: honest placeholder states no history scope (no fabricated count)', () => {
+    const html = renderToStaticMarkup(<NotificationsPanel snapshot={snap} />);
+    expect(html).toContain('Recent notifications');
+    expect(html).toContain('no history scope');
+    expect(html).toContain('no file persistence');
+    // confirms no fabricated numeric count or list items
+    expect(html).not.toMatch(/\d+ notification/);
+  });
+
   it('Hooks: real hook filenames listed', () => {
     const html = renderToStaticMarkup(<HooksPanel snapshot={snap} />);
     expect(html).toContain('rules-loader.mjs');
