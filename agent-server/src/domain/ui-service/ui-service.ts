@@ -7,6 +7,7 @@ import { handleProjectsList } from './query/projects.js';
 import { handleSessionsList, handleSessionsTranscript } from './query/sessions.js';
 import { handleThreadsList, handleThreadsGet } from './query/threads.js';
 import { handleTasksList } from './query/tasks.js';
+import { handleTaskVerification } from './query/task-verification.js';
 import { handleSchedulesList } from './query/schedules.js';
 import { handleExecutionsList, handleExecutionsGet } from './query/executions.js';
 import { handleMemoryTree, handleMemoryFile } from './query/memory.js';
@@ -45,6 +46,7 @@ const queryHandlers: Record<string, QueryHandler> = {
   'threads.list': (deps, params) => handleThreadsList(deps, params),
   'threads.get': (deps, params) => handleThreadsGet(deps, params),
   'tasks.list': (deps, params) => handleTasksList(deps, params),
+  'tasks.verification': (deps, params) => handleTaskVerification(deps, params),
   'schedules.list': (deps, params) => handleSchedulesList(deps, params),
   'executions.list': (deps, params) => handleExecutionsList(deps, params),
   'executions.get': (deps, params) => handleExecutionsGet(deps, params),

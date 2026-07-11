@@ -1,6 +1,9 @@
 import { useEffect } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import type { TaskInfo } from '@cortex-agent/ui-contract';
+import { useTRPC } from '@/lib/trpc';
 import { buildTaskModalVm } from './task-modal-vm';
+import { buildTaskVerificationVm, type TaskVerificationVm } from './task-verification-vm';
 
 // Task detail modal (screen 10a), rebuilt 1:1 from prototype.dc.html L1462-1540 (+ shared backdrop
 // L1292). Exact inline styles / px / hex / font-size / weight / EN copy from the source; real tRPC
@@ -10,9 +13,12 @@ import { buildTaskModalVm } from './task-modal-vm';
 // REAL centerpiece: WHY + DONE-WHEN in Card A now bind the real `TaskInfo.why` / `TaskInfo.doneWhen`
 // (task store `why` / `done-when`); when a task genuinely has neither, the honest placeholder shows
 // (null-safe — no fabrication).
-// DATA GAPS rendered structurally + flagged (workbench precedent):
-//   • GAP-VERIFY       : no done-when evidence tRPC scope → verification card is a placeholder.
-//   • GAP-HIST         : no per-task execution join → dispatch-history card is a placeholder.
+// Card B (Done-when verification) + Card C (Dispatch history) now consume the REAL `tasks.verification`
+// scope: done-when achievement evidence (completed-note / completed-at / the completing
+// execution's output) + the per-task execution/dispatch join. Where the scope returns null / [] (task
+// not completed, no note, no completing execution, never dispatched) the card shows an honest
+// placeholder — never fabricated evidence.
+// DATA GAP still flagged:
 //   • GAP-GPU          : no gpu on TaskInfo → Fields gpu renders "—" (matches the T-046 proto-shot).
 
 const CARD: React.CSSProperties = {
@@ -31,10 +37,122 @@ const CARD_HEADER: React.CSSProperties = {
 
 const CARD_TITLE: React.CSSProperties = { fontSize: 11.5, fontWeight: 650, color: '#191C22' };
 
-// A muted note flagging a field the backend contract does not expose (rendered structurally).
+// A muted note flagging a field with no real value (task not completed / never dispatched, etc.).
 function GapNote({ children }: { children: React.ReactNode }) {
   return (
     <span style={{ fontStyle: 'italic', color: '#B6BDC9' }}>{children}</span>
+  );
+}
+
+const EVIDENCE_LABEL: React.CSSProperties = {
+  fontSize: 9.5,
+  fontWeight: 700,
+  letterSpacing: '.05em',
+  color: '#98A1B0',
+  display: 'block',
+  marginBottom: 3,
+};
+
+// Card B body — real done-when achievement evidence (completed-note / completed-at / completing
+// execution output). Honest placeholder when the task is not yet completed.
+function VerificationBody({ vv }: { vv: TaskVerificationVm }) {
+  if (!vv.completed) {
+    return (
+      <GapNote>
+        — not completed yet; done-when evidence appears once the task reaches done
+      </GapNote>
+    );
+  }
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 9, color: '#22262E' }}>
+      <div>
+        <span style={EVIDENCE_LABEL}>COMPLETED AT</span>
+        {vv.completedAt != null ? (
+          <span style={{ font: "400 10.5px 'IBM Plex Mono',monospace", color: '#5B6472' }}>
+            {vv.completedAt}
+          </span>
+        ) : (
+          <GapNote>— not recorded</GapNote>
+        )}
+      </div>
+      <div>
+        <span style={EVIDENCE_LABEL}>COMPLETION NOTE</span>
+        {vv.completedNote != null ? (
+          <span>{vv.completedNote}</span>
+        ) : (
+          <GapNote>— no completion note recorded</GapNote>
+        )}
+      </div>
+      <div>
+        <span style={EVIDENCE_LABEL}>COMPLETING RUN</span>
+        {vv.completingExecutionId != null ? (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+            <span style={{ font: "600 10.5px 'IBM Plex Mono',monospace", color: '#4655D4' }}>
+              {vv.completingExecutionId}
+            </span>
+            {vv.completingOutput != null ? (
+              <span
+                style={{
+                  fontSize: 10.5,
+                  color: '#5B6472',
+                  background: '#FBFBFC',
+                  border: '1px solid #EFF1F5',
+                  borderRadius: 7,
+                  padding: '6px 10px',
+                  whiteSpace: 'pre-wrap',
+                }}
+              >
+                {vv.completingOutput}
+              </span>
+            ) : (
+              <GapNote>— run recorded no final output</GapNote>
+            )}
+          </div>
+        ) : (
+          <GapNote>— no execution linked to this completion</GapNote>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// Card C body — real per-task execution/dispatch rows (newest first).
+function DispatchHistoryBody({ vv }: { vv: TaskVerificationVm }) {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+      {vv.dispatches.map((d) => (
+        <div
+          key={d.executionId}
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
+            padding: '6px 9px',
+            background: d.isCompleting ? '#F5F7FF' : '#FBFBFC',
+            border: `1px solid ${d.isCompleting ? '#DDE3FB' : '#EFF1F5'}`,
+            borderRadius: 7,
+          }}
+        >
+          <span
+            style={{ width: 6, height: 6, borderRadius: '50%', background: d.statusColor, flex: 'none' }}
+          />
+          <span style={{ font: "600 10px 'IBM Plex Mono',monospace", color: '#4655D4' }}>
+            {d.executionId}
+          </span>
+          <span style={{ fontSize: 9.5, color: '#8A93A2' }}>{d.machine}</span>
+          <span
+            style={{
+              marginLeft: 'auto',
+              font: "400 9px 'IBM Plex Mono',monospace",
+              color: '#98A1B0',
+              flex: 'none',
+            }}
+          >
+            {d.when} · {d.duration} · {d.cost}
+          </span>
+        </div>
+      ))}
+    </div>
   );
 }
 
@@ -49,6 +167,14 @@ export interface TaskModalProps {
 
 export function TaskModal({ task, allTasks, pending, onClose, onComplete, onUnblock }: TaskModalProps) {
   const tm = buildTaskModalVm(task, allTasks);
+  const trpc = useTRPC();
+  // The modal mounts only when a task is opened, so this per-task query fires on open only.
+  const verifyQuery = useQuery(
+    trpc.tasks.verification.queryOptions({ projectId: task.project, taskId: task.id }),
+  );
+  const vv: TaskVerificationVm | null = verifyQuery.data
+    ? buildTaskVerificationVm(verifyQuery.data)
+    : null;
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -237,47 +363,63 @@ export function TaskModal({ task, allTasks, pending, onClose, onComplete, onUnbl
               </div>
             </div>
 
-            {/* Card B — Done-when verification (prototype L1483-1492). GAP-VERIFY: no evidence scope. */}
+            {/* Card B — Done-when verification (prototype L1483-1492). Real evidence via tasks.verification. */}
             <div style={CARD}>
               <div style={CARD_HEADER}>
                 <span style={CARD_TITLE}>Done-when verification</span>
-                <span
-                  style={{
-                    marginLeft: 'auto',
-                    fontSize: 9.5,
-                    fontWeight: 600,
-                    padding: '1px 7px',
-                    borderRadius: 999,
-                    background: '#F1F2F5',
-                    color: '#8A93A2',
-                  }}
-                >
-                  data gap
-                </span>
+                {vv && (
+                  <span
+                    style={{
+                      marginLeft: 'auto',
+                      fontSize: 9.5,
+                      fontWeight: 600,
+                      padding: '1px 7px',
+                      borderRadius: 999,
+                      background: vv.completed ? '#E9F4EE' : '#F1F2F5',
+                      color: vv.completed ? '#23854F' : '#8A93A2',
+                    }}
+                  >
+                    {vv.completed ? '✓ completed' : 'not completed'}
+                  </span>
+                )}
               </div>
               <div style={{ padding: '10px 15px', fontSize: 11, lineHeight: 1.55 }}>
-                <GapNote>
-                  — no done-when evidence tRPC scope yet (git / artifact / criteria checks unavailable)
-                </GapNote>
+                {verifyQuery.isPending ? (
+                  <GapNote>— loading verification…</GapNote>
+                ) : verifyQuery.isError || !vv ? (
+                  <GapNote>— failed to load verification evidence</GapNote>
+                ) : (
+                  <VerificationBody vv={vv} />
+                )}
               </div>
             </div>
 
-            {/* Card C — Dispatch history (prototype L1493-1506). GAP-HIST: no per-task execution join. */}
+            {/* Card C — Dispatch history (prototype L1493-1506). Real per-task execution/dispatch join. */}
             <div style={CARD}>
               <div style={CARD_HEADER}>
                 <span style={CARD_TITLE}>Dispatch history</span>
-                <span
-                  style={{
-                    marginLeft: 'auto',
-                    font: "400 9px 'IBM Plex Mono',monospace",
-                    color: '#98A1B0',
-                  }}
-                >
-                  data gap
-                </span>
+                {vv && vv.hasDispatches && (
+                  <span
+                    style={{
+                      marginLeft: 'auto',
+                      font: "400 9px 'IBM Plex Mono',monospace",
+                      color: '#98A1B0',
+                    }}
+                  >
+                    {vv.dispatches.length} run{vv.dispatches.length === 1 ? '' : 's'}
+                  </span>
+                )}
               </div>
               <div style={{ padding: '10px 15px', fontSize: 11, lineHeight: 1.55 }}>
-                <GapNote>— no per-task execution/dispatch join in the contract yet</GapNote>
+                {verifyQuery.isPending ? (
+                  <GapNote>— loading dispatch history…</GapNote>
+                ) : verifyQuery.isError || !vv ? (
+                  <GapNote>— failed to load dispatch history</GapNote>
+                ) : !vv.hasDispatches ? (
+                  <GapNote>— no dispatches recorded for this task</GapNote>
+                ) : (
+                  <DispatchHistoryBody vv={vv} />
+                )}
               </div>
             </div>
           </div>

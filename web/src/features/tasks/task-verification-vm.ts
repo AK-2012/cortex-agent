@@ -1,0 +1,106 @@
+// Pure view-model for the task modal's "Done-when verification" (Card B) + "Dispatch history"
+// (Card C), consuming the real `tasks.verification` scope. Framework-free so the DTO→render mapping
+// — including every honest-placeholder branch — is unit-tested in isolation. Consumed by TaskModal.tsx.
+//
+// Discipline: only REAL fields are surfaced. Where the scope returns null / [] (task not completed,
+// no completion note, no completing execution, never dispatched), the VM exposes explicit flags so
+// the component renders an honest placeholder — never fabricated evidence.
+
+import type { TaskVerificationInfo, TaskDispatchRecord } from '@cortex-agent/ui-contract';
+
+// dispatch/execution status → dot color (mirrors the modal's palette in task-modal-vm.ts).
+function statusColor(status: TaskDispatchRecord['status']): string {
+  switch (status) {
+    case 'completed':
+      return '#23854F';
+    case 'failed':
+      return '#C03D33';
+    case 'running':
+      return '#4655D4';
+    case 'stale':
+      return '#C99A2E';
+    default:
+      return '#8A93A2'; // cancelled
+  }
+}
+
+export function formatDuration(ms: number | null): string {
+  if (ms == null || !Number.isFinite(ms) || ms < 0) return '—';
+  const s = ms / 1000;
+  if (s < 60) return `${s.toFixed(1)}s`;
+  const m = Math.floor(s / 60);
+  const rem = Math.round(s % 60);
+  return `${m}m ${rem}s`;
+}
+
+export function formatCost(cost: number | null): string {
+  if (cost == null || !Number.isFinite(cost)) return '—';
+  return `$${cost.toFixed(4)}`;
+}
+
+export function formatWhen(iso: string | null): string {
+  if (!iso) return '—';
+  const t = Date.parse(iso);
+  if (Number.isNaN(t)) return '—';
+  const d = new Date(t);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+export interface DispatchRowVm {
+  executionId: string;
+  type: 'local' | 'dispatch';
+  status: TaskDispatchRecord['status'];
+  statusColor: string;
+  machine: string;
+  threadId: string | null;
+  when: string;
+  duration: string;
+  cost: string;
+  /** True for the execution the scope identified as the one that completed the task. */
+  isCompleting: boolean;
+}
+
+export interface TaskVerificationVm {
+  completed: boolean;
+  doneWhen: string | null;
+  completedAt: string | null;
+  completedNote: string | null;
+  completingExecutionId: string | null;
+  completingOutput: string | null;
+  /** True when there is at least one real piece of achievement evidence to show. */
+  hasEvidence: boolean;
+  dispatches: DispatchRowVm[];
+  hasDispatches: boolean;
+}
+
+export function buildTaskVerificationVm(info: TaskVerificationInfo): TaskVerificationVm {
+  const e = info.evidence;
+  const dispatches: DispatchRowVm[] = info.dispatches.map((d) => ({
+    executionId: d.executionId,
+    type: d.type,
+    status: d.status,
+    statusColor: statusColor(d.status),
+    machine: d.machine ?? '—',
+    threadId: d.threadId,
+    when: formatWhen(d.startedAt),
+    duration: formatDuration(d.durationMs),
+    cost: formatCost(d.cost),
+    isCompleting: d.executionId === e.completingExecutionId,
+  }));
+
+  const hasEvidence =
+    e.completed && (e.completedNote != null || e.completingOutput != null || e.completedAt != null);
+
+  return {
+    completed: e.completed,
+    doneWhen: e.doneWhen,
+    completedAt: e.completedAt,
+    completedNote: e.completedNote,
+    completingExecutionId: e.completingExecutionId,
+    completingOutput: e.completingOutput,
+    hasEvidence,
+    dispatches,
+    hasDispatches: dispatches.length > 0,
+  };
+}

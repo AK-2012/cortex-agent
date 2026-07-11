@@ -40,6 +40,11 @@ export const tasksListInput = z.object({
   actionable: z.boolean().optional(),
 });
 
+export const taskVerificationInput = z.object({
+  projectId: z.string(),
+  taskId: z.string(),
+});
+
 export const schedulesListInput = z.object({
   projectId: z.string().optional(),
   paused: z.boolean().optional(),
@@ -190,6 +195,7 @@ export const queryInputSchemas = {
   'threads.list': threadsListInput,
   'threads.get': threadsGetInput,
   'tasks.list': tasksListInput,
+  'tasks.verification': taskVerificationInput,
   'schedules.list': schedulesListInput,
   'executions.list': executionsListInput,
   'executions.get': executionsGetInput,

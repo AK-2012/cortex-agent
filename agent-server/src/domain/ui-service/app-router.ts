@@ -22,6 +22,7 @@ import {
   threadsListInput,
   threadsGetInput,
   tasksListInput,
+  taskVerificationInput,
   schedulesListInput,
   executionsListInput,
   executionsGetInput,
@@ -135,6 +136,7 @@ export function createAppRouter(uiService: UiService) {
     }),
     tasks: router({
       list: makeQuery(uiService, 'tasks.list', tasksListInput),
+      verification: makeQuery(uiService, 'tasks.verification', taskVerificationInput),
       claim: makeMutation(uiService, 'tasks.claim', taskActionInput),
       unclaim: makeMutation(uiService, 'tasks.unclaim', taskActionInput),
       complete: makeMutation(uiService, 'tasks.complete', taskCompleteInput),

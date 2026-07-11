@@ -90,6 +90,7 @@ const queryScopes = [
   'sessions.transcript',
   'threads.list',
   'tasks.list',
+  'tasks.verification',
   'schedules.list',
   'executions.list',
   'executions.get',
