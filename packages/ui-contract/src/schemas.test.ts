@@ -4,14 +4,15 @@ import { queryInputSchemas, mutateInputSchemas } from './schemas.js';
 
 const QUERY_SCOPES = [
   'projects.list', 'sessions.list', 'sessions.transcript', 'threads.list', 'threads.get', 'tasks.list',
-  'schedules.list', 'executions.list', 'executions.get', 'memory.tree', 'memory.file',
+  'tasks.verification', 'schedules.list', 'executions.list', 'executions.get', 'memory.tree', 'memory.file',
   'approvals.list', 'cost.summary', 'config.get',
 ] as const;
 
 const MUTATE_OPS = [
   'projects.create', 'sessions.send', 'threads.cancel', 'executions.cancel', 'schedules.pause', 'schedules.resume',
   'schedules.remove', 'schedules.add', 'tasks.claim', 'tasks.unclaim', 'tasks.complete',
-  'tasks.block', 'tasks.unblock', 'approvals.approve', 'approvals.reject', 'config.set',
+  'tasks.block', 'tasks.unblock', 'approvals.approve', 'approvals.reject', 'approvals.request',
+  'config.set',
 ] as const;
 
 test('every QueryScope has an input schema', () => {
@@ -114,17 +115,33 @@ test('config.get accepts an empty object', () => {
   assert.deepEqual(queryInputSchemas['config.get'].parse({}), {});
 });
 
-test('config.set accepts a valid budget and rejects illegal values / sections', () => {
+test('config.set accepts valid budget / profiles sections and rejects illegal values / sections', () => {
   assert.deepEqual(
     mutateInputSchemas['config.set'].parse({ section: 'budget', value: { daily_usd: 100, monthly_usd: 2000 } }),
     { section: 'budget', value: { daily_usd: 100, monthly_usd: 2000 } },
+  );
+  // profiles section: a non-empty defaultProfile name
+  assert.deepEqual(
+    mutateInputSchemas['config.set'].parse({ section: 'profiles', value: { defaultProfile: 'plan' } }),
+    { section: 'profiles', value: { defaultProfile: 'plan' } },
   );
   // negative / zero rejected
   assert.throws(() => mutateInputSchemas['config.set'].parse({ section: 'budget', value: { daily_usd: -1, monthly_usd: 2000 } }));
   // missing field rejected
   assert.throws(() => mutateInputSchemas['config.set'].parse({ section: 'budget', value: { daily_usd: 100 } }));
+  // profiles: empty defaultProfile rejected
+  assert.throws(() => mutateInputSchemas['config.set'].parse({ section: 'profiles', value: { defaultProfile: '' } }));
   // unknown section rejected
-  assert.throws(() => mutateInputSchemas['config.set'].parse({ section: 'profiles', value: {} }));
+  assert.throws(() => mutateInputSchemas['config.set'].parse({ section: 'mcp', value: {} }));
+});
+
+test('approvals.request enforces per-kind required fields', () => {
+  const s = mutateInputSchemas['approvals.request'];
+  assert.equal(s.parse({ kind: 'reconnect-platform', platform: 'slack' }).platform, 'slack');
+  assert.equal(s.parse({ kind: 'add-machine', machineName: 'atlas' }).machineName, 'atlas');
+  assert.throws(() => s.parse({ kind: 'reconnect-platform' }));       // no platform
+  assert.throws(() => s.parse({ kind: 'add-machine' }));              // no machineName
+  assert.throws(() => s.parse({ kind: 'reboot' }));                   // unknown kind
 });
 
 test('schedules.add accepts valid per-type input', () => {

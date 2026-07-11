@@ -25,6 +25,7 @@ export {
   approvalsListInput,
   approvalsApproveInput,
   approvalsRejectInput,
+  approvalsRequestInput,
   costSummaryInput,
   threadsCancelInput,
   executionsCancelInput,

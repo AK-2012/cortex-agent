@@ -32,7 +32,7 @@ import {
   handleBlockTask,
   handleUnblockTask,
 } from './mutate/tasks.js';
-import { handleApproveApproval, handleRejectApproval } from './mutate/approvals.js';
+import { handleApproveApproval, handleRejectApproval, handleRequestApproval } from './mutate/approvals.js';
 import { createSubscription } from './subscribe.js';
 import { resolveExecutionLogLocation } from '@domain/executions/log-tailer.js';
 
@@ -73,6 +73,7 @@ const mutateHandlers: Record<string, MutateHandler> = {
   'tasks.unblock': (deps, args) => handleUnblockTask(deps, args),
   'approvals.approve': (deps, args) => handleApproveApproval(deps, args),
   'approvals.reject': (deps, args) => handleRejectApproval(deps, args),
+  'approvals.request': (deps, args) => handleRequestApproval(deps, args),
   'config.set': (deps, args) => handleConfigSet(deps, args),
 };
 

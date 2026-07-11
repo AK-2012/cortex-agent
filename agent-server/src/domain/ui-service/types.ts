@@ -56,6 +56,7 @@ export type MutateOp =
   | 'tasks.unblock'
   | 'approvals.approve'
   | 'approvals.reject'
+  | 'approvals.request'
   | 'config.set';
 
 // ── Subscribe ─────────────────────────────────────────────────────
@@ -201,17 +202,22 @@ export interface TaskBlockArgs extends TaskActionArgs {
   reason: string;
 }
 
-// The only safely-writable config section exposed by config.set (Stage 7). Other sections are
-// rejected by both the zod schema and the handler until they get their own validated write path.
+// Safely-writable config.set sections (Stage 7 + task b983). Each section has its own validated
+// write path; any section not listed here is rejected by both the zod schema and the handler.
+// `budget` writes budget.json (daily/monthly); `profiles` re-points the default profile (which must
+// already exist in profiles.json — the write can only SELECT an existing profile, never invent one).
 export interface BudgetValue {
   daily_usd: number;
   monthly_usd: number;
 }
 
-export interface ConfigSetArgs {
-  section: 'budget';
-  value: BudgetValue;
+export interface ProfilesValue {
+  defaultProfile: string;
 }
+
+export type ConfigSetArgs =
+  | { section: 'budget'; value: BudgetValue }
+  | { section: 'profiles'; value: ProfilesValue };
 
 export interface ApprovalsApproveArgs {
   id: string;
@@ -220,6 +226,19 @@ export interface ApprovalsApproveArgs {
 export interface ApprovalsRejectArgs {
   id: string;
   feedback?: string;
+}
+
+// approvals.request enqueues a high-privilege operation as a PENDING entry in
+// PENDING_APPROVALS.md instead of executing it (task b983 — the Web settings "approval gate").
+// The `kind` is a CLOSED enum and the server constructs ALL of the entry's prose; the browser
+// cannot inject arbitrary markdown. Never runs the operation — a human/agent actions it after
+// approval (mirrors approvals.approve, which also only flips the Status line).
+export interface ApprovalsRequestArgs {
+  kind: 'reconnect-platform' | 'add-machine';
+  /** Required when kind === 'reconnect-platform'. */
+  platform?: 'slack' | 'feishu';
+  /** Required when kind === 'add-machine'. */
+  machineName?: string;
 }
 
 // ── Query return types (DTOs) ─────────────────────────────────────
@@ -643,12 +662,18 @@ export interface ExecutionsCancelReturn {
 
 export interface ConfigSetReturn {
   written: true;
-  section: 'budget';
+  section: 'budget' | 'profiles';
 }
 
 export interface ApprovalMutateReturn {
   id: string;
   status: ApprovalStatus;
+}
+
+export interface ApprovalsRequestReturn {
+  queued: true;
+  /** headingId of the newly appended PENDING entry (stable, hashed from the heading line). */
+  id: string;
 }
 
 // ── Mapped types ──────────────────────────────────────────────────
@@ -705,6 +730,7 @@ export interface MutateArgsMap {
   'tasks.unblock': TaskActionArgs;
   'approvals.approve': ApprovalsApproveArgs;
   'approvals.reject': ApprovalsRejectArgs;
+  'approvals.request': ApprovalsRequestArgs;
   'config.set': ConfigSetArgs;
 }
 

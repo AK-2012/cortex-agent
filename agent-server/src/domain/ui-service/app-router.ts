@@ -31,6 +31,7 @@ import {
   approvalsListInput,
   approvalsApproveInput,
   approvalsRejectInput,
+  approvalsRequestInput,
   costSummaryInput,
   threadsCancelInput,
   executionsCancelInput,
@@ -115,7 +116,7 @@ function makeMutation<O extends MutateOp, Sch extends z.ZodType>(
 }
 
 // ── AppRouter ─────────────────────────────────────────────────────────────────────
-// 14 QueryScope + 16 MutateOp + 2 subscriptions (generic `subscribe` + `executions.log`;
+// 14 QueryScope + 17 MutateOp + 2 subscriptions (generic `subscribe` + `executions.log`;
 // `subscribeFilterInput` carries `sessionId` for the S4 `session.message` stream),
 // mirroring the ui-service contract.
 export function createAppRouter(uiService: UiService) {
@@ -178,6 +179,7 @@ export function createAppRouter(uiService: UiService) {
       list: makeQuery(uiService, 'approvals.list', approvalsListInput),
       approve: makeMutation(uiService, 'approvals.approve', approvalsApproveInput),
       reject: makeMutation(uiService, 'approvals.reject', approvalsRejectInput),
+      request: makeMutation(uiService, 'approvals.request', approvalsRequestInput),
     }),
     cost: router({
       summary: makeQuery(uiService, 'cost.summary', costSummaryInput),

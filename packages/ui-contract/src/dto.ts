@@ -41,9 +41,11 @@ export type {
   TaskCompleteArgs,
   TaskBlockArgs,
   BudgetValue,
+  ProfilesValue,
   ConfigSetArgs,
   ApprovalsApproveArgs,
   ApprovalsRejectArgs,
+  ApprovalsRequestArgs,
   // Output DTOs
   ProjectConduitInfo,
   SessionInfo,
@@ -86,6 +88,7 @@ export type {
   ApprovalStatus,
   ApprovalInfo,
   ApprovalMutateReturn,
+  ApprovalsRequestReturn,
   // Mapped contract
   QueryParamMap,
   QueryReturnMap,

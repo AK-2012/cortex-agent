@@ -115,6 +115,7 @@ const mutateOps = [
   'tasks.unblock',
   'approvals.approve',
   'approvals.reject',
+  'approvals.request',
   'config.set',
 ] as const;
 

@@ -166,16 +166,25 @@ export const taskBlockInput = z.object({
   reason: z.string(),
 });
 
-// config.set: only the whitelisted `budget` section is writable (Stage 7). Numbers must be
-// finite and > 0 — rejects NaN / Infinity / non-positive / non-number. The discriminated union
-// leaves room for future safely-writable sections without loosening budget validation.
-export const configSetInput = z.object({
-  section: z.literal('budget'),
-  value: z.object({
-    daily_usd: z.number().finite().positive(),
-    monthly_usd: z.number().finite().positive(),
+// config.set: a discriminated union of the safely-writable sections. `budget` numbers must be
+// finite and > 0 — rejects NaN / Infinity / non-positive / non-number. `profiles` re-points the
+// default profile only (a non-empty name; existence in profiles.json is enforced in the handler,
+// which has the file to check against). Any section not in this union is rejected structurally.
+export const configSetInput = z.discriminatedUnion('section', [
+  z.object({
+    section: z.literal('budget'),
+    value: z.object({
+      daily_usd: z.number().finite().positive(),
+      monthly_usd: z.number().finite().positive(),
+    }),
   }),
-});
+  z.object({
+    section: z.literal('profiles'),
+    value: z.object({
+      defaultProfile: z.string().min(1),
+    }),
+  }),
+]);
 
 export const approvalsApproveInput = z.object({
   id: z.string(),
@@ -185,6 +194,25 @@ export const approvalsRejectInput = z.object({
   id: z.string(),
   feedback: z.string().optional(),
 });
+
+// approvals.request (task b983): enqueue a high-privilege operation for approval. `kind` is a
+// CLOSED enum; the per-kind required field is enforced by superRefine so the router rejects
+// malformed input before the handler runs. The handler constructs the entry's prose — the browser
+// supplies only the enum + a machine name (sanitized handler-side), never raw markdown.
+export const approvalsRequestInput = z
+  .object({
+    kind: z.enum(['reconnect-platform', 'add-machine']),
+    platform: z.enum(['slack', 'feishu']).optional(),
+    machineName: z.string().min(1).optional(),
+  })
+  .superRefine((val, ctx) => {
+    if (val.kind === 'reconnect-platform' && val.platform === undefined) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['platform'], message: 'platform is required for kind=reconnect-platform' });
+    }
+    if (val.kind === 'add-machine' && (val.machineName === undefined || val.machineName.trim() === '')) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['machineName'], message: 'machineName is required for kind=add-machine' });
+    }
+  });
 
 // ── Keyed maps (one entry per QueryScope / MutateOp) ──────────────
 
@@ -222,5 +250,6 @@ export const mutateInputSchemas = {
   'tasks.unblock': taskActionInput,
   'approvals.approve': approvalsApproveInput,
   'approvals.reject': approvalsRejectInput,
+  'approvals.request': approvalsRequestInput,
   'config.set': configSetInput,
 } satisfies Record<MutateOp, z.ZodType>;

@@ -4,9 +4,10 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { writeBudget, handleConfigSet } from '../../../src/domain/ui-service/mutate/config.js';
+import { writeBudget, writeDefaultProfile, handleConfigSet } from '../../../src/domain/ui-service/mutate/config.js';
 import { configSetInput } from '../../../src/domain/ui-service/input-schemas.js';
 import { createUiService } from '../../../src/domain/ui-service/ui-service.js';
+import { CONFIG_DIR } from '../../../src/core/paths.js';
 import type { UiServiceDeps } from '../../../src/domain/ui-service/types.js';
 
 function makeMinimalDeps(): UiServiceDeps {
@@ -98,6 +99,68 @@ test('config.set via facade writes to the isolated CONFIG_DIR and returns writte
 test('config.set via facade rejects invalid input with invalid-args', async () => {
   const result = await createUiService(makeMinimalDeps())
     .mutate('config.set', { section: 'budget', value: { daily_usd: -1, monthly_usd: 2000 } } as any);
+  assert.equal(result.ok, false);
+  if (!result.ok) assert.equal(result.code, 'invalid-args');
+});
+
+// ── profiles section (task b983): re-point defaultProfile to an EXISTING profile ───────
+test('writeDefaultProfile re-points defaultProfile and preserves every other field', async () => {
+  const configDir = await fs.mkdtemp(path.join(os.tmpdir(), 'cfg-prof-'));
+  const original = { defaultProfile: 'plan', profiles: { plan: { model: 'a' }, fast: { model: 'b' } }, extra: 42 };
+  await fs.writeFile(path.join(configDir, 'profiles.json'), JSON.stringify(original), 'utf8');
+  await writeDefaultProfile(configDir, 'fast');
+  const after = JSON.parse(await fs.readFile(path.join(configDir, 'profiles.json'), 'utf8'));
+  assert.equal(after.defaultProfile, 'fast');
+  assert.deepEqual(after.profiles, original.profiles, 'profiles map preserved');
+  assert.equal(after.extra, 42, 'unrelated fields preserved');
+});
+
+test('writeDefaultProfile rejects an unknown profile without changing the file', async () => {
+  const configDir = await fs.mkdtemp(path.join(os.tmpdir(), 'cfg-prof-bad-'));
+  const original = { defaultProfile: 'plan', profiles: { plan: {} } };
+  const file = path.join(configDir, 'profiles.json');
+  await fs.writeFile(file, JSON.stringify(original), 'utf8');
+  await assert.rejects(
+    () => writeDefaultProfile(configDir, 'ghost'),
+    (e: any) => e?.code === 'invalid-args',
+  );
+  assert.deepEqual(JSON.parse(await fs.readFile(file, 'utf8')), original, 'file unchanged');
+});
+
+test('writeDefaultProfile rejects a missing profiles.json with invalid-args', async () => {
+  const configDir = await fs.mkdtemp(path.join(os.tmpdir(), 'cfg-prof-none-'));
+  await assert.rejects(
+    () => writeDefaultProfile(configDir, 'plan'),
+    (e: any) => e?.code === 'invalid-args',
+  );
+});
+
+test('config.set profiles via facade writes defaultProfile and read-back reflects it', async () => {
+  // Seed profiles.json into the isolated CONFIG_DIR so config.get can read it back.
+  await fs.mkdir(CONFIG_DIR, { recursive: true });
+  await fs.writeFile(
+    path.join(CONFIG_DIR, 'profiles.json'),
+    JSON.stringify({ defaultProfile: 'plan', profiles: { plan: { model: 'a' }, fast: { model: 'b' } } }),
+    'utf8',
+  );
+  const ui = createUiService(makeMinimalDeps());
+  const result = await ui.mutate('config.set', { section: 'profiles', value: { defaultProfile: 'fast' } });
+  assert.ok(result.ok);
+  assert.deepEqual(result.data, { written: true, section: 'profiles' });
+  const got = await ui.query('config.get', {});
+  assert.ok(got.ok);
+  assert.equal(got.data.profiles?.defaultProfile, 'fast');
+});
+
+test('config.set profiles via facade rejects an unknown profile with invalid-args', async () => {
+  await fs.mkdir(CONFIG_DIR, { recursive: true });
+  await fs.writeFile(
+    path.join(CONFIG_DIR, 'profiles.json'),
+    JSON.stringify({ defaultProfile: 'plan', profiles: { plan: {} } }),
+    'utf8',
+  );
+  const result = await createUiService(makeMinimalDeps())
+    .mutate('config.set', { section: 'profiles', value: { defaultProfile: 'ghost' } });
   assert.equal(result.ok, false);
   if (!result.ok) assert.equal(result.code, 'invalid-args');
 });

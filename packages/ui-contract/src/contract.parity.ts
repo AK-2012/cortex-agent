@@ -25,6 +25,7 @@ import type {
   approvalsListInput,
   approvalsApproveInput,
   approvalsRejectInput,
+  approvalsRequestInput,
   costSummaryInput,
   threadsCancelInput,
   executionsCancelInput,
@@ -83,6 +84,7 @@ const _tasksUnblock: MutateParity<'tasks.unblock', typeof taskActionInput> = tru
 const _configSet: MutateParity<'config.set', typeof configSetInput> = true;
 const _approvalsApprove: MutateParity<'approvals.approve', typeof approvalsApproveInput> = true;
 const _approvalsReject: MutateParity<'approvals.reject', typeof approvalsRejectInput> = true;
+const _approvalsRequest: MutateParity<'approvals.request', typeof approvalsRequestInput> = true;
 
 // ── Subscriptions ─────────────────────────────────────────────────
 // Subscriptions have no query/mutate map entry; guard the input schema against its backend
@@ -97,5 +99,5 @@ export const _contractParityChecked = [
   _projectsCreate, _sessionsSend, _threadsCancel, _executionsCancel,
   _schedulesPause, _schedulesResume, _schedulesRemove, _schedulesAdd, _tasksClaim,
   _tasksUnclaim, _tasksComplete, _tasksBlock, _tasksUnblock,
-  _approvalsApprove, _approvalsReject, _configSet, _executionsLog,
+  _approvalsApprove, _approvalsReject, _approvalsRequest, _configSet, _executionsLog,
 ] as const;
