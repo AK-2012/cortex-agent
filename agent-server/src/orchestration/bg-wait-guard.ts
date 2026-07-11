@@ -41,25 +41,10 @@ export interface BgWaitGuardOpts {
   timers?: { set: (fn: () => void, ms: number) => unknown; clear: (h: unknown) => void };
 }
 
-const DEFAULT_GRACE_MS = 90_000;
-const DEFAULT_MAX_WAIT_MS = 1_800_000;
-
-function envMs(name: string, defMs: number): number {
-  const raw = process.env[name];
-  if (!raw) return defMs;
-  const s = Number(raw);
-  return Number.isFinite(s) && s > 0 ? s * 1000 : defMs;
-}
-
-/** Grace period for work-done-but-unnotified tasks (CORTEX_BG_GRACE_S, default 90s). */
-export function getBgGraceMs(): number {
-  return envMs('CORTEX_BG_GRACE_S', DEFAULT_GRACE_MS);
-}
-
-/** Max hold for still-running tasks (CORTEX_BG_WAIT_MAX_S, default 30min). */
-export function getBgMaxWaitMs(): number {
-  return envMs('CORTEX_BG_WAIT_MAX_S', DEFAULT_MAX_WAIT_MS);
-}
+// Shared env-tunable durations live in agent-adapter/bg-wait (also used by the thread
+// inline wait); re-exported here for existing orchestration-side consumers/tests.
+import { getBgGraceMs, getBgMaxWaitMs } from '../agent-adapter/bg-wait.js';
+export { getBgGraceMs, getBgMaxWaitMs };
 
 const realTimers = {
   set: (fn: () => void, ms: number): unknown => {

@@ -299,6 +299,82 @@ test('runWithAdapter: context_compacted notifies via onAssistantMessage only whe
   assert.match(onMsgs[0], /37418/);
 });
 
+// --- Thread-session inline background-task wait (2026-07-10) ---
+// A thread step (options.threadId set) whose turn left background work remaining must NOT
+// resolve until the spontaneous continuation completes — mirroring the interactive hold.
+// Interactive turns (threadId null) keep the async lifecycle-hold path and resolve immediately.
+
+interface SinkCapableSpec extends FakeProcessSpec { sinks: any[] }
+
+function makeSinkCapableAdapter(backend: Backend, spec: SinkCapableSpec): AgentAdapter {
+  return {
+    backend,
+    capabilities: CAPABILITIES_BY_BACKEND[backend],
+    spawn(_config: AgentSpawnConfig): AgentProcess {
+      const proc = makeFakeProcess(spec) as AgentProcess & { setContinuationSink?: (s: any) => void };
+      proc.setContinuationSink = (s: any) => spec.sinks.push(s);
+      return proc;
+    },
+    async close(_key: string): Promise<void> {},
+    kill(_key: string): boolean { return false; },
+    listSessions(): string[] { return []; },
+  };
+}
+
+test('runWithAdapter: thread turn with pending background task waits for the continuation and merges it', async () => {
+  const spec: SinkCapableSpec = {
+    events: [{ type: 'turn_complete', numTurns: 1, totalCostUsd: 0.01 }],
+    resultOnResolve: { ...defaultAgentResult('s-thr-bg'), total_cost_usd: 0.01, pendingBackgroundTasks: 1 },
+    recorded: { sendCalls: [], killed: false, closed: false },
+    sinks: [],
+  };
+  const adapter = makeSinkCapableAdapter('claude', spec);
+  const texts: string[] = [];
+
+  const handle = runWithAdapter(
+    adapter, 'msg',
+    { channel: 'thread-x', threadId: 'thr_abc', onAssistantMessage: (t: string) => texts.push(t) },
+    { model: 'm', backend: 'claude', mode: null },
+    undefined,
+  );
+
+  let resolved = false;
+  void handle.promise.then(() => { resolved = true; });
+  // Give the turn plenty of ticks: it must still be waiting on the continuation.
+  for (let i = 0; i < 10; i++) await new Promise((r) => setImmediate(r));
+  assert.equal(resolved, false, 'thread turn held while the background task runs');
+  assert.equal(spec.sinks.length, 1, 'continuation sink registered on the process');
+
+  // Background task completes → spontaneous continuation turn ends.
+  spec.sinks[0].onAssistantText('bg result: PASS');
+  spec.sinks[0].onResult({ ...defaultAgentResult('s-thr-bg'), total_cost_usd: 0.02, num_turns: 2, finalOutput: 'bg result: PASS', pendingBackgroundTasks: 0 });
+
+  const final = await handle.promise;
+  assert.ok(Math.abs((final.total_cost_usd ?? 0) - 0.03) < 1e-9, 'continuation cost merged into the step result');
+  assert.equal(final.finalOutput, 'bg result: PASS', 'continuation output becomes the step output');
+  assert.deepEqual(texts, ['bg result: PASS'], 'continuation text forwarded to the step stream');
+});
+
+test('runWithAdapter: interactive turn (no threadId) with pending background task resolves immediately', async () => {
+  const spec: SinkCapableSpec = {
+    events: [{ type: 'turn_complete', numTurns: 1, totalCostUsd: 0.01 }],
+    resultOnResolve: { ...defaultAgentResult('s-int-bg'), pendingBackgroundTasks: 1 },
+    recorded: { sendCalls: [], killed: false, closed: false },
+    sinks: [],
+  };
+  const adapter = makeSinkCapableAdapter('claude', spec);
+
+  const final = await runWithAdapter(
+    adapter, 'msg',
+    { channel: 'slack:D1' },
+    { model: 'm', backend: 'claude', mode: null },
+    undefined,
+  ).promise;
+
+  assert.equal(final.pendingBackgroundTasks, 1, 'interactive path returns immediately (lifecycle holds the status instead)');
+  assert.equal(spec.sinks.length, 0, 'no inline sink for interactive turns');
+});
+
 // --- Error path: send() rejects; handle.promise rejects with the same error ---
 
 test('runWithAdapter: fatal error from send() rejects handle.promise', async () => {
