@@ -15,9 +15,9 @@ proto-shots 11/12 show the right rail). Diffed vs `proto-shots/11-memory-exp.png
 | `MarkdownView.tsx` | Presentational Markdown renderer: frontmatter card + prototype-styled headings/paragraphs/lists/GFM tables/code/blockquote (prototype L685–716). |
 | `markdown.ts` | **Pure** (TDD): `splitFrontmatter` (YAML `--- … ---` → chip entries + `summary`) · `parseInline` (bold/italic/code/link) · `parseBlocks` (heading/paragraph/list/table/code/blockquote/hr). Dependency-free — no `react-markdown` (public-repo minimalism; exact style control). |
 | `markdown.test.ts` | vitest for `markdown.ts` (13 tests, written first). |
-| `memory-vm.ts` | **Pure** (TDD): `buildTreeRows` (files selectable + dirs w/ real entryCount) · `pickDefaultPath` · `relTimeAgo` · `diffToggle` (verbatim prototype pill hexes). Reuses `overview-vm.deriveActiveProjectId`. |
-| `memory-vm.test.ts` | vitest for `memory-vm.ts` (8 tests). |
-| `memory-render.test.tsx` | `react-dom/server` render checks of `MarkdownView` (5 tests). Neutral placeholder fixtures. |
+| `memory-vm.ts` | **Pure** (TDD): `buildTreeRows` (files selectable + dirs w/ real entryCount) · `pickDefaultPath` · `relTimeAgo` · `diffToggle` (verbatim prototype pill hexes) · `formatLineDiff` · `groupBlame` (zip content lines with real per-line blame → `BlameRow[]`, commit-run boundaries, honest `null` passthrough). Reuses `overview-vm.deriveActiveProjectId`. |
+| `memory-vm.test.ts` | vitest for `memory-vm.ts` (15 tests). |
+| `memory-render.test.tsx` | `react-dom/server` render checks of `MarkdownView` + `BlamePane` (7 tests). Neutral placeholder fixtures. |
 
 ## Real data vs honest placeholders
 
@@ -31,22 +31,29 @@ proto-shots 11/12 show the right rail). Diffed vs `proto-shots/11-memory-exp.png
     bar shows green `+N` / red `−M`; a clean file legitimately reads `+0 −0`. Pure `formatLineDiff()` maps the
     DTO → chips (or `null` → placeholder). Since `~/.cortex/context` is auto-committed, most files show `0/0` —
     the real, spec-faithful answer, not a placeholder.
+  - **Per-line blame (逐行高亮 + commit hash + task ref)** = real `memory.file.blame` (`git blame`). With diff
+    ON, `BlamePane` renders each line with a gutter carrying the REAL short commit hash + a task-ref chip
+    (shown once per commit run) and a subtle per-commit background band. The task ref is parsed server-side
+    from the commit subject (4-hex after a `task`/`manager`/`gate` keyword); it is blank when the commit
+    carries no task tag (honest, never fabricated). Pure `groupBlame()` zips content lines ↔ blame.
 - **HONEST placeholder (mandated — NEVER fabricated numbers)**:
   - **line `+/−` when unresolvable** — when `lineDiff` is `null` (project dir not a git work tree / git
     unavailable / binary) the diff bar falls back to a muted `diff metadata unavailable` note and the amber
     banner explains the file is not git-tracked. Never a fabricated `+42 −7`.
-  - **task ref + commit hash** — still have **no backend scope** → not shown (not fabricated). The **diff
-    toggle renders BOTH visual states 1:1** ("Viewing diff" filled / "Diff hidden" outline); with diff ON the
-    amber banner states the real aggregate (`+N / −M lines changed vs HEAD`) and notes per-line highlighting
-    is not available (only aggregate counts have a backend); the body renders the current working-tree content.
+  - **task ref when the commit carries none** — the gutter chip is blank (honest `null`), never a fabricated
+    ref. The **diff toggle renders BOTH visual states 1:1** ("Viewing diff" filled / "Diff hidden" outline);
+    with diff ON the body switches to the per-line blame pane (real hashes + refs); with diff OFF it renders
+    the plain Markdown. When `blame` is `null` (not a git work tree / git unavailable / binary) the amber
+    banner explains per-line blame is unavailable and the Markdown body is shown instead.
   - **Dir contents** — `memory.tree` returns dir names + counts only (no entry list) → dirs are
     non-selectable and their nested files are NOT enumerated (no dir-listing scope). Flagged gap.
 
 ## Notes
 
 - Consumes `memory.tree` / `memory.file` (+ `projects.list` / `sessions.list` for the active project). The
-  `memory.file.lineDiff` git-numstat field is the only backend-side data added for the real `+/−`; `/trpc`
-  relative URL unchanged.
-- Line `+/−` is now REAL (git numstat). It stays an honest `null`→placeholder when the dir is not a git work
-  tree; do NOT fabricate counts. Per-line highlighting, task ref, and commit hash remain out (no backend).
+  `memory.file.lineDiff` (git-numstat) + `memory.file.blame` (git-blame) fields are the backend-side data for
+  the real `+/−` + per-line blame; `/trpc` relative URL unchanged.
+- Line `+/−` (numstat) AND per-line blame (commit hash + task ref) are now REAL. Both stay an honest
+  `null`→placeholder when the dir is not a git work tree; do NOT fabricate counts / hashes / refs. A task ref
+  is `null` when the commit subject carries no `task`/`manager`/`gate` tag.
 - Entry points: Overview "Project memory" card → `/memory`; header ‹back / projName → `/overview`.

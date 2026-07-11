@@ -14,6 +14,7 @@ import type {
   MemoryTree,
   MemoryFile,
   MemoryLineDiff,
+  MemoryBlameLine,
 } from '../types.js';
 
 // Canonical top-level memory files, in display order. Missing ones are omitted (not errored).
@@ -129,6 +130,69 @@ function gitLineDiff(root: string, relPath: string): MemoryLineDiff | null {
   return { added, removed };
 }
 
+// Extract a task reference (4-hex id) from a commit subject. A ref is only recognized when it is
+// anchored to a `task` / `manager` / `gate` keyword — bare 4-hex tokens (or 4-digit years) are NOT
+// assumed to be refs, so an unsourced line stays an honest `null` rather than a fabricated ref.
+const TASK_REF_RE = /\b(?:task|manager|gate)\s+([0-9a-f]{4})\b/i;
+export function parseTaskRef(subject: string): string | null {
+  const m = TASK_REF_RE.exec(subject);
+  return m ? m[1].toLowerCase() : null;
+}
+
+// Parse `git blame --line-porcelain` output into per-line attribution. Each line group starts with a
+// `<40-hex> <origLine> <finalLine> [<n>]` header, carries a `summary <subject>` field, and ends with
+// the TAB-prefixed content line. The commit hash is shortened to 8 hex; the subject → parseTaskRef.
+export function parseBlamePorcelain(out: string): MemoryBlameLine[] {
+  const rows: MemoryBlameLine[] = [];
+  // git emits the full commit header (incl. `summary`) only the FIRST time a commit is seen;
+  // later lines of the same commit carry only the abbreviated header + content. Cache the parsed
+  // task ref per commit so repeated lines keep their ref.
+  const refByCommit = new Map<string, string | null>();
+  let commit: string | null = null;
+  let lineNo = 0;
+  for (const raw of out.split('\n')) {
+    if (raw.startsWith('\t')) {
+      // Content line closes the current group.
+      if (commit) {
+        rows.push({ line: lineNo, commit: commit.slice(0, 8), taskRef: refByCommit.get(commit) ?? null });
+      }
+      commit = null;
+      continue;
+    }
+    const header = /^([0-9a-f]{40}) \d+ (\d+)(?: \d+)?$/.exec(raw);
+    if (header) {
+      commit = header[1];
+      lineNo = Number(header[2]);
+      continue;
+    }
+    if (commit && raw.startsWith('summary ')) {
+      refByCommit.set(commit, parseTaskRef(raw.slice('summary '.length)));
+    }
+  }
+  return rows;
+}
+
+// Real per-line blame (commit hash + parsed task ref). Returns null (honest placeholder, never
+// fabricated) when the project dir is not a git work tree, git is unavailable, or the file is
+// binary/unblameable. Read-only; array args (no shell) — `relPath` is already validated.
+function gitBlame(root: string, relPath: string): MemoryBlameLine[] | null {
+  let out: string;
+  try {
+    out = execFileSync('git', ['blame', '--line-porcelain', 'HEAD', '--', relPath], {
+      cwd: root,
+      encoding: 'utf8',
+      timeout: 5000,
+      maxBuffer: 8 * 1024 * 1024,
+      stdio: ['ignore', 'pipe', 'ignore'],
+      env: { ...process.env, GIT_TERMINAL_PROMPT: '0' },
+    });
+  } catch {
+    // git missing / not a repo / binary / non-zero exit → unknown, not fabricated.
+    return null;
+  }
+  return parseBlamePorcelain(out);
+}
+
 export async function handleMemoryFile(
   deps: UiServiceDeps,
   params: MemoryFileParams,
@@ -145,5 +209,6 @@ export async function handleMemoryFile(
     sizeBytes: st.size,
     modifiedAt: st.mtime.toISOString(),
     lineDiff: gitLineDiff(root, params.path),
+    blame: gitBlame(root, params.path),
   };
 }

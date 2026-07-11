@@ -1,6 +1,9 @@
 import { describe, it, expect } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { MarkdownView } from './MarkdownView';
+import { BlamePane } from './MemoryView';
+import { groupBlame } from './memory-vm';
+import type { MemoryBlameLine } from '@cortex-agent/ui-contract';
 
 // react-dom/server render checks for the memory viewer 7b presentational surface. vitest
 // runs in node; data fetching + the diff toggle + tree selection live in MemoryView (verified against
@@ -48,5 +51,37 @@ describe('MarkdownView', () => {
     const html = renderToStaticMarkup(<MarkdownView content={'plain body, no frontmatter'} />);
     expect(html).toContain('plain body, no frontmatter');
     expect(html).not.toContain('summary');
+  });
+});
+
+describe('BlamePane', () => {
+  const blame: MemoryBlameLine[] = [
+    { line: 1, commit: 'aaaa1111', taskRef: 'ab12' },
+    { line: 2, commit: 'aaaa1111', taskRef: 'ab12' },
+    { line: 3, commit: 'bbbb2222', taskRef: null },
+  ];
+
+  it('shows the real commit hash + task ref once per commit run, and the line text', () => {
+    const rows = groupBlame(blame, 'alpha\nbeta\ngamma\n')!;
+    const html = renderToStaticMarkup(<BlamePane rows={rows} />);
+    // Line texts present.
+    expect(html).toContain('alpha');
+    expect(html).toContain('beta');
+    expect(html).toContain('gamma');
+    // Real commit hashes present (not fabricated).
+    expect(html).toContain('aaaa1111');
+    expect(html).toContain('bbbb2222');
+    // Task ref chip present for the tagged commit.
+    expect(html).toContain('ab12');
+  });
+
+  it('renders no task-ref chip when the commit carries none (honest blank, not fabricated)', () => {
+    const rows = groupBlame(
+      [{ line: 1, commit: 'cccc3333', taskRef: null }],
+      'only line\n',
+    )!;
+    const html = renderToStaticMarkup(<BlamePane rows={rows} />);
+    expect(html).toContain('cccc3333');
+    expect(html).toContain('only line');
   });
 });
