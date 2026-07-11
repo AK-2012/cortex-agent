@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from 'react';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useTRPC } from '@/lib/trpc';
 import { useToast } from '@/design';
 import { ScheduleModal } from './ScheduleModal';
@@ -7,6 +7,7 @@ import {
   defaultScheduleForm,
   buildScheduleAddArgs,
   validateScheduleForm,
+  profileOptions,
   type ScheduleForm,
 } from './schedule-modal-vm';
 
@@ -31,6 +32,10 @@ export function ScheduleModalProvider({ children }: { children: ReactNode }) {
   const queryClient = useQueryClient();
   const { toast } = useToast();
   const [form, setForm] = useState<ScheduleForm | null>(null);
+
+  // Real selectable profiles come from the redacted config.get snapshot (profiles.json → names).
+  const configQuery = useQuery(trpc.config.get.queryOptions({}));
+  const profileNames = configQuery.data?.profiles?.profiles.map((p) => p.name);
 
   const close = useCallback(() => setForm(null), []);
   const open = useCallback((opts?: OpenOptions) => {
@@ -74,6 +79,7 @@ export function ScheduleModalProvider({ children }: { children: ReactNode }) {
           onCreate={onCreate}
           valid={validateScheduleForm(form).ok}
           pending={addSchedule.isPending}
+          profileOptions={profileOptions(profileNames, form.profile)}
         />
       )}
     </ScheduleModalContext.Provider>

@@ -14,6 +14,7 @@ function render(overrides: Partial<ScheduleForm> = {}, extra: Partial<Parameters
       valid
       pending={false}
       now={new Date(2026, 6, 7, 8, 8, 0)}
+      profileOptions={['default', 'research']}
       {...extra}
     />,
   );
@@ -41,6 +42,12 @@ describe('ScheduleModal render (daily = proto-shot 13 bar)', () => {
     expect(html).toContain('>PROFILE<');
     expect(html).not.toContain('>EVERY<');
     expect(html).not.toContain('>DAY<');
+  });
+
+  it('PROFILE dropdown lists the provided (real) profile options', () => {
+    const html = render({ type: 'daily', profile: 'research' }, { profileOptions: ['default', 'research'] });
+    expect(html).toContain('>default</option>');
+    expect(html).toContain('>research</option>');
   });
 
   it('renders MESSAGE / TARGET / FALLBACK section labels', () => {

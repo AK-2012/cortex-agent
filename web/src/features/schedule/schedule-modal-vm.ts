@@ -29,9 +29,20 @@ export const DAY_OPTIONS: { value: number; label: string }[] = [
   { value: 6, label: 'Sat' },
 ];
 
-// PROFILE has no `profiles` tRPC scope (c3ce precedent: profile-menu is a static set). `profile` is
-// optional in ScheduleAddArgs, so this static list is a flagged placeholder, not backend-driven.
-export const PROFILE_OPTIONS: string[] = ['claude-haiku', 'claude-sonnet', 'claude-opus', 'research'];
+// PROFILE options are the real agent profiles, sourced from `config.get` (ConfigSnapshot.profiles —
+// read from ~/.cortex/config/profiles.json, redacted to names). `profile` is optional in
+// ScheduleAddArgs. This pure helper derives the <select> options from those real names while
+// guaranteeing the form's current value stays selectable (controlled-select invariant). When no
+// source is available (profiles.json absent → undefined/empty) it returns only the current value —
+// or nothing when current is empty — never a fabricated list.
+export function profileOptions(names: string[] | undefined, current: string): string[] {
+  const out: string[] = [];
+  for (const name of names ?? []) {
+    if (!out.includes(name)) out.push(name);
+  }
+  if (current && !out.includes(current)) out.push(current);
+  return out;
+}
 
 export interface ScheduleForm {
   type: SchedType;

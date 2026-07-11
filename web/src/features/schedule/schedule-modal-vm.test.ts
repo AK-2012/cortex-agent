@@ -8,6 +8,7 @@ import {
   computeNextRun,
   nextRunLabel,
   nextRunParts,
+  profileOptions,
   SCHED_TYPES,
   DAY_OPTIONS,
   FALLBACK_OPTIONS,
@@ -33,6 +34,29 @@ describe('SCHED_TYPES / option lists', () => {
   });
   it('target options only include constructible kinds', () => {
     expect(TARGET_OPTIONS).toEqual(['current-channel', 'fresh', 'project']);
+  });
+});
+
+describe('profileOptions', () => {
+  it('returns the real profile names unchanged when current is among them', () => {
+    expect(profileOptions(['default', 'research'], 'research')).toEqual(['default', 'research']);
+  });
+  it('appends current once when it is not among the real names', () => {
+    expect(profileOptions(['default', 'research'], 'claude-haiku')).toEqual([
+      'default',
+      'research',
+      'claude-haiku',
+    ]);
+  });
+  it('does not duplicate current when it is already present', () => {
+    expect(profileOptions(['default', 'default'], 'default')).toEqual(['default']);
+  });
+  it('no source (undefined names) → only the current value, nothing fabricated', () => {
+    expect(profileOptions(undefined, 'claude-haiku')).toEqual(['claude-haiku']);
+  });
+  it('no source and empty current → empty list', () => {
+    expect(profileOptions(undefined, '')).toEqual([]);
+    expect(profileOptions([], '')).toEqual([]);
   });
 });
 
