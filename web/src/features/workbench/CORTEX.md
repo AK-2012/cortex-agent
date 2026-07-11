@@ -31,11 +31,11 @@ LeftRail (f528) + CenterChat (89e7) + RightPanel (1e96) are all real 1:1 — the
 | `thread-card-proto.test.ts` | vitest for `thread-card-proto.ts` (4 tests). |
 | `chat-content.ts` | Static non-data content (task aba0 trimmed the transcript constants — the body is now real): `toolCallsLabel` + `ToolCall`/`ApprovalContent` types · `SLASH_COMMANDS` (18-slash-menu, verbatim) · `REPRESENTATIVE_APPROVAL` (Stage-5 GAP-B) · `DEFAULT_CHAT_PROFILE`. |
 | `chat-content.test.ts` | vitest for `chat-content.ts` (4 tests). |
-| `RightPanel.tsx` | **Real Right Panel 1:1** (prototype L1091–1276, task 1e96). Same export `RightPanel(): JSX.Element` (replaced the f528 STUB). Exact inline styles/px/hex/font/weight/EN copy; real tRPC data. Tab bar Threads/Tasks/Machines + counts (real `threads.list` active len · `tasks.list` open actionable count · Machines `0` GAP-M) · cost/budget bar (real `cost.summary.today`; budget denominator GAP-B) · Active/History toggle (`scope.ts`) · Threads tab = `RightThreadCard` list · Tasks tab = reused `features/tasks/TasksPanel` · Machines tab = `RightMachinesTab` stub. |
+| `RightPanel.tsx` | **Real Right Panel 1:1** (prototype L1091–1276, task 1e96). Same export `RightPanel(): JSX.Element` (replaced the f528 STUB). Exact inline styles/px/hex/font/weight/EN copy; real tRPC data. Tab bar Threads/Tasks/Machines + counts (real `threads.list` active len · `tasks.list` open actionable count · real `machines.list` len, task 2a13) · cost/budget bar (real `cost.summary.today`; budget denominator GAP-B) · Active/History toggle (`scope.ts`) · Threads tab = `RightThreadCard` list · Tasks tab = reused `features/tasks/TasksPanel` · Machines tab = `RightMachinesTab`. |
 | `RightThreadCard.tsx` | One thread card 1:1 (prototype L1115–1185). Header (node icon · mono templateName · status pill · meta line · depth dots) + collapsible step-tree body (running/opened cards fetch `threads.get`; dot+tail grid, active-step dispatch/subthread sub-cards) + footer (Pause · Cancel · Detail · Σcost). Cancel = real `threads.cancel` mutation → invalidates `threads.list`/`threads.get` (live). Pause inert (GAP-P). |
-| `RightMachinesTab.tsx` | Machines tab **structural stub** (prototype L1237–1274). GAP-M: no machines tRPC scope (Stage 7). |
-| `right-panel-vm.ts` | **Pure** VM helpers (TDD): `threadPill` (verbatim prototype `pill()` hexes) · `stepDotKind` · `formatCost`/`formatDurationS`/`stepMeta` · `formatAge`/`threadMetaLine` · `depthInfo` (reuses `thread/nested-threads` `treeMaxLevel`) · `actionableCount`. |
-| `right-panel-vm.test.ts` | vitest for `right-panel-vm.ts` (19 tests). |
+| `RightMachinesTab.tsx` | Machines tab **real 1:1** (prototype L1237–1274, task 2a13). Queries `machines.list`; renders machine cards (name / Online-Offline pill / GPU ×N / live-runs pulse dot) + empty / loading / error states. Replaces the GAP-M structural stub. |
+| `right-panel-vm.ts` | **Pure** VM helpers (TDD): `threadPill` (verbatim prototype `pill()` hexes) · `stepDotKind` · `formatCost`/`formatDurationS`/`stepMeta` · `formatAge`/`threadMetaLine` · `depthInfo` (reuses `thread/nested-threads` `treeMaxLevel`) · `actionableCount` · `machinePill` (task 2a13). |
+| `right-panel-vm.test.ts` | vitest for `right-panel-vm.ts` (21 tests, +2 `machinePill` tests, task 2a13). |
 | `session-groups.ts` | **Pure** helpers (TDD): `groupSessions` (local-day TODAY/YESTERDAY/EARLIER partition, recent-first), `sessionMeta` (HH:MM + `· from schedule`), `projectInitials`. |
 | `session-groups.test.ts` | vitest for `session-groups.ts` (10 tests). |
 | `scope.ts` / `scope.test.ts` | Active/History → query-filter mapping (`threadScopeFilter` status[] · `taskScopeFilter` open\|done). Reused by RightPanel. |
@@ -57,8 +57,7 @@ project/trigger with no session/turn/message linkage (escalated to manager, task
 (reuses the `!cancel` channel-cancel path via an injected `cancelSessionRun` dep); **slash execution** — no backend op
 → the 18-slash-menu is a local visual affordance only. The other LIVE center surface (inline thread card,
 `threads.get`) is kept. Right Panel
-(1e96): **GAP-M** Machines tab — no machines tRPC
-scope (**Stage 7**); **GAP-P** Pause — no `threads` pause MutateOp (inert affordance); **GAP-B**
+(1e96): **GAP-M RESOLVED** (task 2a13) — Machines tab now real (`machines.list`, machine cards rendered); **GAP-P** Pause — no `threads` pause MutateOp (inert affordance); **GAP-B**
 budget denominator — `CostSummary` has `today` only, no budget scope (rendered `today` real, `/ —` +
 empty bar; **Stage 7**).
 
