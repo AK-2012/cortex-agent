@@ -171,6 +171,8 @@ function approval(over: Partial<ApprovalInfo> = {}): ApprovalInfo {
     queuedAt: '2026-07-09',
     decidedAt: null,
     feedback: null,
+    provenance: null,
+    taskRef: null,
     ...over,
   };
 }

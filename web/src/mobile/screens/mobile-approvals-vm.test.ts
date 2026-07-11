@@ -14,6 +14,8 @@ function mk(partial: Partial<ApprovalInfo> & { id: string }): ApprovalInfo {
     queuedAt: partial.queuedAt ?? null,
     decidedAt: partial.decidedAt ?? null,
     feedback: partial.feedback ?? null,
+    provenance: partial.provenance ?? null,
+    taskRef: partial.taskRef ?? null,
   };
 }
 

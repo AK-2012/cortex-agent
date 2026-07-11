@@ -2,10 +2,13 @@ import type { ApprovalInfo, ApprovalStatus } from '@cortex-agent/ui-contract';
 
 // Pure view-model for the approval center overlay (design 7a, prototype.dc.html L1317-1405).
 // Maps the REAL `ApprovalInfo` DTO (parsed from PENDING_APPROVALS.md) into the prototype's slots.
-// The prototype's mock carries fields the real markdown does NOT have (tag / origin / from / task /
-// ttl / an ESTIMATE cost table / a why rationale) — those are omitted or rendered as `—` here; we
-// NEVER fabricate a value (esp. no invented cost numbers). Framework-free so the DTO→value mapping
-// is unit-tested in isolation.
+// §12 C item 13 source verification: the origin/from/task slots are backed by the REAL (optional)
+// `provenance` bullet — origin/from = the verbatim provenance text, task = its parsed 4-hex `taskRef`;
+// both are honest null when the entry has no provenance bullet (never fabricated). The prototype's
+// `ttl` slot has ZERO source (the markdown queue has no expiry concept — the 30-min hook-bridge plan
+// TTL is a different channel) → it stays omitted, never fabricated. The `tag` safety-class pill + the
+// ESTIMATE cost table + the why rationale likewise have no field → omitted (the mono block shows the
+// real COMMAND, no invented cost numbers). Framework-free so the DTO→value mapping is unit-tested.
 
 /** Explicit missing-field placeholder. */
 export const DASH = '—';
@@ -40,10 +43,12 @@ export interface ApprovalListCard {
   title: string;
   /** queuedAt date shown in the card's age slot; null → omit (no fabricated relative age). */
   age: string | null;
+  /** Verbatim provenance = the left-card origin slot; null → omit (no fabricated origin). */
+  origin: string | null;
 }
 
 export function toListCard(a: ApprovalInfo): ApprovalListCard {
-  return { id: a.id, title: a.title, age: a.queuedAt };
+  return { id: a.id, title: a.title, age: a.queuedAt, origin: a.provenance };
 }
 
 export interface ApprovalDetailVm {
@@ -60,6 +65,10 @@ export interface ApprovalDetailVm {
   hasCommand: boolean;
   /** Parenthetical feedback captured from a rejected entry (resolved entries only). */
   feedback: string | null;
+  /** Verbatim provenance = the detail meta-row `from` slot; null → omit (no fabricated origin). */
+  origin: string | null;
+  /** Parsed 4-hex task ref = the detail meta-row `task` slot; null → omit (no fabricated ref). */
+  task: string | null;
 }
 
 export function toDetail(a: ApprovalInfo): ApprovalDetailVm {
@@ -75,6 +84,8 @@ export function toDetail(a: ApprovalInfo): ApprovalDetailVm {
     command,
     hasCommand: command != null && command.trim() !== '',
     feedback: a.feedback,
+    origin: a.provenance,
+    task: a.taskRef,
   };
 }
 

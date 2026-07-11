@@ -123,6 +123,57 @@ test('parseApprovals assigns stable, distinct ids', () => {
   assert.ok(first.every((id) => /^[0-9a-f]{8}$/.test(id)));
 });
 
+// ── (4b) provenance + taskRef (§12 C item 13): real-when-present, honest null else ──
+// The canonical writer (need-approval skill) and the approval-gate builder BOTH emit only
+// Operation/Reason/Impact/Command/Status — NO origin/task/ttl structured field. The only real
+// carrier of "who raised this" + a task ref is the OPTIONAL freeform `Provenance` bullet some
+// entries add. We parse it verbatim (provenance) + extract a 4-hex task ref (taskRef, reusing the
+// memory.ts parseTaskRef semantics) — real when present, honest null when absent. TTL has ZERO
+// source anywhere in the queue → never a fabricated field.
+const PROV_SAMPLE = `# Pending Approvals
+
+## 2026-07-10 Atlas: run a thing
+- **Operation**: do the thing
+- **Reason**: needed
+- **Impact**: some files
+- **Command/Action**: run it
+- **Status**: pending
+- **Provenance**: Cortex executor thread thr_42a1b744 (task 89dd), 2026-07-10
+
+## 2026-07-10 Nimbus: manager-raised
+- **Operation**: other thing
+- **Status**: pending
+- **Provenance**: manager c2a3 raised this after review
+
+## 2026-07-10 Orchard: no provenance
+- **Operation**: bare thing
+- **Status**: pending
+`;
+
+test('parseApprovals captures a verbatim Provenance bullet + parses its task ref', () => {
+  const [a, b, c] = parseApprovals(PROV_SAMPLE);
+
+  // (a) thread + explicit `task <4hex>` → verbatim provenance + parsed taskRef.
+  assert.equal(a.provenance, 'Cortex executor thread thr_42a1b744 (task 89dd), 2026-07-10');
+  assert.equal(a.taskRef, '89dd');
+
+  // (b) `manager <4hex>` keyword → taskRef parsed from the manager anchor (parseTaskRef semantics).
+  assert.equal(b.provenance, 'manager c2a3 raised this after review');
+  assert.equal(b.taskRef, 'c2a3');
+
+  // (c) no Provenance bullet → honest null for BOTH (never fabricated).
+  assert.equal(c.provenance, null);
+  assert.equal(c.taskRef, null);
+});
+
+test('parseApprovals never fabricates a ttl/expiry field (zero-source)', () => {
+  // TTL is the prototype amber "expires in …" slot; the markdown queue has no expiry concept at all.
+  // Guard: the DTO must not carry a fabricated ttl value.
+  for (const e of parseApprovals(PROV_SAMPLE)) {
+    assert.equal((e as Record<string, unknown>).ttl, undefined);
+  }
+});
+
 // ── (5) missing file → [] ────────────────────────────────────────────────────
 test('handleApprovalsList returns [] when the file is missing', async () => {
   const deps = makeDeps(path.join(os.tmpdir(), 'does-not-exist-approvals.md'));

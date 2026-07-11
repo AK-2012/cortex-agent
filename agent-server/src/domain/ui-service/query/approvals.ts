@@ -12,15 +12,19 @@ import type {
   ApprovalStatus,
   ApprovalsListParams,
 } from '../types.js';
+import { parseTaskRef } from './memory.js';
 
 const DATE_RE = /\d{4}-\d{2}-\d{2}/;
 
 // Map a bullet field label → the ApprovalInfo key it fills.
-const FIELD_KEYS: Record<string, 'operation' | 'reason' | 'impact' | 'command'> = {
+const FIELD_KEYS: Record<string, 'operation' | 'reason' | 'impact' | 'command' | 'provenance'> = {
   Operation: 'operation',
   Reason: 'reason',
   Impact: 'impact',
   'Command/Action': 'command',
+  // The only real origin/task carrier — an OPTIONAL freeform bullet a subset of entries add. Not
+  // emitted by either writer (need-approval skill / approval-gate builder); honest null when absent.
+  Provenance: 'provenance',
 };
 
 // Classify a raw `Status` value. Prefix-matched because the real file has variants like
@@ -51,7 +55,12 @@ export function parseApprovals(md: string, filter?: ApprovalStatus): ApprovalInf
   let current: ApprovalInfo | null = null;
 
   const flush = (): void => {
-    if (current) entries.push(current);
+    if (current) {
+      // Derive the task ref from the real provenance text (parseTaskRef: a 4-hex id anchored to a
+      // task/manager/gate keyword). Honest null when there is no provenance bullet or no anchored ref.
+      current.taskRef = current.provenance ? parseTaskRef(current.provenance) : null;
+      entries.push(current);
+    }
     current = null;
   };
 
@@ -74,6 +83,8 @@ export function parseApprovals(md: string, filter?: ApprovalStatus): ApprovalInf
         queuedAt,
         decidedAt: null,
         feedback: null,
+        provenance: null,
+        taskRef: null,
       };
       continue;
     }

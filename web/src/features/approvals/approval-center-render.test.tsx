@@ -18,6 +18,8 @@ function entry(over: Partial<ApprovalInfo> = {}): ApprovalInfo {
     queuedAt: '2026-07-05',
     decidedAt: null,
     feedback: null,
+    provenance: null,
+    taskRef: null,
     ...over,
   };
 }
@@ -78,6 +80,21 @@ describe('ApprovalCenterView', () => {
   it('renders — placeholders for missing operation/reason/impact', () => {
     const html = view({ entries: [entry({ operation: null, reason: null, impact: null })] });
     expect(html).toContain('—');
+  });
+
+  it('renders the real origin/from + parsed task ref when provenance is present (§12 C item 13)', () => {
+    const html = view({
+      entries: [entry({ provenance: 'coder thread thr_ab12 (task 7c9d)', taskRef: '7c9d' })],
+    });
+    expect(html).toContain('coder thread thr_ab12 (task 7c9d)'); // left-card origin + detail `from`
+    expect(html).toContain('task ');
+    expect(html).toContain('7c9d');
+  });
+
+  it('omits origin/from/task when provenance is absent (honest, no fabrication)', () => {
+    const html = view({ entries: [entry({ provenance: null, taskRef: null })] });
+    expect(html).not.toContain('from <');
+    expect(html).not.toContain('task <');
   });
 
   it('omits the COMMAND block when command is absent', () => {

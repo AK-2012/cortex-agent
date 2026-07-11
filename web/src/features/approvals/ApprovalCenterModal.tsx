@@ -16,13 +16,18 @@ import {
 // Approve → approvals.approve, Reject-feedback → approvals.reject({id,feedback}); a decision flips
 // the target entry's Status line in PENDING_APPROVALS.md and the list re-invalidates → live refresh.
 //
-// DATA GAPS rendered structurally + flagged (workbench precedent). The real ApprovalInfo only has
-// {title,operation,reason,impact,command,status,queuedAt,decidedAt,feedback}; the prototype's mock
-// extras have NO backing field and are OMITTED (never fabricated):
-//   • tag / origin (left card meta)   — no safety-class / origin field.
-//   • from / task / ttl (meta row)    — no thread / task / Slack-TTL field.
-//   • ESTIMATE cost table             — no cost data; the mono block shows the real COMMAND instead.
-//   • Why-approval note               — no rationale field.
+// DATA GAPS rendered structurally + flagged (workbench precedent). §12 C item 13 verified the real
+// source of the origin/task/ttl slots against BOTH writers (need-approval skill + approval-gate
+// builder) and the live queue:
+//   • origin / from (left card + meta) — REAL when present via the optional `provenance` bullet
+//     (verbatim), honest-omit when absent. Not fabricated.
+//   • task (meta row)                  — REAL when present: `taskRef` (4-hex, parseTaskRef) parsed
+//     from `provenance`; honest-omit when absent.
+//   • ttl (meta row)                   — ZERO source: the markdown queue has no expiry concept (the
+//     30-min hook-bridge plan TTL is a different channel). Stays OMITTED, never fabricated.
+//   • tag (safety-class pill)          — no safety-class field → omitted.
+//   • ESTIMATE cost table              — no cost data; the mono block shows the real COMMAND instead.
+//   • Why-approval note                — no rationale field.
 // queuedAt has date-only (no clock), so the "age" and "queued" slots show the date.
 
 const mono = "'IBM Plex Mono',monospace";
@@ -299,7 +304,8 @@ function PendingList({
                   >
                     {card.title}
                   </div>
-                  {/* meta row: tag + origin OMITTED (no backing field); age = queuedAt date */}
+                  {/* meta row: tag OMITTED (no safety-class field); origin = real provenance when
+                      present; age = queuedAt date */}
                   <div
                     style={{
                       display: 'flex',
@@ -309,6 +315,9 @@ function PendingList({
                       flexWrap: 'wrap',
                     }}
                   >
+                    {card.origin && (
+                      <span style={{ font: `400 9px ${mono}`, color: '#98A1B0' }}>{card.origin}</span>
+                    )}
                     {card.age && (
                       <span style={{ marginLeft: 'auto', font: `400 9px ${mono}`, color: '#B6BDC9' }}>
                         {card.age}
@@ -380,7 +389,8 @@ function DetailPane({
           </span>
         </div>
 
-        {/* meta row: from / task / ttl OMITTED (no backing field); queued = queuedAt date */}
+        {/* meta row: queued = queuedAt date; from = real provenance; task = parsed taskRef; ttl
+            OMITTED (zero source — no expiry in the markdown queue), never fabricated */}
         <div
           style={{
             display: 'flex',
@@ -393,6 +403,16 @@ function DetailPane({
           }}
         >
           {detail.queued && <span>{detail.queued}</span>}
+          {detail.origin && (
+            <span>
+              from <span style={{ color: '#4655D4' }}>{detail.origin}</span>
+            </span>
+          )}
+          {detail.task && (
+            <span>
+              task <span style={{ color: '#4655D4' }}>{detail.task}</span>
+            </span>
+          )}
         </div>
 
         {/* OPERATION / REASON / IMPACT grid */}

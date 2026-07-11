@@ -698,6 +698,21 @@ export interface ApprovalInfo {
   decidedAt: string | null;
   /** Parenthetical feedback captured from a rejected Status line, null otherwise. */
   feedback: string | null;
+  /**
+   * Verbatim `Provenance` bullet — the only real "who raised this / origin" carrier in the queue
+   * (§12 C item 13). Neither the need-approval skill nor the approval-gate builder emit a structured
+   * origin/from field; a subset of entries add this freeform bullet. `null` (honest placeholder,
+   * never fabricated) when absent. Backs the approval-center origin/from slots.
+   */
+  provenance: string | null;
+  /**
+   * 4-hex task/manager/gate ref parsed from `provenance` (parseTaskRef semantics, shared with
+   * memory blame). `null` (honest placeholder, never fabricated) when the provenance bullet is
+   * absent or carries no anchored ref. Backs the approval-center `task` slot.
+   * NOTE: the prototype's `ttl` slot has ZERO source (the markdown queue has no expiry concept) →
+   * deliberately NOT a DTO field, never fabricated.
+   */
+  taskRef: string | null;
 }
 
 // ── Mutate return types ───────────────────────────────────────────

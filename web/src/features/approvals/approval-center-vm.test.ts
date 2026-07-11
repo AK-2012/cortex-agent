@@ -21,6 +21,8 @@ function mk(over: Partial<ApprovalInfo> = {}): ApprovalInfo {
     queuedAt: '2026-07-05',
     decidedAt: null,
     feedback: null,
+    provenance: null,
+    taskRef: null,
     ...over,
   };
 }
@@ -56,10 +58,17 @@ describe('toListCard', () => {
       id: 'x',
       title: 'T',
       age: '2026-07-05',
+      origin: null,
     });
   });
   it('leaves age null when queuedAt is null (no fabrication)', () => {
     expect(toListCard(mk({ queuedAt: null })).age).toBeNull();
+  });
+  it('carries the provenance origin when present, null when absent (§12 C item 13)', () => {
+    expect(toListCard(mk({ provenance: 'thread thr_1 (task 89dd)' })).origin).toBe(
+      'thread thr_1 (task 89dd)',
+    );
+    expect(toListCard(mk({ provenance: null })).origin).toBeNull();
   });
 });
 
@@ -91,6 +100,14 @@ describe('toDetail', () => {
   });
   it('carries reject feedback through', () => {
     expect(toDetail(mk({ status: 'rejected', feedback: 'nope' })).feedback).toBe('nope');
+  });
+  it('maps the provenance origin + parsed task ref, null when absent (§12 C item 13)', () => {
+    const d = toDetail(mk({ provenance: 'manager c2a3 raised this', taskRef: 'c2a3' }));
+    expect(d.origin).toBe('manager c2a3 raised this');
+    expect(d.task).toBe('c2a3');
+    const bare = toDetail(mk({ provenance: null, taskRef: null }));
+    expect(bare.origin).toBeNull();
+    expect(bare.task).toBeNull();
   });
 });
 
