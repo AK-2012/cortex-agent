@@ -13,7 +13,7 @@ import { useThreadsLiveSync } from './useThreadsLiveSync';
 // styles / px / hex / font / weight / EN copy reproduced verbatim; real tRPC data (cost.summary /
 // threads.list / threads.get / tasks.list) substituted into the design's structure. Replaces the
 // f528 STUB behind the SAME export signature. Data gaps rendered structurally + flagged (see the
-// completion note): Machines tab has no tRPC scope (Stage 7); Pause has no mutate op (non-functional);
+// completion note): Machines tab real (task 2a13); Pause has no mutate op (non-functional);
 // the budget denominator has no scope (CostSummary carries `today` only — Stage 7 config surface).
 
 type Tab = 'threads' | 'tasks' | 'machines';
