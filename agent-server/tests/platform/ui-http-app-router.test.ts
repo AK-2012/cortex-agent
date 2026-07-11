@@ -133,8 +133,8 @@ test('every mutation routes to the correct op and unwraps Result.data', async ()
   }
 });
 
-test('coverage: exactly 9 queries + 14 mutations exercised', () => {
-  assert.equal(QUERY_CASES.length, 9);
+test('coverage: exactly 10 queries + 14 mutations exercised', () => {
+  assert.equal(QUERY_CASES.length, 10);
   assert.equal(MUTATE_CASES.length, 14);
 });
 
