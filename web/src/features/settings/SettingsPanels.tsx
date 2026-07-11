@@ -789,6 +789,10 @@ export function NotificationsPanel({ snapshot }: { snapshot: ConfigSnapshot }) {
   const idx = indexEnv(snapshot.env);
   const slackPresent = hasAnyKey(snapshot.env, 'SLACK_');
   const feishuPresent = hasAnyKey(snapshot.env, 'FEISHU_');
+  // Specific admin-channel key presence for notification routing.
+  // Values are always masked (••••••••) — never cleartext — enforced by config.get contract.
+  const slackChannel = envRow(idx, 'SLACK_ADMIN_CHANNEL');
+  const feishuChannel = envRow(idx, 'FEISHU_ADMIN_CHANNEL');
   const toggles: { key: string; title: string; desc: string; env: string }[] = [
     {
       key: NOTIFY_KEYS.turn,
@@ -811,6 +815,8 @@ export function NotificationsPanel({ snapshot }: { snapshot: ConfigSnapshot }) {
   ];
   return (
     <>
+      {/* Env-flag toggles — REAL presence from config.get.
+          WRITE path (env toggle) belongs to settings-actions / M-B-9 — controls are inert here. */}
       <SCard>
         {toggles.map((t, i) => (
           <div
@@ -832,6 +838,9 @@ export function NotificationsPanel({ snapshot }: { snapshot: ConfigSnapshot }) {
           </div>
         ))}
       </SCard>
+
+      {/* Platform routing — REAL data: shows SLACK_ADMIN_CHANNEL / FEISHU_ADMIN_CHANNEL key
+          presence (masked ••••••••; value never returned by config.get contract). */}
       <SCard style={{ marginTop: 12 }}>
         <SCardHeader title="系统通知去向" right="多平台逐个分发" />
         <div
@@ -846,13 +855,31 @@ export function NotificationsPanel({ snapshot }: { snapshot: ConfigSnapshot }) {
           <PlatformAvatar glyph="S" />
           <span style={{ fontSize: 11.5, fontWeight: 600, color: '#191C22' }}>Slack</span>
           <PresencePill present={slackPresent} />
+          {slackPresent && (
+            <span style={{ marginLeft: 'auto', font: `400 9.5px ${MONO}`, color: '#8A93A2' }}>
+              {'SLACK_ADMIN_CHANNEL: '}
+              <span style={{ color: slackChannel.present ? '#5B6472' : '#B6BDC9' }}>
+                {slackChannel.display}
+              </span>
+            </span>
+          )}
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px' }}>
           <PlatformAvatar glyph="飞" />
           <span style={{ fontSize: 11.5, fontWeight: 600, color: '#191C22' }}>飞书</span>
           <PresencePill present={feishuPresent} />
+          {feishuPresent && (
+            <span style={{ marginLeft: 'auto', font: `400 9.5px ${MONO}`, color: '#8A93A2' }}>
+              {'FEISHU_ADMIN_CHANNEL: '}
+              <span style={{ color: feishuChannel.present ? '#5B6472' : '#B6BDC9' }}>
+                {feishuChannel.display}
+              </span>
+            </span>
+          )}
         </div>
       </SCard>
+
+      {/* Approval reminder — fixed policy: always on */}
       <div
         style={{
           marginTop: 12,
@@ -872,6 +899,32 @@ export function NotificationsPanel({ snapshot }: { snapshot: ConfigSnapshot }) {
           审批提醒固定开启 — 阻塞线程时每 30 分钟重新提醒
         </span>
       </div>
+
+      {/* Recent notifications — honest placeholder (zero-source).
+          Investigation: the TUI client holds notifications in an in-memory ring buffer only
+          (useNotifications.ts, cap 50, no file persistence, no tRPC read scope).
+          No notification history is available in the web UI.
+          Fabricating a count or list is explicitly prohibited. */}
+      <SCard style={{ marginTop: 12, maxWidth: 760 }}>
+        <SCardHeader title="Recent notifications" right="runtime only · no history scope" />
+        <div style={{ padding: '10px 14px', display: 'flex', alignItems: 'flex-start', gap: 8 }}>
+          <span
+            style={{
+              width: 6,
+              height: 6,
+              borderRadius: '50%',
+              background: '#D9DCE3',
+              flex: 'none',
+              marginTop: 5,
+            }}
+          />
+          <span style={{ fontSize: 10.5, color: '#98A1B0', lineHeight: 1.6 }}>
+            Notification activity is held in the TUI client&apos;s in-memory ring buffer (cap 50,
+            no file persistence) — not exposed via any tRPC read scope. Real-time history is not
+            available in the web UI; use the TUI terminal interface to view live notifications.
+          </span>
+        </div>
+      </SCard>
     </>
   );
 }
