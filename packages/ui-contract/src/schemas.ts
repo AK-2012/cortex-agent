@@ -16,6 +16,7 @@ export {
   threadsListInput,
   threadsGetInput,
   tasksListInput,
+  taskVerificationInput,
   schedulesListInput,
   executionsListInput,
   executionsGetInput,

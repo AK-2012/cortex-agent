@@ -16,6 +16,7 @@ import type {
   threadsListInput,
   threadsGetInput,
   tasksListInput,
+  taskVerificationInput,
   schedulesListInput,
   executionsListInput,
   executionsGetInput,
@@ -55,6 +56,7 @@ const _sessionsTranscript: QueryParity<'sessions.transcript', typeof sessionsTra
 const _threadsList: QueryParity<'threads.list', typeof threadsListInput> = true;
 const _threadsGet: QueryParity<'threads.get', typeof threadsGetInput> = true;
 const _tasksList: QueryParity<'tasks.list', typeof tasksListInput> = true;
+const _taskVerification: QueryParity<'tasks.verification', typeof taskVerificationInput> = true;
 const _schedulesList: QueryParity<'schedules.list', typeof schedulesListInput> = true;
 const _executionsList: QueryParity<'executions.list', typeof executionsListInput> = true;
 const _executionsGet: QueryParity<'executions.get', typeof executionsGetInput> = true;

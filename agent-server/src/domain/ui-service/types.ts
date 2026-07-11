@@ -28,6 +28,7 @@ export type QueryScope =
   | 'threads.list'
   | 'threads.get'
   | 'tasks.list'
+  | 'tasks.verification'
   | 'schedules.list'
   | 'executions.list'
   | 'executions.get'
@@ -106,6 +107,11 @@ export interface TasksListParams {
   projectId?: string;
   status?: 'open' | 'done';
   actionable?: boolean;
+}
+
+export interface TaskVerificationParams {
+  projectId: string;
+  taskId: string;
 }
 
 export interface SchedulesListParams {
@@ -389,6 +395,50 @@ export interface TaskInfo {
   doneWhen: string | null;
 }
 
+// ── tasks.verification DTO (DR-0018 §12 C item 11) ────────────────
+// Single-task done-when EVIDENCE + per-task dispatch history. DEEPER than TaskInfo.doneWhen (which
+// is just the criteria text): this joins the REAL completion sources — the task store's
+// `completed-note` / `completed-at` / status, plus the terminal execution that completed the task
+// (its finalOutput) — and the full per-task execution/dispatch join by taskId. Every field with no
+// structured source is an honest `null` / `[]`, never fabricated.
+
+/** Done-when achievement evidence drawn from real completion sources (task store + completing execution). */
+export interface TaskDoneWhenEvidence {
+  /** Echo of the criteria text (task store `done-when`); null when absent/empty. */
+  doneWhen: string | null;
+  /** Whether the task reached `done`. */
+  completed: boolean;
+  /** Real `completed-at` timestamp; null (honest) when the task is not completed / never recorded. */
+  completedAt: string | null;
+  /** Real `completed-note` — the achievement note captured at completion; null (honest) when absent. */
+  completedNote: string | null;
+  /** The most-recent TERMINAL execution joined by taskId that completed this task; null when none. */
+  completingExecutionId: string | null;
+  /** That execution's final output (real evidence of what the run produced); null when unavailable. */
+  completingOutput: string | null;
+}
+
+/** One execution/dispatch record joined to the task by `dispatch.taskId`. */
+export interface TaskDispatchRecord {
+  executionId: string;
+  type: 'local' | 'dispatch';
+  status: 'running' | 'completed' | 'failed' | 'cancelled' | 'stale';
+  machine: string | null;
+  threadId: string | null;
+  startedAt: string;
+  finishedAt: string | null;
+  durationMs: number | null;
+  cost: number | null;
+}
+
+export interface TaskVerificationInfo {
+  taskId: string;
+  project: string;
+  evidence: TaskDoneWhenEvidence;
+  /** Per-task execution/dispatch history, newest first. `[]` (honest) when never dispatched. */
+  dispatches: TaskDispatchRecord[];
+}
+
 export interface ScheduleInfo {
   id: string;
   type: 'interval' | 'daily' | 'weekly' | 'once';
@@ -610,6 +660,7 @@ export interface QueryParamMap {
   'threads.list': ThreadsListParams;
   'threads.get': ThreadsGetParams;
   'tasks.list': TasksListParams;
+  'tasks.verification': TaskVerificationParams;
   'schedules.list': SchedulesListParams;
   'executions.list': ExecutionsListParams;
   'executions.get': ExecutionsGetParams;
@@ -627,6 +678,7 @@ export interface QueryReturnMap {
   'threads.list': ThreadInfo[];
   'threads.get': ThreadDetail;
   'tasks.list': TaskInfo[];
+  'tasks.verification': TaskVerificationInfo;
   'schedules.list': ScheduleInfo[];
   'executions.list': ExecutionInfo[];
   'executions.get': ExecutionDetailInfo;
