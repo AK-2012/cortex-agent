@@ -99,5 +99,5 @@ test('executions.get via facade returns not-found Err for a missing id', async (
 });
 
 // The tRPC router binding (missing id → TRPCError NOT_FOUND) is covered in
-// @cortex-agent/ui-server's app-router.test.ts; the facade data + not-found paths are asserted
+// the ui-http app-router test (tests/platform/ui-http-app-router.test.ts); the facade data + not-found paths are asserted
 // in the two facade tests above.

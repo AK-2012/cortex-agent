@@ -6,15 +6,15 @@
 //         store/@trpc-real-router dependency beyond the package's own AppRouter binding.
 // >>> If I am updated, update the parent folder's CORTEX.md <<<
 
-import './_test-home.js'; // MUST be first: isolate CORTEX_HOME before the core logger's paths.ts loads
+import '../_test-home.js'; // MUST be first: isolate CORTEX_HOME before the core logger's paths.ts loads
 import test, { after } from 'node:test';
 import assert from 'node:assert/strict';
 import * as http from 'node:http';
 import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { startUiHttpServer } from '../src/start-ui-http.js';
-import type { UiService, UiEvent } from '@cortex-agent/server/dist/domain/ui-service/types.js';
+import { startUiHttpServer } from '@entry/start-ui-http.js';
+import type { UiService, UiEvent } from '@domain/ui-service/types.js';
 
 const TOKEN = 'test-same-origin-token';
 const INDEX_MARKER = '<!-- CORTEX-UI-SAME-ORIGIN-INDEX -->';

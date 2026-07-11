@@ -9,15 +9,15 @@
 //         The x-cortex-token byte-for-byte behaviour stays covered by ui-http-server.test.ts.
 // >>> If I am updated, update my header comment and the parent folder's CORTEX.md <<<
 
-import './_test-home.js'; // MUST be first: isolate CORTEX_HOME before paths.ts loads
+import '../_test-home.js'; // MUST be first: isolate CORTEX_HOME before paths.ts loads
 import test, { after } from 'node:test';
 import assert from 'node:assert/strict';
 import * as http from 'node:http';
 import { initTRPC } from '@trpc/server';
 import { z } from 'zod';
 import { generateKeyPair, exportJWK, SignJWT, type JWK, type CryptoKey } from 'jose';
-import { createUiHttpServer } from '../src/ui-http-server.js';
-import { createAccessJwtVerifier, accessVerifierFromEnv } from '../src/access-jwt.js';
+import { createUiHttpServer } from '@platform/ui-http/ui-http-server.js';
+import { createAccessJwtVerifier, accessVerifierFromEnv } from '@platform/ui-http/access-jwt.js';
 
 const TOKEN = 'test-ui-token-xyz';
 const ACCESS_HEADER = 'cf-access-jwt-assertion';

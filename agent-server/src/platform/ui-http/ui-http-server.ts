@@ -1,7 +1,7 @@
 // input:  an AnyRouter (injected) + a token accessor + optional Access-JWT verifier + core/auth +
 //          @trpc/server standalone adapter
 // output: createUiHttpServer({ router, getToken, port, host?, spaDir?, corsOrigins?, verifyAccessJwt? }) -> { server, close() }
-// pos:    Web UI transport-host, in the @cortex-agent/ui-server package. Mounts the injected tRPC
+// pos:    Web UI transport-host, in-core (agent-server platform/ui-http). Mounts the injected tRPC
 //         router on the standalone HTTP adapter (query/mutate over HTTP, subscription over SSE —
 //         tRPC v11), gated by a DUAL-PATH auth check BEFORE tRPC, and serves the built SPA static
 //         files for non-tRPC paths. Generic over AnyRouter — the concrete AppRouter is injected by
@@ -21,8 +21,8 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { createHTTPServer } from '@trpc/server/adapters/standalone';
 import type { AnyRouter } from '@trpc/server';
-import { AUTH_HEADER, timingSafeEqualStr } from '@cortex-agent/server/dist/core/auth.js';
-import { createLogger } from '@cortex-agent/server/dist/core/log.js';
+import { AUTH_HEADER, timingSafeEqualStr } from '@core/auth.js';
+import { createLogger } from '@core/log.js';
 import type { AccessJwtVerifier } from './access-jwt.js';
 
 const log = createLogger('ui-http');

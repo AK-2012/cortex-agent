@@ -61,13 +61,20 @@ Project→conduit mapping (formerly `channel-repo.ts`) has moved into `platform/
 | `status-helpers.ts` | execution / status-message / streaming-VM helpers (pure subset has been sunk to `core/status-format.ts`) |
 
 ### L5: entry/
-`app.ts` (composition root, S13: <200 lines; the Web UI transport-host is loaded on demand via a CORTEX_UI_HTTP-gated `await import('@cortex-agent/ui-server')` — dynamic so core stays @trpc-free when the flag is off) `daemon.ts` `startup-helpers.ts` `startup-notify.ts`
+`app.ts` (composition root, S13: <200 lines; the Web UI transport-host is loaded on demand via `entry/ui-http-gate.ts`, whose CORTEX_UI_HTTP-gated dynamic `import('./start-ui-http.js')` is the sole runtime edge to @trpc/server+jose — so core stays @trpc-free when the flag is off) `daemon.ts` `start-ui-http.ts` (Web UI wiring: binds domain/ui-service AppRouter → platform/ui-http host) `ui-http-gate.ts` (the lazy CORTEX_UI_HTTP seam) `startup-helpers.ts` `startup-notify.ts`
 
-The Web UI transport (tRPC AppRouter binding + HTTP/SSE host + same-origin SPA serving; formerly
-`entry/start-ui-http.ts` + `domain/ui-service/{trpc,app-router}.ts` + `platform/ui-http/`) moved to
-the optional **`@cortex-agent/ui-server`** workspace package in Stage 9 §9.1, keeping `@trpc/server`
-out of the core runtime dependency tree. CORS is still resolved from `CORTEX_UI_CORS_ORIGINS` and the
-SPA is served same-origin from `CORTEX_UI_SPA_DIR` (else the monorepo `web/dist`).
+The Web UI transport (tRPC AppRouter binding + HTTP/SSE host + same-origin SPA serving) lives
+**in-core**, split by layer: `domain/ui-service/{trpc,app-router}.ts` (the tRPC contract bound over
+the ui-service facade), `platform/ui-http/{ui-http-server,access-jwt}.ts` (the HTTP/SSE host +
+Cloudflare Access JWT verification — core+external only), and `entry/{start-ui-http,ui-http-gate}.ts`
+(the wiring that binds them + the lazy CORTEX_UI_HTTP gate). `@trpc/server` + `jose` are ordinary
+core dependencies, but they are **runtime-lazy**: `app.ts` loads the transport only through the
+gate's dynamic import, so an unset `CORTEX_UI_HTTP` keeps both out of the module graph (guarded by
+`tests/platform/ui-http-lazy-load.test.ts`). CORS resolves from `CORTEX_UI_CORS_ORIGINS`; the SPA is
+served from `CORTEX_UI_SPA_DIR`, else the package-root `web/dist` (staged on publish via prepack),
+else the monorepo `web/dist`. `@cortex-agent/ui-contract` re-exports the `AppRouter` type from
+`domain/ui-service/app-router.ts` for the browser client.
+(Reversal of the Stage-9 §9.1 package split — `@cortex-agent/ui-server` was merged back per plan §11.)
 
 ### Other static directories
 | Directory | Contents |

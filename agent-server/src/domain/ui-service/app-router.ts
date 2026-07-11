@@ -2,11 +2,12 @@
 // output: createAppRouter(uiService): AppRouter — the typed client↔server contract
 //         mirroring ui-service query/mutate/subscribe. AppRouter type re-exported by
 //         @cortex-agent/ui-contract for the browser client.
-// pos:    Web UI tRPC contract, in the @cortex-agent/ui-server package (transport-agnostic —
-//         @trpc/server CORE only, no http/ws adapter; the HTTP/SSE server injects this router).
-//         Pure contract mirror over the injected UiService — no auth (that is an HTTP-layer gate
-//         in the transport-host). Consumes the domain zod input-schemas + UiService type from the
-//         core package's built dist (narrow deep-import), keeping the workspace build graph acyclic.
+// pos:    Web UI tRPC contract, in-core (domain/ui-service; transport-agnostic — @trpc/server CORE
+//         only, no http/ws adapter; the HTTP/SSE transport-host injects this router). Pure contract
+//         mirror over the injected UiService — no auth (that is an HTTP-layer gate in the
+//         transport-host). Lives beside the ui-service facade it mirrors (domain→domain). Reached
+//         only via the entry/start-ui-http wiring, which is loaded on demand behind CORTEX_UI_HTTP,
+//         so @trpc stays runtime-lazy for Slack/TUI-only installs.
 // >>> If I am updated, update CORTEX.md <<<
 
 import { TRPCError } from '@trpc/server';
@@ -40,7 +41,7 @@ import {
   executionsLogInput,
   configGetInput,
   configSetInput,
-} from '@cortex-agent/server/dist/domain/ui-service/input-schemas.js';
+} from './input-schemas.js';
 import type {
   UiService,
   Result,
@@ -49,7 +50,7 @@ import type {
   MutateOp,
   QueryParams,
   MutateArgs,
-} from '@cortex-agent/server/dist/domain/ui-service/types.js';
+} from './types.js';
 
 // ── Subscribe filter input (no keyed schema for subscribe; router-local) ──
 const subscribeFilterInput = z.object({

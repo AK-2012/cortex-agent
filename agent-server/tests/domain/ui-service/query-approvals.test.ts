@@ -144,7 +144,7 @@ test('approvals.list reachable via the ui-service facade', async () => {
   assert.equal(filtered.data[0].status, 'approved');
 });
 
-// The tRPC router binding is covered in @cortex-agent/ui-server's app-router.test.ts;
+// The tRPC router binding is covered in the ui-http app-router test (tests/platform/ui-http-app-router.test.ts);
 // here we assert the facade's pending-status filter (distinct from the approved filter above).
 test('approvals.list via facade honors the pending-status filter', async () => {
   const deps = makeDeps(writeTemp(SAMPLE));

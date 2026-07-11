@@ -128,7 +128,7 @@ test('handleRejectApproval returns not-found for unknown id', async () => {
 
 // ── (6) facade wiring ────────────────────────────────────────────────────────
 // The tRPC router binding (missing id → TRPCError NOT_FOUND) is covered in
-// @cortex-agent/ui-server's app-router.test.ts; here we assert the facade Result path.
+// the ui-http app-router test (tests/platform/ui-http-app-router.test.ts); here we assert the facade Result path.
 test('approvals.approve / approvals.reject reachable via facade (approve, reject, missing→not-found)', async () => {
   const p = writeTemp(SAMPLE);
   const ui = createUiService(makeDeps(p));

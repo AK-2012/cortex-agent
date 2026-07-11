@@ -1,7 +1,7 @@
 // input:  an AccessJwtConfig (JWKS URL + aud + iss) OR the process env (team-domain / aud / certs URL)
 // output: createAccessJwtVerifier(cfg) -> (token) => Promise<boolean> and
 //         accessVerifierFromEnv(env) -> AccessJwtVerifier | undefined
-// pos:    Cloudflare Access JWT leg of the Web UI tRPC auth gate, in @cortex-agent/ui-server.
+// pos:    Cloudflare Access JWT leg of the Web UI tRPC auth gate, in-core (platform/ui-http).
 //         Verifies the `Cf-Access-Jwt-Assertion` JWT the Cloudflare edge injects after it
 //         authenticates the browser: signature against the Access team-domain JWKS
 //         (https://<team>.cloudflareaccess.com/cdn-cgi/access/certs), plus audience (AUD tag) +
@@ -14,7 +14,7 @@
 // >>> If I am updated, update CORTEX.md <<<
 
 import { createRemoteJWKSet, jwtVerify } from 'jose';
-import { createLogger } from '@cortex-agent/server/dist/core/log.js';
+import { createLogger } from '@core/log.js';
 
 const log = createLogger('ui-http');
 

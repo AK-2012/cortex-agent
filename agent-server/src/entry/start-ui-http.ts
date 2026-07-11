@@ -5,13 +5,15 @@
 //         auth gate — x-cortex-token (getClientToken) OR a Cloudflare Access JWT verifier built
 //         from env (accessVerifierFromEnv) — bound 127.0.0.1. Returns null (clean skip) when the
 //         env gate is off. Same-origin: serves the built SPA (web/dist) and /trpc on one port.
-// pos:    Web UI wiring, in the @cortex-agent/ui-server package. The only place that binds the
-//         AppRouter (createAppRouter) to the transport-host (createUiHttpServer) — kept out of
-//         both so the router stays transport-agnostic and the transport-host stays router-agnostic.
-//         agent-server loads this on demand via `await import('@cortex-agent/ui-server')` behind
-//         its own CORTEX_UI_HTTP gate, and closes the returned handle on shutdown.
-//         SPA dir: opts.spaDir ?? CORTEX_UI_SPA_DIR ?? the monorepo web/dist resolved relative to
-//         this package's dist (so a same-origin browser gets index.html + assets from one port).
+// pos:    Web UI wiring, in-core (entry layer). The only place that binds the AppRouter
+//         (createAppRouter, domain/ui-service) to the transport-host (createUiHttpServer,
+//         platform/ui-http) — kept out of both so the router stays transport-agnostic and the
+//         transport-host stays router-agnostic; the wiring sits in entry, the one layer allowed to
+//         depend on both domain and platform. app.ts loads this on demand via a CORTEX_UI_HTTP-gated
+//         dynamic import (entry/ui-http-gate.ts), so @trpc/server + jose stay runtime-lazy, and
+//         closes the returned handle on shutdown. SPA dir: opts.spaDir ?? CORTEX_UI_SPA_DIR ??
+//         web/dist resolved relative to this module's compiled location (installed-package root,
+//         else the monorepo repo-root — see defaultSpaDir).
 //         CORS: resolves the transport-host's allow-list from opts.corsOrigins else the
 //         CORTEX_UI_CORS_ORIGINS env var (comma-separated) — lets the Tauri desktop webview reach
 //         tRPC directly.
@@ -20,14 +22,14 @@
 import * as path from 'node:path';
 import * as fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { createAppRouter } from './app-router.js';
-import { createUiHttpServer } from './ui-http-server.js';
-import type { UiHttpServer } from './ui-http-server.js';
-import { accessVerifierFromEnv } from './access-jwt.js';
-import type { AccessJwtVerifier } from './access-jwt.js';
-import type { UiService } from '@cortex-agent/server/dist/domain/ui-service/types.js';
-import { getClientToken } from '@cortex-agent/server/dist/core/auth.js';
-import { createLogger } from '@cortex-agent/server/dist/core/log.js';
+import { createAppRouter } from '@domain/ui-service/app-router.js';
+import { createUiHttpServer } from '@platform/ui-http/ui-http-server.js';
+import type { UiHttpServer } from '@platform/ui-http/ui-http-server.js';
+import { accessVerifierFromEnv } from '@platform/ui-http/access-jwt.js';
+import type { AccessJwtVerifier } from '@platform/ui-http/access-jwt.js';
+import type { UiService } from '@domain/ui-service/types.js';
+import { getClientToken } from '@core/auth.js';
+import { createLogger } from '@core/log.js';
 
 const log = createLogger('ui-http');
 
@@ -41,17 +43,23 @@ function isEnabled(env: NodeJS.ProcessEnv): boolean {
 }
 
 /**
- * Resolve the monorepo's built SPA directory relative to this package's compiled location
- * (`packages/ui-server/dist/start-ui-http.js` → repo-root `web/dist`). Workspace-only default;
- * a deployment can override via `opts.spaDir` or `CORTEX_UI_SPA_DIR`. Returns the path only when
- * it exists on disk, so `serveSpaStub` still 404s cleanly (rather than a bogus path) when web/ is
- * not built. When it cannot be located, returns undefined.
+ * Resolve the built SPA directory relative to this module's compiled location
+ * (`agent-server/dist/entry/start-ui-http.js`). Two layouts are supported:
+ *  - installed package: `web/dist` sits at the package root (`@cortex-agent/server/web/dist`,
+ *    placed there by the `prepack` copy step) → `../../web/dist`.
+ *  - monorepo dev-from-source: `web/dist` sits at the repo root → `../../../web/dist`.
+ * Workspace/deploy override via `opts.spaDir` or `CORTEX_UI_SPA_DIR` takes precedence. Returns the
+ * first candidate that exists on disk, so `serveSpaStub` still 404s cleanly (rather than a bogus
+ * path) when web/ is not built. When none is located, returns undefined.
  */
 function defaultSpaDir(): string | undefined {
   try {
     const here = path.dirname(fileURLToPath(import.meta.url));
-    const candidate = path.resolve(here, '../../../web/dist');
-    return fs.existsSync(candidate) ? candidate : undefined;
+    const candidates = [
+      path.resolve(here, '../../web/dist'), // installed package root
+      path.resolve(here, '../../../web/dist'), // monorepo repo root
+    ];
+    return candidates.find((c) => fs.existsSync(c));
   } catch {
     return undefined;
   }

@@ -93,7 +93,7 @@ test('config.set via facade writes to the isolated CONFIG_DIR and returns writte
 });
 
 // The tRPC router binding (invalid-args → TRPCError BAD_REQUEST) is covered in
-// @cortex-agent/ui-server's app-router.test.ts; here we assert the facade rejects invalid input
+// the ui-http app-router test (tests/platform/ui-http-app-router.test.ts); here we assert the facade rejects invalid input
 // with the invalid-args Err code (no write).
 test('config.set via facade rejects invalid input with invalid-args', async () => {
   const result = await createUiService(makeMinimalDeps())

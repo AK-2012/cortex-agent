@@ -7,6 +7,10 @@ import { mkdirSync } from 'fs';
 import * as path from 'path';
 import { createAdapterFromEnv, extractTuiAdapter } from '@platform/index.js';
 import type { PlatformAdapter } from '@platform/index.js';
+// Gate for the in-core Web UI transport: static import is @trpc-free (node builtins + an erased
+// type only); the transport (which pulls @trpc/server + jose) is dynamic-imported inside the gate,
+// gated on CORTEX_UI_HTTP, so it stays runtime-lazy for Slack/TUI-only installs.
+import { startUiHttpIfEnabled } from '@entry/ui-http-gate.js';
 import { WORKSPACE_DIR, CONFIG_DIR, DATA_DIR, STORE_DIR, DEFAULTS_DIR, CONTEXT_DIR } from '@core/utils.js';
 import { tryAcquireSingletonLock, releaseSingletonLock } from '@core/singleton-lock.js';
 import { closeAllSessions, closeSession as closeClaudePooledSession, shutdownCodex } from '@domain/agents/index.js';
@@ -245,9 +249,9 @@ registerMessageHandler(adapter, { dispatchCommand, handleMessageEdit });
 
 // --- Profile watcher (hot-reload profiles.json without restart) ---
 let _stopProfileWatcher: (() => void) | null = null;
-// Web UI transport-host handle. The concrete type lives in the optional @cortex-agent/ui-server
-// package (not a runtime dep of core); app.ts only ever calls close(), so a structural type keeps
-// the composition root free of the package's types (and of @trpc).
+// Web UI transport-host handle. The transport lives in-core (platform/ui-http) but is loaded on
+// demand behind CORTEX_UI_HTTP; app.ts only ever calls close(), so a structural type keeps the
+// composition root free of the transport's types (and of @trpc) on the static import graph.
 let _uiHttpServer: { close: () => Promise<void> } | null = null;
 
 // --- Graceful shutdown ---
@@ -349,21 +353,16 @@ process.on('SIGTERM', async () => {
   extractTuiAdapter(adapter)?.setUiService(uiService);
 
   // ── Web UI tRPC HTTP+SSE transport-host (opt-in via CORTEX_UI_HTTP) ──────
-  // The Web UI transport (tRPC AppRouter + HTTP/SSE host + SPA serving) lives in the OPTIONAL
-  // @cortex-agent/ui-server package, which pulls @trpc/server. Core (Slack/TUI-only) must not
-  // load it: gate on CORTEX_UI_HTTP and load the package on demand via dynamic import, so an
-  // unset flag means the package (and @trpc) never enters the runtime graph. A non-literal
-  // specifier keeps tsc from resolving a package core does not declare as a dependency.
-  const uiFlag = (process.env.CORTEX_UI_HTTP || '').trim().toLowerCase();
-  if (uiFlag === '1' || uiFlag === 'true' || uiFlag === 'on' || uiFlag === 'yes') {
-    try {
-      const uiServerPkg = '@cortex-agent/ui-server';
-      const { startUiHttpServer } = await import(uiServerPkg);
-      // The package re-reads CORTEX_UI_HTTP and returns null when off — always truthy here.
-      _uiHttpServer = startUiHttpServer({ uiService }) ?? null;
-    } catch (e) {
-      log.warn(`CORTEX_UI_HTTP is set but @cortex-agent/ui-server failed to load: ${(e as Error).message}`);
-    }
+  // The Web UI transport (tRPC AppRouter + HTTP/SSE host + SPA serving) lives in-core under
+  // platform/ui-http and pulls @trpc/server + jose. Core (Slack/TUI-only) must not load it: the
+  // gate module does the CORTEX_UI_HTTP check and, only in the enabled branch, dynamic-imports the
+  // transport — so an unset flag means @trpc/server + jose never enter the runtime graph. app.ts
+  // statically imports only the gate (node builtins + an erased type), keeping its static graph
+  // @trpc-free (guarded by tests/platform/ui-http-lazy-load.test.ts).
+  try {
+    _uiHttpServer = await startUiHttpIfEnabled(uiService);
+  } catch (e) {
+    log.warn(`CORTEX_UI_HTTP is set but the Web UI transport failed to load: ${(e as Error).message}`);
   }
 
   await adapter.start();

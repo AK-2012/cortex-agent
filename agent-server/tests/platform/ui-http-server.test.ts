@@ -7,7 +7,7 @@
 //         Generic over AnyRouter — builds its own tiny router, no dependency on the real AppRouter.
 // >>> If I am updated, update my header comment and the parent folder's CORTEX.md <<<
 
-import './_test-home.js'; // MUST be first: isolate CORTEX_HOME before paths.ts loads
+import '../_test-home.js'; // MUST be first: isolate CORTEX_HOME before paths.ts loads
 import test, { after } from 'node:test';
 import assert from 'node:assert/strict';
 import * as http from 'node:http';
@@ -16,7 +16,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { initTRPC } from '@trpc/server';
 import { z } from 'zod';
-import { createUiHttpServer } from '../src/ui-http-server.js';
+import { createUiHttpServer } from '@platform/ui-http/ui-http-server.js';
 
 const TOKEN = 'test-ui-token-xyz';
 const INDEX_MARKER = '<!-- CORTEX-UI-STUB-INDEX -->';

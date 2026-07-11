@@ -26,8 +26,8 @@ import { EventBus } from '@events/index.js';
 import { MockAdapter } from '@platform/testing.js';
 import { createUiService } from '@domain/ui-service/index.js';
 import type { UiServiceDeps } from '@domain/ui-service/index.js';
-// The Web UI transport now lives in the optional @cortex-agent/ui-server workspace package.
-import { startUiHttpServer } from '@cortex-agent/ui-server';
+// The Web UI transport lives in-core (entry/start-ui-http wiring; loaded on demand by the daemon).
+import { startUiHttpServer } from '@entry/start-ui-http.js';
 import { projectStore } from '@domain/projects/index.js';
 import { sessionStore } from '@store/session-registry-repo.js';
 import { threadStore } from '@store/thread-repo.js';

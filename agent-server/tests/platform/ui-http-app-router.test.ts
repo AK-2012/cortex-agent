@@ -1,8 +1,9 @@
+import '../_test-home.js'; // MUST be first: isolate CORTEX_HOME before paths.ts loads
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { TRPCError } from '@trpc/server';
-import { createAppRouter } from '../src/app-router.js';
-import { createCallerFactory } from '../src/trpc.js';
+import { createAppRouter } from '@domain/ui-service/app-router.js';
+import { createCallerFactory } from '@domain/ui-service/trpc.js';
 import type {
   UiService,
   QueryScope,
@@ -10,7 +11,7 @@ import type {
   Result,
   UiEvent,
   SubscribeFilter,
-} from '@cortex-agent/server/dist/domain/ui-service/index.js';
+} from '@domain/ui-service/index.js';
 
 // ── Fake UiService ────────────────────────────────────────────────────────────────
 interface QueryCall { scope: QueryScope; params: unknown; }

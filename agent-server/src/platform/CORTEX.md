@@ -16,4 +16,5 @@ Specific SDK calls are encapsulated in the adapters/ subdirectory.
 | `tool-trace.ts` | UI helper | tool_use compact traces rendered via OutputStream openMutable/update |
 | `testing.ts` | testing | MockAdapter in-memory mock implementation + MockOutputStream typed segment trail recorder |
 | `tui/` | subdirectory | TUI protocol types + wire format (M4: TuiFrame union + guards + parseFrame/encodeFrame) |
+| `ui-http/` | subdirectory | Web UI HTTP/SSE transport-host: `ui-http-server.ts` (standalone tRPC host + dual-path auth gate + same-origin SPA static) + `access-jwt.ts` (Cloudflare Access JWT verify via `jose`). Core+external deps only (router injected); the wiring that binds the domain AppRouter lives in `entry/start-ui-http.ts`. Loaded on demand behind CORTEX_UI_HTTP |
 | `adapters/index.ts` | factory | `createPrimaryAdaptersFromEnv` (comma-list CORTEX_PLATFORM) + `createAdapterFromEnv` — multi-platform composition + TUI auto-enable |

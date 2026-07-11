@@ -136,7 +136,7 @@ test('config.get via facade returns ok', async () => {
 });
 
 // The tRPC router binding (Result-unwrap + Err→TRPCError mapping) is covered in
-// @cortex-agent/ui-server's app-router.test.ts; here we assert the facade snapshot shape.
+// the ui-http app-router test (tests/platform/ui-http-app-router.test.ts); here we assert the facade snapshot shape.
 test('config.get via facade exposes the env snapshot array', async () => {
   const result = await createUiService(makeMinimalDeps()).query('config.get', {});
   assert.ok(result.ok);

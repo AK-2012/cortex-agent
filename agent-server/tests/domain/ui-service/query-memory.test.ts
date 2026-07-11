@@ -190,7 +190,7 @@ test('memory.tree / memory.file reachable via the ui-service facade', async () =
 });
 
 // The tRPC router binding (traversal → TRPCError BAD_REQUEST) is covered in
-// @cortex-agent/ui-server's app-router.test.ts; here we assert the facade reads STATUS.md and
+// the ui-http app-router test (tests/platform/ui-http-app-router.test.ts); here we assert the facade reads STATUS.md and
 // rejects traversal with invalid-args.
 test('memory.tree / memory.file via facade read a file and reject traversal', async () => {
   const { root } = makeProject();

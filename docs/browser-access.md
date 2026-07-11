@@ -15,15 +15,16 @@ There are two independent ways to reach the workbench, and they authenticate dif
 This page is the browser + deployment reference. For installing the native desktop app, see
 [Desktop App](desktop-app.md).
 
-## The optional Web UI package
+## The in-core Web UI transport
 
-The Web UI transport lives in an **optional, in-process add-on package**,
-`@cortex-agent/ui-server`. The core agent-server (Slack / TUI only) does **not** carry
-`@trpc/server` or any UI code: the package — and its dependencies — enter the runtime only
-when you opt in with `CORTEX_UI_HTTP`. When the flag is unset, the package is never imported,
-so a Slack- or TUI-only deployment pays zero UI weight.
+The Web UI transport ships **in-core** with `@cortex-agent/server` and is **loaded on demand**
+behind the `CORTEX_UI_HTTP` flag. It pulls `@trpc/server` and `jose`, but these are
+**runtime-lazy**: the server imports the transport only through a dynamic import that is reached
+solely when the flag is set. When the flag is unset, neither the transport code nor `@trpc/server`
+/ `jose` ever enter the runtime module graph, so a Slack- or TUI-only deployment pays zero UI
+weight — while installing and upgrading stay a single `npm install -g @cortex-agent/server`.
 
-When enabled, `@cortex-agent/ui-server`:
+When enabled, the transport:
 
 - serves the built SPA (`web/dist`) **same-origin** with the tRPC API — one port, one origin,
   so the browser loads `index.html` + assets and calls `/trpc` with no cross-origin plumbing;
@@ -60,21 +61,25 @@ pnpm --filter @cortex-agent/ui-contract run build
 pnpm --filter web run build      # produces web/dist
 ```
 
-`web/dist` is a plain static bundle (`index.html` + hashed assets). It is intentionally **not**
-part of the published npm package — you build it at deploy time from source.
+`web/dist` is a plain static bundle (`index.html` + hashed assets). When the `@cortex-agent/server`
+package is published, `web/dist` is staged into the package (via a `prepack` step) and shipped in
+its `files`, so an installed server can serve the SPA with no extra build. From a source checkout
+you build it yourself with the step above.
 
 ### 3. Where `web/dist` is served from
 
-`@cortex-agent/ui-server` resolves the SPA directory in this order:
+The server resolves the SPA directory in this order:
 
 1. an explicit directory you pass to it;
 2. the `CORTEX_UI_SPA_DIR` environment variable;
-3. the monorepo's `web/dist`, resolved relative to the installed package.
+3. the package-root `web/dist` (present in an installed/published package);
+4. the monorepo's `web/dist` (when running from a source checkout).
 
-If you deploy from a repo checkout, option 3 works with no configuration — build `web/dist`
-in place and it is served automatically. If you deploy the built SPA to a different location,
-point `CORTEX_UI_SPA_DIR` at it. If the directory is absent (SPA not built), non-`/trpc`
-paths return a 404 placeholder while `/trpc` still works.
+If you deploy an installed package, option 3 works out of the box. If you deploy from a repo
+checkout, option 4 works with no configuration — build `web/dist` in place and it is served
+automatically. If you deploy the built SPA to a different location, point `CORTEX_UI_SPA_DIR` at
+it. If the directory is absent (SPA not built), non-`/trpc` paths return a 404 placeholder while
+`/trpc` still works.
 
 ### 4. Enable the Web UI endpoint
 
@@ -86,7 +91,7 @@ CORTEX_UI_PORT=3004       # optional; defaults to 3004
 ```
 
 `CORTEX_UI_HTTP` accepts `1`, `true`, `on`, or `yes`. With it unset, the endpoint — and the
-whole `@cortex-agent/ui-server` package — never loads.
+Web UI transport, along with `@trpc/server` / `jose` — never loads.
 
 ### 5. Restart the daemon to apply
 
@@ -135,7 +140,7 @@ browser
 Cloudflare Tunnel   (cortex-ui.example.com  →  server localhost:3004)
   │  edge injects  Cf-Access-Jwt-Assertion  on every request
   ▼
-@cortex-agent/ui-server  (verifies the JWT; the browser never holds clientToken)
+agent-server Web UI transport  (verifies the JWT; the browser never holds clientToken)
   ├─ serves web/dist  (same-origin SPA)
   └─ serves /trpc     (same-origin real data, in-process)
 ```
