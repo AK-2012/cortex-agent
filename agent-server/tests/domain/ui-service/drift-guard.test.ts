@@ -54,6 +54,7 @@ function makeMinimalDeps(): UiServiceDeps {
     executionLogTailer: { startTail: () => {}, stopTail: () => {}, refCount: () => 0 },
     conversationHistory: { getHistory: async () => null },
     sendSessionMessage: () => {},
+    createDirectSession: async () => ({ sessionId: '', sessionName: '' }),
     cancelSessionRun: async () => 0,
     approvalsPath: '/tmp/nonexistent-approvals.md',
     runningExecutions: {
