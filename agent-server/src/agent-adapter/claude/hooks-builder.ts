@@ -55,6 +55,7 @@ export const POST_TOOL_USE_HOOKS = [
   ]},
   { matcher: 'Read|Edit|Write|Skill', hooks: [nodeHook('session-activity-tracker.mjs')] },
   { matcher: 'Read|Edit', hooks: [nodeHook('cortex-md-injector.mjs')] },
+  { matcher: 'Skill', hooks: [nodeHook('memory-trigger-detector.mjs')] },
 ];
 
 export const PERMISSION_REQUEST_HOOKS = [
