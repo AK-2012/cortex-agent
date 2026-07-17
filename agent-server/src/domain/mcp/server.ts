@@ -22,8 +22,23 @@ const server = new McpServer({ name: 'cortex-ext', version: CORTEX_VERSION });
 
 registerCostTools(server);
 registerExecutionTools(server);
-registerContextTools(server);
-registerScheduleTools(server);
+registerContextTools(server, contextDeps);
+registerScheduleTools(server, contextDeps);
+
+// --- Exported tool name list (for verification) ---
+
+export const TOOL_NAMES: readonly string[] = [
+  'cost_query',
+  'query_executions',
+  'cortex_context',
+  'cortex_schedule_add',
+  'cortex_schedule_list',
+  'cortex_schedule_get',
+  'cortex_schedule_remove',
+  'cortex_schedule_pause',
+  'cortex_schedule_resume',
+  'cortex_record_memory',
+];
 
 // --- Start (called by barrel when run as standalone) ---
 
