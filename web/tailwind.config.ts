@@ -1,3 +1,8 @@
+// input:  source globs and shared CSS-variable design tokens/keyframes
+// output: Tailwind build configuration for generated utility classes
+// pos:    web styling compiler config; toast timing is presentation-owned
+// >>> If I am updated, update my header comment and the parent folder's CORTEX.md <<<
+
 import type { Config } from 'tailwindcss';
 
 // Single source of truth for the Cortex UI design tokens (design §5, v2 定稿).
@@ -6,83 +11,89 @@ import type { Config } from 'tailwindcss';
 // and `fontFamily.mono` respectively.
 const config: Config = {
   content: ['./index.html', './src/**/*.{ts,tsx}'],
+  // Dark theme is driven by `data-theme="dark"` on <html> (set by src/theme + the no-flash script in
+  // index.html), NOT by the OS media query — the theme is a persisted user choice. All token hexes
+  // below resolve to CSS variables (defined in src/index.css `:root` / `[data-theme='dark']`), so a
+  // single attribute flip re-themes every token consumer. See design/ref/scheme-dark.dc.html.
+  darkMode: ['selector', '[data-theme="dark"]'],
   theme: {
     extend: {
       colors: {
         // State palette
         state: {
-          ink: '#191C22',
-          run: '#4655D4',
-          wait: '#A96B0B',
-          done: '#23854F',
-          fail: '#C03D33',
-          gray: '#F1F2F5',
+          ink: 'var(--state-ink)',
+          run: 'var(--state-run)',
+          wait: 'var(--state-wait)',
+          done: 'var(--state-done)',
+          fail: 'var(--state-fail)',
+          gray: 'var(--state-gray)',
         },
         // Status-pill tinted bg/fg pairs
         pill: {
-          'running-bg': '#EEF0FA',
-          'running-fg': '#4655D4',
-          'waiting-bg': '#F7ECCE',
-          'waiting-fg': '#8A5B06',
-          'done-bg': '#E9F4EE',
-          'done-fg': '#23854F',
-          'failed-bg': '#FBEDEB',
-          'failed-fg': '#C03D33',
-          'cancelled-bg': '#F1F2F5',
-          'cancelled-fg': '#8A93A2',
+          'running-bg': 'var(--pill-running-bg)',
+          'running-fg': 'var(--pill-running-fg)',
+          'waiting-bg': 'var(--pill-waiting-bg)',
+          'waiting-fg': 'var(--pill-waiting-fg)',
+          'done-bg': 'var(--pill-done-bg)',
+          'done-fg': 'var(--pill-done-fg)',
+          'failed-bg': 'var(--pill-failed-bg)',
+          'failed-fg': 'var(--pill-failed-fg)',
+          'cancelled-bg': 'var(--pill-cancelled-bg)',
+          'cancelled-fg': 'var(--pill-cancelled-fg)',
         },
         // Surfaces
         surface: {
-          card: '#FFFFFF',
-          canvas: '#E9E7E2', // prototype html/body base (was #F0EEE9; realigned §8.6 RA)
-          'canvas-alt': '#F7F8FA',
-          rail: '#FBFBFC',
+          card: 'var(--proto-card)',
+          canvas: 'var(--surface-base)', // prototype html/body base (was #F0EEE9; realigned §8.6 RA)
+          'canvas-alt': 'var(--proto-alt)',
+          rail: 'var(--proto-rail)',
         },
         // Prototype 1:1 palette (design §8.6 RA / task 6d21). Audited from
         // prototype.dc.html — the recurring structural ink/line/accent/amber
-        // scale. Per §8.3 one-off hexes may stay raw in a screen; these are the
-        // values that repeat across the design and become tokens for RB+.
+        // scale. Each resolves to a CSS var so it flips under `data-theme=dark`
+        // (light/dark values in src/index.css). Per §8.3 one-off hexes may stay
+        // raw in a screen; those are migrated to the same vars in the dark pass.
         proto: {
-          base: '#E9E7E2',
-          card: '#FFFFFF',
-          rail: '#FBFBFC',
-          alt: '#F7F8FA',
-          gray: '#F1F2F5',
+          base: 'var(--proto-base)',
+          card: 'var(--proto-card)',
+          rail: 'var(--proto-rail)',
+          alt: 'var(--proto-alt)',
+          gray: 'var(--proto-gray)',
           // ink / text scale (darkest → faint)
-          ink: '#191C22',
-          'ink-2': '#22262E',
-          'ink-3': '#383E48',
-          muted: '#5B6472',
-          'muted-2': '#8A93A2',
-          'muted-3': '#98A1B0',
-          faint: '#B6BDC9',
+          ink: 'var(--proto-ink)',
+          'ink-2': 'var(--proto-ink-2)',
+          'ink-3': 'var(--proto-ink-3)',
+          muted: 'var(--proto-muted)',
+          'muted-2': 'var(--proto-muted-2)',
+          'muted-3': 'var(--proto-muted-3)',
+          faint: 'var(--proto-faint)',
           // hairlines / borders
-          line: '#E7E9EE',
-          'line-2': '#EFF1F5',
-          'line-3': '#D9DCE3',
-          'line-4': '#E3E6F0',
+          line: 'var(--proto-line)',
+          'line-2': 'var(--proto-line-2)',
+          'line-3': 'var(--proto-line-3)',
+          'line-4': 'var(--proto-line-4)',
           // accent (run / blue)
-          accent: '#4655D4',
-          'accent-bg': '#EEF0FA',
-          'accent-border': '#C9CFF2',
-          'accent-2': '#9AA3E8',
-          'accent-strong': '#3A48B8',
+          accent: 'var(--proto-accent)',
+          'accent-bg': 'var(--proto-accent-bg)',
+          'accent-border': 'var(--proto-accent-border)',
+          'accent-2': 'var(--proto-accent-2)',
+          'accent-strong': 'var(--proto-accent-strong)',
           // amber (waiting / approvals)
-          amber: '#C99A2E',
-          'amber-fg': '#8A5B06',
-          'amber-bg': '#FDF9F0',
-          'amber-border': '#EFDDB0',
-          'amber-accent': '#C0A96E',
+          amber: 'var(--proto-amber)',
+          'amber-fg': 'var(--proto-amber-fg)',
+          'amber-bg': 'var(--proto-amber-bg)',
+          'amber-border': 'var(--proto-amber-border)',
+          'amber-accent': 'var(--proto-amber-accent)',
           // success (done)
-          success: '#23854F',
-          'success-bg': '#E9F4EE',
+          success: 'var(--proto-success)',
+          'success-bg': 'var(--proto-success-bg)',
           // danger (failed)
-          danger: '#C03D33',
-          'danger-bg': '#FBEDEB',
+          danger: 'var(--proto-danger)',
+          'danger-bg': 'var(--proto-danger-bg)',
         },
       },
       borderColor: {
-        card: 'rgba(0,0,0,0.08)',
+        card: 'var(--border-card)',
       },
       // Fonts match the prototype exactly (§8.6 RA). Sans = prototype html/body
       // stack; mono = IBM Plex Mono (loaded via Google Fonts in index.html).
@@ -122,6 +133,14 @@ const config: Config = {
       boxShadow: {
         card: '0 1px 2px rgba(0,0,0,0.04), 0 1px 3px rgba(0,0,0,0.06)',
         overlay: '0 10px 38px rgba(0,0,0,0.20), 0 6px 12px rgba(0,0,0,0.12)',
+        // Hot-update modal (design 21a): heavier drop shadow than the generic overlay. Verbatim from
+        // scheme.dc.html #21a modal (`0 24px 64px rgba(16,24,40,.32)`).
+        'overlay-strong': '0 24px 64px rgba(16,24,40,0.32)',
+        // Notification toast (design 18a): 二级投影 — lighter than modal, heavier than card. Verbatim
+        // from scheme.dc.html #18a bubble shadow.
+        toast: '0 8px 28px rgba(16,24,40,0.13), 0 2px 6px rgba(16,24,40,0.05)',
+        // The collapsed "+N" overflow pill (design 18a) — a lighter one-level shadow.
+        'toast-pill': '0 4px 14px rgba(16,24,40,0.10)',
       },
       // Overlay enter/exit motion (design §5, task 970d). Driven off Radix
       // `data-[state=open|closed]` attributes; kept token-side (no extra dep).
@@ -149,6 +168,11 @@ const config: Config = {
           from: { opacity: '1', transform: 'translateX(0)' },
           to: { opacity: '0', transform: 'translateX(calc(100% + 16px))' },
         },
+        // Notification auto-dismiss progress line (design 18a: 底部 2px 进度线 = 自动消失倒计时).
+        // Shrinks the 2px bar left-to-right over the dwell; onAnimationEnd fires the dismiss so
+        // the visual countdown and the removal stay in perfect sync, and `paused` on hover pauses
+        // both at once (scheme 18a: hover 暂停倒计时).
+        toastbar: { from: { width: '100%' }, to: { width: '0%' } },
         'popover-in': {
           from: { opacity: '0', transform: 'scale(0.96)' },
           to: { opacity: '1', transform: 'scale(1)' },
@@ -219,6 +243,8 @@ const config: Config = {
         'slide-out-left': 'slide-out-left 160ms ease-in',
         'toast-in': 'toast-in 180ms cubic-bezier(0.16, 1, 0.3, 1)',
         'toast-out': 'toast-out 120ms ease-in',
+        // 6s dwell for transient info toasts; warning/error toasts do not use this bar.
+        toastbar: 'toastbar 6000ms linear forwards',
         'popover-in': 'popover-in 140ms cubic-bezier(0.16, 1, 0.3, 1)',
         'popover-out': 'popover-out 100ms ease-in',
         // Prototype animation defaults (durations/easings as used in the source).

@@ -115,26 +115,31 @@ plugins/
 
 ### 每智能体插件配置
 
-`thread-templates.json` 中的每个智能体定义通过 `pluginDirs` 字段指定其插件（完整线程模板系统参见 [threads.md](./threads.md)）：
+智能体定义位于 `config/thread-templates/`——该目录每个实体一个 JSON 文件，分列于 `agents/`、`templates/`、`shells/` 三个子目录。每个智能体定义（`agents/` 下的一个文件）通过 `pluginDirs` 字段指定其插件（完整线程模板系统参见 [threads.md](./threads.md)）。每个文件中直接放智能体对象本身，其 `name` 必须与文件名一致——所以插件集不同的两个智能体就是两个文件。
+
+`agents/researcher.json`：
 
 ```json
 {
-  "agents": {
-    "researcher": {
-      "profile": "claude-sonnet",
-      "pluginDirs": [
-        "plugins/cortex-common",
-        "plugins/cortex-surveyor"
-      ]
-    },
-    "coder": {
-      "profile": "claude-sonnet",
-      "pluginDirs": [
-        "plugins/cortex-common",
-        "plugins/cortex-coder"
-      ]
-    }
-  }
+  "name": "researcher",
+  "profile": "claude-sonnet",
+  "pluginDirs": [
+    "plugins/cortex-common",
+    "plugins/cortex-surveyor"
+  ]
+}
+```
+
+`agents/coder.json`：
+
+```json
+{
+  "name": "coder",
+  "profile": "claude-sonnet",
+  "pluginDirs": [
+    "plugins/cortex-common",
+    "plugins/cortex-coder"
+  ]
 }
 ```
 
@@ -142,17 +147,19 @@ plugins/
 
 ### 模板级覆盖
 
-模板可以覆盖智能体的插件集：
+模板可以覆盖智能体的插件集。模板同样是 `templates/` 下的一个文件，其中直接放模板对象本身。
+
+`templates/special-review.json`：
 
 ```json
 {
-  "templates": {
-    "special-review": {
-      "agents": [
-        {"ref": "coder", "pluginDirs": ["plugins/cortex-coder", "plugins/cortex-analyst"]}
-      ]
-    }
-  }
+  "name": "special-review",
+  "agents": [
+    {"ref": "coder", "pluginDirs": ["plugins/cortex-coder", "plugins/cortex-analyst"]}
+  ],
+  "transitions": [],
+  "entryAgent": "coder",
+  "maxTotalSteps": 4
 }
 ```
 
@@ -162,7 +169,6 @@ plugins/
 
 - **Claude Code**：`--plugin-dir <path>` 标志
 - **PI**：`--skill <path>` 标志
-- **Codex**：不支持插件（`Capability.Plugins` 功能不可用）
 
 后端本身处理扫描目录中的 `SKILL.md` 文件并通过 `Skill` 工具使其可用。
 
@@ -172,8 +178,6 @@ Cortex 扫描多个根目录以查找 `SKILL.md` 文件：
 
 1. `{DATA_DIR}/plugins/` — 主插件目录（按插件名称组织）
 2. `{DATA_DIR}/.claude/skills/` — 用户可修改的技能根目录
-3. `{DATA_DIR}/.codex/skills/.system/` — Codex 系统技能
-4. `{WORKSPACE_DIR}/codex-routes/` — Codex 路由技能
 
 发现是递归的：任何包含 `SKILL.md` 的子目录都被视为技能。结果缓存有 60 秒 TTL。
 

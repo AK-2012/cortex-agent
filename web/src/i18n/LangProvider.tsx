@@ -1,60 +1,66 @@
-import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
-import { deriveLang, pickVocab, MOBILE_MAX_WIDTH, type Lang } from './lang';
+import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from 'react';
+import { isMobileShell } from '@/lib/desktop-config';
+import { pickVocab, readStoredLang, storeLang, type Lang } from './lang';
 import { type Vocab } from './vocab';
 
 interface LangContextValue {
   lang: Lang;
   vocab: Vocab;
   isMobile: boolean;
+  setLang: (lang: Lang) => void;
 }
 
 const LangContext = createContext<LangContextValue | null>(null);
 
-const MOBILE_QUERY = `(max-width: ${MOBILE_MAX_WIDTH}px)`;
-
-function currentLang(): Lang {
-  if (typeof window === 'undefined') return 'en';
-  return deriveLang(window.innerWidth);
-}
-
+// Language is a real, user-controlled, persisted choice (the EN/中 toggle) — NOT derived from the
+// viewport width. Mobile layout is selected ONLY by the dedicated mobile client shell
+// (`isMobileShell()`), so resizing a browser window never switches to the mobile UI.
 export function LangProvider({ children }: { children: ReactNode }) {
-  const [lang, setLang] = useState<Lang>(currentLang);
+  const [lang, setLangState] = useState<Lang>(readStoredLang);
+  const isMobile = isMobileShell();
 
-  useEffect(() => {
-    const mql = window.matchMedia(MOBILE_QUERY);
-    const update = () => setLang(mql.matches ? 'zh' : 'en');
-    update();
-    mql.addEventListener('change', update);
-    return () => mql.removeEventListener('change', update);
+  const setLang = useCallback((next: Lang) => {
+    setLangState(next);
+    storeLang(next);
   }, []);
 
-  // The mobile boundary is the same breakpoint that drives the language (mobile → zh), so it is the
-  // single source of truth for both the vocabulary and the mobile/desktop render switch.
   const value = useMemo<LangContextValue>(
-    () => ({ lang, vocab: pickVocab(lang), isMobile: lang === 'zh' }),
-    [lang],
+    () => ({ lang, vocab: pickVocab(lang), isMobile, setLang }),
+    [lang, isMobile, setLang],
   );
 
   return <LangContext.Provider value={value}>{children}</LangContext.Provider>;
 }
 
-export function useLang(): Lang {
+function useLangContext(): LangContextValue {
   const ctx = useContext(LangContext);
   if (!ctx) throw new Error('useLang must be used within <LangProvider>');
-  return ctx.lang;
+  return ctx;
+}
+
+export function useLang(): Lang {
+  return useLangContext().lang;
+}
+
+// Change the active language (persisted). Wired to the EN/中 toggle in the left rail footer.
+export function useSetLang(): (lang: Lang) => void {
+  return useLangContext().setLang;
 }
 
 // The vocabulary accessor — mirrors the prototype's `const L = this.dict()` idiom.
 export function useVocab(): Vocab {
-  const ctx = useContext(LangContext);
-  if (!ctx) throw new Error('useVocab must be used within <LangProvider>');
-  return ctx.vocab;
+  return useLangContext().vocab;
 }
 
-// True on a mobile viewport (≤ MOBILE_MAX_WIDTH). Drives the mobile/desktop render switch; tracks
-// the same matchMedia listener as the language, so lang and layout never disagree.
-export function useIsMobile(): boolean {
+// Provider-optional vocabulary accessor: returns the active-language vocab when a LangProvider is in
+// scope, else the default-language vocab. Lets shared helpers (e.g. useDownloadFile) run inside
+// isolated component tests that render a previewer bare, without a LangProvider.
+export function useVocabOptional(): Vocab {
   const ctx = useContext(LangContext);
-  if (!ctx) throw new Error('useIsMobile must be used within <LangProvider>');
-  return ctx.isMobile;
+  return ctx?.vocab ?? pickVocab(readStoredLang());
+}
+
+// True only inside the dedicated mobile client shell. Drives the mobile/desktop render switch.
+export function useIsMobile(): boolean {
+  return useLangContext().isMobile;
 }

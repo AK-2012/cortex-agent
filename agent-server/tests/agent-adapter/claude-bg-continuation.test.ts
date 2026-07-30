@@ -1,9 +1,9 @@
-// input:  Node test runner + ClaudeSession handleLine wiring (_test.makeSessionForTest)
-// output: spec for background-task pending-count on result + spontaneous continuation routing + compact_boundary → onCompact
-// pos:    CC backend background-task continuation wiring tests (no child process)
+// input:  ClaudeSession line wiring, context events, continuation sink
+// output: background context, continuation, and compaction specs
+// pos:    Claude print spontaneous-continuation wiring tests
 // >>> If I am updated, update my header comment and the parent folder's CORTEX.md <<<
 
-import test from 'node:test';
+import { test } from 'vitest';
 import assert from 'node:assert/strict';
 
 import { _test } from '../../src/agent-adapter/claude/adapter.js';
@@ -28,12 +28,14 @@ const TASK_UPDATED_DONE = JSON.stringify({ type: 'system', subtype: 'task_update
 const TASK_NOTIFICATION = JSON.stringify({ type: 'system', subtype: 'task_notification', task_id: 'b6vp8rywx', status: 'completed', summary: 'done' });
 const RESULT_FIRST = JSON.stringify({ type: 'result', subtype: 'success', is_error: false, total_cost_usd: 0.02, num_turns: 2, session_id: 'test-session' });
 const ASSISTANT_CONT = JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text: 'Background task done: DONE' }] } });
-const RESULT_CONT = JSON.stringify({ type: 'result', subtype: 'success', is_error: false, origin: { kind: 'task-notification' }, total_cost_usd: 0.01, num_turns: 1, session_id: 'test-session' });
+const CONTEXT_START = JSON.stringify({ type: 'stream_event', event: { type: 'message_start', message: { model: 'claude-opus-5', usage: { input_tokens: 100, cache_creation_input_tokens: 20, cache_read_input_tokens: 300 } } } });
+const CONTEXT_DELTA = JSON.stringify({ type: 'stream_event', event: { type: 'message_delta', usage: { output_tokens: 80 } } });
+const RESULT_CONT = JSON.stringify({ type: 'result', subtype: 'success', is_error: false, origin: { kind: 'task-notification' }, total_cost_usd: 0.01, num_turns: 1, session_id: 'test-session', usage: { iterations: [{ input_tokens: 100, cache_creation_input_tokens: 20, cache_read_input_tokens: 300, output_tokens: 80 }] }, modelUsage: { 'claude-opus-5[1m]': { canonicalModel: 'claude-opus-5', contextWindow: 900000 } } });
 
 test('handleLine: normal turn result carries pendingBackgroundTasks count', (t) => {
   const s: any = _test.makeSessionForTest();
   s.createTurnStreams = () => ({ rawStream: FAKE_STREAM, txtStream: FAKE_STREAM });
-  t.after(() => s.close());
+  t.onTestFinished(() => s.close());
 
   const cap: { value?: any } = {};
   s.currentTurn = fakeTurn(cap);
@@ -48,7 +50,7 @@ test('handleLine: normal turn result carries pendingBackgroundTasks count', (t) 
 test('handleLine: spontaneous continuation routes assistant text + final result to the sink', (t) => {
   const s: any = _test.makeSessionForTest();
   s.createTurnStreams = () => ({ rawStream: FAKE_STREAM, txtStream: FAKE_STREAM });
-  t.after(() => s.close());
+  t.onTestFinished(() => s.close());
 
   const texts: string[] = [];
   let finalResult: any = null;
@@ -68,10 +70,35 @@ test('handleLine: spontaneous continuation routes assistant text + final result 
   assert.equal(finalResult.pendingBackgroundTasks, 0, 'no background tasks remain at continuation end');
 });
 
+test('handleLine: spontaneous continuation forwards final and reconciled context snapshots', (t) => {
+  const s: any = _test.makeSessionForTest('claude-opus-5[1m]');
+  s.createTurnStreams = () => ({ rawStream: FAKE_STREAM, txtStream: FAKE_STREAM });
+  t.onTestFinished(() => s.close());
+
+  const contexts: Array<{ usedTokens: number; contextWindow: number }> = [];
+  s.setContinuationSink({
+    onAssistantText: () => {},
+    onContextUsage: (usage: { usedTokens: number; contextWindow: number }) => contexts.push(usage),
+    onResult: () => {},
+  });
+
+  s.handleLine(TASK_STARTED);
+  s.handleLine(TASK_NOTIFICATION);
+  s.handleLine(CONTEXT_START); // seeds the tracker before the synthetic turn opens
+  s.handleLine(ASSISTANT_CONT); // opens the synthetic continuation turn
+  s.handleLine(CONTEXT_DELTA); // first callback-visible exact boundary
+  s.handleLine(RESULT_CONT); // provider-reported window correction
+
+  assert.deepEqual(contexts.map((usage) => [usage.usedTokens, usage.contextWindow]), [
+    [500, 1_000_000],
+    [500, 900_000],
+  ]);
+});
+
 test('handleLine: assistant with no active turn and NO continuation armed is dropped (no sink call)', (t) => {
   const s: any = _test.makeSessionForTest();
   s.createTurnStreams = () => ({ rawStream: FAKE_STREAM, txtStream: FAKE_STREAM });
-  t.after(() => s.close());
+  t.onTestFinished(() => s.close());
 
   let called = false;
   s.setContinuationSink({ onAssistantText: () => { called = true; }, onResult: () => { called = true; } });
@@ -83,7 +110,7 @@ test('handleLine: assistant with no active turn and NO continuation armed is dro
 test('integration: real captured line sequence merges continuation text + dispatches complete via production sink', (t) => {
   const s: any = _test.makeSessionForTest();
   s.createTurnStreams = () => ({ rawStream: FAKE_STREAM, txtStream: FAKE_STREAM });
-  t.after(() => s.close());
+  t.onTestFinished(() => s.close());
 
   const stream = new MockOutputStream(new MockAdapter(), { type: 'interactive-reply', conduit: 'slack:D1', sessionId: '' });
   let completedWith: any = null;
@@ -117,7 +144,7 @@ test('integration: real captured line sequence merges continuation text + dispat
 test('handleLine: task completed without notification → undelivered, not pending, on result', (t) => {
   const s: any = _test.makeSessionForTest();
   s.createTurnStreams = () => ({ rawStream: FAKE_STREAM, txtStream: FAKE_STREAM });
-  t.after(() => s.close());
+  t.onTestFinished(() => s.close());
 
   const cap: { value?: any } = {};
   s.currentTurn = fakeTurn(cap);
@@ -136,7 +163,7 @@ test('handleLine: task completed without notification → undelivered, not pendi
 test('handleProcessClose: waiting window (bg pending, no active turn) → sink gets backgroundInterrupted exactly once', (t) => {
   const s: any = _test.makeSessionForTest();
   s.createTurnStreams = () => ({ rawStream: FAKE_STREAM, txtStream: FAKE_STREAM });
-  t.after(() => s.close());
+  t.onTestFinished(() => s.close());
 
   const results: any[] = [];
   s.setContinuationSink({ onAssistantText: () => {}, onResult: (r: any) => results.push(r) });
@@ -155,7 +182,7 @@ test('handleProcessClose: waiting window (bg pending, no active turn) → sink g
 test('handleProcessClose: nothing pending → sink cleared silently (no interrupted call)', (t) => {
   const s: any = _test.makeSessionForTest();
   s.createTurnStreams = () => ({ rawStream: FAKE_STREAM, txtStream: FAKE_STREAM });
-  t.after(() => s.close());
+  t.onTestFinished(() => s.close());
 
   const results: any[] = [];
   s.setContinuationSink({ onAssistantText: () => {}, onResult: (r: any) => results.push(r) });
@@ -168,7 +195,7 @@ test('handleProcessClose: nothing pending → sink cleared silently (no interrup
 test('handleProcessClose: crash mid-continuation (spontaneous turn open) → sink gets backgroundInterrupted', (t) => {
   const s: any = _test.makeSessionForTest();
   s.createTurnStreams = () => ({ rawStream: FAKE_STREAM, txtStream: FAKE_STREAM });
-  t.after(() => s.close());
+  t.onTestFinished(() => s.close());
 
   const results: any[] = [];
   s.setContinuationSink({ onAssistantText: () => {}, onResult: (r: any) => results.push(r) });
@@ -185,7 +212,7 @@ test('handleProcessClose: crash mid-continuation (spontaneous turn open) → sin
 test('handleLine: compact_boundary fires onCompact with trigger + preTokens', (t) => {
   const s: any = _test.makeSessionForTest();
   s.createTurnStreams = () => ({ rawStream: FAKE_STREAM, txtStream: FAKE_STREAM });
-  t.after(() => s.close());
+  t.onTestFinished(() => s.close());
 
   const cap: { value?: any } = {};
   const turn: any = fakeTurn(cap);
@@ -201,7 +228,7 @@ test('handleLine: compact_boundary fires onCompact with trigger + preTokens', (t
 test('handleLine: compact_boundary with no active turn is a no-op', (t) => {
   const s: any = _test.makeSessionForTest();
   s.createTurnStreams = () => ({ rawStream: FAKE_STREAM, txtStream: FAKE_STREAM });
-  t.after(() => s.close());
+  t.onTestFinished(() => s.close());
 
   // No currentTurn set — must not throw.
   assert.doesNotThrow(() =>
@@ -212,7 +239,7 @@ test('handleLine: compact_boundary with no active turn is a no-op', (t) => {
 test('setContinuationSink/clearContinuationSink and close clear the sink', (t) => {
   const s: any = _test.makeSessionForTest();
   s.createTurnStreams = () => ({ rawStream: FAKE_STREAM, txtStream: FAKE_STREAM });
-  t.after(() => s.close());
+  t.onTestFinished(() => s.close());
 
   const sink = { onAssistantText: () => {}, onResult: () => {} };
   s.setContinuationSink(sink);

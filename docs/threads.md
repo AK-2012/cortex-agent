@@ -31,21 +31,20 @@ Each file holds a single entity, and **the filename (without `.json`) is the ent
 
 ### Agent Definitions
 
-Each agent in the `agents` map is an independent entity with its own identity, tools, and prompt:
+Each file under `agents/` defines one agent — an independent entity with its own identity, tools, and prompt. The file holds the agent object itself, and its `name` must match the filename.
+
+`agents/planner.json`:
 
 ```json
 {
-  "agents": {
-    "planner": {
-      "description": "Plans the research approach",
-      "profile": "claude-sonnet",
-      "persistSession": false,
-      "directive": "You are a research planner. Break down problems into testable hypotheses.",
-      "promptTemplate": "file:planner-prompt.md",
-      "pluginDirs": ["plugins/cortex-common", "plugins/cortex-surveyor"],
-      "tools": "Agent,AskUserQuestion,Bash,Read,Grep,Glob,Write,Edit,WebSearch,WebFetch,Skill"
-    }
-  }
+  "name": "planner",
+  "description": "Plans the research approach",
+  "profile": "claude-sonnet",
+  "persistSession": false,
+  "directive": "You are a research planner. Break down problems into testable hypotheses.",
+  "promptTemplate": "file:planner-prompt.md",
+  "tools": "Agent,AskUserQuestion,Bash,Read,Grep,Glob,Write,Edit,WebSearch,WebFetch,Skill",
+  "pluginDirs": ["plugins/cortex-common", "plugins/cortex-surveyor"]
 }
 ```
 
@@ -53,12 +52,12 @@ Each agent in the `agents` map is an independent entity with its own identity, t
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `name` | string | Agent ID (key in the agents map) |
+| `name` | string | Agent ID — required, and must equal the filename (`agents/<name>.json`) |
 | `profile` | string | Profile name from `profiles.json`, or `"__active__"` to use the current runtime profile |
 | `persistSession` | boolean | `true`: reuse the same LLM session across iterations (preserves conversation context). `false`: fresh session each step |
 | `directive` | string? | Agent role/identity, prepended to the prompt. Supports `file:filename.md` references |
 | `systemPrompt` | string? | Full system prompt override. Supports `file:` references |
-| `promptTemplate` | string? | Template with `{{input}}`, `{{artifactPath}}`, `{{previousOutput}}`, `{{modifiedFiles}}`, `{{modifiedFilesWithDiff}}`, `{{currentDateTime}}` variables. Supports `file:` references |
+| `promptTemplate` | string? | Template with `{{input}}`, `{{artifactPath}}`, `{{previousOutput}}`, `{{modifiedFiles}}`, `{{currentDateTime}}` variables. Supports `file:` references |
 | `claudeAgent` | string? | Claude Code agent name (`--agent` flag, loads from `.claude/agents/`) |
 | `outputStyle` | string? | Claude Code output style |
 | `tools` | string? | Comma-separated tool list (overrides defaults) |
@@ -68,25 +67,26 @@ Each agent in the `agents` map is an independent entity with its own identity, t
 
 An agent can declare multiple **stages** via the `stages` field. When stages are present, `promptTemplate` is ignored — the engine selects the appropriate stage's prompt for each step based on the transition target.
 
+`agents/coder.json`:
+
 ```json
 {
-  "coder": {
-    "profile": "claude-sonnet",
-    "persistSession": true,
-    "pluginDirs": ["plugins/cortex-coder"],
-    "stages": {
-      "implement": {
-        "promptTemplate": "You are implementing the plan. Write code to {{artifactPath}}.",
-        "description": "Write the implementation"
-      },
-      "review": {
-        "promptTemplate": "You are reviewing the code in {{artifactPath}}. Check for correctness.",
-        "continuesSession": true,
-        "description": "Review the implementation"
-      }
+  "name": "coder",
+  "profile": "claude-sonnet",
+  "persistSession": true,
+  "entryStage": "implement",
+  "stages": {
+    "implement": {
+      "promptTemplate": "You are implementing the plan. Write code to {{artifactPath}}.",
+      "description": "Write the implementation"
     },
-    "entryStage": "implement"
-  }
+    "review": {
+      "promptTemplate": "You are reviewing the code in {{artifactPath}}. Check for correctness.",
+      "continuesSession": true,
+      "description": "Review the implementation"
+    }
+  },
+  "pluginDirs": ["plugins/cortex-coder"]
 }
 ```
 
@@ -106,28 +106,27 @@ The template system supports a YAML-frontmatter-based format with `extends:` (in
 
 ## Templates
 
-Templates compose agents into multi-step pipelines:
+Templates compose agents into multi-step pipelines. Each file under `templates/` holds one template object.
+
+`templates/coder-review.json`:
 
 ```json
 {
-  "templates": {
-    "coder-review": {
-      "description": "Implement a feature then review it",
-      "agents": ["planner", "coder", "reviewer"],
-      "transitions": [
-        {"from": "planner", "to": "coder:implement", "condition": {"type": "always"}},
-        {"from": "coder:implement", "to": "coder:review", "condition": {"type": "always"}},
-        {"from": "coder:review", "to": "reviewer", "condition": {"type": "always"}}
-      ],
-      "entryAgent": "planner",
-      "maxTotalSteps": 10,
-      "maxTotalCostUsd": 5.00,
-      "hooks": {
-        "onEnd": {
-          "command": "node hooks/post-task-hook.mjs",
-          "timeout": 30000
-        }
-      }
+  "name": "coder-review",
+  "description": "Implement a feature then review it",
+  "agents": ["planner", "coder", "reviewer"],
+  "transitions": [
+    {"from": "planner", "to": "coder:implement", "condition": {"type": "always"}},
+    {"from": "coder:implement", "to": "coder:review", "condition": {"type": "always"}},
+    {"from": "coder:review", "to": "reviewer", "condition": {"type": "always"}}
+  ],
+  "entryAgent": "planner",
+  "maxTotalSteps": 10,
+  "maxTotalCostUsd": 5.00,
+  "hooks": {
+    "onEnd": {
+      "command": "node hooks/post-task-hook.mjs",
+      "timeout": 30000
     }
   }
 }
@@ -137,7 +136,7 @@ Templates compose agents into multi-step pipelines:
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `name` | string | Template ID (used in `!thread <name>` and task dispatch) |
+| `name` | string? | Optional; if present it must equal the filename (`templates/<name>.json`). The filename is the template ID used in `!thread <name>` and task dispatch |
 | `agents` | TemplateAgentRef[] | Ordered list of participating agents |
 | `transitions` | TransitionRule[] | Rules governing when to move from one agent to the next |
 | `entryAgent` | string | The first agent to run |
@@ -170,7 +169,7 @@ Pipelines that share the same transition graph and differ only in which agents f
 A shell declares its parameters and uses placeholders in the graph:
 
 - `{param}` — substituted with the binding's value for that parameter (an agent name).
-- `{param.entryStage}` — substituted with that agent's `entryStage`, resolved from the agents map.
+- `{param.entryStage}` — substituted with that agent's `entryStage`, resolved from that agent's definition under `agents/`.
 
 For example, the shipped `worker-review` shell (`shells/worker-review.json`) — a generic produce-then-audit loop:
 
@@ -293,6 +292,14 @@ Terminal states: `completed`, `failed`, `cancelled`, `aborted`.
 
 Thread control is out-of-band: an agent signals its own thread by calling the `thread_abort`, `thread_split`, or `thread_wait` MCP tools, never by writing markers into the artifact (text mentioning those keywords in the artifact does nothing). The tool writes a structured `metadata.pendingControl` on the agent's own thread; the runner reads it after every step completion, with **higher priority than all transition rules**. `thread_abort({ kind, diagnosis })` immediately terminates the thread with status `aborted` (but `onEnd` hooks still fire); `thread_split({ subtasks })` proposes a decomposition of the owning dispatch task; `thread_wait` suspends until awaited children finish.
 
+### Suspension and Wake-up (thread_wait)
+
+A suspended manager waits on its child tasks (and any child threads). Calling `thread_wait` without `on_tasks` or `on_threads` infers all live linked children. Supplying either parameter switches to explicit override mode: only IDs listed in the supplied arrays are awaited, and an omitted array is treated as empty. Explicit IDs must identify live linked children; duplicate, missing, unrelated, and terminal IDs are ignored. Empty arrays therefore leave nothing to await and the thread continues.
+
+Each child that completes or blocks is delivered into the manager's `pendingMessages` as a result or escalation notice, and the manager is re-entered once nothing is left to wait on. Delivery is event-driven (`task.completed` / `task.blocked`, verified against `TASKS.yaml` before delivery), backed by two safety nets: a periodic disk-driven sweep (every 60 seconds, configurable via `CORTEX_WAITING_SWEEP_MS`) that reconciles every waiting manager against on-disk task state, and a startup recovery pass that re-delivers results that turned terminal while the server was down. Open child tasks survive restarts and stay awaited.
+
+Blocking a task does not cascade to its dependents, so a wait set can reach a state where every remaining awaited task depends — directly or transitively — on a blocked task and can never start. The wake path detects this stall and wakes the manager with a deadlock notice naming the stuck tasks and their blockers; the manager is expected to unblock, re-plan the decomposition, or escalate via `thread_abort`. Each distinct stall wakes the manager exactly once — an unchanged stall never re-wakes it.
+
 ### thread_wait Checkpoint Gate (DR-0017)
 
 Before a manager suspends via `thread_wait`, it must leave a fresh checkpoint for its (possibly rotated) next incarnation. The runner enforces this with a **checkpoint gate**:
@@ -393,10 +400,9 @@ tmp/threads/thr_a1b2c3d4/
 
 The artifact path is available to all agents via the `{{artifactPath}}` template variable. Agents communicate by reading what previous agents wrote and appending their own findings.
 
-Agents can also read files modified by previous agents:
+Agents can also identify files modified by previous agents:
 - `{{previousOutput}}` — the complete output from the last completed step
-- `{{modifiedFiles}}` — list of files edited by the previous agent (extracted from session activity logs)
-- `{{modifiedFilesWithDiff}}` — file list with per-file diff blocks reconstructed from session activity JSONL
+- `{{modifiedFiles}}` — list of files edited by the previous agent (extracted from path-only session activity logs)
 
 ### Task-Keyed Manager Artifact (DR-0017)
 
@@ -484,7 +490,6 @@ Agent prompts support template variables that are resolved at runtime:
 | `{{artifactPath}}` | Absolute path to `artifact.md` |
 | `{{previousOutput}}` | Full output from the last completed step |
 | `{{modifiedFiles}}` | Files edited by the previous agent |
-| `{{modifiedFilesWithDiff}}` | Files with inline diffs from previous agent |
 | `{{currentDateTime}}` | Current date and time in ISO format |
 
 ## Plugin Loading

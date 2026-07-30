@@ -1,5 +1,5 @@
 import '../_test-home.js'; // MUST be first: isolate CORTEX_HOME before paths.ts loads
-import test from 'node:test';
+import { test } from 'vitest';
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import { resolveSessionName } from '../../src/orchestration/agent-runner.js';
@@ -71,7 +71,7 @@ test('resolveSessionName generates a name without registering when sessionId is 
 
 test('handleNewCmd clears sessions for all backends and the ledger', async () => {
   const channel = 'c0-newcmd';
-  const ALL_BACKENDS = ['claude', 'pi', 'codex'];
+  const ALL_BACKENDS = ['claude', 'pi'];
 
   // Seed sessions for all backends
   for (const b of ALL_BACKENDS) {

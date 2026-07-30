@@ -1,13 +1,23 @@
+// input:  project data, recent thread scope, notes drawer state
+// output: desktop right pane switching between work tabs and notes
+// pos:    Workbench right-side pane host
+// >>> 一旦我被更新，务必更新我的开头注释与所属文件夹 CORTEX.md <<<
+
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useTRPC } from '@/lib/trpc';
 import { TasksPanel } from '@/features/tasks/TasksPanel';
+import { actionableOpenCount } from '@/features/tasks/group-tasks';
 import { RightThreadCard } from './RightThreadCard';
 import { RightMachinesTab } from './RightMachinesTab';
-import { actionableCount, formatCost } from './right-panel-vm';
-import { threadScopeFilter, taskScopeFilter, type Scope } from './scope';
+import { formatCost, onlineMachineCount } from './right-panel-vm';
+import { recentTerminalThreads, threadScopeFilter, type Scope } from './scope';
+import { useRecentNow } from './useRecentNow';
 import { useThreadsLiveSync } from './useThreadsLiveSync';
 import { useCurrentProject } from './CurrentProjectProvider';
+import { useVocab } from '@/i18n';
+import { NotesPane } from '@/features/notes/NotesPane';
+import { useNotes } from '@/features/notes/NotesProvider';
 
 // RIGHT PANEL — 1:1 from prototype.dc.html L1091–1276 (Stage-R RB sibling C, task 1e96). Exact inline
 // styles / px / hex / font / weight / EN copy reproduced verbatim; real tRPC data (cost.summary /
@@ -39,9 +49,9 @@ function TabButton({
       style={{
         fontSize: 12.5,
         fontWeight: active ? 600 : 500,
-        color: active ? '#191C22' : '#8A93A2',
+        color: active ? 'var(--proto-ink)' : 'var(--proto-muted-2)',
         padding: '13px 0 11px',
-        borderBottom: '2px solid ' + (active ? '#191C22' : 'transparent'),
+        borderBottom: '2px solid ' + (active ? 'var(--proto-ink)' : 'transparent'),
         marginBottom: -1,
         cursor: 'pointer',
         display: 'inline-flex',
@@ -51,7 +61,7 @@ function TabButton({
     >
       {label}{' '}
       {dot && (
-        <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#4655D4', display: 'inline-block' }} />
+        <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--proto-accent)', display: 'inline-block' }} />
       )}
       <span style={{ font: "500 10px 'IBM Plex Mono',monospace", color: countColor }}>{count}</span>
     </div>
@@ -59,9 +69,16 @@ function TabButton({
 }
 
 export function RightPanel(): JSX.Element {
+  const { isOpen } = useNotes();
+  return isOpen ? <NotesPane /> : <RightWorkPanel />;
+}
+
+function RightWorkPanel(): JSX.Element {
+  const L = useVocab();
   const trpc = useTRPC();
   const [tab, setTab] = useState<Tab>('threads');
   const [filter, setFilter] = useState<Scope>('active');
+  const now = useRecentNow(tab === 'threads');
 
   useThreadsLiveSync();
 
@@ -74,18 +91,26 @@ export function RightPanel(): JSX.Element {
     enabled: !!activeProjectId,
   });
 
-  // Tab counts: real threads.list (Active) length; real tasks.list (open) actionable count; real machines.list length.
-  const activeThreadsQuery = useQuery(trpc.threads.list.queryOptions({ status: threadScopeFilter('active') }));
-  const openTasksQuery = useQuery(trpc.tasks.list.queryOptions({ status: 'open' }));
+  // Tab counts + lists are scoped to the shared cross-pane current project (threads/tasks both accept
+  // projectId) so the panel shows only THIS project's threads and tasks. Machines are cross-project.
+  const projectId = activeProjectId ?? undefined;
+  const activeThreadsQuery = useQuery(trpc.threads.list.queryOptions({ status: threadScopeFilter('active'), projectId }));
+  // Same unfiltered query TasksPanel runs (identical input → react-query dedupes it, no extra
+  // request), counted the same way, so the tab badge and the panel's chip can never disagree: both
+  // are the open (not-done) count — in-progress dispatches, blocked, waiting-deps and pending
+  // included. The former badge counted only strictly-claimable tasks and read as a second, smaller
+  // truth beside the chip.
+  const tasksQuery = useQuery(trpc.tasks.list.queryOptions({ ...(projectId ? { projectId } : {}) }));
   const machinesQuery = useQuery(trpc.machines.list.queryOptions({}));
   const activeThreadCount = activeThreadsQuery.data?.length ?? 0;
-  const actionable = openTasksQuery.data ? actionableCount(openTasksQuery.data) : 0;
-  const machineCount = machinesQuery.data?.length ?? 0;
+  const openTaskCount = tasksQuery.data ? actionableOpenCount(tasksQuery.data) : 0;
+  // Machines tab badge = ONLINE machines, not the total in the registry (task: show online count).
+  const machineCount = onlineMachineCount(machinesQuery.data);
 
-  // Threads list for the current Active/History filter.
-  const threadsQuery = useQuery(trpc.threads.list.queryOptions({ status: threadScopeFilter(filter) }));
-  const threads = threadsQuery.data ?? [];
-  const now = Date.now();
+  // Recent reuses the terminal query and applies its 24-hour window client-side.
+  const threadsQuery = useQuery(trpc.threads.list.queryOptions({ status: threadScopeFilter(filter), projectId }));
+  const listedThreads = threadsQuery.data ?? [];
+  const threads = filter === 'recent' ? recentTerminalThreads(listedThreads, now) : listedThreads;
 
   const todayCost = costQuery.data?.today;
   // GAP-B: no budget scope in the contract (CostSummary has `today`, no limit). Denominator + bar
@@ -98,33 +123,33 @@ export function RightPanel(): JSX.Element {
       style={{
         width: 400,
         flex: 'none',
-        background: '#FBFBFC',
-        borderLeft: '1px solid #E7E9EE',
+        background: 'var(--proto-rail)',
+        borderLeft: '1px solid var(--proto-line)',
         display: 'flex',
         flexDirection: 'column',
         minHeight: 0,
       }}
     >
       {/* tab bar */}
-      <div style={{ display: 'flex', gap: 16, padding: '0 18px', borderBottom: '1px solid #E7E9EE', flex: 'none' }}>
+      <div style={{ display: 'flex', gap: 16, padding: '0 18px', borderBottom: '1px solid var(--proto-line)', flex: 'none' }}>
         <TabButton
-          label="Threads"
+          label={L.threads}
           count={String(activeThreadCount)}
-          countColor="#4655D4"
+          countColor="var(--proto-accent)"
           active={tab === 'threads'}
           onClick={() => setTab('threads')}
         />
         <TabButton
-          label="Tasks"
-          count={String(actionable)}
-          countColor="#8A93A2"
+          label={L.tasks}
+          count={String(openTaskCount)}
+          countColor="var(--proto-muted-2)"
           active={tab === 'tasks'}
           onClick={() => setTab('tasks')}
         />
         <TabButton
-          label="Machines"
+          label={L.machines}
           count={String(machineCount)}
-          countColor="#8A93A2"
+          countColor="var(--proto-muted-2)"
           active={tab === 'machines'}
           dot
           onClick={() => setTab('machines')}
@@ -138,15 +163,15 @@ export function RightPanel(): JSX.Element {
           alignItems: 'center',
           gap: 10,
           padding: '10px 18px',
-          borderBottom: '1px solid #EFF1F5',
+          borderBottom: '1px solid var(--proto-line-2)',
           flex: 'none',
         }}
       >
-        <span style={{ fontSize: 10.5, fontWeight: 600, color: '#8A93A2' }}>Today</span>
-        <div style={{ flex: 1, height: 4, borderRadius: 999, background: '#EFF1F5', overflow: 'hidden' }}>
-          <div style={{ width: '0%', height: '100%', borderRadius: 999, background: '#4655D4' }} />
+        <span style={{ fontSize: 10.5, fontWeight: 600, color: 'var(--proto-muted-2)' }}>{L.today}</span>
+        <div style={{ flex: 1, height: 4, borderRadius: 999, background: 'var(--proto-line-2)', overflow: 'hidden' }}>
+          <div style={{ width: '0%', height: '100%', borderRadius: 999, background: 'var(--proto-accent)' }} />
         </div>
-        <span style={{ font: "500 10.5px 'IBM Plex Mono',monospace", color: '#191C22' }}>
+        <span style={{ font: "500 10.5px 'IBM Plex Mono',monospace", color: 'var(--proto-ink)' }}>
           {todayLabel} / —
         </span>
       </div>
@@ -155,36 +180,51 @@ export function RightPanel(): JSX.Element {
       {tab === 'threads' && (
         <>
           <div style={{ display: 'flex', alignItems: 'center', padding: '10px 16px 0', flex: 'none' }}>
-            <div style={{ display: 'flex', background: '#EFF1F5', borderRadius: 7, padding: 2 }}>
+            <div style={{ display: 'flex', background: 'var(--proto-line-2)', borderRadius: 7, padding: 2 }}>
               <span
                 onClick={() => setFilter('active')}
                 style={{
                   fontSize: 11,
                   fontWeight: 600,
-                  color: filter === 'active' ? '#191C22' : '#8A93A2',
-                  background: filter === 'active' ? '#fff' : 'transparent',
+                  color: filter === 'active' ? 'var(--proto-ink)' : 'var(--proto-muted-2)',
+                  background: filter === 'active' ? 'var(--proto-card)' : 'transparent',
                   borderRadius: 5,
                   padding: '3px 10px',
                   cursor: 'pointer',
                   boxShadow: filter === 'active' ? '0 1px 2px rgba(16,24,40,.08)' : 'none',
                 }}
               >
-                Active {activeThreadCount}
+                {L.active} {activeThreadCount}
+              </span>
+              <span
+                onClick={() => setFilter('recent')}
+                style={{
+                  fontSize: 11,
+                  fontWeight: 600,
+                  color: filter === 'recent' ? 'var(--proto-ink)' : 'var(--proto-muted-2)',
+                  background: filter === 'recent' ? 'var(--proto-card)' : 'transparent',
+                  borderRadius: 5,
+                  padding: '3px 10px',
+                  cursor: 'pointer',
+                  boxShadow: filter === 'recent' ? '0 1px 2px rgba(16,24,40,.08)' : 'none',
+                }}
+              >
+                {L.recentDay}
               </span>
               <span
                 onClick={() => setFilter('history')}
                 style={{
                   fontSize: 11,
                   fontWeight: 600,
-                  color: filter === 'history' ? '#191C22' : '#8A93A2',
-                  background: filter === 'history' ? '#fff' : 'transparent',
+                  color: filter === 'history' ? 'var(--proto-ink)' : 'var(--proto-muted-2)',
+                  background: filter === 'history' ? 'var(--proto-card)' : 'transparent',
                   borderRadius: 5,
                   padding: '3px 10px',
                   cursor: 'pointer',
                   boxShadow: filter === 'history' ? '0 1px 2px rgba(16,24,40,.08)' : 'none',
                 }}
               >
-                History
+                {L.history}
               </span>
             </div>
           </div>
@@ -203,23 +243,28 @@ export function RightPanel(): JSX.Element {
               <RightThreadCard key={t.id} thread={t} now={now} />
             ))}
             {threadsQuery.isSuccess && threads.length === 0 && filter === 'active' && (
-              <div style={{ textAlign: 'center', padding: '26px 12px', border: '1px dashed #E7E9EE', borderRadius: 10 }}>
-                <div style={{ fontSize: 11.5, fontWeight: 600, color: '#8A93A2' }}>No active threads</div>
-                <div style={{ fontSize: 10.5, color: '#B6BDC9', marginTop: 4, lineHeight: 1.6 }}>
-                  Running and waiting threads will appear here.
+              <div style={{ textAlign: 'center', padding: '26px 12px', border: '1px dashed var(--proto-line)', borderRadius: 10 }}>
+                <div style={{ fontSize: 11.5, fontWeight: 600, color: 'var(--proto-muted-2)' }}>{L.rpNoActiveThreads}</div>
+                <div style={{ fontSize: 10.5, color: 'var(--proto-faint)', marginTop: 4, lineHeight: 1.6 }}>
+                  {L.rpNoActiveThreadsHint}
                 </div>
               </div>
             )}
+            {threadsQuery.isSuccess && threads.length === 0 && filter === 'recent' && (
+              <div style={{ textAlign: 'center', fontSize: 11.5, color: 'var(--proto-faint)', padding: '24px 0' }}>
+                {L.rpNoRecentThreads}
+              </div>
+            )}
             {threadsQuery.isSuccess && threads.length === 0 && filter === 'history' && (
-              <div style={{ textAlign: 'center', fontSize: 11.5, color: '#B6BDC9', padding: '24px 0' }}>
-                No finished threads yet.
+              <div style={{ textAlign: 'center', fontSize: 11.5, color: 'var(--proto-faint)', padding: '24px 0' }}>
+                {L.rpNoFinishedThreads}
               </div>
             )}
           </div>
         </>
       )}
 
-      {/* tasks tab — REUSE the real tasks.list panel (features/tasks/TasksPanel) */}
+      {/* tasks tab — design 4a: lifecycle groups with built-in Actionable/All filter */}
       {tab === 'tasks' && (
         <div
           style={{
@@ -232,7 +277,7 @@ export function RightPanel(): JSX.Element {
             minHeight: 0,
           }}
         >
-          <TasksPanel lifecycle={taskScopeFilter(filter)} />
+          <TasksPanel projectId={projectId} />
         </div>
       )}
 

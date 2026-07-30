@@ -1,140 +1,107 @@
 // input:  AgentSpawnConfig, session keys, injectable spawner
-// output: PIAdapter + PISession + switch_session API
-// pos:    PI CLI session pool and AgentAdapter implementation
+// output: PIAdapter runtime sessions, context stats, manual compact, steering
+// pos:    PI CLI session pool; private spawn/codec helpers stay module-internal
 // >>> If I am updated, update my header comment and the parent folder's CORTEX.md <<<
 
-import { spawn as defaultSpawn, execSync, type ChildProcess, type SpawnOptions } from 'child_process';
+import { spawn as defaultSpawn, type ChildProcess } from 'child_process';
 import { mkdirSync } from 'fs';
 import * as path from 'path';
-import { DATA_DIR, INSTALL_ROOT } from '@core/utils.js';
+import { DATA_DIR } from '@core/utils.js';
 import { createLogger } from '@core/log.js';
 import { Capability, CAPABILITIES_BY_BACKEND } from '../capabilities.js';
-import type { AgentAdapter, AgentProcess, AgentSpawnConfig, Backend, UserMessage } from '../types.js';
-import type { AgentResult, AskUserQuestionInfo } from '@core/types/agent-types.js';
+import type { AgentAdapter, AgentCompactResult, AgentCompactUsage, AgentSpawnConfig, Backend, InjectionAckSink, UserMessage } from '../types.js';
+import type { AgentResult } from '@core/types/agent-types.js';
 import type { NormalizedEvent } from '../normalize/event-types.js';
-import { buildSpawnArgs } from './spawn-args.js';
+import { buildPiEnv, buildSpawnArgs } from './spawn-args.js';
 import { createLineSplitter, encodeCommand } from './framing.js';
-import { piRpcLineToNormalized, createPIEventParserState, type PIEventParserState } from './event-parser.js';
-import { PI_AGENT_DIR, PI_SESSIONS_DIR, writeProvidersConfig, buildProviderOverrides, ensureAuthVisible } from './agent-dir.js';
-import { parsePiListModelsOutput } from '@core/gateway-generator.js';
-import { buildPrompt } from '../normalize/prompt-builder.js';
+import { piRpcLineToNormalized, createPIEventParserState, piContextUsageFromStats, type PIEventParserState } from './event-parser.js';
+import { PI_AGENT_DIR, writeProvidersConfig, buildProviderOverrides, ensureAuthVisible } from './agent-dir.js';
 import { fromCanonical } from '../normalize/tool-names.js';
-
+import { discoverPIProviders, piSessionFileExists } from './discovery.js';
+import {
+  CLOSE_EXIT_WAIT_MS,
+  DEFAULT_PI_BINARY,
+  EventQueue,
+  PI_IDLE_SESSION_TIMEOUT,
+  PI_MAX_TIMEOUT,
+  PI_TURN_IDLE_TIMEOUT,
+  PIContextUsageProbe,
+  PI_CONTEXT_USAGE_TIMEOUT_MS,
+  PISteeringQueue,
+  SWITCH_SESSION_TIMEOUT_MS,
+  buildPromptText,
+  isPIContextSampleBoundary,
+  parseRpcObject,
+  type PendingPiTurn,
+  type PIAgentProcess,
+  type PISessionOptions,
+  type SpawnFn,
+  type SwitchResult,
+} from './session-support.js';
+import { DEFAULT_SESSION_DIR, HOOK_BRIDGE_PATH, MCP_BRIDGE_PATH, TOOL_SHIMS_PATH } from './defaults.js';
+export type { PIAgentProcess } from './session-support.js';
 const log = createLogger('pi-adapter');
+type PiTurnComplete = Extract<NormalizedEvent, { type: 'turn_complete' }>;
+type CompactBase = Omit<AgentCompactResult, 'contextUsage'>;
 
-function buildPromptText(msg: UserMessage): string {
-  return buildPrompt(msg.text, msg.attachments ?? []);
+interface ReadyWaiter {
+  resolve: () => void;
+  reject: (error: Error) => void;
+  timer: ReturnType<typeof setTimeout>;
 }
 
-/**
- * Discover unique PI provider names by shelling out to `pi --list-models`. Called at spawn time
- * so the multi-provider models.json reflects whatever the user has currently authenticated to.
- *
- * PI writes the table to stderr — merge via 2>&1. Returns empty array on any failure (PI not
- * installed, timeout, parse error); the caller logs a warning and proceeds without overriding
- * models.json, which means the PI subprocess will fall back to direct upstream calls.
- *
- * Uses the user's real ~/.pi/agent/ for discovery (no PI_CODING_AGENT_DIR override) — symmetric
- * with cortex init's gateway-generator.scanPIViaListModels(). ensureAuthVisible() then mirrors
- * the auth file into PI_AGENT_DIR so the actual spawn can see those credentials.
- */
-function discoverPIProviders(): string[] {
-  try {
-    const stdout = execSync('pi --list-models 2>&1', {
-      timeout: 10_000,
-      encoding: 'utf-8',
-      // Intentionally do NOT set PI_CODING_AGENT_DIR — read user's real PI config.
-      env: { ...process.env, PI_CODING_AGENT_DIR: '' },
-    });
-    const models = parsePiListModelsOutput(stdout);
-    const uniq = new Set<string>();
-    for (const m of models) uniq.add(m.provider);
-    return Array.from(uniq);
-  } catch (err) {
-    log.info(`pi --list-models failed at spawn: ${(err as Error).message ?? 'unknown'}`);
-    return [];
-  }
+interface PendingCompact {
+  id: string;
+  statsId: string | null;
+  base: CompactBase | null;
+  resolve: (result: AgentCompactResult) => void;
+  reject: (error: Error) => void;
+  timer: ReturnType<typeof setTimeout>;
 }
 
-const DEFAULT_PI_BINARY = 'pi';
-// DEFAULT_SESSION_DIR: sessionId.jsonl files are stored here (convention: <sessionDir>/<sessionId>.jsonl).
-// Sessions stored under logs/sessions-pi/; PI_CODING_AGENT_DIR points to data/ for models.json.
-const DEFAULT_SESSION_DIR = PI_SESSIONS_DIR;
-// PI extensions point at compiled dist/.js files — PI's extension loader accepts both .ts and .js
-// (pi-coding-agent dist/core/extensions/loader.js:367). Shipping .js avoids depending on src/ in
-// the installed package (package.json#files only ships dist/ + defaults/).
-const MCP_BRIDGE_PATH = path.join(INSTALL_ROOT, 'dist/agent-adapter/pi/mcp-bridge.js');
-const TOOL_SHIMS_PATH = path.join(INSTALL_ROOT, 'dist/agent-adapter/pi/tool-shims.js');
-const HOOK_BRIDGE_PATH = path.join(INSTALL_ROOT, 'dist/agent-adapter/pi/hook-bridge.js');
-// Per FINDINGS.md §S1, pi rpc exits cleanly on stdin close; observed bootstrap cost ≈ 500 ms.
-// 5 s is a safety margin; if pi does not exit in that window close() falls back to SIGTERM.
-const CLOSE_EXIT_WAIT_MS = 5000;
-// switch_session response timeout: if pi does not ack within this window, reject the pending promise.
-const SWITCH_SESSION_TIMEOUT_MS = 5000;
-const PI_IDLE_SESSION_TIMEOUT = 65 * 60 * 1000;
-const PI_TURN_IDLE_TIMEOUT = 60 * 60 * 1000;
-const PI_MAX_TIMEOUT = 30_000_000;
-
-/** Result of a switch_session RPC: ok=true when pi acked, cancelled=true when an in-flight agent was preempted. */
-type SwitchResult = { ok: boolean; cancelled: boolean };
-
-/**
- * PI-specific extension of AgentProcess that exposes sendExtensionUiResponse.
- * Callers that need to respond to ask_user_question events (plan approval, interactive questions)
- * can use this method to send extension_ui_response back to the PI subprocess.
- * Payload fields depend on the dialog method (rpc.md §extension_ui):
- *   select/input/editor: { value: string } or { cancelled: true }
- *   confirm:             { confirmed: boolean } or { cancelled: true }
- */
-export interface PIAgentProcess extends AgentProcess {
-  sendExtensionUiResponse(id: string, payload: Record<string, unknown>): void;
+function record(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
 }
 
-type SpawnFn = (command: string, args: string[], options: SpawnOptions) => ChildProcess;
-
-interface PISessionOptions {
-  sessionKey: string;
-  sessionDir: string;
-  cliArgs: string[];
-  cwd: string;
-  env: NodeJS.ProcessEnv;
-  spawner: SpawnFn;
-  /** Shared session-path registry; bootstrap handler registers sessionId → path on first session_started. */
-  registry: Map<string, string>;
-  /** sessionDir used to derive paths; passed here so PISession does not need a PIAdapter back-reference. */
-  registrySessionDir: string;
-  /** Called when session self-closes (idle timeout, max timeout) so the adapter can remove it from the pool. */
-  onClose?: (sessionKey: string) => void;
+function numberOrNull(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) ? value : null;
 }
 
-class EventQueue {
-  private readonly pending: NormalizedEvent[] = [];
-  private readonly waiters: ((r: IteratorResult<NormalizedEvent>) => void)[] = [];
-  private closed = false;
+function compactUsage(data: Record<string, unknown>): AgentCompactUsage | null {
+  const usage = record(data['usage']);
+  if (Object.keys(usage).length === 0) return null;
+  return {
+    inputTokens: numberOrNull(usage['input']) ?? 0,
+    outputTokens: numberOrNull(usage['output']) ?? 0,
+    cacheReadTokens: numberOrNull(usage['cacheRead']) ?? 0,
+    cacheWriteTokens: numberOrNull(usage['cacheWrite']) ?? 0,
+    costUsd: numberOrNull(record(usage['cost'])['total']),
+  };
+}
 
-  push(evt: NormalizedEvent): void {
-    if (this.closed) return;
-    const waiter = this.waiters.shift();
-    if (waiter) waiter({ value: evt, done: false });
-    else this.pending.push(evt);
-  }
+function compactBase(data: unknown): CompactBase {
+  const value = record(data);
+  return {
+    status: 'compacted',
+    tokensBefore: numberOrNull(value['tokensBefore']),
+    estimatedTokensAfter: numberOrNull(value['estimatedTokensAfter']),
+    usage: compactUsage(value),
+  };
+}
 
-  next(): Promise<IteratorResult<NormalizedEvent>> {
-    const buffered = this.pending.shift();
-    if (buffered) return Promise.resolve({ value: buffered, done: false });
-    if (this.closed) return Promise.resolve({ value: undefined, done: true });
-    return new Promise<IteratorResult<NormalizedEvent>>((resolve) => {
-      this.waiters.push(resolve);
-    });
-  }
+function rpcErrorMessage(raw: Record<string, unknown>): string {
+  const error = raw['error'];
+  if (typeof error === 'string') return error;
+  const nested = record(error)['message'];
+  if (typeof nested === 'string') return nested;
+  const dataMessage = record(raw['data'])['message'];
+  return typeof dataMessage === 'string' ? dataMessage : 'PI compact failed';
+}
 
-  close(): void {
-    if (this.closed) return;
-    this.closed = true;
-    for (const w of this.waiters.splice(0)) {
-      w({ value: undefined, done: true });
-    }
-  }
+function isNothingToCompact(message: string): boolean {
+  return /no messages to compact/i.test(message);
 }
 
 class PISession {
@@ -162,6 +129,13 @@ class PISession {
   private exitPromise: Promise<void>;
   /** Buffer for assistant_text deltas; flushed on message_end / turn_complete / non-text events. */
   private textBuffer = '';
+  /** blockId of the text currently in textBuffer; attached to the flushed assistant_text. */
+  private textBlockId: string | null = null;
+  /**
+   * Streaming preview gate, resolved once at spawn time (CORTEX_STREAM_DELTAS=0 disables it).
+   * Only assistant_delta is suppressed — the buffered whole message is unaffected.
+   */
+  private readonly streamDeltas: boolean;
   private idleTimer: ReturnType<typeof setTimeout> | null = null;
   private turnIdleTimer: ReturnType<typeof setTimeout> | null = null;
   private maxTimer: ReturnType<typeof setTimeout> | null = null;
@@ -171,28 +145,40 @@ class PISession {
     reject: (e: Error) => void;
   } | null = null;
   private pendingSwitchTimer: ReturnType<typeof setTimeout> | null = null;
-  /** Accumulator for the current in-flight turn. Resolved/rejected by handleRawLine. */
-  private pendingTurn: {
-    resolve: (r: AgentResult) => void;
-    reject: (e: Error) => void;
-    planFilePath: string | null;
-    askUserQuestions: AskUserQuestionInfo[];
-    rateLimited: boolean;
-    numTurns: number | null;
-    totalCostUsd: number | null;
-  } | null = null;
+  /** Accumulator for the current in-flight Cortex turn. Resolved/rejected by handleRawLine. */
+  private pendingTurn: PendingPiTurn | null = null;
+  private readonly steering = new PISteeringQueue();
+  /**
+   * Where PI's own agent loop is, tracked off its event stream because the injection RPC form
+   * depends on it. `starting` = a prompt is written but PI has not entered the loop yet; PI still
+   * reads its internal run flag as inactive there and only the dedicated steer command is safe.
+   */
+  private loopState: 'idle' | 'starting' | 'running' = 'idle';
+  private readonly contextUsageProbe: PIContextUsageProbe;
+  private readonly readyWaiters: ReadyWaiter[] = [];
+  private pendingCompact: PendingCompact | null = null;
+  private compactSequence = 0;
 
   constructor(opts: PISessionOptions) {
     this.sessionKey = opts.sessionKey;
     this.registry = opts.registry;
     this.registrySessionDir = opts.registrySessionDir;
     this.onClose = opts.onClose;
+    this.streamDeltas = process.env['CORTEX_STREAM_DELTAS'] !== '0';
 
     this.proc = opts.spawner(DEFAULT_PI_BINARY, opts.cliArgs, {
       cwd: opts.cwd,
       env: opts.env,
       stdio: ['pipe', 'pipe', 'pipe'],
     });
+    this.contextUsageProbe = new PIContextUsageProbe(
+      (command) => {
+        const stdin = this.proc.stdin;
+        if (!stdin || stdin.destroyed || stdin.writableEnded) throw new Error('PI stdin unavailable');
+        stdin.write(encodeCommand(command));
+      },
+      (event) => this.emitNormalizedEvent(event),
+    );
 
     this.proc.stdout?.on('data', (chunk: Buffer | string) => {
       for (const line of this.splitter.push(chunk)) this.handleRawLine(line);
@@ -205,6 +191,9 @@ class PISession {
     this.exitPromise = new Promise<void>((resolve) => {
       this.proc.once('close', (code: number | null) => {
         this.alive = false;
+        const exitError = new Error(this.stderrTail || `pi exited with code ${code ?? 0}`);
+        this.settleReadyWaiters(exitError);
+        this.rejectCompact(exitError);
         // Reject any pending switch_session promise on unexpected subprocess exit.
         if (this.pendingSwitch !== null) {
           const entry = this.pendingSwitch;
@@ -215,6 +204,10 @@ class PISession {
           }
           entry.reject(new Error('pi subprocess exited while switch_session was pending'));
         }
+        // Seal every accepted steering message before rejecting the outer turn. This releases
+        // orchestration's pending UI row and busy bracket even when PI dies before consumption.
+        this.steering.abandon();
+        this.steering.clearSink();
         // Reject any pending turn promise if the process exits without a turn_complete.
         if (this.pendingTurn !== null) {
           const t = this.pendingTurn;
@@ -234,6 +227,7 @@ class PISession {
             fatal: true,
           });
         }
+        this.contextUsageProbe.close();
         this.events.close();
         // Remove stream listeners and destroy streams so stub PassThrough streams
         // (used in tests) don't keep the event loop alive after close.
@@ -257,18 +251,27 @@ class PISession {
     }, PI_MAX_TIMEOUT);
   }
 
-  /** Flush buffered text as a single assistant_text event. */
+  /**
+   * Flush buffered text as a single assistant_text event, tagged with the blockId its deltas
+   * carried so the UI can replace the streamed preview with this authoritative message.
+   */
   private flushTextBuffer(): void {
     if (this.textBuffer.length > 0) {
-      this.events.push({ type: 'assistant_text', text: this.textBuffer });
+      this.events.push(
+        this.textBlockId !== null
+          ? { type: 'assistant_text', text: this.textBuffer, blockId: this.textBlockId }
+          : { type: 'assistant_text', text: this.textBuffer },
+      );
       this.textBuffer = '';
     }
+    this.textBlockId = null;
   }
 
   private clearTimers(): void {
     if (this.idleTimer) { clearTimeout(this.idleTimer); this.idleTimer = null; }
     if (this.turnIdleTimer) { clearTimeout(this.turnIdleTimer); this.turnIdleTimer = null; }
     if (this.maxTimer) { clearTimeout(this.maxTimer); this.maxTimer = null; }
+    this.contextUsageProbe.close();
     this.flushTextBuffer();
   }
 
@@ -295,6 +298,120 @@ class PISession {
     this.startTurnIdleTimer();
   }
 
+  private waitForBootstrap(): Promise<void> {
+    if (this.sessionId !== null) return Promise.resolve();
+    return new Promise<void>((resolve, reject) => {
+      const waiter = {} as ReadyWaiter;
+      waiter.resolve = resolve;
+      waiter.reject = reject;
+      waiter.timer = setTimeout(() => {
+        const index = this.readyWaiters.indexOf(waiter);
+        if (index !== -1) this.readyWaiters.splice(index, 1);
+        reject(new Error('PI compact timed out waiting for bootstrap'));
+      }, SWITCH_SESSION_TIMEOUT_MS);
+      waiter.timer.unref?.();
+      this.readyWaiters.push(waiter);
+    });
+  }
+
+  private settleReadyWaiters(error?: Error): void {
+    for (const waiter of this.readyWaiters.splice(0)) {
+      clearTimeout(waiter.timer);
+      if (error) waiter.reject(error);
+      else waiter.resolve();
+    }
+  }
+
+  async compact(): Promise<AgentCompactResult> {
+    if (this.pendingCompact) throw new Error('PI compact already in progress');
+    await this.waitForBootstrap();
+    const id = `compact-${++this.compactSequence}`;
+    return new Promise<AgentCompactResult>((resolve, reject) => {
+      const timer = setTimeout(
+        () => this.rejectCompact(new Error('PI compact timed out')),
+        PI_TURN_IDLE_TIMEOUT,
+      );
+      timer.unref?.();
+      this.pendingCompact = { id, statsId: null, base: null, resolve, reject, timer };
+      try {
+        this.proc.stdin?.write(encodeCommand({ id, type: 'compact' }));
+      } catch (error) {
+        this.rejectCompact(error instanceof Error ? error : new Error(String(error)));
+      }
+    });
+  }
+
+  private handleCompactResponse(raw: Record<string, unknown> | null): boolean {
+    const pending = this.pendingCompact;
+    if (!pending || raw?.['type'] !== 'response') return false;
+    if (raw['command'] === 'compact' && raw['id'] === pending.id) {
+      this.handleCompactCommandResponse(raw);
+      return true;
+    }
+    if (raw['command'] === 'get_session_stats' && raw['id'] === pending.statsId) {
+      this.handleCompactStatsResponse(raw);
+      return true;
+    }
+    return false;
+  }
+
+  private handleCompactCommandResponse(raw: Record<string, unknown>): void {
+    if (raw['success'] === true) {
+      this.requestCompactStats(compactBase(raw['data']));
+      return;
+    }
+    const message = rpcErrorMessage(raw);
+    if (isNothingToCompact(message)) {
+      this.resolveCompact({
+        status: 'not-needed', tokensBefore: null, estimatedTokensAfter: null,
+        contextUsage: null, usage: null,
+      });
+      return;
+    }
+    this.rejectCompact(new Error(message));
+  }
+
+  private requestCompactStats(base: CompactBase): void {
+    const pending = this.pendingCompact;
+    if (!pending) return;
+    pending.base = base;
+    pending.statsId = `compact-stats-${++this.compactSequence}`;
+    clearTimeout(pending.timer);
+    pending.timer = setTimeout(
+      () => this.resolveCompact({ ...base, contextUsage: null }),
+      PI_CONTEXT_USAGE_TIMEOUT_MS,
+    );
+    pending.timer.unref?.();
+    try {
+      this.proc.stdin?.write(encodeCommand({ id: pending.statsId, type: 'get_session_stats' }));
+    } catch {
+      this.resolveCompact({ ...base, contextUsage: null });
+    }
+  }
+
+  private handleCompactStatsResponse(raw: Record<string, unknown>): void {
+    const base = this.pendingCompact?.base;
+    if (!base) return;
+    const contextUsage = raw['success'] === true ? piContextUsageFromStats(raw['data']) : null;
+    this.resolveCompact({ ...base, contextUsage });
+  }
+
+  private resolveCompact(result: AgentCompactResult): void {
+    const pending = this.pendingCompact;
+    if (!pending) return;
+    clearTimeout(pending.timer);
+    this.pendingCompact = null;
+    pending.resolve(result);
+  }
+
+  private rejectCompact(error: Error): void {
+    const pending = this.pendingCompact;
+    if (!pending) return;
+    clearTimeout(pending.timer);
+    this.pendingCompact = null;
+    pending.reject(error);
+  }
+
   get eventsIterable(): AsyncIterable<NormalizedEvent> {
     return {
       [Symbol.asyncIterator]: (): AsyncIterator<NormalizedEvent> => ({
@@ -308,114 +425,226 @@ class PISession {
     this.resetIdleTimer();
     this.bumpTurnIdleTimer();
 
-    // Intercept switch_session response BEFORE event-parser: event-parser silently drops
-    // successful non-bootstrap responses (return []), so switch_session acks must be
-    // correlated here to resolve/reject the pending promise.
-    if (this.pendingSwitch !== null) {
-      let obj: unknown = null;
-      try { obj = JSON.parse(line); } catch { /* fall through to event-parser */ }
-      if (obj && typeof obj === 'object') {
-        const r = obj as Record<string, unknown>;
-        if (
-          r['type'] === 'response' &&
-          r['command'] === 'switch_session' &&
-          r['id'] === this.pendingSwitch.id
-        ) {
-          const entry = this.pendingSwitch;
-          this.pendingSwitch = null;
-          if (this.pendingSwitchTimer !== null) {
-            clearTimeout(this.pendingSwitchTimer);
-            this.pendingSwitchTimer = null;
-          }
-          const data = r['data'];
-          const cancelled =
-            data && typeof data === 'object'
-              ? Boolean((data as Record<string, unknown>)['cancelled'])
-              : false;
-          entry.resolve({ ok: r['success'] === true, cancelled });
-          return;
-        }
-      }
-    }
+    const raw = parseRpcObject(line);
+    if (this.handleCompactResponse(raw)) return;
+    if (this.handleSwitchResponse(raw)) return;
+    const finishDeferred = this.handleInjectionProtocol(raw);
 
     for (const evt of piRpcLineToNormalized(line, this.parserState)) {
-      if (evt.type === 'session_started' && this.sessionId === null) {
-        this.sessionId = evt.sessionId;
-        this.currentSessionId = evt.sessionId;
-        // Use sessionFile from bootstrap if available; fall back to legacy path guess.
-        if (evt.sessionFile) {
-          this.sessionFile = evt.sessionFile;
-          this.registry.set(evt.sessionId, evt.sessionFile);
-        } else {
-          this.registry.set(evt.sessionId, path.join(this.registrySessionDir, `${evt.sessionId}.jsonl`));
-        }
-      }
-
-      // Accumulate turn result data for pending send() promise.
-      if (this.pendingTurn !== null) {
-        if (evt.type === 'plan_written') {
-          this.pendingTurn.planFilePath = evt.path;
-        } else if (evt.type === 'ask_user_question') {
-          // Do NOT accumulate in pendingTurn.askUserQuestions: PI ask_user_question
-          // events are handled in real-time via the facade event loop → onAskUserQuestion
-          // callback → Slack interaction → sendExtensionUiResponse. Accumulating here
-          // would cause handleAgentSuccess to re-post the already-answered questions
-          // via sendMessages after turn_complete, leaving the agent stuck in
-          // "Waiting for user input" forever.
-        } else if (evt.type === 'rate_limit') {
-          this.pendingTurn.rateLimited = true;
-        } else if (evt.type === 'turn_complete') {
-          // Flush buffered text before resolving the turn so downstream sees all text.
-          this.flushTextBuffer();
-          if (this.turnIdleTimer) { clearTimeout(this.turnIdleTimer); this.turnIdleTimer = null; }
-          const t = this.pendingTurn;
-          this.pendingTurn = null;
-          if (evt.error) {
-            // Turn-level error (e.g. gateway "400 Unknown mode") — fail the turn so the lifecycle
-            // shows ❌ Error and posts the message, matching the Claude adapter's is_error path.
-            // Fall through (no continue) so turn_complete is still pushed to this.events and the
-            // facade event loop terminates cleanly, exactly like the fatal-error branch below.
-            t.reject(new Error(evt.error));
-          } else {
-            const result: AgentResult = {
-              sessionId: this.sessionId,
-              total_cost_usd: evt.totalCostUsd,
-              num_turns: evt.numTurns,
-              rateLimited: t.rateLimited,
-              rateLimitMessage: null,
-              planFilePath: t.planFilePath,
-              enteredPlanMode: false,
-              exitedPlanMode: t.planFilePath !== null,
-              askUserQuestions: t.askUserQuestions.length > 0 ? t.askUserQuestions : undefined,
-              finalOutput: null,
-            };
-            t.resolve(result);
-          }
-        } else if (evt.type === 'error' && evt.fatal) {
-          this.flushTextBuffer();
-          if (this.turnIdleTimer) { clearTimeout(this.turnIdleTimer); this.turnIdleTimer = null; }
-          const t = this.pendingTurn;
-          this.pendingTurn = null;
-          t.reject(new Error(evt.message));
-        }
-      }
-
-      // Buffer assistant_text deltas until a message boundary (turn_progress from
-      // message_end) or a non-text event arrives, then flush as a single event.
-      // This matches Claude adapter behavior where onAssistantMessage fires once
-      // per complete assistant message block, not per token.
-      if (evt.type === 'assistant_text') {
-        this.textBuffer += evt.text;
-      } else {
-        this.flushTextBuffer();
-        this.events.push(evt);
-      }
+      this.captureSessionStarted(evt);
+      const output = this.processPendingTurnEvent(evt);
+      if (output !== null) this.emitOrProbeContext(output);
     }
+
+    if (finishDeferred) {
+      const terminal = this.finishDeferredTurn();
+      if (terminal !== null) this.emitOrProbeContext(terminal);
+    }
+    this.contextUsageProbe.observe(raw);
+    if (this.pendingTurn && isPIContextSampleBoundary(raw)) this.contextUsageProbe.requestSnapshot();
+  }
+
+  private emitOrProbeContext(event: NormalizedEvent): void {
+    if (event.type === 'turn_complete') this.contextUsageProbe.deferTerminal(event);
+    else this.emitNormalizedEvent(event);
+  }
+
+  /** Correlate switch_session before the generic parser drops its response. */
+  private handleSwitchResponse(raw: Record<string, unknown> | null): boolean {
+    const pending = this.pendingSwitch;
+    if (
+      pending === null || raw?.['type'] !== 'response' ||
+      raw['command'] !== 'switch_session' || raw['id'] !== pending.id
+    ) return false;
+
+    this.pendingSwitch = null;
+    if (this.pendingSwitchTimer !== null) {
+      clearTimeout(this.pendingSwitchTimer);
+      this.pendingSwitchTimer = null;
+    }
+    const data = raw['data'];
+    const cancelled = data && typeof data === 'object'
+      ? Boolean((data as Record<string, unknown>)['cancelled'])
+      : false;
+    pending.resolve({ ok: raw['success'] === true, cancelled });
+    return true;
+  }
+
+  /** Observe PI-only delivery/rejection events that intentionally stay out of NormalizedEvent. */
+  private handleInjectionProtocol(raw: Record<string, unknown> | null): boolean {
+    // agent_start is emitted from inside the loop, so it is the first point at which PI's own run
+    // flag is provably set; agent_settled is the point at which it is provably clear again.
+    if (raw?.['type'] === 'agent_start') this.loopState = 'running';
+    else if (raw?.['type'] === 'agent_settled') this.loopState = 'idle';
+    if (raw?.['type'] === 'message_start' && this.isUserStart(raw['message'])) {
+      const turn = this.pendingTurn;
+      if (turn && !turn.openingUserSeen) turn.openingUserSeen = true;
+      else if (turn) this.steering.consumeNext();
+      return false;
+    }
+    if (!raw || !this.steering.rejectFromResponse(raw)) return false;
+    return !this.steering.hasPending && this.pendingTurn?.deferredCompletion === true;
+  }
+
+  private isUserStart(message: unknown): boolean {
+    return !!message && typeof message === 'object' &&
+      (message as Record<string, unknown>)['role'] === 'user';
+  }
+
+  private captureSessionStarted(evt: NormalizedEvent): void {
+    if (evt.type !== 'session_started' || this.sessionId !== null) return;
+    this.sessionId = evt.sessionId;
+    this.currentSessionId = evt.sessionId;
+    this.settleReadyWaiters();
+    if (evt.sessionFile) {
+      this.sessionFile = evt.sessionFile;
+      this.registry.set(evt.sessionId, evt.sessionFile);
+    } else {
+      this.registry.set(evt.sessionId, path.join(this.registrySessionDir, `${evt.sessionId}.jsonl`));
+    }
+  }
+
+  /** Update the outer send() promise and optionally replace/suppress a terminal event. */
+  private processPendingTurnEvent(evt: NormalizedEvent): NormalizedEvent | null {
+    const turn = this.pendingTurn;
+    if (!turn) return evt;
+    if (evt.type === 'plan_written') turn.planFilePath = evt.path;
+    // ask_user_question is handled live by the facade; accumulating it would post it twice.
+    else if (evt.type === 'ask_user_question') { /* intentionally not accumulated */ }
+    else if (evt.type === 'turn_complete') return this.handleTurnComplete(evt);
+    else if (evt.type === 'error' && evt.fatal) {
+      this.flushTextBuffer();
+      this.clearTurnIdleTimer();
+      this.steering.abandon();
+      this.pendingTurn = null;
+      turn.reject(new Error(evt.message));
+    }
+    return evt;
+  }
+
+  private handleTurnComplete(evt: PiTurnComplete): PiTurnComplete | null {
+    const turn = this.pendingTurn!;
+    this.flushTextBuffer();
+    turn.numTurns += evt.numTurns;
+    if (evt.totalCostUsd !== null) turn.totalCostUsd = (turn.totalCostUsd ?? 0) + evt.totalCostUsd;
+    if (evt.error) {
+      this.steering.abandon();
+      return this.settlePendingTurn(evt.error);
+    }
+    if (this.steering.hasPending) {
+      turn.deferredCompletion = true;
+      return null;
+    }
+    return this.settlePendingTurn();
+  }
+
+  private finishDeferredTurn(): PiTurnComplete | null {
+    if (!this.pendingTurn?.deferredCompletion || this.steering.hasPending) return null;
+    return this.settlePendingTurn();
+  }
+
+  private settlePendingTurn(error?: string): PiTurnComplete {
+    const turn = this.pendingTurn!;
+    this.pendingTurn = null;
+    this.clearTurnIdleTimer();
+    const terminal: PiTurnComplete = error
+      ? { type: 'turn_complete', numTurns: turn.numTurns, totalCostUsd: turn.totalCostUsd, error }
+      : { type: 'turn_complete', numTurns: turn.numTurns, totalCostUsd: turn.totalCostUsd };
+    if (error) turn.reject(new Error(error));
+    else turn.resolve(this.buildAgentResult(turn));
+    return terminal;
+  }
+
+  private buildAgentResult(turn: PendingPiTurn): AgentResult {
+    return {
+      sessionId: this.sessionId,
+      total_cost_usd: turn.totalCostUsd,
+      num_turns: turn.numTurns,
+      rateLimited: false,
+      rateLimitMessage: null,
+      planFilePath: turn.planFilePath,
+      enteredPlanMode: false,
+      exitedPlanMode: turn.planFilePath !== null,
+      askUserQuestions: turn.askUserQuestions.length > 0 ? turn.askUserQuestions : undefined,
+      finalOutput: null,
+    };
+  }
+
+  private clearTurnIdleTimer(): void {
+    if (!this.turnIdleTimer) return;
+    clearTimeout(this.turnIdleTimer);
+    this.turnIdleTimer = null;
+  }
+
+  /** Buffer deltas into whole assistant messages while preserving Web preview events. */
+  private emitNormalizedEvent(evt: NormalizedEvent): void {
+    if (evt.type === 'context_usage') {
+      this.events.push(evt);
+      return;
+    }
+    if (evt.type !== 'assistant_text') {
+      this.flushTextBuffer();
+      this.events.push(evt);
+      return;
+    }
+    const blockId = evt.blockId ?? null;
+    if (this.textBuffer.length > 0 && blockId !== this.textBlockId) this.flushTextBuffer();
+    this.textBlockId = blockId;
+    if (this.streamDeltas && blockId !== null) {
+      this.events.push({ type: 'assistant_delta', text: evt.text, blockId });
+    }
+    this.textBuffer += evt.text;
   }
 
   send(msg: UserMessage): void {
     if (!this.alive) throw new Error('PISession.send: subprocess is not alive');
-    this.proc.stdin?.write(encodeCommand({ type: 'prompt', message: buildPromptText(msg) }));
+    this.writeOpeningPrompt(buildPromptText(msg));
+  }
+
+  private writeOpeningPrompt(promptText: string): void {
+    const stdin = this.proc.stdin;
+    if (!stdin) throw new Error('PISession: subprocess stdin is unavailable');
+    stdin.write(encodeCommand({ type: 'prompt', message: promptText }));
+    this.loopState = 'starting';
+    if (this.pendingTurn) this.pendingTurn.promptDispatched = true;
+  }
+
+  /**
+   * Queue a message at PI's next agent-loop boundary without opening a new Cortex run.
+   *
+   * The RPC form has to follow PI's loop state. A `prompt` with streamingBehavior=steer is only
+   * queued when PI already considers itself streaming; written during the prompt preflight window
+   * (which includes our own before_agent_start hook scripts, seconds long) PI instead takes its
+   * plain-prompt path, acks success, then throws internally and drops the message — and that failed
+   * path clears PI's run flag, so every later injection in the same turn takes the same broken
+   * branch. The dedicated `steer` command bypasses that check entirely and is drained by the
+   * opening steering poll of the loop that is about to start. Once the loop is running, or once PI
+   * has settled and the message must reopen a turn, prompt+steer is the correct form.
+   */
+  injectUserMessage(msg: UserMessage): boolean {
+    const stdin = this.proc.stdin;
+    if (
+      !this.alive || !this.pendingTurn?.promptDispatched || !stdin ||
+      stdin.destroyed || stdin.writableEnded
+    ) return false;
+    const entry = this.steering.begin(msg.text);
+    const message = buildPromptText(msg);
+    const preflight = this.loopState === 'starting';
+    try {
+      stdin.write(encodeCommand(preflight
+        ? { id: entry.id, type: 'steer', message }
+        : { id: entry.id, type: 'prompt', message, streamingBehavior: 'steer' }));
+      // A prompt written to an idle PI opens a fresh run, so the next injection is a preflight one.
+      if (this.loopState === 'idle') this.loopState = 'starting';
+      return true;
+    } catch {
+      this.steering.rollback(entry);
+      return false;
+    }
+  }
+
+  setInjectionAckSink(sink: InjectionAckSink): void {
+    this.steering.setSink(sink);
   }
 
   /**
@@ -460,7 +689,7 @@ class PISession {
     if (this.currentSessionId !== targetSessionId) {
       if (targetPath === null) {
         // Can't switch without a path; write prompt to current session as fallback.
-        this.proc.stdin?.write(encodeCommand({ type: 'prompt', message: promptText }));
+        this.writeOpeningPrompt(promptText);
         return { switched: false, cancelled: false };
       }
       const result = await this.sendSwitchSession(targetPath);
@@ -470,12 +699,12 @@ class PISession {
       // BLOCKER-1 fix: write prompt in every branch regardless of result.ok.
       // NTH-A: if result.ok===false (pi rejected switch), the prompt goes to the current
       // (un-switched) session — intentional best-effort, caller can inspect result.ok.
-      this.proc.stdin?.write(encodeCommand({ type: 'prompt', message: promptText }));
+      this.writeOpeningPrompt(promptText);
       return { switched: result.ok, cancelled: result.cancelled };
     }
 
     // Same session: write prompt directly.
-    this.proc.stdin?.write(encodeCommand({ type: 'prompt', message: promptText }));
+    this.writeOpeningPrompt(promptText);
     return { switched: false, cancelled: false };
   }
 
@@ -507,9 +736,11 @@ class PISession {
       reject,
       planFilePath: null,
       askUserQuestions: [],
-      rateLimited: false,
-      numTurns: null,
+      numTurns: 0,
       totalCostUsd: null,
+      promptDispatched: false,
+      openingUserSeen: false,
+      deferredCompletion: false,
     };
     this.startTurnIdleTimer();
   }
@@ -519,6 +750,7 @@ class PISession {
     if (this.pendingTurn !== null) {
       const t = this.pendingTurn;
       this.pendingTurn = null;
+      this.steering.abandon();
       t.reject(err);
     }
   }
@@ -575,7 +807,22 @@ export class PIAdapter implements AgentAdapter {
     // The sessionPathRegistry is populated below from the bootstrap session_started
     // event for switchSession / sendTurn path lookups — it is NOT used for the
     // --session CLI flag here.
-    const sessionIdForSpawn = (config.resume && config.sessionId) ? config.sessionId : null;
+    //
+    // Guard (mirrors Claude's resolveResumeForPrint): PI's `--session <id>` can only RESUME an
+    // existing session — unlike Claude it cannot create/force a session under an externally-supplied
+    // id. If the requested id has no matching session (a fresh session, or a stale backendSessionId
+    // whose file was pruned), passing --session makes PI exit with "No session found matching <id>".
+    // So only resume when the session is known: either bootstrapped in THIS adapter instance (path
+    // registry) or present on disk (a prior process / persisted backendSessionId). Otherwise start
+    // fresh and let PI bootstrap its own id (captured back as backendSessionId by the caller).
+    const wantResume = !!(config.resume && config.sessionId);
+    const sessionKnown =
+      wantResume &&
+      (this.sessionPathRegistry.has(config.sessionId!) || piSessionFileExists(sessionDir, config.sessionId!));
+    const sessionIdForSpawn = sessionKnown ? config.sessionId! : null;
+    if (wantResume && sessionIdForSpawn === null) {
+      log.info(`PI resume target '${config.sessionId}' not found (no live session or file in ${sessionDir}); starting fresh`);
+    }
 
     const cliArgs = buildSpawnArgs({
       sessionDir,
@@ -587,6 +834,7 @@ export class PIAdapter implements AgentAdapter {
       pluginDirs: config.pluginDirs ?? null,
       // All three extensions always injected: MCP bridge (task 5754) + tool shims (task 5b5c) + hook bridge (task d3ae).
       extensionPaths: [MCP_BRIDGE_PATH, TOOL_SHIMS_PATH, HOOK_BRIDGE_PATH],
+      thinking: config.thinking ?? null,
       extraOption: config.extraOption ?? null,
     });
 
@@ -619,11 +867,6 @@ export class PIAdapter implements AgentAdapter {
       }
     }
 
-    const env: Record<string, string | undefined> = { ...process.env, ...(config.env ?? {}), PI_CODING_AGENT_DIR: PI_AGENT_DIR };
-    if (config.channel) {
-      env.SLACK_CHANNEL = config.channel;
-      env.FEISHU_CHANNEL = config.channel;
-    }
     // Forward the agent's tool allowlist (Claude-native names) so tool-shims.ts can gate which
     // pseudo-tools it registers — mirroring the Claude backend's `--tools` allowlist. Without this,
     // thread-dispatched agents (whose config excludes AskUserQuestion/EnterPlanMode/ExitPlanMode)
@@ -632,7 +875,16 @@ export class PIAdapter implements AgentAdapter {
       ?? (config.tools && config.tools.length > 0
         ? config.tools.map((t) => fromCanonical('claude', t)).filter((n): n is string => !!n).join(',')
         : undefined);
-    if (allowedTools) env.CORTEX_PI_ALLOWED_TOOLS = allowedTools;
+    const env = buildPiEnv({
+      sessionId: config.sessionId,
+      channel: config.channel,
+      callbackSource: config.callbackSource,
+      scheduleTaskId: config.scheduleTaskId,
+      extraEnv: config.env,
+      context: config.cortexContext,
+      piAgentDir: PI_AGENT_DIR,
+      allowedTools,
+    });
     const cwd = config.cwd ?? DATA_DIR;
 
     const session = new PISession({
@@ -679,9 +931,12 @@ export class PIAdapter implements AgentAdapter {
           }
         });
       },
+      compact: (): Promise<AgentCompactResult> => session.compact(),
       sendExtensionUiResponse: (id: string, payload: Record<string, unknown>): void => {
         session.sendExtensionUiResponse(id, payload);
       },
+      injectUserMessage: (msg: UserMessage): boolean => session.injectUserMessage(msg),
+      setInjectionAckSink: (sink: InjectionAckSink): void => session.setInjectionAckSink(sink),
       events: session.eventsIterable,
       close: async () => {
         await session.close();
@@ -738,15 +993,3 @@ export class PIAdapter implements AgentAdapter {
     return Array.from(this.sessions.keys());
   }
 }
-
-export const _test = {
-  buildSpawnArgs,
-  encodeCommand,
-  createLineSplitter,
-  DEFAULT_SESSION_DIR,
-  MCP_BRIDGE_PATH,
-  TOOL_SHIMS_PATH,
-  HOOK_BRIDGE_PATH,
-  CLOSE_EXIT_WAIT_MS,
-  SWITCH_SESSION_TIMEOUT_MS,
-};

@@ -1,42 +1,16 @@
-# ui-service/ — M3 Cortex UI Service
+Please update me when files in this folder change
 
-Transport-agnostic facade over domain modules providing `query`, `mutate`, and `subscribe` primitives,
-**plus** the tRPC contract bound over it (`trpc.ts` + `app-router.ts`, in-core here since the plan §11
-single-package merge — reversing the Stage-9 §9.1 split to `@cortex-agent/ui-server`). The facade
-itself is @trpc-free; only `trpc.ts`/`app-router.ts` pull `@trpc/server`, and they are reached only
-through `entry/start-ui-http.ts` behind the CORTEX_UI_HTTP gate, so Slack/TUI-only core loads no @trpc
-at runtime. The HTTP/SSE transport-host lives in `platform/ui-http`; the wiring in `entry/start-ui-http`.
-Consumed directly by the M5 TUI dashboard (createUiService), and — via the AppRouter over this facade —
-by the Web UI.
+UI service domain — transport-neutral query, mutate, and subscribe facade over the domain modules.
+Serves the TUI dashboard directly and the Web UI through the tRPC router bound here.
 
 | filename | role | function |
 |---|---|---|
-| `types.ts` | types | Result, QueryScope, MutateOp, SubscribeFilter, UiEvent, UiService interface, DTOs |
-| `trpc.ts` | tRPC init | Shared `initTRPC.create()` — `router` / `publicProcedure` / `createCallerFactory` (transport-agnostic; `@trpc/server` CORE only, no http/ws adapter) |
-| `app-router.ts` | tRPC router | `createAppRouter(uiService): AppRouter` — mirrors the full ui-service contract (query + mutation + subscriptions) over the injected UiService; unwraps `Result`, maps `Err`→`TRPCError`. Consumes the sibling `input-schemas` + `types`. `AppRouter` type re-exported by `@cortex-agent/ui-contract` (from the built dist) for the browser client |
-| `input-schemas.ts` | schemas | Source-of-truth zod input schema per QueryScope / MutateOp + `queryInputSchemas` / `mutateInputSchemas` keyed maps. Consumed by the sibling `app-router.ts` + re-exported (runtime) by `@cortex-agent/ui-contract` for the browser. Kept here (not in ui-contract) so the router can consume it without agent-server importing ui-contract, which would close a workspace build cycle |
-| `ui-service.ts` | facade | createUiService(deps) — routes scope/op strings to per-module handlers; `subscribeExecutionLog(executionId)` (B2-C) resolves the run's log location, ref-counts the tailer, streams `execution.log` over the bounded queue |
-| `subscribe.ts` | subscribe | EventBus → AsyncIterable&lt;UiEvent&gt; with bounded queue (cap 256, drop-oldest + synthetic `ui-subscribe.dropped`); post-filters by projectId, (B2-C) executionId, and (S4) sessionId — scopes `session.message` to one session (no cross-session leak) |
-| `index.ts` | barrel | re-exports createUiService and public types |
-| `query/projects.ts` | query | projects.list handler |
-| `query/sessions.ts` | query | sessions.list + sessions.transcript (S4 chat: wraps `conversationHistory.getHistory`, groups user/assistant/tool events into turns; each `TranscriptMessage` carries a real per-message `elapsedMs` = ts-delta from the previous event, null for the first / unparseable ts. Per-message cost is deliberately absent — no real attribution source: conversation-history has no cost, and `costs.jsonl`/`CostEntry` is keyed by project/trigger, not session/message) handlers |
-| `query/threads.ts` | query | threads.list + threads.get (detail: steps/agent-flow/dispatches/child-tree≤5/artifacts, DR-0018 §6.3 B1) handlers |
-| `query/tasks.ts` | query | tasks.list handler |
-| `query/task-verification.ts` | query | tasks.verification handler (§12 C item 11) — single-task done-when EVIDENCE (real `completed-note` / `completed-at` / status + the most-recent terminal execution joined by taskId and its `finalOutput`) + the full per-task execution/dispatch history (`executionRegistry.getAll()` filtered by `dispatch.taskId`, newest first). Not found / project mismatch → `not-found`. Every unsourced field is an honest `null` / `[]`, never fabricated |
-| `query/schedules.ts` | query | schedules.list handler |
-| `query/executions.ts` | query | executions.list + executions.get handlers |
-| `query/memory.ts` | query | memory.tree (project memory tree: top-level files + memory dirs w/ entry counts) + memory.file (raw file content + metadata + `lineDiff` = real working-tree-vs-HEAD line counts via `git diff --numstat` + `blame` = real per-line `git blame` [short commit hash + task ref parsed from the commit subject, a 4-hex id after a `task`/`manager`/`gate` keyword — else honest `null`], both `null` when not a git repo / git unavailable / binary — honest placeholder, never fabricated) handlers — read-only, path-restricted to the project root; rejects `..` traversal / absolute paths / symlink escape. Pure exports `parseTaskRef` / `parseBlamePorcelain` are unit-tested |
-| `query/approvals.ts` | query | approvals.list handler + pure `parseApprovals` (PENDING_APPROVALS.md → ApprovalInfo[], missing fields null, status filter); path via `deps.approvalsPath`. §12 C item 13: captures the OPTIONAL freeform `Provenance` bullet → `provenance` (verbatim, the only real origin/from carrier — neither writer emits a structured origin/task field) + derives `taskRef` (4-hex, reusing memory.ts `parseTaskRef`); honest `null` when absent, never fabricated. The prototype's `ttl` slot has ZERO source (the markdown queue has no expiry concept; the 30-min hook-bridge plan TTL is a different channel) → deliberately no `ttl` field |
-| `query/cost.ts` | query | cost.summary handler |
-| `query/config.ts` | query | config.get handler — redacted snapshot of `~/.cortex/config` (budget/profiles/machines/mcp/thread-templates/hooks/.env) for the settings panel (Stage 7); pure `readConfigSnapshot(configDir, hooksDir)` + thin handler. SECURITY: `.env` values + machine `ssh` are never returned, only redacted markers |
-| `query/machines.ts` | query | machines.list handler — joined view of `getMachineRegistry()` (static config: cortexPath/gpuCount/ssh presence/os) + `getOnlineDevices()` (live WebSocket state: online/connectedAt/lastHeartbeat/capabilities) + `executionRegistry.getAll()` (running dispatch count per machine = liveRuns). SECURITY: ssh presence flag only, never raw user@host |
-| `query/skills.ts` | query | skills.list handler — delegates to `getDisplaySkillGroups()` (skill-scanner, 60s cache); maps each group to a `SkillGroup` DTO with an independent copy of the skills array (no shared cache reference). No deps used — pure fs read via the injected skill-scanner |
-| `query/thread-templates.ts` | query | threadTemplates.get handler — reads real JSON body from each `config/thread-templates/{templates,agents,shells}/*.json` file; returns `ThreadTemplateEntry[]` with `kind`, `name`, `description` (from body.description or null), `body` (full parsed object or null on parse error); sorted by filename within kind, order: templates → agents → shells. Pure export `readThreadTemplates(configDir)` is unit-tested |
-| `mutate/projects.ts` | mutate | projects.create handler (reuses ProjectStore.createProject; maps invalid-name/already-exists → Err) |
-| `mutate/sessions.ts` | mutate | sessions.create handler (workbench "+ New session": resolve project → default fallback, delegate to the injected `createDirectSession` dep, return `{sessionId}`) + sessions.send handler (S4 chat: resolve session→channel, inject a genuine user turn via the injected `sendSessionMessage` dep; fire-and-forget `{accepted:true}` — assistant output returns over the `session.message` stream, not this return) + sessions.cancel handler (S4 chat Stop, task bdc2: resolve session→channel, cancel the live agent(s) on that channel via the injected `cancelSessionRun` dep → `{cancelled,count}`; not-found when the session is missing) |
-| `mutate/threads.ts` | mutate | threads.cancel handler |
-| `mutate/executions.ts` | mutate | executions.cancel handler |
-| `mutate/schedules.ts` | mutate | schedules.{pause,resume,remove,add} handlers (add: reuses injected scheduler.add + schedule-repo backfill of target/fallback, returns the created ScheduleInfo) |
-| `mutate/tasks.ts` | mutate | tasks.{claim,unclaim,complete,block,unblock} handlers |
-| `mutate/config.ts` | mutate | config.set handler — safe atomic write of two whitelisted sections: `budget` (pure `writeBudget`, zod-validate + atomicWrite) and `profiles` (pure `writeDefaultProfile` — re-points `defaultProfile` to an EXISTING profile only, preserving all other fields; unknown/absent → invalid-args). Thin handler switches on section (safeParse→invalid-args, IO→internal). Any other section rejected |
-| `mutate/approvals.ts` | mutate | approvals.{approve,reject,request} handlers. approve/reject: pure `applyApprovalDecision` (flips only the target entry's Status line w/ timestamp + reject feedback; idempotent; unknown id → not-found). request (task b983 "approval gate"): pure `buildApprovalEntry` (closed `kind` enum → need-approval-format markdown; server-constructed prose; machineName sanitized so no markdown injection) + `handleRequestApproval` (safeParse→invalid-args; append-only enqueue, create-if-missing, preserves prior entries). NONE execute the underlying operation |
+| types.ts | types | UI DTOs including task completion and hooks |
+| input-schemas.ts | schemas | Validates every UI operation input |
+| ui-service.ts | facade | routes query and mutate keys to handlers |
+| subscribe.ts | subscribe | turns event bus traffic into a UI event stream |
+| trpc.ts | tRPC | shared tRPC router and procedure builders |
+| app-router.ts | tRPC | tRPC router mirroring the UI operations |
+| index.ts | entry | re-exports createUiService and public types |
+| query/ | subdir | read-side UI operation handlers |
+| mutate/ | subdir | write-side UI operation handlers |

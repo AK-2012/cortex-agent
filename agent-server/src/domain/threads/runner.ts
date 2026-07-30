@@ -1,12 +1,13 @@
-// input:  domain/threads, mode-manager, hook-runner, handles
-// output: runThread / continueThread / resumeThread / resumeRateLimitedThread / buildThreadSummary
-// pos:    runtime execution engine for the Thread system
+// input:  thread state, agents, provider throttle, hooks
+// output: thread runs, outage resume, and transcripts
+// pos:    Runs thread steps, controls, hooks, and resumes
 // >>> If I am updated, update my header comment and the parent folder's CORTEX.md <<<
 
 import { threadStore } from '@store/thread-repo.js';
 import {
   resolveNextStep,
   buildStepPrompt,
+  beginStepSession,
   recordStepResult,
   evaluateTransitions,
   completeThread,
@@ -22,11 +23,23 @@ import {
   getTemplate,
   readArtifact,
   resolveSystemVars,
+  type PendingControl,
 } from './index.js';
-import { runAgent, getClaudeMode, getActiveBackend, getActiveProfile } from '../agents/index.js';
-import { isApiRateLimitError } from '../agents/config.js';
-import { isThrottled } from '../costs/rate-limit-throttle.js';
-import { recordResume } from '../costs/resume-registry.js';
+import {
+  runAgent,
+  getClaudeMode,
+  getActiveBackend,
+  getActiveProfile,
+  resolveRateLimitProvider,
+} from '../agents/index.js';
+import { isApiRateLimitError, isRetryableError } from '../agents/config.js';
+import { resolveProfileConfig } from '../agents/profile-manager.js';
+import {
+  activateOutageWindow,
+  isProviderRateLimited,
+  isProviderUsageRateLimited,
+} from '../costs/rate-limit-throttle.js';
+import { recordResume, removeThreadResume } from '../costs/resume-registry.js';
 import { Icons } from '../../core/icons.js';
 import { closeSessionsByPrefix } from '../agents/index.js';
 import * as executionRegistry from '../executions/registry.js';
@@ -36,10 +49,10 @@ import { buildThreadStatusMessage } from '@core/status-format.js';
 import type { OutputStream } from '@platform/index.js';
 import { runningExecutions } from '../../core/running-executions.js';
 import type { RunningExecution } from '../../core/running-executions.js';
-import { executeLifecycleHook } from './hook-runner.js';
+import { executeLifecycleHooks } from './hook-runner.js';
 import { createToolTrace } from '@platform/index.js';
 import { conversationHistory } from '@store/conversation-history-repo.js';
-import { createStepTranscriptBuffer, flushStepTranscript, type StepTranscriptBuffer } from './thread-transcript.js';
+import { createStepTranscriptRecorder, type StepTranscriptRecorder } from './thread-transcript.js';
 import { ctx as jobCtx } from '@domain/scheduling/job-registry.js';
 import { createLogger } from '@core/log.js';
 import type {
@@ -51,6 +64,8 @@ import type {
 } from '@core/types/thread-types.js';
 
 const log = createLogger('thread-runner');
+const OUTAGE_BACKOFF_MS = [5, 15, 45].map((minutes) => minutes * 60_000);
+const OUTAGE_MAX_RESUMES = OUTAGE_BACKOFF_MS.length;
 
 // --- Result types ---
 
@@ -78,7 +93,7 @@ interface ThreadContext {
   stream: OutputStream;
   lastAgentResult: any;
   totalNumTurns: number;
-  /** Set when a step was interrupted by an API rate limit while the throttle is active.
+  /** Set when a step was interrupted by a provider throttle.
    *  Pauses the thread (status='rate_limited') instead of completing/failing it. */
   rateLimited?: boolean;
 }
@@ -92,23 +107,30 @@ interface StepContext {
   /** Stage this step runs. Null for single-stage agents (no `stages` map declared). */
   stage: string | null;
   prompt: string;
-  sessionId: string | null;
+  /** Backend `--resume` target (slot.backendSessionId via beginStepSession); null → fresh. */
+  resumeSessionId: string | null;
+  /** Stable Cortex track id (slot.sessionId, minted at step start) — the conversation-history /
+   *  UI transcript key + CORTEX_SESSION_ID. Known BEFORE the agent spawns, so the web UI can
+   *  query/stream the running step. */
+  trackSessionId: string;
   sessionKey: string | null;
   sessionName: string;
   profileName: string;
   execution: { id: string; [k: string]: any };
   /** Always set in buildStepConfig — never an empty placeholder. */
   stepStartTime: string;
-  /** Buffers this step's streamed assistant/tool events; flushed to conversation-history in
-   *  recordStepOutcome once result.sessionId is known (thread transcript recording). */
-  transcriptBuffer: StepTranscriptBuffer;
+  /** Live per-event transcript recorder keyed by trackSessionId: appends each streamed
+   *  assistant/tool event to conversation-history immediately + publishes session.message
+   *  (shared ts) — the running step streams into the UI and survives reloads/restarts. */
+  recorder: StepTranscriptRecorder;
 }
 
 /** Per-step callbacks resolved from opts/vm by setupStepCallbacks. */
 interface StepCallbacks {
   onAssistantMessage: ((text: string) => void) | null | undefined;
   onProgress: ((progress: any) => void) | null;
-  onToolUse: ((name: string, input: any) => void) | null;
+  onToolUse: ((name: string, input: any, toolUseId: string) => void) | null;
+  onToolResult: ((toolUseId: string, content: string, isError: boolean) => void) | null;
 }
 
 type StepInfo = Pick<StepContext, 'agentSlotId' | 'agentConfig' | 'isFirstStep' | 'multiAgent' | 'stage'>;
@@ -184,6 +206,27 @@ async function resolveAndNotifyStep(
   return { agentSlotId, agentConfig, isFirstStep, multiAgent, stage };
 }
 
+function resolveEffectiveProfileName(
+  configuredProfile: string,
+  meta: ThreadRecord['metadata'],
+  channel: string,
+): string {
+  return configuredProfile === '__active__'
+    ? (meta?.profileOverride || getActiveProfile(channel))
+    : configuredProfile;
+}
+
+function resolveActiveStepProvider(thread: ThreadRecord, channel: string): string | null {
+  const slot = thread.agents[thread.activeAgent];
+  if (!slot) return null;
+  try {
+    const profileName = resolveEffectiveProfileName(slot.profile, thread.metadata, channel);
+    return resolveRateLimitProvider(resolveProfileConfig(profileName));
+  } catch {
+    return null;
+  }
+}
+
 /** Build prompt, resolve session config, profile, register execution, generate session name + start time.
  *  Returns a fully-populated StepContext — no placeholder fields. */
 async function buildStepConfig(
@@ -193,22 +236,26 @@ async function buildStepConfig(
   opts: RunThreadOptions,
 ): Promise<StepContext> {
   const { agentSlotId, agentConfig, isFirstStep, multiAgent, stage } = stepInfo;
-  const slot = threadStore.get(threadId)!.agents[agentSlotId];
 
   // Build prompt for this step — pass the stage so stage-aware agents send their stage-specific
   // prompt (and, in incremental mode on session resume, skip directive + preamble + auto previousOutput).
+  // ORDER MATTERS: buildStepPrompt reads slot.sessionId truthiness as "resuming a persistent
+  // session" — it must run BEFORE beginStepSession mints the track id, or a fresh slot's first
+  // step would be misdetected as a resume and skip its directive.
   const prompt = buildStepPrompt(threadId, agentConfig, stage);
 
-  // Determine session configuration — thread steps use a thread-scoped session key.
+  // Session identity (track/backend decoupling): mint + persist the stable track id on the slot
+  // (the UI transcript key, visible to threads.get while the step RUNS) and resolve the backend
+  // resume target. Publishes thread.step.started.
+  const { trackSessionId, resumeSessionId } = await beginStepSession(threadId, agentSlotId, stage);
+
+  // Thread steps use a thread-scoped session key.
   const sessionKey = getSessionKey(threadId, agentSlotId);
-  const sessionId = slot.persistSession ? slot.sessionId : null;
 
   // Resolve profile: agents with a hardcoded profile always use their own declaration.
   // metadata.profileOverride only applies to __active__ agents (default/main/scheduler-main),
   // letting scheduler/dispatch inject a concrete profile without overriding research-pipeline agents.
-  const profileName = agentConfig.profile === '__active__'
-    ? (ctx.meta?.profileOverride || getActiveProfile(opts.channel))
-    : agentConfig.profile;
+  const profileName = resolveEffectiveProfileName(agentConfig.profile, ctx.meta, opts.channel);
 
   // Register execution
   const executionKind = ctx.meta?.trigger === 'task-dispatch' ? 'dispatch'
@@ -223,20 +270,39 @@ async function buildStepConfig(
     trigger: executionTrigger,
     backend: getActiveBackend(),
     billingMode: getClaudeMode(),
-    sessionId,
+    sessionId: trackSessionId,
     label: `[${label}] ${prompt.substring(0, 40)}`,
     scheduleTaskId: ctx.meta?.scheduleTaskId || null,
     threadId,
     agentSlotId,
   });
 
+  // Live transcript recorder: every streamed event appends to conversation-history (keyed by
+  // the track id) AND publishes session.message with the same ts — snapshot + delta for the UI.
+  const recorder = createStepTranscriptRecorder(conversationHistory, trackSessionId, (ev) => {
+    jobCtx.bus?.publish({
+      type: 'session.message',
+      sessionId: trackSessionId,
+      channel: opts.channel,
+      role: ev.role,
+      text: ev.text ?? '',
+      ...(ev.toolName !== undefined ? { toolName: ev.toolName } : {}),
+      ...(ev.toolInput !== undefined ? { toolInput: ev.toolInput } : {}),
+      ts: ev.ts,
+    });
+  }, () => {
+    jobCtx.bus?.publish({ type: 'session.debug.updated', sessionId: trackSessionId, channel: opts.channel });
+  });
+  // The step prompt opens the turn — recorded now so a reload mid-step shows it.
+  recorder.recordUser(prompt);
+
   return {
     agentSlotId, agentConfig, isFirstStep, multiAgent, stage,
-    prompt, sessionId, sessionKey,
+    prompt, resumeSessionId, trackSessionId, sessionKey,
     sessionName: await sessionStore.generateSessionName(),
     profileName, execution,
     stepStartTime: new Date().toISOString(),
-    transcriptBuffer: createStepTranscriptBuffer(),
+    recorder,
   };
 }
 
@@ -268,24 +334,28 @@ function setupStepCallbacks(
   const streamAssistantMessage = toolTrace
     ? (text: string) => { toolTrace.flush(); baseAssistantMessage(text); }
     : baseAssistantMessage;
-  const traceToolUse = toolTrace ? (name: string, input: any) => toolTrace.onToolUse(name, input) : null;
-  const composedToolUse: ((name: string, input: any) => void) | null =
+  const traceToolUse = toolTrace ? (name: string, input: any, _toolUseId: string) => toolTrace.onToolUse(name, input) : null;
+  const composedToolUse: ((name: string, input: any, toolUseId: string) => void) | null =
     traceToolUse && callerOnToolUse
-      ? (name: string, input: any) => { traceToolUse(name, input); callerOnToolUse(name, input); }
+      ? (name: string, input: any, toolUseId: string) => { traceToolUse(name, input, toolUseId); callerOnToolUse(name, input); }
       : (traceToolUse ?? callerOnToolUse);
 
-  // Transcript recording: mirror the direct path — every assistant message + tool call is buffered
-  // (keyed later by result.sessionId in recordStepOutcome) so the thread session has a full
-  // conversation-history transcript renderable in the UI. Recording wraps (never replaces) the
-  // display callbacks, so streaming/tool-trace behaviour is unchanged.
-  const buffer = stepCtx.transcriptBuffer;
+  // Transcript recording: mirror the direct path — every assistant message + tool call is
+  // appended to conversation-history IMMEDIATELY (keyed by the step's track sessionId) and
+  // published as a session.message delta, so the UI streams the running step and a reload
+  // shows everything so far. Recording wraps (never replaces) the display callbacks, so
+  // streaming/tool-trace behaviour is unchanged.
+  const recorder = stepCtx.recorder;
   const onAssistantMessage = (text: string) => {
     streamAssistantMessage(text);
-    if (text) buffer.recordAssistant(text);
+    if (text) recorder.recordAssistant(text);
   };
-  const onToolUse = (name: string, input: any) => {
-    composedToolUse?.(name, input);
-    buffer.recordTool(name, input);
+  const onToolUse = (name: string, input: any, toolUseId: string) => {
+    composedToolUse?.(name, input, toolUseId);
+    recorder.recordTool(name, input, toolUseId);
+  };
+  const onToolResult = (toolUseId: string, content: string, isError: boolean) => {
+    recorder.recordToolResult(toolUseId, content, isError);
   };
 
   // onProgress: caller override (e.g. scheduler's buildUserProcessingMessage) takes precedence;
@@ -315,7 +385,7 @@ function setupStepCallbacks(
   slot.status = 'running';
   threadStore.set(threadRecord);
 
-  return { onAssistantMessage, onProgress, onToolUse };
+  return { onAssistantMessage, onProgress, onToolUse, onToolResult };
 }
 
 /** Run the agent, manage handle, await result; fail execution + rethrow on error.
@@ -327,13 +397,14 @@ async function executeAndAwaitAgent(
   ctx: ThreadContext,
   opts: RunThreadOptions,
 ): Promise<any> {
-  const { agentConfig, isFirstStep, prompt, sessionId, sessionKey, profileName, execution, stepStartTime } = stepCtx;
+  const { agentConfig, isFirstStep, prompt, resumeSessionId, trackSessionId, sessionKey, profileName, execution, stepStartTime } = stepCtx;
   const meta = ctx.meta;
 
   const handle = runAgent(prompt, {
     channel: opts.channel,
     executionId: execution.id,
-    sessionId,
+    sessionId: resumeSessionId,
+    trackSessionId,
     sessionKey,
     files: isFirstStep ? (opts.files || []) : [],
     profileName,
@@ -355,6 +426,7 @@ async function executeAndAwaitAgent(
     onAssistantMessage: callbacks.onAssistantMessage,
     onProgress: callbacks.onProgress,
     onToolUse: callbacks.onToolUse,
+    onToolResult: callbacks.onToolResult,
     onPlanWritten: opts.onPlanWritten ?? null,
     onAskUserQuestion: opts.onAskUserQuestion ?? null,
   });
@@ -408,19 +480,26 @@ async function recordStepOutcome(
   // Rate-limit interruption (graceful path): the API window is exhausted and the throttle is
   // active. Do NOT record the step result — leaving currentStepIndex unadvanced so resume
   // re-runs THIS step (matches the thrown path). Tear down the execution as failed and pause the
-  // thread for auto-resume. Gate on isThrottled() so a stray rateLimited without an active
-  // throttle (no onResume will ever fire) falls through to the normal terminal path below.
-  if (result?.rateLimited && isThrottled()) {
+  // thread for auto-resume. Require this result's provider throttle to be active so another
+  // provider cannot create a resume entry whose reset callback will never own it.
+  // NOTE: the live recorder has already persisted this step's streamed events — an interrupted
+  // step is partially recorded (honest history); the re-run opens a fresh prompt turn.
+  if (result?.rateLimited && isProviderRateLimited(result.rateLimitProvider)) {
     executionRegistry.teardownExecution({
       executionId: execution.id, status: 'failed', durationS: stepDurationS,
       error: { message: 'Rate limited' },
     });
-    await handleRateLimitInterruption(threadId, ctx, opts);
+    await handleRateLimitInterruption(threadId, ctx, opts, result.rateLimitProvider ?? null);
     return;
   }
 
+  // Ensure the incrementally-appended transcript is durable before the step is sealed
+  // (settle never rejects — failed appends are logged and skipped).
+  await stepCtx.recorder.settle();
+
   await recordStepResult(threadId, agentSlotId, {
-    sessionId: result?.sessionId || null,
+    sessionId: stepCtx.trackSessionId,
+    backendSessionId: result?.sessionId || null,
     sessionName,
     executionId: execution.id,
     input: prompt,
@@ -434,11 +513,12 @@ async function recordStepOutcome(
 
   ctx.totalNumTurns += result?.num_turns || 0;
 
-  // Register session
+  // Register session under the TRACK id — the same key the live transcript is recorded under
+  // (sessions.transcript / session.message), so the thread session renders in the UI.
   const currentThread = threadStore.get(threadId);
-  if (result?.sessionId && sessionName && currentThread) {
+  if (sessionName && currentThread) {
     await sessionStore.registerSession(sessionName, {
-      sessionId: result.sessionId,
+      sessionId: stepCtx.trackSessionId,
       channel: opts.channel,
       backend: getActiveBackend(),
       kind: 'local',
@@ -447,26 +527,6 @@ async function recordStepOutcome(
       profileName: getActiveProfile(opts.channel),
       projectId: currentThread.projectId,
     });
-  }
-
-  // Record this step's full transcript into conversation-history, keyed by the resolved
-  // sessionId (same key the registry entry above uses), so the thread session renders in the
-  // UI (sessions.transcript). Fire-and-forget: a history write must never break the step. Each
-  // event is also published on the bus for live UI reconciliation (best-effort). The rate-limit
-  // early-return above skips this, so an interrupted step is not half-recorded.
-  if (result?.sessionId) {
-    const sid = result.sessionId;
-    void flushStepTranscript(conversationHistory, sid, prompt, stepCtx.transcriptBuffer, (ev) => {
-      jobCtx.bus?.publish({
-        type: 'session.message',
-        sessionId: sid,
-        channel: opts.channel,
-        role: ev.role,
-        text: ev.text ?? '',
-        ...(ev.toolName !== undefined ? { toolName: ev.toolName } : {}),
-        ...(ev.toolInput !== undefined ? { toolInput: ev.toolInput } : {}),
-      });
-    }).catch((e) => log.error('thread transcript flush failed:', (e as Error).message));
   }
 
   // Finalize execution: persistent record + registry teardown + balanced agent.* event.
@@ -482,21 +542,24 @@ async function recordStepOutcome(
   }
 }
 
-/** Pause the thread for auto-resume after an API rate limit interrupted a step. Records the
- *  thread in the resume registry (drained by resume-dispatcher when the window resets) and
+/** Pause the thread for auto-resume after a provider throttle interrupted a step. Records the
+ *  thread in the resume registry (drained when its provider window resets) and
  *  flips it to the non-terminal 'rate_limited' status. Sets ctx.rateLimited so the loop breaks
  *  and skips completeThread / onEnd. Shared by the graceful (recordStepOutcome) and thrown
  *  (runThread catch) paths. */
-async function handleRateLimitInterruption(threadId: string, ctx: ThreadContext, opts: RunThreadOptions): Promise<void> {
+async function handleRateLimitInterruption(
+  threadId: string,
+  ctx: ThreadContext,
+  opts: RunThreadOptions,
+  provider: string | null,
+): Promise<boolean> {
+  if (!await markThreadRateLimited(threadId, provider)) return false;
   ctx.rateLimited = true;
-  await markThreadRateLimited(threadId);
   recordResume({
-    kind: 'thread',
-    threadId,
-    channel: opts.channel,
-    userMessage: threadStore.get(threadId)?.userMessage ?? '',
-    recordedAt: Date.now(),
+    kind: 'thread', provider, threadId, channel: opts.channel,
+    userMessage: threadStore.get(threadId)?.userMessage ?? '', recordedAt: Date.now(),
   });
+  return true;
 }
 
 /** Decide whether the loop continues; run onTransition hook when transitioning.
@@ -515,28 +578,19 @@ async function evaluateAndTransition(
   if (!transition.shouldTransition) return false;
   // transition.nextAgent / nextStage are already set on the thread by evaluateTransitions
 
-  // --- onTransition hook (between steps) ---
-  // Template hook first, then per-call extraHooks. executeLifecycleHook is a no-op for undefined
-  // config so the second call costs nothing when the caller didn't inject an extra hook.
   const prevAgent = stepCtx.agentSlotId;
   const fromLabel = formatAgentStageLabel(prevAgent, stepCtx.stage);
   const toLabel = formatAgentStageLabel(transition.nextAgent!, transition.nextStage ?? null);
-  const transitionLogSuffix = `(${fromLabel} → ${toLabel})`;
-  await executeLifecycleHook(
+  await executeLifecycleHooks(
     threadId,
     'transition',
-    ctx.template?.hooks?.onTransition,
+    {
+      template: ctx.template?.hooks?.onTransition,
+      extra: opts.extraHooks?.onTransition,
+    },
     opts,
     prevAgent,
-    transitionLogSuffix,
-  );
-  await executeLifecycleHook(
-    threadId,
-    'transition',
-    opts.extraHooks?.onTransition,
-    opts,
-    prevAgent,
-    transitionLogSuffix,
+    `(${fromLabel} → ${toLabel})`,
   );
   return true;
 }
@@ -581,15 +635,78 @@ export async function finalizeAbortedThread(
   }
 }
 
+async function claimOutageResume(threadId: string, error: string): Promise<number | null> {
+  let claimedCount: number | null = null;
+  let capped = false;
+  await threadStore.mutate(threadId, (record) => {
+    if (record.status !== 'running' && record.status !== 'rate_limited') return;
+    const current = record.metadata?.outageResumeCount ?? 0;
+    if (current >= OUTAGE_MAX_RESUMES) {
+      record.status = 'failed';
+      record.error = error;
+      record.endedAt = new Date().toISOString();
+      capped = true;
+      return;
+    }
+    (record.metadata ??= {}).outageResumeCount = current + 1;
+    claimedCount = current;
+  });
+  if (capped) {
+    await failThread(threadId, error);
+    removeThreadResume(threadId);
+  }
+  return claimedCount;
+}
+
+async function failOutageActivation(
+  threadId: string,
+  providerError: Error & { cause?: unknown },
+  activationError: unknown,
+): Promise<never> {
+  await threadStore.mutate(threadId, (record) => {
+    const count = record.metadata?.outageResumeCount ?? 0;
+    if (count > 0) record.metadata!.outageResumeCount = count - 1;
+  });
+  const cause = activationError instanceof Error ? activationError.message : String(activationError);
+  if (threadStore.get(threadId)?.status === 'running') {
+    await failThread(threadId, `${providerError.message}; outage activation failed: ${cause}`);
+  }
+  providerError.cause = activationError;
+  throw providerError;
+}
+
+async function pauseRetryableProviderError(
+  threadId: string,
+  ctx: ThreadContext,
+  opts: RunThreadOptions,
+  error: Error & { rateLimitProvider?: string; cause?: unknown },
+): Promise<boolean> {
+  const thread = threadStore.get(threadId);
+  const resumableStatus = thread?.status === 'running' || thread?.status === 'rate_limited';
+  if (!thread || !resumableStatus || !isRetryableError(error)) return false;
+  const provider = error.rateLimitProvider ?? resolveActiveStepProvider(thread, opts.channel);
+  if (isApiRateLimitError(error.message) && isProviderUsageRateLimited(provider)) {
+    return handleRateLimitInterruption(threadId, ctx, opts, provider);
+  }
+  const resumeCount = await claimOutageResume(threadId, error.message);
+  if (resumeCount === null) return false;
+  try {
+    await activateOutageWindow(provider, OUTAGE_BACKOFF_MS[resumeCount]);
+  } catch (activationError) {
+    await failOutageActivation(threadId, error, activationError);
+  }
+  return handleRateLimitInterruption(threadId, ctx, opts, provider);
+}
+
 async function runThread(threadId: string, opts: RunThreadOptions): Promise<ThreadRunResult> {
   const ctx = initThreadContext(threadId, opts);
   let enteredWaiting = false;
 
   try {
-    // --- onStart hook (before first step) ---
-    // Template hook first, then per-call extraHooks (see note at onTransition).
-    await executeLifecycleHook(threadId, 'start', ctx.template?.hooks?.onStart, opts);
-    await executeLifecycleHook(threadId, 'start', opts.extraHooks?.onStart, opts);
+    await executeLifecycleHooks(threadId, 'start', {
+      template: ctx.template?.hooks?.onStart,
+      extra: opts.extraHooks?.onStart,
+    }, opts);
 
     while (true) {
       const stepInfo = await resolveAndNotifyStep(threadId, ctx, opts);
@@ -601,7 +718,7 @@ async function runThread(threadId: string, opts: RunThreadOptions): Promise<Thre
       await recordStepOutcome(threadId, stepCtx, result, ctx, opts);
 
       // Rate-limit pause (graceful path): recordStepOutcome paused the thread. Break out so the
-      // thread is NOT completed; resume-dispatcher re-enters it when the window resets.
+      // thread is NOT completed; resume-dispatcher re-enters it when its provider resets.
       if (ctx.rateLimited) break;
 
       // Out-of-band control plane (DR-0015 problem 1): the agent signals abort / split / wait by
@@ -615,8 +732,7 @@ async function runThread(threadId: string, opts: RunThreadOptions): Promise<Thre
       if (control?.action === 'abort') {
         await clearPendingControl(threadId);
         const reason = control.diagnosis ?? null;
-        // DR-0015 problem 2: abort the thread AND block the owning task here, BEFORE the onEnd
-        // hook runs below — otherwise task-status-check sees a still-claimed task and unclaims it.
+        // Abort the thread and block its owning task before end hooks inspect task state.
         await finalizeAbortedThread(threadId, ctx.meta, reason, opts);
         if (ctx.stream) {
           const reasonStr = reason ? `: ${reason}` : '';
@@ -646,8 +762,7 @@ async function runThread(threadId: string, opts: RunThreadOptions): Promise<Thre
       //    in pendingMessages → re-enter the loop immediately so the same agent processes them.
       //  - signal but nothing to wait on or process → fall through to normal transitions.
       if (control?.action === 'wait') {
-        await clearPendingControl(threadId);
-        if (await tryEnterWaiting(threadId)) {
+        if (await consumeWaitControl(threadId, control)) {
           enteredWaiting = true;
           // DR-0014 lock hygiene: release any project lock this execution still holds BEFORE
           // suspending. A manager that ran `decompose --auto-lock` (which does not auto-release)
@@ -674,18 +789,14 @@ async function runThread(threadId: string, opts: RunThreadOptions): Promise<Thre
       if (!await evaluateAndTransition(threadId, stepCtx, ctx, opts)) break;
     }
 
-    // --- onEnd hook (after main loop) ---
-    // Template hook first, then per-call extraHooks (see note at onTransition).
-    // Skipped on suspension: onEnd semantics are "thread truly finished" (e.g. the dispatch
-    // task-status-check hook must not nag while children are still working). The re-entry
-    // path re-runs runThread, so onEnd still fires exactly once at final termination.
-    // Also skipped on rate-limit pause (like suspension): the dispatch task-status-check onEnd
-    // hook must not fire and release the still-claimed task while the thread is only paused.
+    // End means true termination. A suspended or provider-paused run emits it on re-entry.
     if (!enteredWaiting && !ctx.rateLimited) {
       const threadForEnd = threadStore.get(threadId)!;
       const lastStep = threadForEnd.steps[threadForEnd.steps.length - 1];
-      await executeLifecycleHook(threadId, 'end', ctx.template?.hooks?.onEnd, opts, lastStep?.agentSlotId);
-      await executeLifecycleHook(threadId, 'end', opts.extraHooks?.onEnd, opts, lastStep?.agentSlotId);
+      await executeLifecycleHooks(threadId, 'end', {
+        template: ctx.template?.hooks?.onEnd,
+        extra: opts.extraHooks?.onEnd,
+      }, opts, lastStep?.agentSlotId);
     }
 
     // Only complete if not already in a terminal state (e.g. cancelled during loop). A
@@ -696,14 +807,11 @@ async function runThread(threadId: string, opts: RunThreadOptions): Promise<Thre
     }
 
   } catch (error: any) {
-    const t = threadStore.get(threadId);
-    // Thrown rate-limit path: the agent threw a rate-limit error while the throttle is active.
-    // Pause for auto-resume instead of failing, and do NOT rethrow — the thread is left in
-    // 'rate_limited' and finalizeThread returns normally so wrappers see thread.status, not a throw.
-    if (t && t.status === 'running' && isApiRateLimitError(error?.message) && isThrottled()) {
-      await handleRateLimitInterruption(threadId, ctx, opts);
-    } else {
-      if (t && t.status === 'running') {
+    // Retryable provider failures pause on a synthetic outage window and return normally;
+    // permanent errors and the fourth transient failure keep the original fail + rethrow path.
+    if (!await pauseRetryableProviderError(threadId, ctx, opts, error)) {
+      const thread = threadStore.get(threadId);
+      if (thread && thread.status === 'running') {
         await failThread(threadId, error.message || 'Unknown error');
       }
       throw error;
@@ -745,17 +853,29 @@ async function continueThread(threadId: string, userMessage: string, opts: RunTh
   await threadStore.mutate(threadId, (t) => {
     t.userMessage = userMessage;
     t.status = 'running';
-    if (t.metadata) t.metadata.interruptedByRateLimit = false;
+    if (t.metadata) {
+      t.metadata.interruptedByRateLimit = false;
+      t.metadata.rateLimitProvider = null;
+    }
   });
 
   return runThread(threadId, opts);
 }
 
+/** Consume one wait intent exactly once, preserving its explicit target selectors. */
+export async function consumeWaitControl(
+  threadId: string,
+  control: Pick<NonNullable<PendingControl>, 'onTasks' | 'onThreads'>,
+): Promise<boolean> {
+  await clearPendingControl(threadId);
+  return tryEnterWaiting(threadId, control);
+}
+
 // --- Resume a rate-limit-paused thread (auto-resume) ---
 
-/** Re-enter a thread paused by an API rate limit (status==='rate_limited'). Like resumeThread,
+/** Re-enter a thread paused by a provider throttle (status==='rate_limited'). Like resumeThread,
  *  the userMessage is NOT overwritten — the thread re-runs its interrupted step from the original
- *  prompt/contract. Called by resume-dispatcher when the rate-limit window resets. */
+ *  prompt/contract. Called when the owning provider window resets. */
 async function resumeRateLimitedThread(threadId: string, opts: RunThreadOptions): Promise<ThreadRunResult> {
   const thread = threadStore.get(threadId);
   if (!thread) throw new Error(`Thread not found: ${threadId}`);
@@ -764,7 +884,10 @@ async function resumeRateLimitedThread(threadId: string, opts: RunThreadOptions)
   }
   await threadStore.mutate(threadId, (t) => {
     t.status = 'running';
-    if (t.metadata) t.metadata.interruptedByRateLimit = false;
+    if (t.metadata) {
+      t.metadata.interruptedByRateLimit = false;
+      t.metadata.rateLimitProvider = null;
+    }
   });
   return runThread(threadId, opts);
 }

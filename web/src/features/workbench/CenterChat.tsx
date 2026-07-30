@@ -1,54 +1,128 @@
+// input:  selected session, transcript/live state and draft reload token
+// output: desktop chat with context controls and composer
+// pos:    Workbench conversation pane orchestration
+// >>> 一旦我被更新，务必更新我的开头注释与所属文件夹 CORTEX.md <<<
 import { useMemo } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useTRPC } from '@/lib/trpc';
+import { useLang, useVocab } from '@/i18n';
 import { ChatHeader } from './ChatHeader';
-import { MessageStream } from './MessageStream';
+import { MessageStream, type MessageEditCtx } from './MessageStream';
+import { InlineThreadCardProto } from './InlineThreadCardProto';
 import { Composer } from './Composer';
+import { ContextUsageControl } from './ContextUsageControl';
+import { useSessionCompact } from './useSessionCompact';
 import { useSessionMessageLiveSync } from './useSessionMessageLiveSync';
-import { buildTranscriptRows, turnCount, sessionElapsedMs, formatElapsed } from './transcript-vm';
+import { useInteractionActions } from './useInteractionActions';
+import { useMarkSessionRead } from './useMarkSessionRead';
+import { buildTranscriptRows, turnCount, resolveTurns, currentTurnElapsedMs, formatElapsed, formatDividerFromVocab } from './transcript-vm';
+import { useCurrentProject } from './CurrentProjectProvider';
+import { useSelectedSession } from './SelectedSessionProvider';
 
 // CENTER CHAT pane — 1:1 rebuild from prototype.dc.html L103–395 (workspace-chat view). Task aba0
 // (S4 chat) makes the transcript body + composer send REAL, replacing 89e7's GAP-A (static transcript)
 // and GAP-C (inert send) placeholders:
 //   • transcript: real `sessions.transcript` query (grouped turns) → prototype message rows
 //   • streaming: live `session.message` subscription appends assistant/tool output as it lands, and
-//     invalidates the transcript so the finalized history reconciles (buildTranscriptRows de-dups)
+//     invalidates the transcript so the finalized history reconciles (buildTranscriptRows de-dups).
+//     The block being written is handed to the stream as `streamKey`-scoped preview text, which the
+//     stream reveals at a steady rate instead of a delta at a time; the key is the session, so
+//     switching sessions mid-reply settles the reveal rather than carrying it into the next chat
 //   • send: the composer routes each message through the real `sessions.send` mutate; the reply echoes
 //     back over the same live stream (fire-and-forget)
-// Active session = the most-recently-used session (sessions.list, sorted by lastUsedAt) — the contract
-// has no cross-pane selected-session state; running is DERIVED from live-stream activity (SessionInfo
-// carries no running field). The one other live surface (inline thread card, threads.get) is kept.
+// Running is snapshot + delta: SessionInfo.running (sessions.list) restores the true state on
+// mount / session switch / reload, and the live `session.status` event overrides once received —
+// so a mid-turn session never shows idle after switching away and back. The one other live surface
+// (inline thread card, threads.get) is kept.
 
 const EMPTY_TRANSCRIPT = { sessionId: '', turns: [] };
 
-export function CenterChat(): JSX.Element {
+// `grow` is the pane's share of the fluid center region — 1 normally, `1 - split` while a preview
+// is pinned beside the chat (WorkbenchPage owns the split).
+export function CenterChat({ grow = 1 }: { grow?: number } = {}): JSX.Element {
+  const L = useVocab();
+  const lang = useLang();
   const trpc = useTRPC();
-  const sessionsQuery = useQuery(trpc.sessions.list.queryOptions({}));
+  const { currentProjectId } = useCurrentProject();
+  const { selectedSessionId, isDraft, draftProfile, draftReloadToken } = useSelectedSession();
+  // Scoped to the current project (dedupes with the LeftRail / provider query) so the active session
+  // is resolved from the same list the rail shows.
+  const sessionsQuery = useQuery(
+    trpc.sessions.list.queryOptions({ origin: 'direct', projectId: currentProjectId ?? undefined }),
+  );
 
+  // The active session is the shared cross-pane selection (a LeftRail click), resolved against the
+  // scoped list. No local most-recent computation — selection is the single source of truth.
   const active = useMemo(() => {
     const list = sessionsQuery.data ?? [];
-    if (list.length === 0) return null;
-    return [...list].sort((a, b) => (a.lastUsedAt < b.lastUsedAt ? 1 : -1))[0];
-  }, [sessionsQuery.data]);
+    return list.find((s) => s.sessionId === selectedSessionId) ?? null;
+  }, [sessionsQuery.data, selectedSessionId]);
 
-  const sessionId = active?.sessionId ?? '';
-  const title = active ? (active.label ?? active.name) : 'No session';
+  const sessionId = active?.sessionId ?? (isDraft ? '' : selectedSessionId ?? '');
+  const title = isDraft ? L.wbNewConversation : active ? (active.label ?? active.name) : 'No session';
 
   const transcriptQuery = useQuery({
     ...trpc.sessions.transcript.queryOptions({ sessionId }),
     enabled: !!sessionId,
   });
 
-  const { liveTail, streaming } = useSessionMessageLiveSync(sessionId);
+  // `deltas: true` — this is the surface that shows a live preview, so it opens the session-scoped
+  // delta subscription. The reply then appears token by token instead of arriving whole after the
+  // whole block is generated (measured on a long answer: first text at ~3.6s, complete at ~22s).
+  // `transcript` is passed back in only so a pending row self-heals if its delivered event is lost.
+  const { liveTail, streaming, running, backgroundRunning, liveTurns, contextUsage, streamingText, pendingUser } =
+    useSessionMessageLiveSync(sessionId, active?.running, active?.backgroundRunning, {
+      deltas: true,
+      transcript: transcriptQuery.data ?? null,
+      contextUsage: active?.contextUsage ?? null,
+    });
+  // Interaction cards are transcript rows now (web-interactions-redesign) — this hook only
+  // provides the answer/approve/reject actions; state lives in the transcript.
+  const interactionActions = useInteractionActions(sessionId);
+  // Unread write side: the OPEN session is being read — stamp markRead on select, on live
+  // activity while viewing, and on tab re-focus (only while the document is visible).
+  useMarkSessionRead(sessionId, `${liveTail.length}:${running}`);
 
   const transcript = transcriptQuery.data ?? EMPTY_TRANSCRIPT;
   const rows = useMemo(
-    () => buildTranscriptRows(transcript, liveTail, { streaming }),
-    [transcript, liveTail, streaming],
+    () => buildTranscriptRows(transcript, liveTail, { streaming, streamingText, pendingUser, formatDivider: formatDividerFromVocab(L) }),
+    [transcript, liveTail, streaming, streamingText, pendingUser, L],
   );
   const turns = turnCount(transcriptQuery.data);
-  const elapsed = useMemo(() => formatElapsed(sessionElapsedMs(transcriptQuery.data)), [transcriptQuery.data]);
-  const running = streaming;
+  // The composer status line shows the REAL agent-turn count (the number that grows as the agent
+  // works), NOT the number of user-message rounds (`turns`). Snapshot + delta: the live `session.turn`
+  // event wins, else the `SessionInfo.numTurns` snapshot from sessions.list (restored on mount/reload).
+  const agentTurns = resolveTurns(liveTurns, active?.numTurns ?? null);
+  // Running-line elapsed = the CURRENT turn's runtime only (last turn's intra-turn span), not the
+  // whole-session accumulated time — a fresh turn's clock starts from its own user message.
+  const elapsed = useMemo(() => formatElapsed(currentTurnElapsedMs(transcriptQuery.data)), [transcriptQuery.data]);
+  // A session "has history" once it carries at least one turn — the switch rule uses this to allow
+  // only same-backend profile switches on a live conversation. Live streaming counts too.
+  const hasHistory = turns > 0 || liveTail.length > 0;
+  const compactAction = useSessionCompact(sessionId, {
+    running,
+    hasBackendHistory: !!active?.backendSessionId,
+  });
+
+  // Message edit + rewind (sec-23): submit fires the real `sessions.rewind` mutation; the
+  // transcript + rail refetch on settle (and again on the `session.rewound` event / regeneration
+  // stream). Editing is greyed out while running (`edit.running`) — the server double-guards.
+  const queryClient = useQueryClient();
+  const rewindMut = useMutation(trpc.sessions.rewind.mutationOptions({
+    onSettled: () => {
+      if (!sessionId) return;
+      queryClient.invalidateQueries(trpc.sessions.transcript.queryFilter({ sessionId }));
+      queryClient.invalidateQueries(trpc.sessions.list.queryFilter());
+    },
+  }));
+  const edit = useMemo<MessageEditCtx | undefined>(() => {
+    if (!sessionId) return undefined;
+    return {
+      running,
+      busy: rewindMut.isPending,
+      onSubmit: (turnIndex, text) => rewindMut.mutate({ sessionId, turnIndex, text }),
+    };
+  }, [sessionId, running, rewindMut]);
 
   const onCmdK = () => {
     // Trigger the global ⌘K command palette (AppShell mounts it via a window keydown hook).
@@ -59,17 +133,56 @@ export function CenterChat(): JSX.Element {
     <div
       data-pane="center"
       style={{
-        flex: 1,
+        flexGrow: grow,
+        flexShrink: 1,
+        flexBasis: 0,
         minWidth: 0,
         display: 'flex',
         flexDirection: 'column',
-        background: '#fff',
+        background: 'var(--proto-card)',
         minHeight: 0,
       }}
     >
-      <ChatHeader title={title} running={running} onCmdK={onCmdK} />
-      <MessageStream rows={rows} loading={!!sessionId && transcriptQuery.isPending} />
-      <Composer sessionId={sessionId} running={running} turns={turns} elapsed={elapsed} />
+      <ChatHeader
+        title={title}
+        running={running}
+        onCmdK={onCmdK}
+        sessionId={sessionId}
+        backendSessionId={active?.backendSessionId ?? null}
+        sessionName={active?.name ?? null}
+        currentProfile={active?.profileName ?? null}
+        hasHistory={hasHistory}
+        isDraft={isDraft}
+      />
+      <MessageStream
+        rows={rows}
+        loading={!!sessionId && transcriptQuery.isPending}
+        inlineThreadCard={sessionId ? <InlineThreadCardProto sessionId={sessionId} /> : undefined}
+        interactionActions={interactionActions}
+        edit={edit}
+        streamKey={sessionId}
+      />
+      <Composer
+        sessionId={sessionId}
+        running={running}
+        backgroundRunning={backgroundRunning}
+        turns={agentTurns}
+        cost={active?.costUsd ?? null}
+        elapsed={elapsed}
+        isDraft={isDraft}
+        draftProfile={draftProfile}
+        draftReloadToken={draftReloadToken}
+        projectId={currentProjectId ?? 'general'}
+        statusAccessory={(active?.contextCompactionSupported || contextUsage !== null) ? (
+          <ContextUsageControl
+            usage={contextUsage}
+            supported={!!active?.contextCompactionSupported}
+            variant="desktop"
+            lang={lang}
+            compactAction={active?.contextCompactionSupported ? compactAction : undefined}
+          />
+        ) : undefined}
+      />
     </div>
   );
 }

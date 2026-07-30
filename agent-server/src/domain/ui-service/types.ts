@@ -1,17 +1,31 @@
-// input:  nothing (leaf module)
-// output: UiService types — Result, QueryScope, MutateOp, DTOs, UiService interface, UiServiceDeps
-// pos:    leaf types module, depends only on domain types pulled in by query/mutate handlers
-// >>> If I am updated, update CORTEX.md and the parent folder's CORTEX.md <<<
+// input:  domain types, context/notices, stores, pending data
+// output: UI DTOs and operation maps including task completion
+// pos:    Canonical transport-neutral UI contract
+// >>> 一旦我被更新，务必更新我的开头注释与所属文件夹 CORTEX.md <<<
 
 import type { Project, CreateProjectResult } from '@domain/projects/index.js';
 import type { CostSummary } from '@domain/costs/cost-tracker.js';
 import type { EventBus } from '@events/index.js';
 import type { RunningExecutions } from '@core/running-executions.js';
+import type { ChatNoticeLevel, SessionContextUsage } from '@core/types/agent-types.js';
+export type { ChatNoticeLevel, SessionContextUsage } from '@core/types/agent-types.js';
 import type { PlatformAdapter } from '@platform/adapter.js';
+import type {
+  HookBackend,
+  HookEvent,
+  HookFilterValue,
+  HookPhase,
+  HookResultMode,
+  HookSource,
+} from '@store/hook-registry.js';
+import type { HookApplyTime, HookMountTarget } from '@domain/hooks/hook-view.js';
+export type { HookApplyTime, HookMountTarget } from '@domain/hooks/hook-view.js';
 import type { Session } from '@store/session-registry-repo.js';
 import type { ScheduleTask, ScheduleTarget } from '@store/schedule-repo.js';
 import type { LogLocation } from '@domain/executions/log-tailer.js';
 import type { SessionHistory } from '@store/conversation-history-repo.js';
+import type { Backend } from '../../agent-adapter/types.js';
+import type { ProjectNote } from '@store/project-notes-repo.js';
 
 // ── Result ────────────────────────────────────────────────────────
 
@@ -25,6 +39,7 @@ export type QueryScope =
   | 'projects.list'
   | 'sessions.list'
   | 'sessions.transcript'
+  | 'sessions.pendingInteraction'
   | 'threads.list'
   | 'threads.get'
   | 'tasks.list'
@@ -35,11 +50,16 @@ export type QueryScope =
   | 'memory.tree'
   | 'memory.file'
   | 'approvals.list'
+  | 'issues.list'
+  | 'notes.list'
   | 'cost.summary'
   | 'config.get'
+  | 'hooks.list'
   | 'machines.list'
   | 'skills.list'
-  | 'threadTemplates.get';
+  | 'threadTemplates.get'
+  | 'system.daemonStatus'
+  | 'system.rateLimitStatus';
 
 // ── Mutate ops ────────────────────────────────────────────────────
 
@@ -48,6 +68,13 @@ export type MutateOp =
   | 'sessions.create'
   | 'sessions.send'
   | 'sessions.cancel'
+  | 'sessions.compact'
+  | 'sessions.setProfile'
+  | 'sessions.createAndSend'
+  | 'sessions.markRead'
+  | 'sessions.answerQuestion'
+  | 'sessions.respondPlan'
+  | 'sessions.rewind'
   | 'threads.cancel'
   | 'executions.cancel'
   | 'schedules.pause'
@@ -62,7 +89,20 @@ export type MutateOp =
   | 'approvals.approve'
   | 'approvals.reject'
   | 'approvals.request'
-  | 'config.set';
+  | 'issues.handle'
+  | 'issues.delete'
+  | 'notes.add'
+  | 'notes.update'
+  | 'notes.setCompleted'
+  | 'notes.delete'
+  | 'notes.clearCompleted'
+  | 'config.set'
+  | 'hooks.create'
+  | 'hooks.update'
+  | 'hooks.setEnabled'
+  | 'hooks.remove'
+  | 'hooks.test'
+  | 'system.restart';
 
 // ── Subscribe ─────────────────────────────────────────────────────
 
@@ -71,7 +111,9 @@ export interface SubscribeFilter {
   projectId?: string | null;
   /** Scope `execution.log` events to a single execution (B2-C live log stream). */
   executionId?: string | null;
-  /** Scope `session.message` events to a single session (S4 chat live stream). */
+  /** Scope `session.message` events to a single session (S4 chat live stream). REQUIRED for
+   *  `session.message.delta`: token-level previews are delivered to session-scoped subscriptions
+   *  only, so an app-wide stream is never flooded with another session's deltas. */
   sessionId?: string | null;
 }
 
@@ -100,13 +142,29 @@ export interface SessionsTranscriptParams {
   sessionId: string;
 }
 
+export interface SessionsPendingInteractionParams {
+  sessionId: string;
+}
+
+export interface SessionsPendingInteraction {
+  askUser: { requestId: string; questions: { question: string; header: string; options: { label: string; description?: string }[]; multiSelect: boolean }[] } | null;
+  plan: { requestId: string; planContent: string; planFilePath: string | null } | null;
+}
+
 export interface ThreadsListParams {
   projectId?: string;
   status?: string[];
+  /** Scope to the threads owned by a single chat session: the handler resolves this session's
+   *  channel and returns only threads running on it (a thread spawned interactively runs on its
+   *  originating channel). Backs the inline chat thread card, which must show THIS conversation's
+   *  thread, not a random global one. Unknown session → empty. Omit for the unscoped list. */
+  sessionId?: string;
 }
 
 export interface ThreadsGetParams {
   threadId: string;
+  /** Include artifact.md text for the open detail modal; omitted for lightweight cards. */
+  includeArtifactContent?: boolean;
 }
 
 export interface TasksListParams {
@@ -149,6 +207,15 @@ export interface ApprovalsListParams {
   status?: ApprovalStatus;
 }
 
+export interface IssuesListParams {
+  /** Issues are per-project (`<contextDir>/ISSUES.md`) — the project is required. */
+  projectId: string;
+}
+
+export interface NotesListParams {
+  projectId: string;
+}
+
 export interface CostSummaryParams {
   projectId?: string | null;
 }
@@ -161,6 +228,10 @@ export type SkillsListParams = Record<string, never>;
 
 export type ThreadTemplatesGetParams = Record<string, never>;
 
+export type SystemDaemonStatusParams = Record<string, never>;
+
+export type SystemRateLimitStatusParams = Record<string, never>;
+
 // ── Mutate args ───────────────────────────────────────────────────
 
 export interface ProjectCreateArgs {
@@ -172,13 +243,91 @@ export interface SessionsCreateArgs {
   projectId?: string;
 }
 
+// ── Attachment metadata (S4 chat file attachments, 15a) ──────────────────
+// Describes a file uploaded through the web composer's "+ attach" / paste / drop.
+// Files are stored under DATA_DIR/tmp/attachments/<sessionId>/ on the server;
+// the message carries paths so the agent can read them directly.
+
+export interface AttachmentMeta {
+  name: string;
+  path: string;
+  size: number;
+  mimeType: string;
+  type: 'image' | 'video' | 'file';
+}
+
 export interface SessionsSendArgs {
   sessionId: string;
   text: string;
+  /** Optional file attachments already uploaded to the server. */
+  attachments?: AttachmentMeta[];
 }
 
 export interface SessionsCancelArgs {
   sessionId: string;
+}
+
+export interface SessionsCompactArgs {
+  sessionId: string;
+}
+
+export interface SessionsMarkReadArgs {
+  sessionId: string;
+}
+
+export interface SessionsSetProfileArgs {
+  sessionId: string;
+  /** The profile to switch the session to. Must exist in profiles.json. */
+  profileName: string;
+}
+
+export interface SessionsAnswerQuestionArgs {
+  requestId: string;
+  answers: Record<string, string>;
+}
+
+export interface SessionsRespondPlanArgs {
+  requestId: string;
+  approved: boolean;
+  feedback?: string;
+}
+
+/** Return of sessions.answerQuestion / sessions.respondPlan. 'already-resolved' means another
+ *  client (or Slack / timeout) resolved the interaction first — not an error; the caller
+ *  refetches the transcript to show the final state. */
+export interface SessionsInteractionMutateReturn {
+  outcome: 'resolved' | 'already-resolved';
+}
+
+/** Args for `sessions.rewind` (message edit + rewind, desktop design 23 / mobile 7): replace the
+ *  user message that opened `turnIndex` with `text`, rolling back every later turn and
+ *  regenerating. Attachments of the original message are preserved server-side (the edit UI can
+ *  neither add nor remove them). */
+export interface SessionsRewindArgs {
+  sessionId: string;
+  /** The transcript turn whose opening user message is being edited. */
+  turnIndex: number;
+  /** The edited message text (non-empty). */
+  text: string;
+}
+
+/** Fire-and-forget like sessions.send — the regenerated reply streams over `session.message`. */
+export interface SessionsRewindReturn {
+  accepted: true;
+}
+
+export interface SessionsCreateAndSendArgs {
+  /** Project the new session belongs to. */
+  projectId: string;
+  /** The profile to create the session with. Omitted → system default. */
+  profileName?: string;
+  /** First user message text. */
+  text: string;
+  /** Optional file attachments. */
+  attachments?: AttachmentMeta[];
+  /** Temporary upload directory id (draft mode). Attachments were uploaded under this id
+   *  rather than a real sessionId. The handler moves them to the new session's dir. */
+  draftUploadId?: string;
 }
 
 export interface ThreadsCancelArgs {
@@ -243,6 +392,37 @@ export interface ApprovalsApproveArgs {
   id: string;
 }
 
+// issues.handle / issues.delete both take the target issue off the project's ISSUES.md list
+// (design sec-24: 在列表即待处理，处理/删除即离场).
+export interface IssueActionArgs {
+  projectId: string;
+  id: string;
+}
+
+export interface NoteAddArgs {
+  projectId: string;
+  text: string;
+}
+
+export interface NoteUpdateArgs extends NoteAddArgs {
+  id: string;
+}
+
+export interface NoteSetCompletedArgs {
+  projectId: string;
+  id: string;
+  completed: boolean;
+}
+
+export interface NoteActionArgs {
+  projectId: string;
+  id: string;
+}
+
+export interface NotesClearCompletedArgs {
+  projectId: string;
+}
+
 export interface ApprovalsRejectArgs {
   id: string;
   feedback?: string;
@@ -272,7 +452,15 @@ export interface ProjectConduitInfo {
 }
 
 export interface SessionInfo {
+  /** The stable TRACK id (Cortex UI identity): registry key, `session.*` events, transcript, and every
+   *  ui-service op key. Since the track/backend session-id decoupling this is NO LONGER the backend CLI
+   *  resume target — use `backendSessionId` for that. */
   sessionId: string;
+  /** The backend CLI resume target (`--resume`/`--session-id`) and session-backup file name — the id
+   *  the "Session ID" surface shows as the backend UUID. Null on a fresh session before its first turn
+   *  completes (no backend id assigned yet — never fabricated). Legacy records that predate the
+   *  decoupling fall back to `sessionId` (where the conflated id WAS the backend id). */
+  backendSessionId: string | null;
   name: string;
   projectId: string;
   backend: string;
@@ -284,6 +472,49 @@ export interface SessionInfo {
   lastUsedAt: string;
   resumable: boolean;
   label: string | null;
+  /** The session's active agent profile (registry record). Null when never explicitly set — the
+   *  client falls back to the config default. Kept in sync by the shared profile-switch rule. */
+  profileName: string | null;
+  /** Latest backend context occupancy, or null until a supported backend reports one. Optional only
+   *  for rolling compatibility with older servers/fixtures; current sessions.list always supplies it. */
+  contextUsage?: SessionContextUsage | null;
+  /** True only for PI and Claude print sessions under their fixed profile. */
+  contextCompactionSupported?: boolean;
+  /** Live running snapshot: true while an interactive turn (a non-thread execution) is live on the
+   *  session's channel. Authoritative at query time — the client uses this as the snapshot and the
+   *  `session.status` event stream as the delta (snapshot + delta), so running state survives
+   *  session switches, page reloads, and SSE reconnects. */
+  running: boolean;
+  /** Background-hold snapshot (web bg-hold): true while the session's foreground turn has ended but
+   *  a background task (run_in_background Bash / background subagent) still holds it — `running`
+   *  stays true throughout. Mirrors the `session.status` `backgroundRunning` delta via the in-memory
+   *  bg-held registry (snapshot + delta, same pattern as `running`), so the state survives session
+   *  switches, page reloads, and app restarts. False while a live foreground turn is on the channel. */
+  backgroundRunning: boolean;
+  /** Awaiting-user-action snapshot: true while the session is blocked on a pending interaction that
+   *  needs the user to act — an ask-user question or a plan approval — resolved from the in-memory
+   *  pending maps keyed by the session's channel (`getPendingAskUser`/`getPendingPlan`). This is the
+   *  ONLY state that drives the rail's amber「需要你」dot; plain running and web bg-hold both render
+   *  blue. False when nothing is pending, and false when the pending-interaction deps are absent
+   *  (fixtures / TUI). Snapshot-only, mirrored live via the `session.interaction` event stream. */
+  awaitingInput: boolean;
+  /** Real agent-turn count for the composer (NOT the number of user-message rounds). While running,
+   *  the live count of the in-flight turn (from the running execution); while idle, the last run's
+   *  final turn count (from the most recent non-thread execution on the session's channel). Null when
+   *  unknown (a running turn before its first progress event, or a session that never ran). The client
+   *  uses this as the snapshot and the `session.turn` event stream as the delta (snapshot + delta). */
+  numTurns: number | null;
+  /** Last run's total cost in USD for the composer status line. Sourced from the most recent
+   *  non-thread execution on the session's channel (`metrics.costUsd`), the same run whose turn count
+   *  drives `numTurns`. Null while running (cost is only finalized at turn end — there is no live
+   *  in-memory cost source, so a running turn never falls back to the previous run's cost) and null
+   *  when the session never ran. Snapshot-only (no live delta event); refreshed when sessions.list
+   *  refetches on a turn-end status edge. */
+  costUsd: number | null;
+  /** Unread: the session had activity (lastUsedAt, bumped at turn end) AFTER the user last viewed
+   *  it (`sessions.markRead` → registry lastReadAt). Legacy records with no lastReadAt are treated
+   *  as read (no unread flood on first deploy). */
+  unread: boolean;
 }
 
 // ── sessions.transcript DTO (S4 chat) ─────────────────────────────
@@ -291,14 +522,71 @@ export interface SessionInfo {
 // event opens a turn). Streaming assistant partials are already collapsed at the source
 // (conversationHistory.getHistory). An absent/empty history maps to `{ sessionId, turns: [] }`.
 
+// ── Interaction entity DTO (web-interactions-redesign) ────────────────────
+// An interaction (agent question / plan approval) is a first-class transcript row with a
+// status machine. Pending rows render actionable cards; resolved/expired rows render
+// summaries. The server derives `expired` at read time for pending rows whose live
+// resolver is gone (restart) or older than the TTL.
+
+export type InteractionKind = 'ask-user' | 'plan-approval';
+export type InteractionStatus = 'pending' | 'answered' | 'approved' | 'rejected' | 'expired' | 'cancelled';
+
+export interface InteractionQuestion {
+  question: string;
+  header: string;
+  options: { label: string; description?: string }[];
+  multiSelect: boolean;
+}
+
+export interface TranscriptInteractionDetail {
+  id: string;
+  kind: InteractionKind;
+  status: InteractionStatus;
+  payload: {
+    questions?: InteractionQuestion[];
+    /** Severity of an ask-user card ('info'|'warning'|'error') — absent = neutral look. */
+    level?: ChatNoticeLevel;
+    planContent?: string;
+    planFilePath?: string | null;
+  };
+  result?: { answers?: Record<string, string>; feedback?: string };
+  resolvedVia?: string;
+}
+
+export interface TranscriptDebugDetails {
+  /** Exact message sent to the agent for a user turn. */
+  agentMessage?: string;
+  /** Unabridged structured tool-call input. */
+  toolInput?: unknown;
+  /** Full correlated normalized tool result. */
+  toolResult?: { content: string; isError: boolean };
+  /** Derived at query time from the agent-server warning threshold; never persisted. */
+  overCharacterThreshold?: true;
+}
+
 export interface TranscriptMessage {
-  type: 'user' | 'assistant' | 'tool';
-  /** user / assistant text; null for tool events. */
+  type: 'user' | 'assistant' | 'tool' | 'interaction';
+  /** user / assistant / interaction text; null for tool events. */
   text: string | null;
   /** tool name (tool events only). */
   toolName: string | null;
   /** compact tool input summary (tool events only). */
   toolInput: string | null;
+  /** Sensitive lossless data. Present only in responses produced while server DEBUG is enabled. */
+  debug?: TranscriptDebugDetails;
+  /** Semantic chat-notice styling for system-authored assistant messages. */
+  noticeLevel?: ChatNoticeLevel;
+  /** interaction subtype: 'ask-user-answered' | 'plan-approved' | 'plan-rejected' (legacy rows)
+   *  or derived from kind+status for entity rows (display compat). */
+  subtype?: string;
+  /** Structured interaction entity (interaction rows with an id). Absent on legacy rows. */
+  interaction?: TranscriptInteractionDetail;
+  /** File attachments: user uploads via the web composer (15a, user messages) OR agent-sent
+   *  files via the `send_file` MCP tool (20a, assistant messages). */
+  attachments?: AttachmentMeta[];
+  /** Present on a user message that replaced an earlier one via edit+rewind (sessions.rewind):
+   *  the original text/ts backing the「已编辑」badge + hover/tap original-message card. */
+  edited?: { originalText: string; originalTs: string };
   ts: string;
   /**
    * Real elapsed since the previous message in the session's chronological stream, in ms
@@ -315,9 +603,19 @@ export interface TranscriptTurn {
   messages: TranscriptMessage[];
 }
 
+export interface PendingTranscriptUserMessage {
+  id: string;
+  text: string;
+  ts: string;
+  attachments?: AttachmentMeta[];
+}
+
 export interface SessionTranscript {
   sessionId: string;
   turns: TranscriptTurn[];
+  /** Durable messages accepted into a live backend turn but not consumed by the model yet.
+   *  Optional for rolling compatibility with older servers; current servers always return it. */
+  pendingUserMessages?: PendingTranscriptUserMessage[];
 }
 
 export interface ThreadInfo {
@@ -330,6 +628,8 @@ export interface ThreadInfo {
   updatedAt: string;
   totalSteps: number;
   artifactPath: string | null;
+  /** Optional while Desktop/Mobile clients and servers roll independently. */
+  taskId?: string | null;
 }
 
 // ── threads.get detail DTO (DR-0018 §6.3 B1) ─────────────────────
@@ -366,7 +666,9 @@ export interface ThreadDispatchInfo {
   machine: string | null;
   type: 'local' | 'dispatch';
   agentSlotId: string | null;
+  stepIndex: number | null;
   taskId: string | null;
+  runName: string | null;
   startedAt: string;
   finishedAt: string | null;
   durationMs: number | null;
@@ -391,6 +693,17 @@ export interface ThreadArtifactRefs {
   workspacePath: string | null;
   taskId: string | null;
   taskProject: string | null;
+  /** Present only when threads.get requested artifact content; null on no file/read failure. */
+  content?: string | null;
+}
+
+export interface ThreadSubtaskInfo {
+  id: string;
+  text: string;
+  status: 'open' | 'done';
+  actionable: boolean;
+  claimedBy: string | null;
+  blockedBy: string | null;
 }
 
 export interface ThreadDetail {
@@ -412,6 +725,7 @@ export interface ThreadDetail {
   steps: ThreadStepDetail[];
   agentFlow: ThreadAgentFlow | null;
   dispatches: ThreadDispatchInfo[];
+  subtasks: ThreadSubtaskInfo[];
   children: ThreadChildNode[];
   artifacts: ThreadArtifactRefs;
 }
@@ -425,6 +739,10 @@ export interface TaskInfo {
   actionable: boolean;
   claimedBy: string | null;
   blockedBy: string | null;
+  /** Approval gate from task-store `approval-needed`; absent only with an older server contract. */
+  approvalNeeded?: boolean;
+  /** Recorded approval date; absent only with an older server contract. */
+  approvedAt?: string | null;
   dependsOn: string[];
   plan: string | null;
   template: string;
@@ -432,6 +750,8 @@ export interface TaskInfo {
   why: string | null;
   /** The task's completion criteria (task store `done-when`). Null when absent/empty (null-safe). */
   doneWhen: string | null;
+  /** Completion timestamp; optional while app and server versions roll independently. */
+  completedAt?: string | null;
 }
 
 // ── tasks.verification DTO (DR-0018 §12 C item 11) ────────────────
@@ -549,8 +869,10 @@ export interface ConfigBudget {
 export interface ConfigProfileEntry {
   name: string;
   model: string | null;
-  backend: string | null;
+  backend: Backend | null;
   mode: string | null;
+  /** Thinking level (backend-native value: claude --effort / pi --thinking). */
+  thinking: string | null;
 }
 
 export interface ConfigProfiles {
@@ -582,13 +904,140 @@ export interface ConfigEnvEntry {
   masked: string;
 }
 
+export interface ConfigHook {
+  id: string;
+  event: HookEvent;
+  enabled: boolean;
+  source: HookSource;
+}
+
+// ── hooks.* DTOs ─────────────────────────────────────────────────────────────
+// Full read/write model of the declarative hook registry. `ConfigHook` above stays the four-field
+// summary embedded in config.get; anything that edits a declaration uses HookDetail instead.
+
+/** `run` flattened for the editor: exactly one of script/command is non-null. */
+export interface HookRunInfo {
+  script: string | null;
+  command: string | null;
+  /** Registry timeout in SECONDS (template hooks use milliseconds and report null here). */
+  timeoutSec: number | null;
+}
+
+export interface HookScopeInfo {
+  backends: HookBackend[] | null;
+  requiresTool: string | null;
+}
+
+export interface HookDetail {
+  id: string;
+  event: HookEvent;
+  /** Regex matcher for agent:/cc:/pi: events; null when the event uses filters or has no matcher. */
+  matcher: string | null;
+  /** Equality filters for cortex:* events; null otherwise. */
+  matcherFilters: Record<string, HookFilterValue> | null;
+  run: HookRunInfo;
+  scope: HookScopeInfo | null;
+  blocking: { mode: 'webhook'; ttlMin: number } | null;
+  result: HookResultMode | null;
+  enabled: boolean;
+  source: HookSource;
+  /** CalVer stamp for managed entries; null for user and template-scoped. */
+  version: string | null;
+  /** Declaration filename; null for template-scoped hooks, which live in the template file. */
+  fileName: string | null;
+  /** Position in load order — which is also execution order within one event. */
+  order: number;
+  /** Where the declaration actually installs once compiled. */
+  mountsOn: HookMountTarget[];
+  /** Result modes the loader accepts for this event, for a constrained editor choice. */
+  legalResults: HookResultMode[];
+  appliesAt: HookApplyTime;
+  /** Whether run.script resolves on disk; null when the hook is command-based. */
+  scriptExists: boolean | null;
+  /** True only for user entries — managed gets resynced, template-scoped is owned elsewhere. */
+  editable: boolean;
+  template: string | null;
+  phase: HookPhase | null;
+}
+
+export interface HookScriptInfo {
+  name: string;
+  usedBy: string[];
+}
+
+export interface HooksOverview {
+  hooks: HookDetail[];
+  scripts: HookScriptInfo[];
+  hooksDir: string;
+}
+
+export type HooksListParams = Record<string, never>;
+
+/** The editable surface of a declaration, flattened so the form binds one field per control. */
+export interface HookDraftInput {
+  event: string;
+  matcher?: string;
+  matcherFilters?: Record<string, HookFilterValue>;
+  script?: string;
+  command?: string;
+  timeoutSec?: number;
+  backends?: HookBackend[];
+  requiresTool?: string;
+  result?: HookResultMode;
+  enabled?: boolean;
+}
+
+export interface HooksCreateArgs extends HookDraftInput {
+  id: string;
+}
+export interface HooksCreateReturn {
+  id: string;
+  fileName: string;
+}
+
+export interface HooksUpdateArgs extends HookDraftInput {
+  id: string;
+}
+export interface HooksUpdateReturn {
+  changed: boolean;
+}
+
+export interface HooksSetEnabledArgs {
+  id: string;
+  enabled: boolean;
+}
+export interface HooksSetEnabledReturn {
+  changed: boolean;
+  /** Non-null when the change is not durable (a managed entry a later sync will restore). */
+  warning: string | null;
+}
+
+export interface HooksRemoveArgs {
+  id: string;
+}
+export interface HooksRemoveReturn {
+  removed: boolean;
+}
+
+export interface HooksTestArgs {
+  id: string;
+  payload: string;
+}
+export interface HooksTestReturn {
+  ok: boolean;
+  exitCode: number | null;
+  stdout: string;
+  stderr: string;
+  error: string | null;
+}
+
 export interface ConfigSnapshot {
   budget: ConfigBudget | null;
   profiles: ConfigProfiles | null;
   machines: ConfigMachine[];
   mcp: ConfigMcp | null;
   threadTemplates: ConfigThreadTemplates;
-  hooks: string[];
+  hooks: ConfigHook[];
   env: ConfigEnvEntry[];
 }
 
@@ -663,6 +1112,12 @@ export interface MemoryDirEntry {
   name: string;
   /** Number of `*.md` entry files, excluding the auto-generated `index.md` and `CORTEX.md`. */
   entryCount: number;
+  /**
+   * The dir's `*.md` entry files (same filter as `entryCount` — excludes `index.md` / `CORTEX.md`),
+   * sorted by name. Lets a client enumerate + open the files under each memory dir (mobile 1j
+   * accordion) without a second round-trip. `entryCount === entries.length`.
+   */
+  entries: MemoryFileEntry[];
 }
 
 export interface MemoryTree {
@@ -750,6 +1205,79 @@ export interface ApprovalInfo {
   taskRef: string | null;
 }
 
+// ── issues DTO (design sec-24 project issue list) ──────────────────
+// Parsed from the per-project <contextDir>/ISSUES.md. One entry per column-0 `- **<title>**`
+// bullet; the real files carry freeform sub-bullets (问题/发生时机/调查过程/建议/规避/Fix…), NOT a
+// guaranteed schema. No status field exists — being listed == pending (design sec-24). The design
+// mock's source (`nightly-eval › report`) and 相关文件 chips have NO markdown source → deliberately
+// NOT DTO fields, never fabricated.
+
+export interface IssueInfo {
+  /** Stable id derived from the raw title line (no explicit id exists in the markdown). */
+  id: string;
+  /** Bold title text of the entry bullet. */
+  title: string;
+  /** First `YYYY-MM-DD` found in the title line's trailing parens; honest null when absent. */
+  date: string | null;
+  /** Raw markdown body lines (freeform sub-bullets), verbatim; '' when the entry has no body. */
+  body: string;
+}
+
+// User-private project note. It is served to operator UIs only and never injected into agent context.
+export type NoteInfo = ProjectNote;
+
+// ── system.daemonStatus DTO ───────────────────────────────────────
+// Daemon + child (app.js) process status. Read from daemon.pid / daemon-child.pid
+// under STORE_DIR; liveness checked via process.kill(pid, 0); uptime from /proc.
+// All nullable fields are honest (no /proc on non-Linux, stale PID, etc.).
+
+export interface DaemonProcessInfo {
+  name: string;
+  label: string;
+  status: 'running' | 'stopped' | 'unknown';
+  pid: number | null;
+  uptime: string | null;
+  port: number | null;
+  extras: Record<string, string | number> | null;
+}
+
+export interface SystemDaemonStatus {
+  processes: DaemonProcessInfo[];
+  lastRestart: { at: string | null; reason: string | null };
+}
+
+// ── system.rateLimitStatus DTO ────────────────────────────────────
+
+export interface RateLimitWindowInfo {
+  type: string;
+  utilization: number | null;
+  resetsAt: number;
+  activatedAt: number;
+}
+
+export interface RateLimitProviderInfo {
+  provider: string;
+  displayName: string;
+  waitingSessions: number;
+  waitingThreads: number;
+  windows: RateLimitWindowInfo[];
+}
+
+export interface SystemRateLimitStatus {
+  providers: RateLimitProviderInfo[];
+}
+
+// ── system.restart DTO ────────────────────────────────────────────
+
+export interface SystemRestartArgs {
+  kind: 'soft' | 'hard' | 'force';
+}
+
+export interface SystemRestartReturn {
+  ok: boolean;
+  message: string;
+}
+
 // ── Mutate return types ───────────────────────────────────────────
 
 export interface ProjectCreateReturn {
@@ -775,6 +1303,23 @@ export interface SessionsCancelReturn {
   count: number;
 }
 
+export interface SessionsCompactReturn {
+  status: 'compacted' | 'not-needed';
+  contextUsage: SessionContextUsage | null;
+}
+
+export interface SessionsSetProfileReturn {
+  /** The profile now active on the session. */
+  profileName: string;
+  /** True when the switch moved to a different backend (only possible on a session with no history). */
+  backendChanged: boolean;
+}
+
+export interface SessionsCreateAndSendReturn {
+  /** The id of the newly created session (the client transitions from draft to this session). */
+  sessionId: string;
+}
+
 export interface ThreadsCancelReturn {
   cancelled: boolean;
 }
@@ -793,6 +1338,25 @@ export interface ApprovalMutateReturn {
   status: ApprovalStatus;
 }
 
+export interface IssuesDeleteReturn {
+  id: string;
+  deleted: true;
+}
+
+export interface IssuesHandleReturn {
+  /** The freshly created direct session now carrying the issue as its first user turn. */
+  sessionId: string;
+}
+
+export interface NotesDeleteReturn {
+  id: string;
+  deleted: true;
+}
+
+export interface NotesClearCompletedReturn {
+  cleared: number;
+}
+
 export interface ApprovalsRequestReturn {
   queued: true;
   /** headingId of the newly appended PENDING entry (stable, hashed from the heading line). */
@@ -805,6 +1369,7 @@ export interface QueryParamMap {
   'projects.list': Record<string, never>;
   'sessions.list': SessionsListParams;
   'sessions.transcript': SessionsTranscriptParams;
+  'sessions.pendingInteraction': SessionsPendingInteractionParams;
   'threads.list': ThreadsListParams;
   'threads.get': ThreadsGetParams;
   'tasks.list': TasksListParams;
@@ -815,17 +1380,23 @@ export interface QueryParamMap {
   'memory.tree': MemoryTreeParams;
   'memory.file': MemoryFileParams;
   'approvals.list': ApprovalsListParams;
+  'issues.list': IssuesListParams;
+  'notes.list': NotesListParams;
   'cost.summary': CostSummaryParams;
   'config.get': ConfigGetParams;
+  'hooks.list': HooksListParams;
   'machines.list': MachinesListParams;
   'skills.list': SkillsListParams;
   'threadTemplates.get': ThreadTemplatesGetParams;
+  'system.daemonStatus': SystemDaemonStatusParams;
+  'system.rateLimitStatus': SystemRateLimitStatusParams;
 }
 
 export interface QueryReturnMap {
   'projects.list': ProjectConduitInfo[];
   'sessions.list': SessionInfo[];
   'sessions.transcript': SessionTranscript;
+  'sessions.pendingInteraction': SessionsPendingInteraction;
   'threads.list': ThreadInfo[];
   'threads.get': ThreadDetail;
   'tasks.list': TaskInfo[];
@@ -836,11 +1407,16 @@ export interface QueryReturnMap {
   'memory.tree': MemoryTree;
   'memory.file': MemoryFile;
   'approvals.list': ApprovalInfo[];
+  'issues.list': IssueInfo[];
+  'notes.list': NoteInfo[];
   'cost.summary': CostSummary;
   'config.get': ConfigSnapshot;
+  'hooks.list': HooksOverview;
   'machines.list': MachineInfo[];
   'skills.list': SkillGroup[];
   'threadTemplates.get': ThreadTemplateEntry[];
+  'system.daemonStatus': SystemDaemonStatus;
+  'system.rateLimitStatus': SystemRateLimitStatus;
 }
 
 export interface MutateArgsMap {
@@ -848,6 +1424,13 @@ export interface MutateArgsMap {
   'sessions.create': SessionsCreateArgs;
   'sessions.send': SessionsSendArgs;
   'sessions.cancel': SessionsCancelArgs;
+  'sessions.compact': SessionsCompactArgs;
+  'sessions.setProfile': SessionsSetProfileArgs;
+  'sessions.createAndSend': SessionsCreateAndSendArgs;
+  'sessions.markRead': SessionsMarkReadArgs;
+  'sessions.answerQuestion': SessionsAnswerQuestionArgs;
+  'sessions.respondPlan': SessionsRespondPlanArgs;
+  'sessions.rewind': SessionsRewindArgs;
   'threads.cancel': ThreadsCancelArgs;
   'executions.cancel': ExecutionsCancelArgs;
   'schedules.pause': ScheduleActionArgs;
@@ -862,7 +1445,20 @@ export interface MutateArgsMap {
   'approvals.approve': ApprovalsApproveArgs;
   'approvals.reject': ApprovalsRejectArgs;
   'approvals.request': ApprovalsRequestArgs;
+  'issues.handle': IssueActionArgs;
+  'issues.delete': IssueActionArgs;
+  'notes.add': NoteAddArgs;
+  'notes.update': NoteUpdateArgs;
+  'notes.setCompleted': NoteSetCompletedArgs;
+  'notes.delete': NoteActionArgs;
+  'notes.clearCompleted': NotesClearCompletedArgs;
   'config.set': ConfigSetArgs;
+  'hooks.create': HooksCreateArgs;
+  'hooks.update': HooksUpdateArgs;
+  'hooks.setEnabled': HooksSetEnabledArgs;
+  'hooks.remove': HooksRemoveArgs;
+  'hooks.test': HooksTestArgs;
+  'system.restart': SystemRestartArgs;
 }
 
 export interface MutateReturnMap {
@@ -870,6 +1466,13 @@ export interface MutateReturnMap {
   'sessions.create': SessionsCreateReturn;
   'sessions.send': SessionsSendReturn;
   'sessions.cancel': SessionsCancelReturn;
+  'sessions.compact': SessionsCompactReturn;
+  'sessions.setProfile': SessionsSetProfileReturn;
+  'sessions.createAndSend': SessionsCreateAndSendReturn;
+  'sessions.markRead': void;
+  'sessions.answerQuestion': SessionsInteractionMutateReturn;
+  'sessions.respondPlan': SessionsInteractionMutateReturn;
+  'sessions.rewind': SessionsRewindReturn;
   'threads.cancel': ThreadsCancelReturn;
   'executions.cancel': ExecutionsCancelReturn;
   'schedules.pause': void;
@@ -884,7 +1487,20 @@ export interface MutateReturnMap {
   'approvals.approve': ApprovalMutateReturn;
   'approvals.reject': ApprovalMutateReturn;
   'approvals.request': ApprovalsRequestReturn;
+  'issues.handle': IssuesHandleReturn;
+  'issues.delete': IssuesDeleteReturn;
+  'notes.add': NoteInfo;
+  'notes.update': NoteInfo;
+  'notes.setCompleted': NoteInfo;
+  'notes.delete': NotesDeleteReturn;
+  'notes.clearCompleted': NotesClearCompletedReturn;
   'config.set': ConfigSetReturn;
+  'hooks.create': HooksCreateReturn;
+  'hooks.update': HooksUpdateReturn;
+  'hooks.setEnabled': HooksSetEnabledReturn;
+  'hooks.remove': HooksRemoveReturn;
+  'hooks.test': HooksTestReturn;
+  'system.restart': SystemRestartReturn;
 }
 
 export type QueryParams<S extends QueryScope> = S extends keyof QueryParamMap ? QueryParamMap[S] : never;
@@ -921,10 +1537,32 @@ export interface UiServiceDeps {
     listByOrigin(origin: 'direct' | 'thread' | 'scheduled', projectId?: string): Promise<Session[]>;
     listResumable(projectId?: string): Promise<Session[]>;
     getById(sessionId: string): Promise<Session | null>;
+    /** Stamp lastReadAt=now (unread tracking; backs `sessions.markRead`). Optional so existing
+     *  facade/test fixtures need not provide it (the handler no-ops when absent). */
+    markRead?(sessionId: string): Promise<void>;
   };
+  /** Capability hint for sessions.list; execution revalidates inside orchestration. */
+  supportsSessionCompaction?: (session: Session) => boolean;
+  /** Idle-only manual context compaction, injected at the entry layer. */
+  compactSession?: (opts: { sessionId: string }) => Promise<
+    | { ok: true; status: 'compacted' | 'not-needed'; contextUsage: SessionContextUsage | null }
+    | { ok: false; reason: 'not-found' | 'unsupported' | 'running' }
+  >;
   /** Backend-independent conversation history — read source for `sessions.transcript` (S4 chat). */
   conversationHistory: {
     getHistory(sessionId: string): Promise<SessionHistory | null>;
+    /** First user message text — used to title a label-less session in `sessions.list`. Optional so
+     *  facade/test fixtures need not provide it (the handler skips titling when absent). */
+    getFirstUserText?(sessionId: string): Promise<string | null>;
+  };
+  /** Durable active pending-injection snapshot joined into `sessions.transcript`. */
+  pendingInjections?: {
+    listBySession(sessionId: string): Promise<{
+      id: string;
+      text: string;
+      createdAt: string;
+      attachments?: AttachmentMeta[];
+    }[]>;
   };
   /**
    * Inject a genuine user turn into a session and route it through the agent (S4 chat send).
@@ -932,7 +1570,7 @@ export interface UiServiceDeps {
    * Wired in the entry layer (app.ts) to the orchestration send path — kept as an injected
    * callback so the ui-service domain never imports orchestration (layer safety / depcruise).
    */
-  sendSessionMessage: (opts: { sessionId: string; channel: string; text: string }) => void;
+  sendSessionMessage: (opts: { sessionId: string; channel: string; text: string; attachments?: AttachmentMeta[] }) => void;
   /**
    * Cancel every live execution running on a session's channel (S4 chat Stop). Wired in the entry
    * layer (app.ts) to the orchestration channel-cancel path (`cancelChannelRuns`), which kills the
@@ -942,11 +1580,40 @@ export interface UiServiceDeps {
    */
   cancelSessionRun: (opts: { channel: string }) => Promise<number>;
   /**
+   * Message edit + rewind: roll the session back to `turnIndex` and re-send the edited text
+   * (orchestration `rewindWebSession` — ledger rollback + backend backup restore + pooled-CLI
+   * close + display-history truncate + resend). Wired in the entry layer (app.ts) so the
+   * ui-service domain never imports orchestration. Optional so test fixtures need not provide it
+   * (the handler returns not-available when absent).
+   */
+  rewindSession?: (opts: { sessionId: string; channel: string; turnIndex: number; text: string }) => Promise<{ ok: true } | { ok: false; reason: 'running' | 'not-found' }>;
+  /**
    * Create a fresh, live user-initiated (origin='direct') session for the workbench and return its
    * id. Injected in the entry layer (app.ts) to the domain `createDirectSession` primitive with the
    * real session/ledger singletons, so the ui-service domain never imports store internals.
    */
-  createDirectSession: (opts: { projectId: string }) => Promise<{ sessionId: string; sessionName: string }>;
+  createDirectSession: (opts: { projectId: string; sessionId?: string; profileName?: string | null }) => Promise<{ sessionId: string; sessionName: string; channel: string }>;
+  /**
+   * Move files uploaded under a draft upload id to the real session's attachment directory
+   * and return updated AttachmentMeta with corrected paths. No-op when draftUploadId is null.
+   * Optional — only needed by sessions.createAndSend; absent in test fixtures.
+   */
+  moveDraftAttachments?: (opts: { draftUploadId: string | null; sessionId: string; attachments: AttachmentMeta[] }) => Promise<AttachmentMeta[]>;
+  /**
+   * Switch the active agent profile for a session's channel under the shared profile-switch rule
+   * (same `switchChannelProfile` the Slack/Feishu `!profile` command uses). Wired in the entry layer
+   * (app.ts) so the ui-service domain never imports domain/agents. Returns a structured outcome:
+   * `ok:false` with `reason` when the profile is unknown or a cross-backend switch is attempted on a
+   * session that already has conversation history.
+   */
+  switchSessionProfile: (opts: { channel: string; name: string }) => Promise<{
+    ok: boolean;
+    name: string;
+    currentBackend: string;
+    targetBackend: string;
+    backendChanged: boolean;
+    reason?: 'unknown-profile' | 'cross-backend-live-session';
+  }>;
   threadStore: {
     getAll(): any[];
     get(id: string): any | null;
@@ -1019,4 +1686,40 @@ export interface UiServiceDeps {
   };
   bus: EventBus;
   adapter: PlatformAdapter;
+  /**
+   * Return the pending ask-user question group for a channel, if any (web UI pending query).
+   * Reads from the in-memory pendingAskUserQuestionGroups Map.
+   */
+  getPendingAskUser?: (channel: string) => { requestId: string; questions: { question: string; header: string; options: { label: string; description?: string }[]; multiSelect: boolean }[] } | null;
+  /**
+   * Return the pending plan approval for a channel, if any (web UI pending query).
+   * Reads from the in-memory planApprovals Map.
+   */
+  getPendingPlan?: (channel: string) => { requestId: string; planContent: string; planFilePath: string | null } | null;
+  /**
+   * Resolve a pending ask-user-question interaction (web UI path). The injected impl (app.ts)
+   * looks up the hook group, collects answers, updates the interaction entity, and calls
+   * tryResolveHook/resolveHookRequest so the blocked MCP tool receives its response.
+   * Three-way outcome: 'resolved' | 'already-resolved' (another client won the race) |
+   * 'not-found' (no such interaction).
+   */
+  answerQuestion?: (requestId: string, answers: Record<string, string>) => 'resolved' | 'already-resolved' | 'not-found';
+  /**
+   * Resolve a pending plan-approval interaction (web UI path). Same three-way outcome as
+   * answerQuestion; the impl calls planApprovals.resolve/reject + entity resolve +
+   * resolveHookRequest.
+   */
+  respondPlan?: (requestId: string, approved: boolean, feedback?: string) => 'resolved' | 'already-resolved' | 'not-found';
+  /**
+   * Liveness signal for transcript materialization: true only while the interaction is a live,
+   * un-expired pending entry in the in-process index. After a restart the index is empty, so
+   * still-`pending` persisted rows derive to `expired` at read time.
+   */
+  isInteractionPending?: (id: string) => boolean;
+  /**
+   * Web bg-hold snapshot (core/bg-held-sessions, fed from `session.status` events in entry/app.ts):
+   * true while the session's foreground turn ended but a background task still holds it. Optional so
+   * fixtures / the TUI need not provide it — absent ⇒ no session is held.
+   */
+  isSessionBgHeld?: (sessionId: string) => boolean;
 }

@@ -1,5 +1,18 @@
+// input:  right-panel view models and DTO fixtures
+// output: task-linked thread metadata and status regressions
+// pos:    Verifies thread, activity, and machine view models
+// >>> If I am updated, update my header comment and CORTEX.md <<<
+
 import { describe, expect, it } from 'vitest';
-import type { ThreadInfo, ThreadStepDetail, ThreadDetail, ThreadChildNode, TaskInfo } from '@cortex-agent/ui-contract';
+import type {
+  ThreadInfo,
+  ThreadStepDetail,
+  ThreadDetail,
+  ThreadChildNode,
+  ThreadDispatchInfo,
+  TaskInfo,
+  MachineInfo,
+} from '@cortex-agent/ui-contract';
 import {
   threadPill,
   stepDotKind,
@@ -9,8 +22,10 @@ import {
   formatAge,
   threadMetaLine,
   depthInfo,
-  actionableCount,
   machinePill,
+  onlineMachineCount,
+  cortexRunLabel,
+  subtaskActivity,
 } from './right-panel-vm';
 
 function step(partial: Partial<ThreadStepDetail>): ThreadStepDetail {
@@ -83,28 +98,23 @@ function detail(partial: Partial<ThreadDetail>): ThreadDetail {
     steps: [],
     agentFlow: null,
     dispatches: [],
+    subtasks: [],
     children: [],
     artifacts: { artifactPath: null, workspacePath: null, taskId: null, taskProject: null },
     ...partial,
   };
 }
 
-describe('threadPill — verbatim prototype pill() hexes (L1841–1848)', () => {
-  it('running → #EEF0FA/#4655D4 Running', () => {
-    expect(threadPill('running')).toEqual({ bg: '#EEF0FA', fg: '#4655D4', text: 'Running' });
-  });
-  it('waiting → #F7ECCE/#8A5B06 Waiting', () => {
-    expect(threadPill('waiting')).toEqual({ bg: '#F7ECCE', fg: '#8A5B06', text: 'Waiting' });
-  });
-  it('completed → #E9F4EE/#23854F Done', () => {
-    expect(threadPill('completed')).toEqual({ bg: '#E9F4EE', fg: '#23854F', text: 'Done' });
-  });
-  it('failed → #FBEDEB/#C03D33 Failed', () => {
-    expect(threadPill('failed')).toEqual({ bg: '#FBEDEB', fg: '#C03D33', text: 'Failed' });
-  });
-  it('cancelled and aborted → #F1F2F5/#8A93A2 Cancelled (default)', () => {
-    expect(threadPill('cancelled')).toEqual({ bg: '#F1F2F5', fg: '#8A93A2', text: 'Cancelled' });
-    expect(threadPill('aborted')).toEqual({ bg: '#F1F2F5', fg: '#8A93A2', text: 'Cancelled' });
+describe('threadPill', () => {
+  it.each([
+    ['running', 'Running'],
+    ['waiting', 'Waiting'],
+    ['completed', 'Done'],
+    ['failed', 'Failed'],
+    ['cancelled', 'Cancelled'],
+    ['aborted', 'Cancelled'],
+  ] as const)('maps %s to its semantic label', (status, label) => {
+    expect(threadPill(status).text).toBe(label);
   });
 });
 
@@ -113,6 +123,30 @@ describe('stepDotKind', () => {
     expect(stepDotKind(step({ status: 'completed' }))).toBe('done');
     expect(stepDotKind(step({ status: 'running' }))).toBe('running');
     expect(stepDotKind(step({ status: 'pending' }))).toBe('pending');
+  });
+});
+
+describe('activity row view models', () => {
+  it('labels a real run by cortex-run name, never by execution id', () => {
+    const run: ThreadDispatchInfo = {
+      executionId: 'exec_dispatch_hidden', status: 'running', machine: 'lab2', type: 'dispatch',
+      agentSlotId: null, stepIndex: 0, taskId: 'ab12', runName: 'root-sweep',
+      startedAt: '2026-07-06T00:00:00Z', finishedAt: null, durationMs: null, cost: null,
+    };
+    expect(cortexRunLabel(run)).toBe('cortex-run root-sweep');
+    expect(cortexRunLabel(run)).not.toContain(run.executionId);
+  });
+
+  it('maps direct subtask lifecycle to compact scheme-3a status', () => {
+    const base: TaskInfo = {
+      id: 'cd34', text: 'Direct child', project: 'p', status: 'open', priority: 'medium',
+      actionable: true, claimedBy: null, blockedBy: null, dependsOn: [], plan: null,
+      template: 'coder-review', why: null, doneWhen: null,
+    };
+    expect(subtaskActivity(base)).toEqual({ label: 'Open', tone: 'idle' });
+    expect(subtaskActivity({ ...base, actionable: false, claimedBy: 'task-dispatcher' })).toEqual({ label: 'Running', tone: 'running' });
+    expect(subtaskActivity({ ...base, actionable: false, blockedBy: 'failed' })).toEqual({ label: 'Blocked', tone: 'failed' });
+    expect(subtaskActivity({ ...base, status: 'done', actionable: false })).toEqual({ label: 'Done', tone: 'done' });
   });
 });
 
@@ -157,17 +191,17 @@ describe('formatAge', () => {
   });
 });
 
-describe('threadMetaLine — "thr_8f2c · step 3/4 · 42m"', () => {
+describe('threadMetaLine', () => {
   const now = Date.parse('2026-07-06T10:00:00.000Z');
-  it('includes step when currentStep present', () => {
+  it('shows the owning task between the thread id and current step', () => {
     expect(
       threadMetaLine(
-        info({ id: 'thr_8f2c', currentStep: { index: 2, name: 'review' }, totalSteps: 4, createdAt: '2026-07-06T09:18:00.000Z' }),
+        info({ id: 'thr_8f2c', taskId: 'a293', currentStep: { index: 2, name: 'review' }, totalSteps: 4, createdAt: '2026-07-06T09:18:00.000Z' }),
         now,
       ),
-    ).toBe('thr_8f2c · step 3/4 · 42m');
+    ).toBe('thr_8f2c · task a293 · step 3/4 · 42m');
   });
-  it('omits step when no currentStep', () => {
+  it('omits task and step when neither is present', () => {
     expect(
       threadMetaLine(info({ id: 'thr_a41d', currentStep: null, createdAt: '2026-07-06T09:18:00.000Z' }), now),
     ).toBe('thr_a41d · 42m');
@@ -187,33 +221,34 @@ describe('depthInfo — dots filled = deepest child level, total = 5', () => {
   });
 });
 
-describe('machinePill — online/offline status pill', () => {
-  it('online → #E9F4EE/#23854F Online', () => {
-    expect(machinePill(true)).toEqual({ bg: '#E9F4EE', fg: '#23854F', text: 'Online' });
-  });
-  it('offline → #F1F2F5/#8A93A2 Offline', () => {
-    expect(machinePill(false)).toEqual({ bg: '#F1F2F5', fg: '#8A93A2', text: 'Offline' });
+describe('machinePill', () => {
+  it('reports online and offline states', () => {
+    expect(machinePill(true).text).toBe('Online');
+    expect(machinePill(false).text).toBe('Offline');
   });
 });
 
-describe('actionableCount', () => {
-  it('counts actionable open tasks', () => {
-    const t = (actionable: boolean): TaskInfo => ({
-      id: 'x',
-      text: 't',
-      project: 'p',
-      status: 'open',
-      priority: 'medium',
-      actionable,
-      claimedBy: null,
-      blockedBy: null,
-      dependsOn: [],
-      plan: null,
-      template: 'coder-review',
-      why: null,
-      doneWhen: null,
-    });
-    expect(actionableCount([t(true), t(false), t(true)])).toBe(2);
-    expect(actionableCount([])).toBe(0);
+describe('onlineMachineCount — Machines tab badge counts ONLINE only, not total', () => {
+  const machine = (online: boolean): MachineInfo => ({
+    name: online ? 'atlas' : 'nimbus',
+    cortexPath: null,
+    gpuCount: null,
+    sshConfigured: false,
+    os: 'unix',
+    online,
+    connectedAt: null,
+    lastHeartbeat: null,
+    capabilities: [],
+    liveRuns: 0,
+  });
+  it('counts only online machines', () => {
+    expect(onlineMachineCount([machine(true), machine(false), machine(true)])).toBe(2);
+  });
+  it('all offline → 0 (even though total > 0)', () => {
+    expect(onlineMachineCount([machine(false), machine(false)])).toBe(0);
+  });
+  it('empty / undefined → 0', () => {
+    expect(onlineMachineCount([])).toBe(0);
+    expect(onlineMachineCount(undefined)).toBe(0);
   });
 });

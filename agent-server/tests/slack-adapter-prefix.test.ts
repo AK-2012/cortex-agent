@@ -1,11 +1,12 @@
 // input:  Node test runner + SlackAdapter conduit prefixing
-// output: Verify `slack:` prefix is added on outbound conduits and stripped on inbound
-// pos:    Regression tests for multi-platform conduit prefixing (Slack + Feishu + TUI coexistence)
+// output: Slack conduit prefix and queue-marker API regression tests
+// pos:    Verifies Slack SDK calls receive bare channel identifiers
 // >>> If I am updated, update my header comment and the parent folder's CORTEX.md <<<
 
-import test from 'node:test';
+import { test } from 'vitest';
 import assert from 'node:assert/strict';
 import { SlackAdapter } from '../src/platform/adapters/slack.js';
+import { shouldWarnReactionFailure } from '../src/platform/utils/reaction-diagnostics.js';
 import type { ActionContext, MessageContext } from '../src/platform/types.js';
 
 /** Build a SlackAdapter without invoking the real constructor (no Bolt App). */
@@ -115,6 +116,67 @@ test('SlackAdapter.onAction: channelId, messageRef.conduit and triggerId are pre
   assert.equal(ctx!.channelId, 'slack:C7');
   assert.equal(ctx!.messageRef?.conduit, 'slack:C7');
   assert.equal(ctx!.triggerId, 'slack:tg');
+});
+
+// ── queue marker lifecycle uses one symmetric Slack reaction ──────
+
+test('SlackAdapter queue marker turns the hourglass into a check once consumed', async () => {
+  const a = makeAdapter();
+  const calls: Array<{ op: string; payload: any }> = [];
+  a.rateLimiter = { acquire: async () => {}, reportThrottled: () => {} };
+  a.client = {
+    reactions: {
+      add: async (payload: any) => { calls.push({ op: 'add', payload }); },
+      remove: async (payload: any) => { calls.push({ op: 'remove', payload }); },
+    },
+  };
+  const ref = { conduit: 'slack:C55', messageId: '171.22' };
+
+  await a.markQueued(ref);
+  await a.unmarkQueued(ref);
+
+  assert.deepEqual(calls, [
+    { op: 'add', payload: { channel: 'C55', name: 'hourglass', timestamp: '171.22' } },
+    { op: 'remove', payload: { channel: 'C55', name: 'hourglass', timestamp: '171.22' } },
+    { op: 'add', payload: { channel: 'C55', name: 'white_check_mark', timestamp: '171.22' } },
+  ]);
+});
+
+test('SlackAdapter still records the consumed check when the hourglass removal fails', async () => {
+  const a = makeAdapter();
+  const added: string[] = [];
+  a.rateLimiter = { acquire: async () => {}, reportThrottled: () => {} };
+  a.client = {
+    reactions: {
+      add: async (payload: any) => { added.push(payload.name); },
+      remove: async () => { throw Object.assign(new Error('no_reaction'), { data: { error: 'no_reaction' } }); },
+    },
+  };
+
+  await assert.rejects(a.unmarkQueued({ conduit: 'slack:C55', messageId: '171.22' }), /no_reaction/);
+  assert.deepEqual(added, ['white_check_mark'], 'a stale hourglass must not cost the check');
+});
+
+test('SlackAdapter queue marker failure propagates instead of being hidden in the adapter', async () => {
+  const a = makeAdapter();
+  a.rateLimiter = { acquire: async () => {}, reportThrottled: () => {} };
+  a.client = {
+    reactions: {
+      add: async () => { throw Object.assign(new Error('missing_scope'), { data: { error: 'missing_scope' } }); },
+      remove: async () => { throw Object.assign(new Error('missing_scope'), { data: { error: 'missing_scope' } }); },
+    },
+  };
+  const ref = { conduit: 'slack:C55', messageId: '171.22' };
+
+  await assert.rejects(a.markQueued(ref), /missing_scope/);
+  await assert.rejects(a.unmarkQueued(ref), /missing_scope/);
+});
+
+test('reaction failure warning fires once per distinct reason', () => {
+  const seen = new Set<string>();
+  assert.equal(shouldWarnReactionFailure('missing_scope', seen), true);
+  assert.equal(shouldWarnReactionFailure('missing_scope', seen), false, 'no per-message log spam');
+  assert.equal(shouldWarnReactionFailure('already_reacted', seen), true, 'a new reason is still reported');
 });
 
 // ── project conduit registry: store stays bare, surface is prefixed ──

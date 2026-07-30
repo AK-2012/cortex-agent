@@ -5,7 +5,7 @@
 //         the blocking Promise after the S5 refactor
 // >>> If I am updated, update my header comment and the parent folder's CORTEX.md <<<
 
-import test from 'node:test';
+import { test } from 'vitest';
 import assert from 'node:assert/strict';
 import { EventBus } from '../src/events/event-bus.js';
 import type { CortexEvent } from '../src/events/event-types.js';
@@ -43,6 +43,26 @@ test('registerAskQuestion publishes ask-user.requested event to bus with correct
 
   // Clean up: resolve so the Promise does not leak
   hb.resolveRequest('req-1', { answers: {} });
+  await resultPromise;
+});
+
+// ── (1b) registerAskQuestion carries the optional severity level ───────────────
+
+test('registerAskQuestion publishes ask-user.requested with the severity level', async () => {
+  const bus = new EventBus();
+  const hb = await freshHookBridge();
+  hb.initHookBridge(bus);
+
+  const received: CortexEvent[] = [];
+  bus.subscribe('ask-user.requested', (e) => { received.push(e); });
+
+  const resultPromise = hb.registerAskQuestion('req-lvl', 'C_LVL', 'sess-lvl', [{ q: 'Danger?' }], false, null, 'warning');
+
+  assert.equal(received.length, 1);
+  const ev = received[0] as Extract<CortexEvent, { type: 'ask-user.requested' }>;
+  assert.equal(ev.level, 'warning');
+
+  hb.resolveRequest('req-lvl', { answers: {} });
   await resultPromise;
 });
 
@@ -130,4 +150,31 @@ test('resolveRequest resolves the Promise returned by registerAskQuestion', asyn
   // Second resolve attempt returns false (already deleted)
   const secondAttempt = hb.resolveRequest('req-4', {});
   assert.ok(!secondAttempt, 'resolveRequest returns false for already-resolved requestId');
+});
+
+// ── (5) TTL stale cleanup notifies the onStale hook (web-interactions-redesign) ──
+
+test('cleanupStale resolves timed-out requests and fires the onStale callback', async (t) => {
+  const bus = new EventBus();
+  const hb = await freshHookBridge();
+  hb.initHookBridge(bus);
+  t.onTestFinished(() => hb.setOnStale(null));
+
+  const stale: { requestId: string; channel: string; sessionId: string }[] = [];
+  hb.setOnStale((requestId, channel, sessionId) => { stale.push({ requestId, channel, sessionId }); });
+
+  const resultPromise = hb.registerPlanApproval('req-ttl', 'web:sess-t', 'sess-t', '# plan', {});
+
+  // Not yet stale — nothing happens.
+  hb.cleanupStale(Date.now());
+  assert.equal(stale.length, 0);
+
+  // 31 minutes later — the request is stale: resolver fires with timeout, onStale notified.
+  hb.cleanupStale(Date.now() + 31 * 60 * 1000);
+  const result = await resultPromise;
+  assert.equal(result.error, 'timeout');
+  assert.equal(stale.length, 1);
+  assert.equal(stale[0].requestId, 'req-ttl');
+  assert.equal(stale[0].channel, 'web:sess-t');
+  assert.equal(stale[0].sessionId, 'sess-t');
 });

@@ -1,14 +1,7 @@
-// input:  UiService (injected) + ui-service zod input schemas + tRPC init (./trpc.js)
-// output: createAppRouter(uiService): AppRouter — the typed client↔server contract
-//         mirroring ui-service query/mutate/subscribe. AppRouter type re-exported by
-//         @cortex-agent/ui-contract for the browser client.
-// pos:    Web UI tRPC contract, in-core (domain/ui-service; transport-agnostic — @trpc/server CORE
-//         only, no http/ws adapter; the HTTP/SSE transport-host injects this router). Pure contract
-//         mirror over the injected UiService — no auth (that is an HTTP-layer gate in the
-//         transport-host). Lives beside the ui-service facade it mirrors (domain→domain). Reached
-//         only via the entry/start-ui-http wiring, which is loaded on demand behind CORTEX_UI_HTTP,
-//         so @trpc stays runtime-lazy for Slack/TUI-only installs.
-// >>> If I am updated, update CORTEX.md <<<
+// input:  UiService, zod operation schemas, and tRPC init
+// output: createAppRouter with query/mutation/subscription routes
+// pos:    Typed tRPC mirror including project notes
+// >>> 一旦我被更新，务必更新我的开头注释与所属文件夹 CORTEX.md <<<
 
 import { TRPCError } from '@trpc/server';
 import { z } from 'zod';
@@ -21,6 +14,14 @@ import {
   sessionsCreateInput,
   sessionsSendInput,
   sessionsCancelInput,
+  sessionsCompactInput,
+  sessionsSetProfileInput,
+  sessionsCreateAndSendInput,
+  sessionsMarkReadInput,
+  sessionsAnswerQuestionInput,
+  sessionsRespondPlanInput,
+  sessionsRewindInput,
+  sessionsPendingInteractionInput,
   threadsListInput,
   threadsGetInput,
   tasksListInput,
@@ -34,6 +35,14 @@ import {
   approvalsApproveInput,
   approvalsRejectInput,
   approvalsRequestInput,
+  issuesListInput,
+  issueActionInput,
+  notesListInput,
+  noteAddInput,
+  noteUpdateInput,
+  noteSetCompletedInput,
+  noteActionInput,
+  notesClearCompletedInput,
   costSummaryInput,
   threadsCancelInput,
   executionsCancelInput,
@@ -45,9 +54,18 @@ import {
   executionsLogInput,
   configGetInput,
   configSetInput,
+  hooksListInput,
+  hooksCreateInput,
+  hooksUpdateInput,
+  hooksSetEnabledInput,
+  hooksRemoveInput,
+  hooksTestInput,
   machinesListInput,
   skillsListInput,
   threadTemplatesGetInput,
+  systemDaemonStatusInput,
+  systemRateLimitStatusInput,
+  systemRestartInput,
 } from './input-schemas.js';
 import type {
   UiService,
@@ -74,8 +92,12 @@ const ERR_CODE_MAP: Record<string, TRPCError['code']> = {
   'not-found': 'NOT_FOUND',
   'invalid-args': 'BAD_REQUEST',
   'invalid-name': 'BAD_REQUEST',
+  'invalid-notes-file': 'BAD_REQUEST',
   'already-terminal': 'CONFLICT',
   'already-exists': 'CONFLICT',
+  'backend-locked': 'CONFLICT',
+  'session-running': 'CONFLICT',
+  'not-available': 'BAD_REQUEST',
   'task-lock-busy': 'CONFLICT',
   'internal': 'INTERNAL_SERVER_ERROR',
 };
@@ -121,7 +143,7 @@ function makeMutation<O extends MutateOp, Sch extends z.ZodType>(
 }
 
 // ── AppRouter ─────────────────────────────────────────────────────────────────────
-// 17 QueryScope + 17 MutateOp + 2 subscriptions (generic `subscribe` + `executions.log`;
+// Every QueryScope + MutateOp + 2 subscriptions (generic `subscribe` + `executions.log`;
 // `subscribeFilterInput` carries `sessionId` for the S4 `session.message` stream),
 // mirroring the ui-service contract.
 export function createAppRouter(uiService: UiService) {
@@ -133,9 +155,17 @@ export function createAppRouter(uiService: UiService) {
     sessions: router({
       list: makeQuery(uiService, 'sessions.list', sessionsListInput),
       transcript: makeQuery(uiService, 'sessions.transcript', sessionsTranscriptInput),
+      pendingInteraction: makeQuery(uiService, 'sessions.pendingInteraction', sessionsPendingInteractionInput),
       create: makeMutation(uiService, 'sessions.create', sessionsCreateInput),
       send: makeMutation(uiService, 'sessions.send', sessionsSendInput),
       cancel: makeMutation(uiService, 'sessions.cancel', sessionsCancelInput),
+      compact: makeMutation(uiService, 'sessions.compact', sessionsCompactInput),
+      setProfile: makeMutation(uiService, 'sessions.setProfile', sessionsSetProfileInput),
+      createAndSend: makeMutation(uiService, 'sessions.createAndSend', sessionsCreateAndSendInput),
+      markRead: makeMutation(uiService, 'sessions.markRead', sessionsMarkReadInput),
+      answerQuestion: makeMutation(uiService, 'sessions.answerQuestion', sessionsAnswerQuestionInput),
+      respondPlan: makeMutation(uiService, 'sessions.respondPlan', sessionsRespondPlanInput),
+      rewind: makeMutation(uiService, 'sessions.rewind', sessionsRewindInput),
     }),
     threads: router({
       list: makeQuery(uiService, 'threads.list', threadsListInput),
@@ -188,12 +218,33 @@ export function createAppRouter(uiService: UiService) {
       reject: makeMutation(uiService, 'approvals.reject', approvalsRejectInput),
       request: makeMutation(uiService, 'approvals.request', approvalsRequestInput),
     }),
+    issues: router({
+      list: makeQuery(uiService, 'issues.list', issuesListInput),
+      handle: makeMutation(uiService, 'issues.handle', issueActionInput),
+      delete: makeMutation(uiService, 'issues.delete', issueActionInput),
+    }),
+    notes: router({
+      list: makeQuery(uiService, 'notes.list', notesListInput),
+      add: makeMutation(uiService, 'notes.add', noteAddInput),
+      update: makeMutation(uiService, 'notes.update', noteUpdateInput),
+      setCompleted: makeMutation(uiService, 'notes.setCompleted', noteSetCompletedInput),
+      delete: makeMutation(uiService, 'notes.delete', noteActionInput),
+      clearCompleted: makeMutation(uiService, 'notes.clearCompleted', notesClearCompletedInput),
+    }),
     cost: router({
       summary: makeQuery(uiService, 'cost.summary', costSummaryInput),
     }),
     config: router({
       get: makeQuery(uiService, 'config.get', configGetInput),
       set: makeMutation(uiService, 'config.set', configSetInput),
+    }),
+    hooks: router({
+      list: makeQuery(uiService, 'hooks.list', hooksListInput),
+      create: makeMutation(uiService, 'hooks.create', hooksCreateInput),
+      update: makeMutation(uiService, 'hooks.update', hooksUpdateInput),
+      setEnabled: makeMutation(uiService, 'hooks.setEnabled', hooksSetEnabledInput),
+      remove: makeMutation(uiService, 'hooks.remove', hooksRemoveInput),
+      test: makeMutation(uiService, 'hooks.test', hooksTestInput),
     }),
     machines: router({
       list: makeQuery(uiService, 'machines.list', machinesListInput),
@@ -203,6 +254,11 @@ export function createAppRouter(uiService: UiService) {
     }),
     threadTemplates: router({
       get: makeQuery(uiService, 'threadTemplates.get', threadTemplatesGetInput),
+    }),
+    system: router({
+      daemonStatus: makeQuery(uiService, 'system.daemonStatus', systemDaemonStatusInput),
+      rateLimitStatus: makeQuery(uiService, 'system.rateLimitStatus', systemRateLimitStatusInput),
+      restart: makeMutation(uiService, 'system.restart', systemRestartInput),
     }),
     subscribe: publicProcedure
       .input(subscribeFilterInput)

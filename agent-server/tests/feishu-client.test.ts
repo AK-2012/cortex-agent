@@ -4,7 +4,7 @@
 //         SDK log to stdout corrupts the protocol. client.ts must force stderr.
 // >>> If I am updated, update my header comment and the parent folder's CORTEX.md <<<
 
-import test from 'node:test';
+import { test } from 'vitest';
 import assert from 'node:assert/strict';
 import { stderrLogger } from '../src/domain/mcp/feishu/client.js';
 
@@ -20,12 +20,6 @@ function captureStreams(fn: () => void): { out: string; err: string } {
   }
   return { out, err };
 }
-
-test('stderrLogger implements the full lark Logger interface', () => {
-  for (const m of ['error', 'warn', 'info', 'debug', 'trace'] as const) {
-    assert.equal(typeof stderrLogger[m], 'function', `missing ${m}`);
-  }
-});
 
 test('every stderrLogger level writes to stderr and NOT stdout', () => {
   for (const m of ['error', 'warn', 'info', 'debug', 'trace'] as const) {

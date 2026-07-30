@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from 'vitest';
-import { readDesktopConfig, isDesktopShell } from './desktop-config';
+import { readDesktopConfig, isDesktopShell, isMobileShell, isNativeShell, apiBase, authHeaders } from './desktop-config';
 
 // Tests run in the vitest Node environment (no jsdom). readDesktopConfig() reads
 // from globalThis (≡ window in browsers), so we can mock the global directly here.
@@ -7,6 +7,7 @@ import { readDesktopConfig, isDesktopShell } from './desktop-config';
 type MockGlobal = typeof globalThis & {
   __CORTEX_DESKTOP_CONFIG?: { serverUrl?: string | null; token?: string | null };
   __CORTEX_DESKTOP__?: boolean;
+  __CORTEX_MOBILE__?: boolean;
 };
 
 describe('isDesktopShell', () => {
@@ -21,6 +22,28 @@ describe('isDesktopShell', () => {
 
   it('returns false in browser / ui-http mode (flag absent)', () => {
     expect(isDesktopShell()).toBe(false);
+  });
+});
+
+describe('isNativeShell', () => {
+  afterEach(() => {
+    delete (globalThis as MockGlobal).__CORTEX_DESKTOP__;
+    delete (globalThis as MockGlobal).__CORTEX_MOBILE__;
+  });
+
+  it('returns true in the desktop shell (only __CORTEX_DESKTOP__ set)', () => {
+    (globalThis as MockGlobal).__CORTEX_DESKTOP__ = true;
+    expect(isNativeShell()).toBe(true);
+  });
+
+  it('returns true in the Android/mobile shell (only __CORTEX_MOBILE__ set)', () => {
+    (globalThis as MockGlobal).__CORTEX_MOBILE__ = true;
+    expect(isMobileShell()).toBe(true);
+    expect(isNativeShell()).toBe(true);
+  });
+
+  it('returns false in browser / ui-http mode (neither flag set)', () => {
+    expect(isNativeShell()).toBe(false);
   });
 });
 
@@ -67,5 +90,31 @@ describe('readDesktopConfig', () => {
   it('returns undefined when serverUrl is empty string', () => {
     (globalThis as MockGlobal).__CORTEX_DESKTOP_CONFIG = { serverUrl: '', token: 'tok-abc' };
     expect(readDesktopConfig()).toBeUndefined();
+  });
+});
+
+// apiBase()/authHeaders() drive the non-tRPC HTTP transport (file download in lib/files.ts + the
+// attachment upload XHR in Composer/MChatScreen). A relative URL + no token would, in a native shell,
+// hit the local cortexui:// asset handler instead of the remote server — the mobile-upload bug.
+describe('apiBase / authHeaders (non-tRPC transport)', () => {
+  afterEach(() => {
+    delete (globalThis as MockGlobal).__CORTEX_DESKTOP_CONFIG;
+  });
+
+  it('browser/ui-http mode: empty base + no auth header (same-origin, proxy/Access supplies auth)', () => {
+    expect(apiBase()).toBe('');
+    expect(authHeaders()).toEqual({});
+  });
+
+  it('native-shell/remote mode: absolute server base + x-cortex-token header', () => {
+    (globalThis as MockGlobal).__CORTEX_DESKTOP_CONFIG = { serverUrl: 'https://cortex.example.com', token: 'tok' };
+    expect(apiBase()).toBe('https://cortex.example.com');
+    expect(authHeaders()).toEqual({ 'x-cortex-token': 'tok' });
+  });
+
+  it('partial config (serverUrl without token) falls back to browser mode', () => {
+    (globalThis as MockGlobal).__CORTEX_DESKTOP_CONFIG = { serverUrl: 'https://cortex.example.com' };
+    expect(apiBase()).toBe('');
+    expect(authHeaders()).toEqual({});
   });
 });

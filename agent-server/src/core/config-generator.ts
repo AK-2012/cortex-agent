@@ -1,6 +1,7 @@
-// input:  fs, path, SERVER_ROOT, CONFIG_DIR
-// output: generateMcpConfig — writes mcp-config.json to config dir
-// pos:    Startup-time MCP config auto-generation (P4)
+// input:  filesystem, config paths, and server install roots
+// output: MCP config builders and startup file generation
+// pos:    MCP server configuration generator
+// >>> 一旦我被更新，务必更新我的开头注释与所属文件夹 CORTEX.md <<<
 
 import { writeFileSync } from 'fs';
 import * as path from 'path';
@@ -11,9 +12,13 @@ const log = createLogger('config-generator');
 
 const MCP_CONFIG_PATH = path.join(CONFIG_DIR, 'mcp-config.json');
 const CORE_MCP_CONFIG_PATH = path.join(CONFIG_DIR, 'mcp-config-core.json');
+const TASKS_MCP_CONFIG_PATH = path.join(CONFIG_DIR, 'mcp-config-tasks.json');
+const MANAGER_QA_MCP_CONFIG_PATH = path.join(CONFIG_DIR, 'mcp-config-manager-qa.json');
+const THREAD_MCP_CONFIG_PATH = path.join(CONFIG_DIR, 'mcp-config-thread.json');
 const TUI_MCP_CONFIG_PATH = path.join(CONFIG_DIR, 'mcp-config-tui.json');
 const SLACK_MCP_CONFIG_PATH = path.join(CONFIG_DIR, 'mcp-config-slack.json');
 const FEISHU_MCP_CONFIG_PATH = path.join(CONFIG_DIR, 'mcp-config-feishu.json');
+const WEB_MCP_CONFIG_PATH = path.join(CONFIG_DIR, 'mcp-config-web.json');
 
 /**
  * Build a MCP server entry. Uses absolute path in args as a workaround for
@@ -28,21 +33,50 @@ function serverEntry(script: string, serverRoot: string) {
   };
 }
 
-/** Full MCP config with both servers — loaded by user-initiated (direct) sessions. */
+/** Direct-session config: always-on tools plus direct-only Cortex management. */
 export function buildFullConfig(serverRoot: string): object {
   return {
     mcpServers: {
       'cortex-core': serverEntry('dist/domain/mcp/core-server.js', serverRoot),
+      'cortex-tasks': serverEntry('dist/domain/mcp/tasks-server.js', serverRoot),
+      'cortex-manager-qa': serverEntry('dist/domain/mcp/manager-qa-server.js', serverRoot),
       'cortex-ext': serverEntry('dist/domain/mcp/server.js', serverRoot),
     },
   };
 }
 
-/** Core-only MCP config — loaded by thread sessions (only remote_* tools). */
+/** Remote execution and time tools, isolated for restricted composition. */
 export function buildCoreConfig(serverRoot: string): object {
   return {
     mcpServers: {
       'cortex-core': serverEntry('dist/domain/mcp/core-server.js', serverRoot),
+    },
+  };
+}
+
+/** Read-only task monitoring for top-level direct and thread sessions. */
+export function buildTasksConfig(serverRoot: string): object {
+  return {
+    mcpServers: {
+      'cortex-tasks': serverEntry('dist/domain/mcp/tasks-server.js', serverRoot),
+    },
+  };
+}
+
+/** Manager answer channel, loaded for top-level direct and thread sessions. */
+export function buildManagerQaConfig(serverRoot: string): object {
+  return {
+    mcpServers: {
+      'cortex-manager-qa': serverEntry('dist/domain/mcp/manager-qa-server.js', serverRoot),
+    },
+  };
+}
+
+/** Thread lifecycle control, loaded only for thread sessions. */
+export function buildThreadConfig(serverRoot: string): object {
+  return {
+    mcpServers: {
+      'cortex-thread': serverEntry('dist/domain/mcp/thread-server.js', serverRoot),
     },
   };
 }
@@ -82,12 +116,33 @@ export function buildFeishuConfig(serverRoot: string): object {
   };
 }
 
+/** Web MCP config — layered ON TOP of the full config (via the variadic `--mcp-config`) only for
+ *  sessions that originate from the Web UI (channel carries the `web:` prefix). Isolated to the single
+ *  cortex-web server (send_file tool) so it can be added/removed independently of the base config; the
+ *  Claude adapter decides whether to load it based on the session's source channel. */
+export function buildWebConfig(serverRoot: string): object {
+  return {
+    mcpServers: {
+      'cortex-web': serverEntry('dist/domain/mcp/web-server.js', serverRoot),
+    },
+  };
+}
+
 export function generateMcpConfig(): void {
   writeFileSync(MCP_CONFIG_PATH, JSON.stringify(buildFullConfig(SERVER_ROOT), null, 2));
   log.info(`Generated full MCP config at ${MCP_CONFIG_PATH}`);
 
   writeFileSync(CORE_MCP_CONFIG_PATH, JSON.stringify(buildCoreConfig(SERVER_ROOT), null, 2));
   log.info(`Generated core MCP config at ${CORE_MCP_CONFIG_PATH}`);
+
+  writeFileSync(TASKS_MCP_CONFIG_PATH, JSON.stringify(buildTasksConfig(SERVER_ROOT), null, 2));
+  log.info(`Generated tasks MCP config at ${TASKS_MCP_CONFIG_PATH}`);
+
+  writeFileSync(MANAGER_QA_MCP_CONFIG_PATH, JSON.stringify(buildManagerQaConfig(SERVER_ROOT), null, 2));
+  log.info(`Generated manager-Q&A MCP config at ${MANAGER_QA_MCP_CONFIG_PATH}`);
+
+  writeFileSync(THREAD_MCP_CONFIG_PATH, JSON.stringify(buildThreadConfig(SERVER_ROOT), null, 2));
+  log.info(`Generated thread MCP config at ${THREAD_MCP_CONFIG_PATH}`);
 
   writeFileSync(TUI_MCP_CONFIG_PATH, JSON.stringify(buildTuiConfig(SERVER_ROOT), null, 2));
   log.info(`Generated TUI MCP config at ${TUI_MCP_CONFIG_PATH}`);
@@ -97,4 +152,7 @@ export function generateMcpConfig(): void {
 
   writeFileSync(FEISHU_MCP_CONFIG_PATH, JSON.stringify(buildFeishuConfig(SERVER_ROOT), null, 2));
   log.info(`Generated Feishu MCP config at ${FEISHU_MCP_CONFIG_PATH}`);
+
+  writeFileSync(WEB_MCP_CONFIG_PATH, JSON.stringify(buildWebConfig(SERVER_ROOT), null, 2));
+  log.info(`Generated Web MCP config at ${WEB_MCP_CONFIG_PATH}`);
 }

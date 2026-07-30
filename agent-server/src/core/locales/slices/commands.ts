@@ -1,7 +1,7 @@
 // input:  nothing (leaf data slice)
-// output: commandsEn / commandsZh — message slice (filled by i18n extraction)
-// pos:    one locale slice; aggregated by core/locales/en.ts & zh.ts barrels
-// >>> Keep en and zh keys in lockstep (zh typed against keyof typeof commandsEn) <<<
+// output: English/Chinese command messages including !compact
+// pos:    Localized message table for orchestration commands
+// >>> If I am updated, update my header comment and the parent folder's CORTEX.md <<<
 
 export const commandsEn = {
   // --- cancel ---
@@ -15,17 +15,26 @@ export const commandsEn = {
   'cmd.cancel.runningTasks': 'Running tasks (${n}):',
   'cmd.cancel.cancelButton': 'Cancel ${id}',
 
+  // --- compact ---
+  'cmd.compact.unavailable': 'Session compaction is not available in this process.',
+  'cmd.compact.completed': 'Context compacted.',
+  'cmd.compact.notNeeded': 'Nothing to compact.',
+  'cmd.compact.running': 'Session is running — stop it before compacting context.',
+  'cmd.compact.unsupported': 'This session backend does not support manual context compaction.',
+  'cmd.compact.noSession': 'No active session to compact.',
+
   // --- mode / backend / model / profile / skills / agent ---
   'cmd.mode.switched': 'Switched to *${mode}* mode',
   'cmd.mode.apiLabel': 'API',
   'cmd.mode.planLabel': 'Plan',
   'cmd.backend.switched': 'Backend: *${backend}*',
   'cmd.backend.claudeLabel': 'Claude Code',
-  'cmd.backend.codexLabel': 'Codex',
+  'cmd.backend.piLabel': 'PI',
   'cmd.model.current': 'Current Claude model: *${model}*',
   'cmd.model.usage': 'Usage: `!model <model-name>`',
   'cmd.model.set': 'Claude model set to *${model}*',
   'cmd.profile.channelSet': 'Channel profile set to *${name}*',
+  'cmd.profile.crossBackendBlocked': 'Can\'t switch to *${name}* — it runs on the `${target}` backend but this conversation is on `${current}`. Backends can\'t be swapped mid-conversation. Start a new session (`!new`) to switch backend.',
   'cmd.profile.channelHeader': 'Channel profile: *${effective}* (global: ${global})',
   'cmd.profile.activeHeader': 'Active profile: *${effective}*',
   'cmd.profile.markerDefault': 'default',
@@ -155,9 +164,10 @@ export const commandsEn = {
   'cmd.help.catThreads': 'Threads',
   'cmd.help.session.new': '`!new` — start a new conversation; runs pre-close hook (`!newq` to skip)',
   'cmd.help.session.cancel': '`!cancel [taskId]` — stop current task, or a dispatched task by id',
+  'cmd.help.session.compact': '`!compact` — compact the active session context while idle',
   'cmd.help.session.resume': '`!resume [cortex-XXXX]` — list recent sessions, or switch to one',
   'cmd.help.config.mode': '`!mode` — toggle API / Plan mode',
-  'cmd.help.config.backend': '`!backend` — toggle Claude Code / Codex backend',
+  'cmd.help.config.backend': '`!backend` — toggle Claude Code / PI backend',
   'cmd.help.config.model': '`!model [name]` — show or set Claude model',
   'cmd.help.config.profile': '`!profile [name]` — show active profile or switch to one',
   'cmd.help.config.skills': '`!skills` — list available skills',
@@ -264,17 +274,26 @@ export const commandsZh: Record<keyof typeof commandsEn, string> = {
   'cmd.cancel.runningTasks': '运行中的任务（${n}）：',
   'cmd.cancel.cancelButton': '取消 ${id}',
 
+  // --- compact ---
+  'cmd.compact.unavailable': '当前进程未提供会话压缩能力。',
+  'cmd.compact.completed': '上下文已压缩。',
+  'cmd.compact.notNeeded': '当前没有可压缩的内容。',
+  'cmd.compact.running': '会话正在运行，请先停止当前 turn 再压缩上下文。',
+  'cmd.compact.unsupported': '此会话后端不支持手动压缩上下文。',
+  'cmd.compact.noSession': '当前没有可压缩的活动会话。',
+
   // --- mode / backend / model / profile / skills / agent ---
   'cmd.mode.switched': '已切换到 *${mode}* 模式',
   'cmd.mode.apiLabel': 'API',
   'cmd.mode.planLabel': 'Plan',
   'cmd.backend.switched': '后端：*${backend}*',
   'cmd.backend.claudeLabel': 'Claude Code',
-  'cmd.backend.codexLabel': 'Codex',
+  'cmd.backend.piLabel': 'PI',
   'cmd.model.current': '当前 Claude 模型：*${model}*',
   'cmd.model.usage': '用法：`!model <model-name>`',
   'cmd.model.set': 'Claude 模型已设为 *${model}*',
   'cmd.profile.channelSet': '频道配置已设为 *${name}*',
+  'cmd.profile.crossBackendBlocked': '无法切换到 *${name}* —— 它使用 `${target}` backend，而当前对话在 `${current}` 上。对话进行中不能切换 backend。请开启新会话（`!new`）后再切换。',
   'cmd.profile.channelHeader': '频道配置：*${effective}*（全局：${global}）',
   'cmd.profile.activeHeader': '当前配置：*${effective}*',
   'cmd.profile.markerDefault': 'default',
@@ -404,9 +423,10 @@ export const commandsZh: Record<keyof typeof commandsEn, string> = {
   'cmd.help.catThreads': '线程',
   'cmd.help.session.new': '`!new` — 开始新对话；运行预关闭钩子（`!newq` 跳过）',
   'cmd.help.session.cancel': '`!cancel [taskId]` — 停止当前任务，或按 id 停止已派发任务',
+  'cmd.help.session.compact': '`!compact` — 在会话空闲时压缩活动上下文',
   'cmd.help.session.resume': '`!resume [cortex-XXXX]` — 列出最近会话，或切换到某个会话',
   'cmd.help.config.mode': '`!mode` — 切换 API / Plan 模式',
-  'cmd.help.config.backend': '`!backend` — 切换 Claude Code / Codex 后端',
+  'cmd.help.config.backend': '`!backend` — 切换 Claude Code / PI 后端',
   'cmd.help.config.model': '`!model [name]` — 显示或设置 Claude 模型',
   'cmd.help.config.profile': '`!profile [name]` — 显示当前配置或切换到某个配置',
   'cmd.help.config.skills': '`!skills` — 列出可用技能',

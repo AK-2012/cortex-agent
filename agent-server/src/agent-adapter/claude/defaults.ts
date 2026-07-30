@@ -1,7 +1,7 @@
-// input:  DATA_DIR from utils.js, fs
-// output: Claude constants + CancelledError class
-// pos:    Claude adapter submodule shared constants and error types
-// >>> If I am updated, update my header comment and the parent folder's CORTEX.md <<<
+// input:  Cortex paths, filesystem, operating-system paths
+// output: Claude constants, MCP paths, and CancelledError
+// pos:    Shared Claude adapter defaults
+// >>> 一旦我被更新，务必更新我的开头注释与所属文件夹 CORTEX.md <<<
 
 import * as path from 'path';
 import * as os from 'os';
@@ -38,6 +38,9 @@ mkdirSync(LOGS_DIR, { recursive: true });
 
 export const MCP_CONFIG = path.join(CONFIG_DIR, 'mcp-config.json');
 export const CORE_MCP_CONFIG = path.join(CONFIG_DIR, 'mcp-config-core.json');
+export const TASKS_MCP_CONFIG = path.join(CONFIG_DIR, 'mcp-config-tasks.json');
+export const MANAGER_QA_MCP_CONFIG = path.join(CONFIG_DIR, 'mcp-config-manager-qa.json');
+export const THREAD_MCP_CONFIG = path.join(CONFIG_DIR, 'mcp-config-thread.json');
 /** DR-0012: TUI-mode-exclusive MCP set (only cortex-tui-bridge server, no core/ext leakage). */
 export const TUI_MCP_CONFIG = path.join(CONFIG_DIR, 'mcp-config-tui.json');
 /** Slack platform-specific tools (cortex-slack server). Layered on top of the full config via the variadic
@@ -46,6 +49,9 @@ export const SLACK_MCP_CONFIG = path.join(CONFIG_DIR, 'mcp-config-slack.json');
 /** Feishu document tools (cortex-feishu server). Layered on top of the full config via the variadic
  *  `--mcp-config` only for sessions that originate from Feishu (channel carries the `feishu:` prefix). */
 export const FEISHU_MCP_CONFIG = path.join(CONFIG_DIR, 'mcp-config-feishu.json');
+/** Web UI tools (cortex-web server, send_file). Layered on top of the full config via the variadic
+ *  `--mcp-config` only for sessions that originate from the Web UI (channel carries the `web:` prefix). */
+export const WEB_MCP_CONFIG = path.join(CONFIG_DIR, 'mcp-config-web.json');
 // User-customizable Claude settings live under DATA_DIR (init copies the seed from
 // defaults/.claude/settings.json on first run). The installed package's defaults/.claude/
 // is read-only and used only as the init source.
@@ -55,17 +61,28 @@ export const DEFAULT_PLAN_DIRS: string[] = ['plan'];
 export const DEFAULT_TOOLS = 'Agent,AskUserQuestion,Bash,Edit,EnterPlanMode,ExitPlanMode,Glob,Grep,Read,Skill,TaskStop,TodoWrite,WebFetch,WebSearch,Write';
 
 /**
- * DR-0012: Tool whitelist for TUI mode. Removes the three interaction tools that conflict with
- * Cortex's MCP-mediated approval flow (AskUserQuestion / EnterPlanMode / ExitPlanMode) and adds
- * their MCP replacements served by the cortex-tui-bridge MCP server.
+ * The three cortex-tui-bridge MCP tools that replace the native EnterPlanMode / ExitPlanMode /
+ * AskUserQuestion. These are the ONLY interaction tools that survive headless `-p` mode: the native
+ * ones are filtered out by the CLI whenever the session is non-interactive, so plan/ask must go
+ * through these MCP tools (served by tui-server.ts, POSTing to /hook/exit-plan-mode and
+ * /hook/ask-user-question). Used by BOTH the TUI whitelist and the print-mode user-session layer.
  *
  * Tool name prefix `mcp__<server-name>__<tool-name>` is Claude's canonical form for MCP tools.
  */
-export const TUI_TOOLS = [
-  'Agent', 'Bash', 'Edit', 'Glob', 'Grep', 'Read', 'Skill', 'TaskStop', 'TodoWrite', 'WebFetch', 'WebSearch', 'Write',
+export const TUI_BRIDGE_TOOLS: readonly string[] = [
   'mcp__cortex-tui-bridge__cortex_plan_enter',
   'mcp__cortex-tui-bridge__cortex_plan_exit',
   'mcp__cortex-tui-bridge__cortex_ask_user',
+];
+
+/**
+ * DR-0012: Tool whitelist for TUI mode. Removes the three interaction tools that conflict with
+ * Cortex's MCP-mediated approval flow (AskUserQuestion / EnterPlanMode / ExitPlanMode) and adds
+ * their MCP replacements (TUI_BRIDGE_TOOLS) served by the cortex-tui-bridge MCP server.
+ */
+export const TUI_TOOLS = [
+  'Agent', 'Bash', 'Edit', 'Glob', 'Grep', 'Read', 'Skill', 'TaskStop', 'TodoWrite', 'WebFetch', 'WebSearch', 'Write',
+  ...TUI_BRIDGE_TOOLS,
 ].join(',');
 
 /** Native interaction tools that must be stripped in TUI mode (all sessions, including threads).

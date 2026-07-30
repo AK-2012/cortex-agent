@@ -1,14 +1,15 @@
-// Prompt assembly and agent slot config resolution.
-// input:  template-loader, artifact-io, thread-store, thread-types
-// output: buildStepPrompt / resolveSystemVars / resolveAgentSlotConfig / resolveTemplateAgents / resolveTemplateProfiles / formatEndpoint / pickStepTemplate
+// input:  templates, artifacts, thread and backend state
+// output: resume-aware thread prompts and slot configs
+// pos:    Thread prompt assembly and agent slot resolution
+// >>> If I am updated, update my header comment and parent CORTEX.md <<<
 
 import { threadStore } from '@store/thread-repo.js';
 import { getAgent, getTemplate, resolveFileRef } from './template-loader.js';
-import { getModifiedFilesFromSession, getSessionFileChanges, renderModifiedFilesWithDiff } from './artifact-io.js';
+import { getModifiedFilesFromSession } from './artifact-io.js';
 import { getDefaultAgent } from '../agents/index.js';
 import { loadUserContext } from '../memory/user-context.js';
 import type {
-  AgentDefinition, AgentSlotConfig, AgentSlotId, AgentStep, TemplateAgentRef, ThreadTemplate,
+  AgentDefinition, AgentSlot, AgentSlotConfig, AgentSlotId, AgentStep, TemplateAgentRef, ThreadTemplate,
 } from '@core/types/thread-types.js';
 
 /** Resolve the `__active__` agent ref placeholder to the currently active default agent
@@ -142,10 +143,10 @@ export const THREAD_PROTOCOL_PREAMBLE = [
   'disagreements with the plan are not abort cases.',
   'Decomposition: if your task is actually several independently verifiable units, call the',
   '`thread_split` tool with the subtasks instead of grinding through it.',
-  'Delegation (DR-0014): you may spawn child threads via the `thread_start` tool (pass a contract:',
-  'goal / done_when / deliverable_path / budget_usd). After spawning awaited children, call the',
-  '`thread_wait` tool to suspend; you are re-entered once ALL awaited children finish, with their',
-  'results injected. Acceptance before trust: verify each child deliverable against its done_when',
+  'Task-backed delegation (DR-0014): when CORTEX_TASK_ID is set, create child tasks with',
+  '`cortex-task spawn`, then call `thread_wait` to suspend; you are re-entered once ALL awaited',
+  'children finish, with their results injected. Acceptance before trust: verify each child',
+  'deliverable against its done_when',
   'yourself (read files, run tests) — never accept a child\'s self-report as evidence.',
   'Checkpoint gate (DR-0017): thread_wait is REJECTED unless you updated your artifact during the',
   'current step — write your checkpoint (delegations & acceptance criteria / decisions made /',
@@ -156,13 +157,11 @@ export const THREAD_PROTOCOL_PREAMBLE = [
 
 function buildPromptVars(thread: import('@core/types/thread-types.js').ThreadRecord, lastStep: AgentStep | undefined): Record<string, string> {
   const prevModifiedFiles = getModifiedFilesFromSession(lastStep?.sessionId);
-  const prevFileChanges = getSessionFileChanges(lastStep?.sessionId);
   return {
     input: thread.userMessage,
     artifactPath: thread.artifactPath,
     previousOutput: lastStep?.output || '',
     modifiedFiles: prevModifiedFiles.length > 0 ? prevModifiedFiles.map(f => `- ${f}`).join('\n') : '',
-    modifiedFilesWithDiff: renderModifiedFilesWithDiff(prevFileChanges),
     ...getSystemVars(),
   };
 }
@@ -175,6 +174,12 @@ function applyPromptTemplate(templateStr: string, vars: Record<string, string>):
   return withBlocks.replace(/\{\{(\w+)\}\}/g, (_, key) => vars[key] || '');
 }
 
+function hasBackendResumeTarget(slot: AgentSlot | undefined): boolean {
+  if (!slot) return false;
+  if (slot.backendSessionId === undefined) return !!slot.sessionId;
+  return !!slot.backendSessionId;
+}
+
 export function buildStepPrompt(threadId: string, agentConfig: AgentSlotConfig, stage: string | null = null): string {
   const thread = threadStore.get(threadId);
   if (!thread) return '';
@@ -185,7 +190,7 @@ export function buildStepPrompt(threadId: string, agentConfig: AgentSlotConfig, 
   let prompt = applyPromptTemplate(templateStr, vars);
 
   const slot = thread.agents[agentConfig.slotId];
-  const resumingPersistentSession = agentConfig.persistSession && !!slot?.sessionId;
+  const resumingPersistentSession = agentConfig.persistSession && hasBackendResumeTarget(slot);
   const incremental = continuesSession && resumingPersistentSession;
 
   if (!incremental && !thread.templateName && lastStep?.output && !templateStr.includes('{{previousOutput}}')) {
@@ -235,21 +240,23 @@ export function buildStepPrompt(threadId: string, agentConfig: AgentSlotConfig, 
  *    injects USER.md; it is on by default unless CORTEX_DISABLE_USER_CONTEXT=1. Thread steps
  *    (buildStepPrompt) never inject it. The caller gates it via opts.includeUserContext so the
  *    profile is sent only on a session's FIRST turn (session resume keeps it in history thereafter);
+ *  - prepends a [Session Project] block when opts.project is given — the caller (conversation-runner
+ *    via resolveConversationProject) passes it only on the FIRST turn of a Web UI direct session
+ *    bound to a user project, so the agent knows which project the session belongs to;
  *  - NEVER injects THREAD_PROTOCOL_PREAMBLE (no artifact, no [ABORT] protocol for conversations).
  */
 export function buildConversationPrompt(
   agentConfig: AgentSlotConfig,
   input: string,
-  opts: { includeUserContext?: boolean } = {},
+  opts: { includeUserContext?: boolean; project?: { id: string; contextDir: string } | null } = {},
 ): string {
-  const { includeUserContext = true } = opts;
+  const { includeUserContext = true, project = null } = opts;
   const { template: templateStr } = pickStepTemplate(agentConfig, null);
   const vars: Record<string, string> = {
     input,
     artifactPath: '',
     previousOutput: '',
     modifiedFiles: '',
-    modifiedFilesWithDiff: '',
     ...getSystemVars(),
   };
   let prompt = applyPromptTemplate(templateStr, vars);
@@ -258,6 +265,14 @@ export function buildConversationPrompt(
   const userCtx = includeUserContext ? loadUserContext() : null;
   if (userCtx) prefixes.push(userCtx);
   if (agentConfig.directive) prefixes.push(resolveSystemVars(agentConfig.directive));
+  if (project) {
+    prefixes.push(
+      `[Session Project] This session is bound to the project "${project.id}".\n`
+      + `Project context directory: ${project.contextDir}\n`
+      + `Treat messages in this session as pertaining to this project unless stated otherwise. `
+      + `project-related findings and status updates there.`,
+    );
+  }
   if (prefixes.length > 0) prompt = prefixes.join('\n\n') + '\n\n' + prompt;
 
   return prompt.trim();

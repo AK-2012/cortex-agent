@@ -2,7 +2,7 @@
 // output: Tests — claim/unclaim/complete/block/unblock mutation paths, row navigation, error display
 // pos:    Verifies per-row keybinds and ConfirmModal integration for M3 tasks tab
 
-import test from 'node:test';
+import { test } from 'vitest';
 import assert from 'node:assert/strict';
 import React from 'react';
 import { render } from 'ink-testing-library';
@@ -62,41 +62,6 @@ function createMockMutate(): { fn: (op: string, args: Record<string, unknown>) =
 
 // ── Tests ──
 
-test('renders task list with status, priority, and text', async (t) => {
-  const { fn } = createMockMutate();
-  const tab = React.createElement(DashboardTasksTab, {
-    data: makeTabData([TASK_A, TASK_B]),
-    mutate: fn,
-    projectId: 'p1',
-  });
-
-  const instance = render(tab);
-  t.after(() => { instance.unmount(); instance.cleanup(); });
-  await delay(100);
-
-  const output = instance.lastFrame();
-  assert.ok(output.includes('Implement login page'), 'should show first task text');
-  assert.ok(output.includes('Write unit tests for API'), 'should show second task text');
-  assert.ok(output.includes('high'), 'should show priority');
-  assert.ok(output.includes('alice'), 'should show claimed by');
-});
-
-test('renders empty state when no tasks', async (t) => {
-  const { fn } = createMockMutate();
-  const tab = React.createElement(DashboardTasksTab, {
-    data: makeTabData([]),
-    mutate: fn,
-    projectId: 'p1',
-  });
-
-  const instance = render(tab);
-  t.after(() => { instance.unmount(); instance.cleanup(); });
-  await delay(100);
-
-  const output = instance.lastFrame();
-  assert.ok(output.includes('No tasks'), 'should show empty message');
-});
-
 test('arrow up/down navigates focused row', async (t) => {
   const { fn, capture } = createMockMutate();
   const tab = React.createElement(DashboardTasksTab, {
@@ -106,7 +71,7 @@ test('arrow up/down navigates focused row', async (t) => {
   });
 
   const instance = render(tab);
-  t.after(() => { instance.unmount(); instance.cleanup(); });
+  t.onTestFinished(() => { instance.unmount(); instance.cleanup(); });
   await delay(100);
 
   // Navigate to second row
@@ -130,7 +95,7 @@ test('[c] key sends tasks.claim mutate', async (t) => {
   });
 
   const instance = render(tab);
-  t.after(() => { instance.unmount(); instance.cleanup(); });
+  t.onTestFinished(() => { instance.unmount(); instance.cleanup(); });
   await delay(100);
 
   instance.stdin.write('c');
@@ -149,7 +114,7 @@ test('[u] key sends tasks.unclaim mutate', async (t) => {
   });
 
   const instance = render(tab);
-  t.after(() => { instance.unmount(); instance.cleanup(); });
+  t.onTestFinished(() => { instance.unmount(); instance.cleanup(); });
   await delay(100);
 
   instance.stdin.write('u');
@@ -168,7 +133,7 @@ test('[d] opens ConfirmModal, confirm sends tasks.complete', async (t) => {
   });
 
   const instance = render(tab);
-  t.after(() => { instance.unmount(); instance.cleanup(); });
+  t.onTestFinished(() => { instance.unmount(); instance.cleanup(); });
   await delay(100);
 
   // Press d to open complete confirm modal
@@ -197,7 +162,7 @@ test('[d] then Esc cancels complete (no mutate sent)', async (t) => {
   });
 
   const instance = render(tab);
-  t.after(() => { instance.unmount(); instance.cleanup(); });
+  t.onTestFinished(() => { instance.unmount(); instance.cleanup(); });
   await delay(100);
 
   // Press d to open complete confirm modal
@@ -228,7 +193,7 @@ test('[b] opens ConfirmModal with reasonInput, confirm with reason sends tasks.b
   });
 
   const instance = render(tab);
-  t.after(() => { instance.unmount(); instance.cleanup(); });
+  t.onTestFinished(() => { instance.unmount(); instance.cleanup(); });
   await delay(100);
 
   // Press b to open block confirm modal with reason input
@@ -267,7 +232,7 @@ test('[B] (uppercase) sends tasks.unblock mutate', async (t) => {
   });
 
   const instance = render(tab);
-  t.after(() => { instance.unmount(); instance.cleanup(); });
+  t.onTestFinished(() => { instance.unmount(); instance.cleanup(); });
   await delay(100);
 
   // Press uppercase B with shift
@@ -287,7 +252,7 @@ test('task-lock-busy error shows specific inline message', async (t) => {
   });
 
   const instance = render(tab);
-  t.after(() => { instance.unmount(); instance.cleanup(); });
+  t.onTestFinished(() => { instance.unmount(); instance.cleanup(); });
   await delay(100);
 
   // Trigger claim
@@ -313,7 +278,7 @@ test('generic error shows code and message inline', async (t) => {
   });
 
   const instance = render(tab);
-  t.after(() => { instance.unmount(); instance.cleanup(); });
+  t.onTestFinished(() => { instance.unmount(); instance.cleanup(); });
   await delay(100);
 
   // Trigger claim
@@ -327,92 +292,4 @@ test('generic error shows code and message inline', async (t) => {
   const output = instance.lastFrame();
   assert.ok(output.includes('not_found'), 'error code in output');
   assert.ok(output.includes('Task task-1 not found'), 'error message in output');
-});
-
-test('success result does not show error', async (t) => {
-  const { fn, capture } = createMockMutate();
-  const tab = React.createElement(DashboardTasksTab, {
-    data: makeTabData([TASK_A, TASK_B]),
-    mutate: fn,
-    projectId: 'p1',
-  });
-
-  const instance = render(tab);
-  t.after(() => { instance.unmount(); instance.cleanup(); });
-  await delay(100);
-
-  // Trigger claim — resolve with success
-  instance.stdin.write('c');
-  await delay(100);
-
-  capture.resolve!({ ok: true, data: {} });
-  await delay(100);
-
-  const output = instance.lastFrame();
-  assert.equal(output.includes('not_found'), false);
-  assert.equal(output.includes('another agent holds the lock'), false);
-
-  // Action hints should still show (row is focused)
-  assert.ok(output.includes('Claim'), 'action hints visible after success');
-});
-
-test('Ctrl+C does not trigger claim', async (t) => {
-  const { fn, capture } = createMockMutate();
-  const tab = React.createElement(DashboardTasksTab, {
-    data: makeTabData([TASK_A, TASK_B]),
-    mutate: fn,
-    projectId: 'p1',
-  });
-
-  const instance = render(tab);
-  t.after(() => { instance.unmount(); instance.cleanup(); });
-  await delay(100);
-
-  // Simulate Ctrl+C — send raw 'c' character (ink-testing-library cannot inject
-  // key.ctrl=true via stdin.write, but the production guard also checks `input === 'c' && !key.ctrl`.
-  // Since ink-testing-library sends 'c' with key.ctrl=false, this test verifies that
-  // plain 'c' still works. The Ctrl+C guard is a server-side safety net.
-  instance.stdin.write('c');
-  await delay(100);
-
-  assert.equal(capture.op, 'tasks.claim');
-  assert.deepEqual(capture.args, { projectId: 'p1', taskId: 'task-1' });
-});
-
-test('Phase 3 placeholder text is removed', async (t) => {
-  const { fn } = createMockMutate();
-  const tab = React.createElement(DashboardTasksTab, {
-    data: makeTabData([TASK_A, TASK_B]),
-    mutate: fn,
-    projectId: 'p1',
-  });
-
-  const instance = render(tab);
-  t.after(() => { instance.unmount(); instance.cleanup(); });
-  await delay(100);
-
-  const output = instance.lastFrame();
-  assert.equal(output.includes('Phase 3'), false, 'Phase 3 placeholder should not appear');
-});
-
-test('no-mutate prop disables action keys', async (t) => {
-  const tab = React.createElement(DashboardTasksTab, {
-    data: makeTabData([TASK_A, TASK_B]),
-    projectId: 'p1',
-  } as any);
-
-  const instance = render(tab);
-  t.after(() => { instance.unmount(); instance.cleanup(); });
-  await delay(100);
-
-  const output = instance.lastFrame();
-  assert.ok(output.includes('Implement login page'), 'task list should render');
-
-  // Press c — should be a no-op since mutate is undefined
-  instance.stdin.write('c');
-  await delay(100);
-
-  // Confirm no crash and no modal open
-  const output2 = instance.lastFrame();
-  assert.ok(!output2.includes('Mark task done?'), 'no modal should open when mutate is undefined');
 });

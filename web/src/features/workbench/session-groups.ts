@@ -1,4 +1,5 @@
 import type { SessionInfo } from '@cortex-agent/ui-contract';
+import type { Vocab } from '@/i18n';
 
 // Pure structural helpers for the left-rail session list (prototype L60–85). The design groups
 // sessions under TODAY / YESTERDAY headers; real `sessions.list` can carry older sessions, so an
@@ -37,13 +38,26 @@ export function groupSessions(sessions: SessionInfo[], now: Date | number): Sess
     buckets[label].push(s);
   }
 
+  // Within each day group, UNREAD sessions float to the top (both halves stay recency-sorted).
+  // Grouping stays day-based — an unread YESTERDAY session does not hoist into TODAY.
   const order: SessionGroupLabel[] = ['TODAY', 'YESTERDAY', 'EARLIER'];
   return order
     .map((label) => ({
       label,
-      items: buckets[label].sort((a, b) => effectiveMs(b) - effectiveMs(a)),
+      items: buckets[label].sort(
+        (a, b) => Number(!!b.unread) - Number(!!a.unread) || effectiveMs(b) - effectiveMs(a),
+      ),
     }))
     .filter((g) => g.items.length > 0);
+}
+
+/** Display label for a session group (i18n-aware). */
+export function groupLabel(L: Vocab, label: SessionGroupLabel): string {
+  switch (label) {
+    case 'TODAY': return L.wbSessionToday;
+    case 'YESTERDAY': return L.wbSessionYesterday;
+    case 'EARLIER': return L.wbSessionEarlier;
+  }
 }
 
 function pad2(n: number): string {
@@ -52,10 +66,10 @@ function pad2(n: number): string {
 
 // Meta line: local HH:MM of the effective timestamp, plus a "from schedule" marker for scheduled
 // sessions. SessionInfo carries no turns/cost/running fields (GAP-2) so the meta is time + kind only.
-export function sessionMeta(s: SessionInfo): string {
+export function sessionMeta(L: Vocab, s: SessionInfo): string {
   const d = new Date(effectiveMs(s));
   const clock = pad2(d.getHours()) + ':' + pad2(d.getMinutes());
-  return s.kind === 'scheduled' ? clock + ' · from schedule' : clock;
+  return s.kind === 'scheduled' ? clock + ' · ' + L.wbFromSchedule : clock;
 }
 
 // Avatar initials from a project id: first letter of the first two `-`/`_`-split segments, else the

@@ -4,7 +4,7 @@
 // >>> If I am updated, update my header comment and CORTEX.md <<<
 
 import '../_test-home.js'; // MUST be first: isolate CORTEX_HOME before paths.ts loads
-import test from 'node:test';
+import { test } from 'vitest';
 import assert from 'node:assert/strict';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
@@ -172,22 +172,7 @@ test('flush() resolves immediately when no mutation is pending', async () => {
   assert.ok(dt < 50, `idle flush took ${dt}ms; expected near-instant`);
 });
 
-// ── Test 6: TaskRepo exposes load/getAll/getById/getStats ─────────
-
-test('TaskRepo instance has expected public API surface', async () => {
-  const repo = new TaskRepo({ skipGit: true });
-  assert.equal(typeof repo.load, 'function');
-  assert.equal(typeof repo.getAll, 'function');
-  assert.equal(typeof repo.getById, 'function');
-  assert.equal(typeof repo.getStats, 'function');
-  assert.equal(typeof repo.getActionable, 'function');
-  assert.equal(typeof repo.getGpuBusyMachines, 'function');
-  assert.equal(typeof repo.runExclusive, 'function');
-  assert.equal(typeof repo.commitAndPush, 'function');
-  assert.equal(typeof repo.flush, 'function');
-});
-
-// ── Test 7: End-to-end round-trip — add → load → getById → claim → complete ──
+// ── End-to-end round-trip — add → load → getById → claim → complete ─────────
 
 test('end-to-end — add → load → getById → claim → complete persists to TASKS.yaml', async () => {
   const fx = makeFixtureRepo();

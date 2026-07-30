@@ -1,9 +1,9 @@
-// input:  Node test runner + fake adapter stubs + runWithAdapter
-// output: event→callback + AgentResult + kill semantics tests
-// pos:    Verify mode-manager adapter event-driven path
+// input:  fake adapters, continuation context, resume ids, locale
+// output: normalized/continuation callbacks and typed-notice regressions
+// pos:    Backend-neutral event dispatch tests
 // >>> If I am updated, update my header comment and the parent folder's CORTEX.md <<<
 
-import test from 'node:test';
+import { test } from 'vitest';
 import assert from 'node:assert/strict';
 
 import { _test as modeManagerTest, isRetryableResult } from '../src/domain/agents/index.js';
@@ -11,6 +11,7 @@ import type { AgentAdapter, AgentProcess, AgentSpawnConfig, Backend, UserMessage
 import { CAPABILITIES_BY_BACKEND } from '../src/agent-adapter/index.js';
 import type { NormalizedEvent } from '../src/agent-adapter/normalize/event-types.js';
 import type { AgentResult } from '../src/core/types/agent-types.js';
+import { getLocale, setLocale } from '../src/core/i18n.js';
 
 const { runWithAdapter } = modeManagerTest;
 
@@ -126,7 +127,8 @@ test('runWithAdapter: assistant_text / tool_use / turn_complete drive callbacks 
   });
 
   const assistantMsgs: string[] = [];
-  const toolCalls: Array<{ name: string; input: any }> = [];
+  const toolCalls: Array<{ name: string; input: any; toolUseId?: string }> = [];
+  const toolResults: Array<{ toolUseId: string; content: string; isError: boolean }> = [];
   const progressCalls: Array<{ num_turns: number | null; total_cost_usd: number | null; duration_ms: number | null }> = [];
 
   const handle = runWithAdapter(
@@ -135,7 +137,8 @@ test('runWithAdapter: assistant_text / tool_use / turn_complete drive callbacks 
     {
       channel: 'C1',
       onAssistantMessage: (t: string) => assistantMsgs.push(t),
-      onToolUse: (name: string, input: any) => toolCalls.push({ name, input }),
+      onToolUse: (name: string, input: any, toolUseId?: string) => toolCalls.push({ name, input, toolUseId }),
+      onToolResult: (toolUseId: string, content: string, isError: boolean) => toolResults.push({ toolUseId, content, isError }),
       onProgress: (p: any) => progressCalls.push(p),
     },
     { model: 'm', backend: 'claude', mode: null },
@@ -148,11 +151,177 @@ test('runWithAdapter: assistant_text / tool_use / turn_complete drive callbacks 
   assert.equal(toolCalls.length, 1);
   assert.equal(toolCalls[0].name, 'Bash');
   assert.deepEqual(toolCalls[0].input, { command: 'ls' });
+  assert.equal(toolCalls[0].toolUseId, 't1', 'the correlation id is preserved');
+  assert.deepEqual(toolResults, [], 'no result callback is invented without a tool_result event');
   assert.equal(progressCalls.length, 1, 'onProgress fires exactly once on turn_complete');
   assert.deepEqual(progressCalls[0], { num_turns: 2, total_cost_usd: 0.01, duration_ms: null });
   assert.equal(final, result, 'handle.promise resolves with the exact AgentResult from send()');
   assert.equal(recorded.sendCalls.length, 1);
   assert.equal(recorded.closed, true, 'proc.close() called in the runWithAdapter finally block');
+});
+
+test('runWithAdapter: context_usage reaches the backend-neutral callback before progress', async () => {
+  const recorded = { sendCalls: [] as UserMessage[], killed: false, closed: false };
+  const adapter = makeFakeAdapter('pi', {
+    events: [
+      { type: 'context_usage', usedTokens: 60000, contextWindow: 200000, percent: 30, accuracy: 'estimate' },
+      { type: 'turn_complete', numTurns: 1, totalCostUsd: 0.01 },
+    ],
+    resultOnResolve: defaultAgentResult('s-context'),
+    recorded,
+  });
+  const seen: string[] = [];
+
+  await runWithAdapter(
+    adapter,
+    'msg',
+    {
+      channel: 'web:context',
+      onContextUsage: (usage) => { seen.push(`context:${usage.usedTokens}/${usage.contextWindow}`); },
+      onProgress: () => seen.push('progress'),
+    },
+    { model: 'm', backend: 'pi', mode: null },
+    undefined,
+  ).promise;
+
+  assert.deepEqual(seen, ['context:60000/200000', 'progress']);
+});
+
+test('runWithAdapter: context compaction emits one concise info notice', async (t) => {
+  const previousFlag = process.env.CORTEX_NOTIFY_COMPACTION;
+  const previousLocale = getLocale();
+  t.onTestFinished(() => {
+    if (previousFlag === undefined) delete process.env.CORTEX_NOTIFY_COMPACTION;
+    else process.env.CORTEX_NOTIFY_COMPACTION = previousFlag;
+    setLocale(previousLocale);
+  });
+  process.env.CORTEX_NOTIFY_COMPACTION = '1';
+  setLocale('en');
+
+  const recorded = { sendCalls: [] as UserMessage[], killed: false, closed: false };
+  const adapter = makeFakeAdapter('claude', {
+    events: [
+      { type: 'context_compacted', trigger: 'overflow', preTokens: 48000 },
+      { type: 'turn_complete', numTurns: 1, totalCostUsd: null },
+    ],
+    resultOnResolve: defaultAgentResult('s-compact'),
+    recorded,
+  });
+  const notices: Array<{ text: string; level?: string }> = [];
+
+  await runWithAdapter(
+    adapter,
+    'msg',
+    {
+      channel: 'C1',
+      onAssistantMessage: (text: string, _blockId?: string, level?: string) => notices.push({ text, level }),
+    },
+    { model: 'm', backend: 'claude', mode: null },
+    undefined,
+  ).promise;
+
+  assert.deepEqual(notices, [{ text: 'Context auto-compacted.', level: 'info' }]);
+});
+
+test('runWithAdapter: a leading API Error becomes an error notice without reclassifying prose', async () => {
+  const recorded = { sendCalls: [] as UserMessage[], killed: false, closed: false };
+  const adapter = makeFakeAdapter('claude', {
+    events: [
+      { type: 'assistant_text', text: 'API Error: Unable to connect to API (ECONNRESET)' },
+      { type: 'assistant_text', text: 'The log mentions API Error: timeout.' },
+      { type: 'turn_complete', numTurns: 1, totalCostUsd: null },
+    ],
+    resultOnResolve: defaultAgentResult('s-api-error'),
+    recorded,
+  });
+  const notices: Array<{ text: string; level?: string }> = [];
+
+  await runWithAdapter(
+    adapter,
+    'msg',
+    {
+      channel: 'web:session',
+      onAssistantMessage: (text: string, _blockId?: string, level?: string) => notices.push({ text, level }),
+    },
+    { model: 'm', backend: 'claude', mode: null },
+    undefined,
+  ).promise;
+
+  assert.deepEqual(notices, [
+    { text: 'API Error: Unable to connect to API (ECONNRESET)', level: 'error' },
+    { text: 'The log mentions API Error: timeout.', level: undefined },
+  ]);
+});
+
+test('runWithAdapter: changed backend identity on resume emits one warning, same/fresh starts emit none', async (t) => {
+  const previousLocale = getLocale();
+  t.onTestFinished(() => setLocale(previousLocale));
+  setLocale('en');
+
+  const collect = async (
+    requestedSessionId: string | null,
+    startedSessionId: string,
+    channel = 'web:session',
+  ) => {
+    const recorded = { sendCalls: [] as UserMessage[], killed: false, closed: false };
+    const adapter = makeFakeAdapter('pi', {
+      events: [
+        { type: 'session_started', sessionId: startedSessionId },
+        { type: 'turn_complete', numTurns: 1, totalCostUsd: null },
+      ],
+      resultOnResolve: defaultAgentResult(startedSessionId),
+      recorded,
+    });
+    const notices: Array<{ text: string; level?: string }> = [];
+
+    await runWithAdapter(
+      adapter,
+      'msg',
+      {
+        channel,
+        sessionId: requestedSessionId,
+        onAssistantMessage: (text: string, _blockId?: string, level?: string) => notices.push({ text, level }),
+      },
+      { model: 'm', backend: 'pi', mode: null },
+      undefined,
+    ).promise;
+    return notices;
+  };
+
+  assert.deepEqual(await collect('backend-old', 'backend-new'), [{
+    text: 'Previous backend session was unavailable; started a fresh session.',
+    level: 'warning',
+  }]);
+  assert.deepEqual(await collect('backend-same', 'backend-same'), []);
+  assert.deepEqual(await collect(null, 'backend-new'), []);
+  assert.deepEqual(await collect('backend-old', 'backend-new', 'slack:C1'), []);
+});
+
+test('runWithAdapter: tool_result preserves full multiline content, error status, and correlation id', async () => {
+  const recorded = { sendCalls: [] as UserMessage[], killed: false, closed: false };
+  const adapter = makeFakeAdapter('claude', {
+    events: [
+      { type: 'tool_use', toolUseId: 'toolu-result', name: 'Read', input: { file_path: '/secret/full.ts' } },
+      { type: 'tool_result', toolUseId: 'toolu-result', content: 'first line\nsecond line\nthird line', ok: false },
+      { type: 'turn_complete', numTurns: 1, totalCostUsd: null },
+    ],
+    resultOnResolve: defaultAgentResult('s-result'),
+    recorded,
+  });
+  const seen: any[] = [];
+
+  await runWithAdapter(
+    adapter,
+    'msg',
+    {
+      channel: 'C1',
+      onToolResult: (toolUseId: string, content: string, isError: boolean) => seen.push({ toolUseId, content, isError }),
+    },
+    { model: 'm', backend: 'claude', mode: null },
+    undefined,
+  ).promise;
+
+  assert.deepEqual(seen, [{ toolUseId: 'toolu-result', content: 'first line\nsecond line\nthird line', isError: true }]);
 });
 
 // --- FIFO ordering: tool_use then assistant_text fires callbacks in that order (T2 plan-review) ---
@@ -262,7 +431,7 @@ test('runWithAdapter: askUserQuestions on AgentResult survives through handle.pr
 
 test('runWithAdapter: context_compacted notifies via onAssistantMessage only when CORTEX_NOTIFY_COMPACTION=1', async (t) => {
   const prev = process.env.CORTEX_NOTIFY_COMPACTION;
-  t.after(() => {
+  t.onTestFinished(() => {
     if (prev === undefined) delete process.env.CORTEX_NOTIFY_COMPACTION;
     else process.env.CORTEX_NOTIFY_COMPACTION = prev;
   });
@@ -286,7 +455,7 @@ test('runWithAdapter: context_compacted notifies via onAssistantMessage only whe
   ).promise;
   assert.deepEqual(offMsgs, [], 'no compaction notice when flag is off');
 
-  // ON: exactly one notification carrying trigger + token count.
+  // ON: exactly one concise notification; backend trigger/token details stay internal.
   process.env.CORTEX_NOTIFY_COMPACTION = '1';
   const onMsgs: string[] = [];
   await runWithAdapter(
@@ -294,9 +463,7 @@ test('runWithAdapter: context_compacted notifies via onAssistantMessage only whe
     { channel: 'C1', onAssistantMessage: (m: string) => onMsgs.push(m) },
     { model: 'm', backend: 'claude', mode: null }, undefined,
   ).promise;
-  assert.equal(onMsgs.length, 1, 'one compaction notice when flag is on');
-  assert.match(onMsgs[0], /auto/);
-  assert.match(onMsgs[0], /37418/);
+  assert.deepEqual(onMsgs, ['Context auto-compacted.']);
 });
 
 // --- Thread-session inline background-task wait (2026-07-10) ---
@@ -330,10 +497,18 @@ test('runWithAdapter: thread turn with pending background task waits for the con
   };
   const adapter = makeSinkCapableAdapter('claude', spec);
   const texts: string[] = [];
+  const toolResults: any[] = [];
+  const contextWindows: number[] = [];
 
   const handle = runWithAdapter(
     adapter, 'msg',
-    { channel: 'thread-x', threadId: 'thr_abc', onAssistantMessage: (t: string) => texts.push(t) },
+    {
+      channel: 'thread-x',
+      threadId: 'thr_abc',
+      onAssistantMessage: (t: string) => texts.push(t),
+      onToolResult: (toolUseId: string, content: string, isError: boolean) => toolResults.push({ toolUseId, content, isError }),
+      onContextUsage: (usage) => { contextWindows.push(usage.contextWindow); },
+    },
     { model: 'm', backend: 'claude', mode: null },
     undefined,
   );
@@ -346,13 +521,17 @@ test('runWithAdapter: thread turn with pending background task waits for the con
   assert.equal(spec.sinks.length, 1, 'continuation sink registered on the process');
 
   // Background task completes → spontaneous continuation turn ends.
+  spec.sinks[0].onToolResult('toolu-bg', 'complete background output', false);
   spec.sinks[0].onAssistantText('bg result: PASS');
+  spec.sinks[0].onContextUsage({ usedTokens: 500, contextWindow: 1_000_000, percent: 0.05, accuracy: 'exact' });
   spec.sinks[0].onResult({ ...defaultAgentResult('s-thr-bg'), total_cost_usd: 0.02, num_turns: 2, finalOutput: 'bg result: PASS', pendingBackgroundTasks: 0 });
 
   const final = await handle.promise;
   assert.ok(Math.abs((final.total_cost_usd ?? 0) - 0.03) < 1e-9, 'continuation cost merged into the step result');
   assert.equal(final.finalOutput, 'bg result: PASS', 'continuation output becomes the step output');
   assert.deepEqual(texts, ['bg result: PASS'], 'continuation text forwarded to the step stream');
+  assert.deepEqual(toolResults, [{ toolUseId: 'toolu-bg', content: 'complete background output', isError: false }], 'continuation tool results use the same callback path');
+  assert.deepEqual(contextWindows, [1_000_000], 'continuation context uses the same callback path');
 });
 
 test('runWithAdapter: interactive turn (no threadId) with pending background task resolves immediately', async () => {
@@ -424,4 +603,69 @@ test('runWithAdapter: handle.kill() forwards to adapter process.kill()', async (
   // Do not await handle.promise here — errorOnReject already sealed rejection; the test below
   // catches it explicitly via assert.rejects.
   await assert.rejects(handle.promise, /Cancelled by user/);
+});
+
+// --- assistant_delta: token-level streaming dispatch (UI-only) ---
+
+test('runWithAdapter: assistant_delta drives onAssistantDelta, interleaved with the complete message in FIFO order', async () => {
+  const recorded = { sendCalls: [] as UserMessage[], killed: false, closed: false };
+  const adapter = makeFakeAdapter('claude', {
+    events: [
+      { type: 'assistant_delta', text: 'Tea ', blockId: 'msg_A:1' },
+      { type: 'assistant_delta', text: 'is a leaf.', blockId: 'msg_A:1' },
+      { type: 'assistant_text', text: 'Tea is a leaf.', blockId: 'msg_A:1' },
+      { type: 'turn_complete', numTurns: 1, totalCostUsd: null },
+    ],
+    resultOnResolve: defaultAgentResult('s-delta'),
+    recorded,
+  });
+
+  const order: string[] = [];
+  const deltas: Array<[string, string]> = [];
+  const finals: Array<[string, string | undefined]> = [];
+
+  const handle = runWithAdapter(
+    adapter,
+    'msg',
+    {
+      channel: 'web:abc',
+      onAssistantDelta: (text: string, blockId: string) => { deltas.push([text, blockId]); order.push('delta'); },
+      onAssistantMessage: (text: string, blockId?: string) => { finals.push([text, blockId]); order.push('final'); },
+    },
+    { model: 'm', backend: 'claude', mode: null },
+    undefined,
+  );
+  await handle.promise;
+
+  assert.deepEqual(deltas, [['Tea ', 'msg_A:1'], ['is a leaf.', 'msg_A:1']]);
+  assert.deepEqual(finals, [['Tea is a leaf.', 'msg_A:1']], 'the complete message carries the same blockId');
+  assert.deepEqual(order, ['delta', 'delta', 'final'], 'deltas precede the authoritative message');
+});
+
+test('runWithAdapter: with no onAssistantDelta, deltas are dropped and never reach onAssistantMessage', async () => {
+  // This is the Slack / Feishu / Ink-TUI guarantee: those paths pass no delta callback, so no
+  // partial text can ever reach OutputStream through the assistant-message seam.
+  const recorded = { sendCalls: [] as UserMessage[], killed: false, closed: false };
+  const adapter = makeFakeAdapter('claude', {
+    events: [
+      { type: 'assistant_delta', text: 'par', blockId: 'msg_A:0' },
+      { type: 'assistant_delta', text: 'tial', blockId: 'msg_A:0' },
+      { type: 'assistant_text', text: 'partial', blockId: 'msg_A:0' },
+      { type: 'turn_complete', numTurns: 1, totalCostUsd: null },
+    ],
+    resultOnResolve: defaultAgentResult('s-nodelta'),
+    recorded,
+  });
+
+  const msgs: string[] = [];
+  const handle = runWithAdapter(
+    adapter,
+    'msg',
+    { channel: 'C1', onAssistantMessage: (t: string) => msgs.push(t) },
+    { model: 'm', backend: 'claude', mode: null },
+    undefined,
+  );
+  await handle.promise;
+
+  assert.deepEqual(msgs, ['partial'], 'exactly one complete message, no partial text');
 });

@@ -325,7 +325,7 @@ function buildDispatchPrompt(task: any): string {
     '2. Otherwise create a worktree on a unique branch named with your thread id ($CORTEX_THREAD_ID), so parallel threads never collide:',
     '     git -C <code-dir> worktree add <code-dir>-wt-$CORTEX_THREAD_ID -b cortex/$CORTEX_THREAD_ID',
     '   Do ALL edits, tests, and commits INSIDE that worktree.',
-    '3. When the work is done, integrate back: pull the latest main branch, merge cortex/$CORTEX_THREAD_ID into it, resolve conflicts, push, then remove the worktree and delete the branch. If conflicts cannot be resolved automatically, STOP and report it in your completion note — never force-overwrite work from another thread.',
+    '3. When the work is done, integrate back: pull the latest main branch, merge cortex/$CORTEX_THREAD_ID into it, resolve conflicts, then remove the worktree and delete the branch. If conflicts cannot be resolved automatically, STOP and report it in your completion note — never force-overwrite work from another thread.',
     '',
     'On REMOTE machines, run every git/worktree command through remote_bash on the same device you worked on (per-machine code paths are in project-dirs.json).',
     '',
@@ -365,8 +365,6 @@ function buildDispatchPrompt(task: any): string {
     `  cortex-task complete --project ${task.project} --task-id ${task.id} --note "your completion note"`,
     '',
     '- Update the project STATUS.md if the work changed project state',
-    '- Commit and push all files you modified in the Cortex repository. Remember to clean any temporary files you created.',
-    '  - If push is rejected, resolve the conflict, amend your commit, and push again.',
   ];
   sections.push(completion.join('\n'));
 

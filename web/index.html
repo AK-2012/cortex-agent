@@ -2,7 +2,11 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover, interactive-widget=resizes-content" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
+    <meta name="theme-color" content="#4655d4" />
     <title>Cortex</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="anonymous" />
@@ -13,6 +17,20 @@
   </head>
   <body>
     <div id="root"></div>
+    <script>
+      // No-flash theme: apply the persisted (or OS-preferred) theme before first paint so a dark
+      // user never sees a light flash. Mirrors src/theme/theme.ts resolveInitialTheme — keep in sync.
+      (function () {
+        try {
+          var stored = null;
+          try { stored = window.localStorage.getItem('cortex.theme'); } catch (e) {}
+          var prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+          var theme = stored === 'light' || stored === 'dark' ? stored : prefersDark ? 'dark' : 'light';
+          if (theme === 'dark') document.documentElement.setAttribute('data-theme', 'dark');
+          document.documentElement.style.colorScheme = theme;
+        } catch (e) {}
+      })();
+    </script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

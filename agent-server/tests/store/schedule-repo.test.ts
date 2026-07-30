@@ -1,25 +1,24 @@
-// input:  Node test runner, assert, tmp filesystem
-// output: regression tests for ScheduleRepo (concurrent mutate, flush ordering, CRUD)
-// pos:    verifies store/schedule-repo.ts Pattern A guarantees
-// >>> If I am updated, update my header comment and the parent folder's CORTEX.md <<<
+// input:  Vitest, temp schedules and channel mappings
+// output: Schedule CRUD, migration, and cache regressions
+// pos:    Persistence regressions for schedules.json
+// >>> 一旦我被更新，务必更新我的开头注释与所属文件夹 CORTEX.md <<<
 
-import test from 'node:test';
+import { test, beforeAll, afterAll } from 'vitest';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
-import * as fsSync from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
-import { ScheduleRepo, CHANNEL_REGISTRY_FILE, type ScheduleTask } from '../../src/store/schedule-repo.js';
+import { ScheduleRepo, type ScheduleTask } from '../../src/store/schedule-repo.js';
 
 // ── Shared tmp directory ───────────────────────────────────────
 
 let tmpDir: string;
 
-test.before(async () => {
+beforeAll(async () => {
   tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'cortex-schedule-repo-test-'));
 });
 
-test.after(async () => {
+afterAll(async () => {
   await fs.rm(tmpDir, { recursive: true, force: true });
 });
 
@@ -153,93 +152,18 @@ test('ScheduleRepo - read returns all tasks after mixed operations', async () =>
   assert.deepEqual(ids, ['b', 'c']);
 });
 
-// ── Rate limit throttle get/set roundtrip ─────────────────────
-
-test('ScheduleRepo - rateLimitThrottle get/set roundtrip', async () => {
-  const repo = createRepo();
-
-  // Initially null
-  assert.equal(await repo.getRateLimitThrottle(), null);
-
-  // Set
-  const meta = { resetsAt: 1234567890, activatedAt: Date.now() };
-  await repo.setRateLimitThrottle(meta);
-
-  // Get
-  const got = await repo.getRateLimitThrottle();
-  assert.ok(got);
-  assert.equal(got.resetsAt, 1234567890);
-
-  // Clear
-  await repo.setRateLimitThrottle(null);
-  assert.equal(await repo.getRateLimitThrottle(), null);
-});
-
-test('ScheduleRepo - rateLimitThrottle persists alongside tasks', async () => {
-  const repo = createRepo();
-  await repo.addTask(makeTask({ id: 't1', message: 'task 1' }));
-  await repo.setRateLimitThrottle({ resetsAt: 999, activatedAt: 888 });
-
-  const data = await repo.read();
-  assert.equal(data.tasks.length, 1);
-  assert.equal(data.rateLimitThrottle?.resetsAt, 999);
-});
-
-// ── Resume queue get/set roundtrip ────────────────────────────
-
-test('ScheduleRepo - getResumeQueue defaults to empty array', async () => {
-  const repo = createRepo();
-  assert.deepEqual(await repo.getResumeQueue(), []);
-});
-
-test('ScheduleRepo - resumeQueue get/set roundtrip', async () => {
-  const repo = createRepo();
-  const entries = [
-    { kind: 'direct' as const, channel: 'C1', userMessage: 'hi', recordedAt: 100 },
-    { kind: 'thread' as const, threadId: 'thr_a', channel: 'C2', userMessage: 'go', recordedAt: 200 },
-  ];
-  await repo.setResumeQueue(entries);
-
-  const got = await repo.getResumeQueue();
-  assert.equal(got.length, 2);
-  assert.equal(got[0].channel, 'C1');
-  assert.equal((got[1] as { threadId: string }).threadId, 'thr_a');
-
-  // Clear
-  await repo.setResumeQueue([]);
-  assert.deepEqual(await repo.getResumeQueue(), []);
-});
-
-test('ScheduleRepo - resumeQueue persists alongside tasks and throttle', async () => {
-  const repo = createRepo();
-  await repo.addTask(makeTask({ id: 't1', message: 'task 1' }));
-  await repo.setRateLimitThrottle({ resetsAt: 999, activatedAt: 888 });
-  await repo.setResumeQueue([{ kind: 'direct', channel: 'C1', userMessage: 'hi', recordedAt: 100 }]);
-
-  const data = await repo.read();
-  assert.equal(data.tasks.length, 1);
-  assert.equal(data.rateLimitThrottle?.resetsAt, 999);
-  assert.equal(data.resumeQueue?.length, 1);
-});
-
 // ── On-disk schema matches SchedulesData ──────────────────────
 
-test('ScheduleRepo - on-disk schema matches SchedulesData format', async () => {
+test('ScheduleRepo - on-disk schema contains schedule tasks only', async () => {
   const idx = _testIdx++;
   const filePath = path.join(tmpDir, `schedules-${idx}.json`);
   const repo = new ScheduleRepo(filePath);
   await repo.addTask(makeTask({ id: 'schema-1', type: 'interval', intervalMs: 3600000 }));
-  await repo.setRateLimitThrottle({ resetsAt: 111, activatedAt: 222 });
-
-  // Flush and read raw from disk
   await repo.flush();
-  const raw = JSON.parse(await fs.readFile(filePath, 'utf8'));
 
-  assert.ok(raw.tasks);
-  assert.equal(Array.isArray(raw.tasks), true);
+  const raw = JSON.parse(await fs.readFile(filePath, 'utf8'));
+  assert.deepEqual(Object.keys(raw), ['tasks']);
   assert.equal(raw.tasks[0].id, 'schema-1');
-  assert.ok(raw.rateLimitThrottle);
-  assert.equal(raw.rateLimitThrottle.resetsAt, 111);
 });
 
 // ── target / fallback fields round-trip ───────────────────────

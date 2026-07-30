@@ -32,21 +32,20 @@
 
 ### 智能体定义
 
-`agents` 映射中的每个智能体都是一个独立的实体，有自己的身份、工具和提示：
+`agents/` 下的每个文件定义一个智能体——一个独立的实体，有自己的身份、工具和提示。文件中直接放智能体对象本身，其 `name` 必须与文件名一致。
+
+`agents/planner.json`：
 
 ```json
 {
-  "agents": {
-    "planner": {
-      "description": "规划研究方法",
-      "profile": "claude-sonnet",
-      "persistSession": false,
-      "directive": "你是一个研究规划器。将问题分解为可测试的假设。",
-      "promptTemplate": "file:planner-prompt.md",
-      "pluginDirs": ["plugins/cortex-common", "plugins/cortex-surveyor"],
-      "tools": "Agent,AskUserQuestion,Bash,Read,Grep,Glob,Write,Edit,WebSearch,WebFetch,Skill"
-    }
-  }
+  "name": "planner",
+  "description": "规划研究方法",
+  "profile": "claude-sonnet",
+  "persistSession": false,
+  "directive": "你是一个研究规划器。将问题分解为可测试的假设。",
+  "promptTemplate": "file:planner-prompt.md",
+  "tools": "Agent,AskUserQuestion,Bash,Read,Grep,Glob,Write,Edit,WebSearch,WebFetch,Skill",
+  "pluginDirs": ["plugins/cortex-common", "plugins/cortex-surveyor"]
 }
 ```
 
@@ -54,12 +53,12 @@
 
 | 字段 | 类型 | 描述 |
 |-------|------|-------------|
-| `name` | string | 智能体 ID（agents 映射中的键） |
+| `name` | string | 智能体 ID——必填，且必须与文件名一致（`agents/<name>.json`） |
 | `profile` | string | `profiles.json` 中的配置名称，或使用当前运行时配置的 `"__active__"` |
 | `persistSession` | boolean | `true`：在迭代间重用相同的 LLM 会话（保留对话上下文）。`false`：每个步骤使用新会话 |
 | `directive` | string? | 智能体角色/身份，添加到提示之前。支持 `file:filename.md` 引用 |
 | `systemPrompt` | string? | 完整系统提示覆盖。支持 `file:` 引用 |
-| `promptTemplate` | string? | 带 `{{input}}`、`{{artifactPath}}`、`{{previousOutput}}`、`{{modifiedFiles}}`、`{{modifiedFilesWithDiff}}`、`{{currentDateTime}}` 变量的模板。支持 `file:` 引用 |
+| `promptTemplate` | string? | 带 `{{input}}`、`{{artifactPath}}`、`{{previousOutput}}`、`{{modifiedFiles}}`、`{{currentDateTime}}` 变量的模板。支持 `file:` 引用 |
 | `claudeAgent` | string? | Claude Code 智能体名称（`--agent` 标志，从 `.claude/agents/` 加载） |
 | `outputStyle` | string? | Claude Code 输出风格 |
 | `tools` | string? | 逗号分隔的工具列表（覆盖默认值） |
@@ -69,25 +68,26 @@
 
 智能体可以通过 `stages` 字段声明多个**阶段**。当存在阶段时，`promptTemplate` 被忽略——引擎根据转换目标为每个步骤选择适当的阶段提示。
 
+`agents/coder.json`：
+
 ```json
 {
-  "coder": {
-    "profile": "claude-sonnet",
-    "persistSession": true,
-    "pluginDirs": ["plugins/cortex-coder"],
-    "stages": {
-      "implement": {
-        "promptTemplate": "你正在实施计划。将代码写入 {{artifactPath}}。",
-        "description": "编写实现"
-      },
-      "review": {
-        "promptTemplate": "你正在审查 {{artifactPath}} 中的代码。检查正确性。",
-        "continuesSession": true,
-        "description": "审查实现"
-      }
+  "name": "coder",
+  "profile": "claude-sonnet",
+  "persistSession": true,
+  "entryStage": "implement",
+  "stages": {
+    "implement": {
+      "promptTemplate": "你正在实施计划。将代码写入 {{artifactPath}}。",
+      "description": "编写实现"
     },
-    "entryStage": "implement"
-  }
+    "review": {
+      "promptTemplate": "你正在审查 {{artifactPath}} 中的代码。检查正确性。",
+      "continuesSession": true,
+      "description": "审查实现"
+    }
+  },
+  "pluginDirs": ["plugins/cortex-coder"]
 }
 ```
 
@@ -107,28 +107,27 @@
 
 ## 模板
 
-模板将智能体组合为多步骤管道：
+模板将智能体组合为多步骤管道。`templates/` 下的每个文件装一个模板对象。
+
+`templates/coder-review.json`：
 
 ```json
 {
-  "templates": {
-    "coder-review": {
-      "description": "实现一个功能然后审查它",
-      "agents": ["planner", "coder", "reviewer"],
-      "transitions": [
-        {"from": "planner", "to": "coder:implement", "condition": {"type": "always"}},
-        {"from": "coder:implement", "to": "coder:review", "condition": {"type": "always"}},
-        {"from": "coder:review", "to": "reviewer", "condition": {"type": "always"}}
-      ],
-      "entryAgent": "planner",
-      "maxTotalSteps": 10,
-      "maxTotalCostUsd": 5.00,
-      "hooks": {
-        "onEnd": {
-          "command": "node hooks/post-task-hook.mjs",
-          "timeout": 30000
-        }
-      }
+  "name": "coder-review",
+  "description": "实现一个功能然后审查它",
+  "agents": ["planner", "coder", "reviewer"],
+  "transitions": [
+    {"from": "planner", "to": "coder:implement", "condition": {"type": "always"}},
+    {"from": "coder:implement", "to": "coder:review", "condition": {"type": "always"}},
+    {"from": "coder:review", "to": "reviewer", "condition": {"type": "always"}}
+  ],
+  "entryAgent": "planner",
+  "maxTotalSteps": 10,
+  "maxTotalCostUsd": 5.00,
+  "hooks": {
+    "onEnd": {
+      "command": "node hooks/post-task-hook.mjs",
+      "timeout": 30000
     }
   }
 }
@@ -138,7 +137,7 @@
 
 | 字段 | 类型 | 描述 |
 |-------|------|-------------|
-| `name` | string | 模板 ID（用于 `!thread <name>` 和任务调度） |
+| `name` | string? | 可选；若存在则必须与文件名一致（`templates/<name>.json`）。文件名即模板 ID，用于 `!thread <name>` 和任务调度 |
 | `agents` | TemplateAgentRef[] | 有序的参与智能体列表 |
 | `transitions` | TransitionRule[] | 控制何时从一个智能体移动到下一个的规则 |
 | `entryAgent` | string | 第一个运行的智能体 |
@@ -171,7 +170,7 @@
 shell 声明其参数，并在转换图中使用占位符：
 
 - `{param}` — 替换为该参数在绑定中的取值（一个智能体名）。
-- `{param.entryStage}` — 替换为该智能体的 `entryStage`，从 agents 表解析。
+- `{param.entryStage}` — 替换为该智能体的 `entryStage`，从 `agents/` 下该智能体的定义解析。
 
 例如随产品发货的 `worker-review` shell（`shells/worker-review.json`）——一个通用的"产出后审核"环：
 
@@ -294,6 +293,14 @@ running → waiting     （等待用户输入 — 第 6 阶段缓冲）
 
 线程控制是带外（out-of-band）的：智能体通过调用 `thread_abort`、`thread_split`、`thread_wait` MCP 工具来控制自己的线程，而不是向产物写入标记（在产物里提及这些关键字不会触发任何动作）。工具会在该智能体自己的线程上写入结构化的 `metadata.pendingControl`；runner 在每步完成后读取它，**优先级高于所有转换规则**。`thread_abort({ kind, diagnosis })` 立即将线程终止为 `aborted`（`onEnd` 钩子仍会触发）；`thread_split({ subtasks })` 提议对所属派发任务做分解；`thread_wait` 挂起直到被等待的子项完成。
 
+### 挂起与唤醒（thread_wait）
+
+挂起中的 manager 等待它的子任务（以及子线程）。调用 `thread_wait` 时若不传 `on_tasks` 和 `on_threads`，系统会自动推断所有仍存活且已关联的子项。只要传入其中任一参数，就会切换到显式覆盖模式：系统仅等待参数数组中列出的 ID，未传的另一类按空数组处理。显式 ID 必须指向仍存活且已关联的子项；重复、缺失、无关和已终止的 ID 会被忽略。因此，传入空数组时没有需要等待的子项，线程会继续执行。
+
+每个完成或被阻塞的子项都会作为结果/升级通知投递进 manager 的 `pendingMessages`；当没有剩余等待项时，manager 被重新进入。投递由事件驱动（`task.completed` / `task.blocked`，投递前会对照 `TASKS.yaml` 验证），并有两张安全网：周期性的磁盘对账扫描（每 60 秒一次，可通过 `CORTEX_WAITING_SWEEP_MS` 配置），逐个核对每个等待中 manager 的磁盘任务状态；以及启动恢复流程，补投服务器停机期间转为终态的结果。未完成的子任务跨重启存续、继续被等待。
+
+任务被阻塞不会级联到依赖它的任务，因此等待集可能进入这样的状态：每个剩余等待项都（直接或传递地）依赖某个被阻塞的任务，永远无法开始。唤醒路径会检测这种停滞，并用一条死锁通知唤醒 manager，通知中列出被卡住的任务及其阻塞源；manager 应当解除阻塞、重新规划分解，或通过 `thread_abort` 升级。每种不同的停滞状态只唤醒 manager 一次——停滞状态不变则不会重复唤醒。
+
 ### thread_wait 检查点门禁（DR-0017）
 
 manager 通过 `thread_wait` 挂起之前，必须为它（可能被轮换过的）下一个化身留下一份新鲜的检查点。runner 通过**检查点门禁**强制这一点：
@@ -394,10 +401,9 @@ tmp/threads/thr_a1b2c3d4/
 
 产物路径对所有智能体通过 `{{artifactPath}}` 模板变量可用。智能体通过读取之前智能体写入的内容并追加自己的发现来进行通信。
 
-智能体还可以读取之前智能体修改的文件：
+智能体还可以识别之前智能体修改的文件：
 - `{{previousOutput}}` — 上一个已完成步骤的完整输出
-- `{{modifiedFiles}}` — 上一个智能体编辑的文件列表（从会话活动日志中提取）
-- `{{modifiedFilesWithDiff}}` — 文件列表，带有从会话活动 JSONL 重建的每文件 diff 块
+- `{{modifiedFiles}}` — 上一个智能体编辑的文件列表（从只记录路径的会话活动日志中提取）
 
 ### 任务定址的 manager 产物（DR-0017）
 
@@ -485,7 +491,6 @@ Cortex 内部使用三种类型的线程记录：
 | `{{artifactPath}}` | `artifact.md` 的绝对路径 |
 | `{{previousOutput}}` | 上一个已完成步骤的完整输出 |
 | `{{modifiedFiles}}` | 上一个智能体编辑的文件 |
-| `{{modifiedFilesWithDiff}}` | 上一个智能体的文件中带内联 diff |
 | `{{currentDateTime}}` | ISO 格式的当前日期和时间 |
 
 ## 插件加载

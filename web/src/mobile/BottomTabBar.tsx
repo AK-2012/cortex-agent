@@ -1,11 +1,11 @@
-// @ds-adherence-ignore -- mobile bottom Tab bar, 1:1 from scheme.dc.html L2995-3000 / L3188-3191
+// @ds-adherence-ignore -- mobile bottom Tab bar, 1:1 from scheme-mobile.dc.html 1a L121-126
 // (raw px/hex/svg by design, §8.3; mobile palette is not in the light `proto.*` token set).
 import { type ReactNode } from 'react';
 import { MOBILE_TABS, tabBadge, type MobileTabId } from './mobile-tabs';
 import { type Vocab } from '@/i18n';
 
-const INK = '#191C22';
-const MUTED = '#98A1B0';
+const INK = 'var(--proto-ink)';
+const MUTED = 'var(--proto-muted-3)';
 
 function TabIcon({ id, color }: { id: MobileTabId; color: string }): ReactNode {
   switch (id) {
@@ -32,13 +32,11 @@ function TabIcon({ id, color }: { id: MobileTabId; color: string }): ReactNode {
           <path d="M10.5 6h6M10.5 13h6" />
         </svg>
       );
-    case 'machines':
+    case 'project':
+      // Folder icon (scheme 1a L125): the 项目 tab.
       return (
         <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke={color} strokeWidth="1.6">
-          <rect x="3" y="4" width="14" height="5" rx="1.5" />
-          <rect x="3" y="11" width="14" height="5" rx="1.5" />
-          <circle cx="6" cy="6.5" r="0.9" fill={color} stroke="none" />
-          <circle cx="6" cy="13.5" r="0.9" fill={color} stroke="none" />
+          <path d="M3 5.5h5l1.5 2H17a1 1 0 0 1 1 1V15a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1z" />
         </svg>
       );
   }
@@ -47,32 +45,28 @@ function TabIcon({ id, color }: { id: MobileTabId; color: string }): ReactNode {
 export interface BottomTabBarProps {
   vocab: Vocab;
   activeId: MobileTabId;
-  activeThreadCount: number;
-  hasPendingApproval: boolean;
+  /** 需要你 count → amber badge on the 项目 tab (pending approvals). */
+  needsYouCount: number;
   onNavigate: (path: string) => void;
 }
 
-export function BottomTabBar({
-  vocab,
-  activeId,
-  activeThreadCount,
-  hasPendingApproval,
-  onNavigate,
-}: BottomTabBarProps) {
+export function BottomTabBar({ vocab, activeId, needsYouCount, onNavigate }: BottomTabBarProps) {
   return (
     <div
       style={{
         flex: 'none',
-        borderTop: '1px solid #E7E9EE',
-        background: '#FBFBFC',
+        borderTop: '1px solid var(--proto-line)',
+        background: 'var(--proto-rail)',
         display: 'flex',
-        padding: '8px 6px 30px',
+        // Reserve the OS home-indicator gutter (env bottom inset) below the 8px base padding.
+        padding: '8px 6px',
+        paddingBottom: 'calc(8px + env(safe-area-inset-bottom))',
       }}
     >
       {MOBILE_TABS.map((tab) => {
         const active = tab.id === activeId;
         const color = active ? INK : MUTED;
-        const badge = tabBadge(tab.id, { activeThreadCount, hasPendingApproval });
+        const badge = tabBadge(tab.id, { needsYouCount });
         return (
           <button
             key={tab.id}
@@ -103,8 +97,8 @@ export function BottomTabBar({
                     position: 'absolute',
                     top: -4,
                     right: -9,
-                    background: '#4655D4',
-                    color: '#fff',
+                    background: 'var(--proto-amber)',
+                    color: 'var(--ink-solid-fg)',
                     font: "600 8px 'IBM Plex Mono', monospace",
                     padding: '1px 4.5px',
                     borderRadius: 999,
@@ -112,19 +106,6 @@ export function BottomTabBar({
                 >
                   {badge.count}
                 </span>
-              )}
-              {badge.dot && (
-                <span
-                  style={{
-                    position: 'absolute',
-                    top: -2,
-                    right: -4,
-                    width: 7,
-                    height: 7,
-                    borderRadius: '50%',
-                    background: '#C99A2E',
-                  }}
-                />
               )}
             </div>
             <span style={{ fontSize: 10, fontWeight: 600, color }}>{vocab[tab.labelKey]}</span>

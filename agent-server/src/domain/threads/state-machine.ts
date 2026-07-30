@@ -1,14 +1,12 @@
-// Thread lifecycle state machine.
-// input:  thread-store, template-loader, prompt-builder, utils, artifact-io
-// output: createThread / addAgentToThread /
-//         resolveNextStep / evaluateTransitions / recordStepResult / completeThread /
-//         failThread / cancelThread / abortThread / tryEnterWaiting /
-//         peekPendingControl / clearPendingControl / detectSplitFromControl (DR-0015 control plane) /
-//         isArtifactUnchangedSinceStepStart (DR-0017 W2 checkpoint gate)
+// input:  thread store, templates, tasks, artifacts
+// output: lifecycle, provider pauses, control transitions
+// pos:    Thread lifecycle and suspension state machine
+// >>> If I am updated, update my header comment and the parent folder's CORTEX.md <<<
 
 import { mkdirSync, writeFileSync, readFileSync } from 'fs';
-import { createHash } from 'crypto';
+import { createHash, randomUUID } from 'crypto';
 import * as path from 'path';
+import { ctx as jobCtx } from '@domain/scheduling/job-registry.js';
 import { WORKSPACE_DIR } from '@core/utils.js';
 import { ensureTaskArtifact } from '@core/task-node.js';
 import { createLogger } from '@core/log.js';
@@ -25,6 +23,19 @@ import type {
   AgentSlotConfig, AgentSlotId, AgentSlot, AgentStep,
   StepResult, TransitionResult, TransitionRule,
 } from '@core/types/thread-types.js';
+
+// --- Thread lifecycle events ---
+// Published on the shared bus (job-registry ctx — the same seam the runner's session.message
+// publish uses) so the web UI / TUI thread views refetch on lifecycle edges. No-op without a bus.
+
+function publishThreadEvent(e: Record<string, unknown>): void {
+  jobCtx.bus?.publish(e as any);
+}
+
+/** `agent` or `agent:stage` — matches the transition endpoint syntax (runner's status label). */
+function stepLabel(agentSlotId: AgentSlotId, stage: string | null | undefined): string {
+  return stage ? `${agentSlotId}:${stage}` : agentSlotId;
+}
 
 // --- Agent slot helpers ---
 
@@ -176,6 +187,7 @@ export function createThread(channel: string, options: {
     metadata: { ...(options.metadata ?? {}), stepStartArtifactHash: hashArtifactAt(artifactPath) },
   });
   threadStore.set(thread);
+  publishThreadEvent({ type: 'thread.created', threadId: id, templateName: options.templateName || 'ad-hoc' });
   const mode = isTemplate ? `template=${options.templateName}` : `agent=${options.agentName}`;
   log.info(`Created thread ${id} (${mode}, workspace=${workspacePath})`);
   return thread;
@@ -199,6 +211,7 @@ function upsertAgentSlot(thread: ThreadRecord, config: AgentSlotConfig): void {
     slotId: config.slotId,
     profile: config.profile,
     sessionId: existing?.sessionId || null,
+    ...(existing?.backendSessionId !== undefined ? { backendSessionId: existing.backendSessionId } : {}),
     sessionName: existing?.sessionName || null,
     status: 'idle',
     lastOutput: null,
@@ -262,10 +275,43 @@ export function resolveNextStep(threadId: string): NextStepInfo | null {
   return thread.templateName ? resolveTemplateNextStep(thread) : resolveAdHocNextStep(thread);
 }
 
+// --- Step session identity (track/backend id decoupling) ---
+
+/** Prepare the slot's session ids for a step about to run, mirroring the direct path's
+ *  trackSessionId/backendSessionId split (conversation-runner):
+ *  - `trackSessionId` (slot.sessionId) — stable Cortex id, the conversation-history / UI
+ *    transcript key + CORTEX_SESSION_ID. Minted HERE (before the agent spawns) and persisted,
+ *    so a RUNNING step is queryable/streamable by the web UI. persistSession slots keep it
+ *    across steps; non-persist slots get a fresh one per step (fresh conversation).
+ *  - `resumeSessionId` (slot.backendSessionId) — the backend `--resume` target, resolved at
+ *    the previous settle. Legacy records (field absent) held the backend id in slot.sessionId:
+ *    migrated in place, keeping that id as BOTH keys for history continuity.
+ *  Publishes `thread.step.started` after persisting, so subscribers refetching `threads.get`
+ *  already see the new sessionId. */
+export async function beginStepSession(
+  threadId: string,
+  agentSlotId: AgentSlotId,
+  stage: string | null,
+): Promise<{ trackSessionId: string; resumeSessionId: string | null }> {
+  let track = '';
+  let resume: string | null = null;
+  await threadStore.mutate(threadId, (t) => {
+    const slot = t.agents[agentSlotId];
+    if (!slot) throw new Error(`Agent slot not found: ${agentSlotId} in ${threadId}`);
+    if (slot.backendSessionId === undefined) slot.backendSessionId = slot.sessionId ?? null;
+    if (!slot.sessionId || !slot.persistSession) slot.sessionId = randomUUID();
+    track = slot.sessionId;
+    resume = slot.persistSession ? (slot.backendSessionId ?? null) : null;
+  });
+  publishThreadEvent({ type: 'thread.step.started', threadId, step: stepLabel(agentSlotId, stage) });
+  return { trackSessionId: track, resumeSessionId: resume };
+}
+
 // --- Step result recording ---
 
 interface StepResultInput {
   sessionId?: string | null;
+  backendSessionId?: string | null;
   sessionName?: string | null;
   executionId?: string | null;
   input?: string | null;
@@ -283,6 +329,7 @@ function makeAgentStep(stepIndex: number, agentSlotId: AgentSlotId, result: Step
     stage: result.stage ?? null,
     executionId: result.executionId || null,
     sessionId: result.sessionId || null,
+    backendSessionId: result.backendSessionId ?? null,
     sessionName: result.sessionName || null,
     input: result.input || '',
     output: result.output,
@@ -298,6 +345,8 @@ function updateSlotAfterStep(slot: AgentSlot, result: StepResultInput): void {
   slot.status = 'completed';
   slot.lastOutput = result.output;
   if (result.sessionId && slot.persistSession) slot.sessionId = result.sessionId;
+  // Backend resume target for the next step of a persist slot (track/backend decoupling).
+  if (result.backendSessionId && slot.persistSession) slot.backendSessionId = result.backendSessionId;
   if (result.sessionName) slot.sessionName = result.sessionName;
 }
 
@@ -315,6 +364,12 @@ export async function recordStepResult(threadId: string, agentSlotId: AgentSlotI
     // DR-0017 W2: the artifact as this step left it IS the next step's start state
     // (nothing writes the artifact between steps) — refresh the checkpoint-gate baseline.
     if (t.artifactPath) (t.metadata ??= {}).stepStartArtifactHash = hashArtifactAt(t.artifactPath);
+  });
+  publishThreadEvent({
+    type: 'thread.step.finished',
+    threadId,
+    step: stepLabel(agentSlotId, result.stage ?? null),
+    result: (result.output ?? '').slice(0, 200),
   });
   return step;
 }
@@ -344,6 +399,7 @@ function applyTransition(thread: ThreadRecord, rule: TransitionRule, result: Tra
   thread.activeAgent = result.nextAgent!;
   thread.activeStage = result.nextStage ?? null;
   threadStore.set(thread);
+  publishThreadEvent({ type: 'thread.transitioned', threadId: thread.id, from: rule.from, to: rule.to });
   return result;
 }
 
@@ -449,6 +505,9 @@ export async function cancelThread(threadId: string): Promise<boolean> {
     t.status = 'cancelled';
     t.endedAt = new Date().toISOString();
   });
+  // No dedicated cancelled/aborted event variants — map to thread.failed so every
+  // subscribed thread view (web/TUI) gets its terminal refetch hint.
+  publishThreadEvent({ type: 'thread.failed', threadId, error: 'cancelled' });
   log.info(`Cancelled thread ${threadId}`);
   return true;
 }
@@ -494,6 +553,28 @@ function isTerminal(status: ThreadRecord['status']): boolean {
   return status === 'completed' || status === 'failed' || status === 'cancelled' || status === 'aborted';
 }
 
+interface WaitTargets {
+  onTasks?: string[] | null;
+  onThreads?: string[] | null;
+}
+
+function hasExplicitWaitTargets(targets?: WaitTargets): boolean {
+  return targets?.onTasks != null || targets?.onThreads != null;
+}
+
+function uniqueIds(ids: string[]): string[] {
+  return [...new Set(ids)];
+}
+
+function threadWaitCandidates(parent: ThreadRecord, requested?: string[]): string[] {
+  const inferred = parent.metadata?.waitingOn ?? [];
+  const candidates = uniqueIds(requested ?? inferred);
+  if (requested == null) return candidates;
+  const linked = new Set([...(parent.metadata?.childThreadIds ?? []), ...inferred]);
+  return candidates.filter((id) => linked.has(id)
+    || threadStore.get(id)?.metadata?.parentThreadId === parent.id);
+}
+
 /** Live (open, unblocked) child tasks of the given task, read straight from TASKS.yaml via
  *  the zero-dependency core parser — no domain/tasks import (avoids a layer cycle).
  *  Wait set = UNION of parent-linked children and the task's own unmet depends_on: any
@@ -517,43 +598,61 @@ function liveChildTaskIds(taskId: string, taskProject: string): string[] {
   }
 }
 
-/** Try to suspend the thread until its waited-on children finish. Inside a single mutate
- *  (serialized with the callback side via the store mutex), filter waitingOn down to
- *  children that still exist and are non-terminal; additionally (DR-0014 §8) snapshot live
- *  child TASKS (parent === metadata.taskId) into waitingOnTasks. If either list is
- *  non-empty, set status='waiting'. Returns true iff the thread entered waiting.
+function liveTaskWaitIds(taskId: string | undefined, project: string | undefined, requested?: string[]): string[] {
+  if (!taskId || !project || requested?.length === 0) return [];
+  const live = liveChildTaskIds(taskId, project);
+  if (requested == null) return live;
+  const linked = new Set(live);
+  return uniqueIds(requested).filter((id) => linked.has(id));
+}
+
+function resolveWaitSets(thread: ThreadRecord, targets?: WaitTargets): { threads: string[]; tasks: string[] } {
+  const explicit = hasExplicitWaitTargets(targets);
+  return {
+    threads: threadWaitCandidates(thread, explicit ? (targets?.onThreads ?? []) : undefined),
+    tasks: liveTaskWaitIds(
+      thread.metadata?.taskId ?? undefined,
+      thread.metadata?.taskProject ?? undefined,
+      explicit ? (targets?.onTasks ?? []) : undefined,
+    ),
+  };
+}
+
+/** Try to suspend the thread until its waited-on children finish. With no targets, infer
+ *  live task/thread children; supplying either target list replaces the entire inferred set.
+ *  Inside one store mutation, persist both resolved sets and enter waiting when either is non-empty.
+ *  Returns true iff the thread entered waiting.
  *  Either interleaving with the completion callback converges: callback-first → nothing
  *  left to wait on (results already in pendingMessages); runner-first → callback sees
  *  waiting and resumes when both lists empty. The task-side race (a child completing
  *  between the snapshot and the waiting persist, its event missed) is closed by
  *  reconcileWaitingTasks right after suspension. */
-export async function tryEnterWaiting(threadId: string): Promise<boolean> {
+export async function tryEnterWaiting(threadId: string, targets?: WaitTargets): Promise<boolean> {
   const thread = threadStore.get(threadId);
   if (!thread) return false;
-  const hasThreadChildren = !!thread.metadata?.waitingOn?.length;
-  const taskId = thread.metadata?.taskId;
-  const taskProject = thread.metadata?.taskProject;
-  if (!hasThreadChildren && !(taskId && taskProject)) return false;
+  const explicit = hasExplicitWaitTargets(targets);
+  const hasInferredSources = !!thread.metadata?.waitingOn?.length
+    || !!(thread.metadata?.taskId && thread.metadata?.taskProject);
+  if (!explicit && !hasInferredSources) return false;
 
-  const taskChildren = taskId && taskProject ? liveChildTaskIds(taskId, taskProject) : [];
-
+  const waitSets = resolveWaitSets(thread, targets);
+  let liveThreads: string[] = [];
   let entered = false;
   await threadStore.mutate(threadId, (t) => {
     const m = (t.metadata ??= {});
-    const live = (m.waitingOn || []).filter((id) => {
+    liveThreads = waitSets.threads.filter((id) => {
       const child = threadStore.get(id);
       return !!child && !isTerminal(child.status);
     });
-    m.waitingOn = live;
-    m.waitingOnTasks = taskChildren;
-    if (live.length > 0 || taskChildren.length > 0) {
+    m.waitingOn = liveThreads;
+    m.waitingOnTasks = waitSets.tasks;
+    if (liveThreads.length > 0 || waitSets.tasks.length > 0) {
       t.status = 'waiting';
       entered = true;
     }
   });
   if (entered) {
-    const m = threadStore.get(threadId)!.metadata!;
-    log.info(`Thread ${threadId} suspended, waiting on ${m.waitingOn!.length} thread children + ${m.waitingOnTasks!.length} task children`);
+    log.info(`Thread ${threadId} suspended, waiting on ${liveThreads.length} thread children + ${waitSets.tasks.length} task children`);
   }
   return entered;
 }
@@ -576,6 +675,7 @@ export async function abortThread(threadId: string, reason: string | null): Prom
     t.abortReason = reason;
     t.endedAt = new Date().toISOString();
   });
+  publishThreadEvent({ type: 'thread.failed', threadId, error: `aborted${reason ? `: ${reason}` : ''}` });
   const reasonTag = reason ? ` (${reason})` : '';
   log.info(`Aborted thread ${threadId}${reasonTag}`);
   return true;
@@ -589,6 +689,7 @@ export async function completeThread(threadId: string): Promise<boolean> {
     t.status = 'completed';
     t.endedAt = new Date().toISOString();
   });
+  publishThreadEvent({ type: 'thread.completed', threadId });
   log.info(`Completed thread ${threadId}`);
   return true;
 }
@@ -602,6 +703,7 @@ export async function failThread(threadId: string, error: string): Promise<boole
     t.error = error;
     t.endedAt = new Date().toISOString();
   });
+  publishThreadEvent({ type: 'thread.failed', threadId, error });
   log.info(`Failed thread ${threadId}: ${error}`);
   return true;
 }
@@ -610,15 +712,23 @@ export async function failThread(threadId: string, error: string): Promise<boole
  *  thread keeps its currentStepIndex/agents and is re-entered (from the interrupted step)
  *  by the resume-dispatcher when the rate-limit window resets. Does NOT set endedAt.
  *  Idempotent. */
-export async function markThreadRateLimited(threadId: string, note?: string): Promise<boolean> {
-  const thread = threadStore.get(threadId);
-  if (!thread) return false;
-
+export async function markThreadRateLimited(
+  threadId: string,
+  provider?: string | null,
+  note?: string,
+): Promise<boolean> {
+  if (!threadStore.get(threadId)) return false;
+  let marked = false;
   await threadStore.mutate(threadId, (t) => {
+    if (t.status !== 'running' && t.status !== 'rate_limited') return;
     t.status = 'rate_limited';
     t.error = note ?? 'Paused — interrupted by API rate limit';
-    (t.metadata ??= {}).interruptedByRateLimit = true;
+    const metadata = t.metadata ??= {};
+    metadata.interruptedByRateLimit = true;
+    if (provider !== undefined) metadata.rateLimitProvider = provider;
+    marked = true;
   });
+  if (!marked) return false;
   log.info(`Rate-limit paused thread ${threadId}`);
   return true;
 }

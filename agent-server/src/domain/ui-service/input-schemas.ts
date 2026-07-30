@@ -1,12 +1,7 @@
-// input:  zod + ui-service scope/op unions (./types.js)
-// output: zod input schema per QueryScope / MutateOp + keyed maps (queryInputSchemas /
-//         mutateInputSchemas). Single source of truth; consumed by the tRPC AppRouter
-//         and re-exported (runtime) by @cortex-agent/ui-contract for the browser.
-// pos:    leaf schema module for the ui-service contract. Kept HERE (not in ui-contract)
-//         so the router can consume it without agent-server importing ui-contract — that
-//         import would close a workspace build cycle (ui-contract re-exports agent-server
-//         types). Contract stays acyclic: agent-server ← ui-contract ← web.
-// >>> If I am updated, update CORTEX.md and the parent folder's CORTEX.md <<<
+// input:  zod and ui-service scope/op unions
+// output: input schemas/maps including project notes
+// pos:    Runtime validation source for the UI contract
+// >>> 一旦我被更新，务必更新我的开头注释与所属文件夹 CORTEX.md <<<
 
 import { z } from 'zod';
 import type { QueryScope, MutateOp } from './types.js';
@@ -28,10 +23,12 @@ export const sessionsTranscriptInput = z.object({
 export const threadsListInput = z.object({
   projectId: z.string().optional(),
   status: z.array(z.string()).optional(),
+  sessionId: z.string().optional(),
 });
 
 export const threadsGetInput = z.object({
   threadId: z.string(),
+  includeArtifactContent: z.boolean().optional(),
 });
 
 export const tasksListInput = z.object({
@@ -72,6 +69,14 @@ export const approvalsListInput = z.object({
   status: z.enum(['pending', 'approved', 'rejected', 'failed']).optional(),
 });
 
+export const issuesListInput = z.object({
+  projectId: z.string(),
+});
+
+export const notesListInput = z.object({
+  projectId: z.string(),
+});
+
 export const costSummaryInput = z.object({
   projectId: z.string().nullish(),
 });
@@ -83,6 +88,10 @@ export const machinesListInput = z.object({});
 export const skillsListInput = z.object({});
 
 export const threadTemplatesGetInput = z.object({});
+
+export const systemDaemonStatusInput = z.object({});
+
+export const systemRateLimitStatusInput = z.object({});
 
 // ── Subscription input schemas ────────────────────────────────────
 // Subscriptions are not part of the query/mutate keyed maps; their input schemas live here too so
@@ -106,11 +115,65 @@ export const sessionsCreateInput = z.object({
 
 export const sessionsSendInput = z.object({
   sessionId: z.string(),
-  text: z.string().min(1),
+  text: z.string(),
+  attachments: z.array(z.object({
+    name: z.string(),
+    path: z.string(),
+    size: z.number(),
+    mimeType: z.string(),
+    type: z.enum(['image', 'video', 'file']),
+  })).optional(),
 });
 
 export const sessionsCancelInput = z.object({
   sessionId: z.string(),
+});
+
+export const sessionsCompactInput = z.object({
+  sessionId: z.string(),
+});
+
+export const sessionsMarkReadInput = z.object({
+  sessionId: z.string(),
+});
+
+export const sessionsSetProfileInput = z.object({
+  sessionId: z.string(),
+  profileName: z.string().min(1),
+});
+
+export const sessionsPendingInteractionInput = z.object({
+  sessionId: z.string().min(1),
+});
+
+export const sessionsAnswerQuestionInput = z.object({
+  requestId: z.string().min(1),
+  answers: z.record(z.string(), z.string()),
+});
+
+export const sessionsRespondPlanInput = z.object({
+  requestId: z.string().min(1),
+  approved: z.boolean(),
+  feedback: z.string().optional(),
+});
+
+export const sessionsRewindInput = z.object({
+  sessionId: z.string(),
+  turnIndex: z.number().int().min(0),
+  text: z.string().min(1),
+});
+
+export const sessionsCreateAndSendInput = z.object({
+  projectId: z.string(),
+  profileName: z.string().optional(),
+  text: z.string(),
+  attachments: z.array(z.object({
+    name: z.string(),
+    path: z.string(),
+    size: z.number(),
+    mimeType: z.string(),
+    type: z.enum(['image', 'video', 'file']),
+  })).optional(),
 });
 
 export const threadsCancelInput = z.object({
@@ -200,8 +263,102 @@ export const configSetInput = z.discriminatedUnion('section', [
   }),
 ]);
 
+// ── hooks.* ───────────────────────────────────────────────────────
+// The declarative hook registry. `hooks.list` is unparameterised; the write ops take a FLAT draft
+// (one field per form control) that mutate/hooks.ts reassembles into the nested declaration.
+// Two fields are absent by construction rather than rejected at runtime: `version` (a forged CalVer
+// would make the next hook sync treat a user file as shipped and overwrite it) and `blocking`
+// (wired to the two shipped webhook hooks, meaningless on a hand-made entry).
+
+export const hooksListInput = z.object({});
+
+const hookFilterValue = z.union([z.string(), z.number(), z.boolean(), z.null()]);
+
+const hookDraftShape = {
+  event: z.string().min(1),
+  matcher: z.string().optional(),
+  matcherFilters: z.record(z.string(), hookFilterValue).optional(),
+  script: z.string().min(1).optional(),
+  command: z.string().min(1).optional(),
+  timeoutSec: z.number().finite().positive().optional(),
+  backends: z.array(z.enum(['claude', 'pi'])).optional(),
+  requiresTool: z.string().min(1).optional(),
+  result: z.enum(['hook-result', 'stdout-as-prompt', 'none']).optional(),
+  enabled: z.boolean().optional(),
+};
+
+/** The loader requires exactly one of script/command; reject the other two shapes up front. */
+function requireExactlyOneRun(
+  val: { script?: string; command?: string },
+  ctx: z.RefinementCtx,
+): void {
+  const hasScript = val.script !== undefined;
+  const hasCommand = val.command !== undefined;
+  if (hasScript === hasCommand) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['script'],
+      message: 'exactly one of script or command is required',
+    });
+  }
+}
+
+export const hooksCreateInput = z
+  .object({ id: z.string().min(1), ...hookDraftShape })
+  .superRefine(requireExactlyOneRun);
+
+export const hooksUpdateInput = z
+  .object({ id: z.string().min(1), ...hookDraftShape })
+  .superRefine(requireExactlyOneRun);
+
+export const hooksSetEnabledInput = z.object({
+  id: z.string().min(1),
+  enabled: z.boolean(),
+});
+
+export const hooksRemoveInput = z.object({
+  id: z.string().min(1),
+});
+
+export const hooksTestInput = z.object({
+  id: z.string().min(1),
+  payload: z.string(),
+});
+
 export const approvalsApproveInput = z.object({
   id: z.string(),
+});
+
+// issues.handle / issues.delete — take the target issue off the project's ISSUES.md list.
+export const issueActionInput = z.object({
+  projectId: z.string(),
+  id: z.string(),
+});
+
+const noteTextInput = z.string().trim().min(1).max(1000).refine((text) => !/[\r\n]/.test(text), {
+  message: 'Note text must be one line',
+});
+
+export const noteAddInput = z.object({
+  projectId: z.string(),
+  text: noteTextInput,
+});
+
+export const noteUpdateInput = noteAddInput.extend({ id: z.string() });
+
+export const noteSetCompletedInput = z.object({
+  projectId: z.string(),
+  id: z.string(),
+  completed: z.boolean(),
+});
+
+export const noteActionInput = z.object({
+  projectId: z.string(),
+  id: z.string(),
+});
+
+export const notesClearCompletedInput = z.object({
+  projectId: z.string(),
 });
 
 export const approvalsRejectInput = z.object({
@@ -213,6 +370,10 @@ export const approvalsRejectInput = z.object({
 // CLOSED enum; the per-kind required field is enforced by superRefine so the router rejects
 // malformed input before the handler runs. The handler constructs the entry's prose — the browser
 // supplies only the enum + a machine name (sanitized handler-side), never raw markdown.
+export const systemRestartInput = z.object({
+  kind: z.enum(['soft', 'hard', 'force']),
+});
+
 export const approvalsRequestInput = z
   .object({
     kind: z.enum(['reconnect-platform', 'add-machine']),
@@ -234,6 +395,7 @@ export const queryInputSchemas = {
   'projects.list': projectsListInput,
   'sessions.list': sessionsListInput,
   'sessions.transcript': sessionsTranscriptInput,
+  'sessions.pendingInteraction': sessionsPendingInteractionInput,
   'threads.list': threadsListInput,
   'threads.get': threadsGetInput,
   'tasks.list': tasksListInput,
@@ -244,11 +406,16 @@ export const queryInputSchemas = {
   'memory.tree': memoryTreeInput,
   'memory.file': memoryFileInput,
   'approvals.list': approvalsListInput,
+  'issues.list': issuesListInput,
+  'notes.list': notesListInput,
   'cost.summary': costSummaryInput,
   'config.get': configGetInput,
+  'hooks.list': hooksListInput,
   'machines.list': machinesListInput,
   'skills.list': skillsListInput,
   'threadTemplates.get': threadTemplatesGetInput,
+  'system.daemonStatus': systemDaemonStatusInput,
+  'system.rateLimitStatus': systemRateLimitStatusInput,
 } satisfies Record<QueryScope, z.ZodType>;
 
 export const mutateInputSchemas = {
@@ -256,6 +423,13 @@ export const mutateInputSchemas = {
   'sessions.create': sessionsCreateInput,
   'sessions.send': sessionsSendInput,
   'sessions.cancel': sessionsCancelInput,
+  'sessions.compact': sessionsCompactInput,
+  'sessions.setProfile': sessionsSetProfileInput,
+  'sessions.createAndSend': sessionsCreateAndSendInput,
+  'sessions.markRead': sessionsMarkReadInput,
+  'sessions.answerQuestion': sessionsAnswerQuestionInput,
+  'sessions.respondPlan': sessionsRespondPlanInput,
+  'sessions.rewind': sessionsRewindInput,
   'threads.cancel': threadsCancelInput,
   'executions.cancel': executionsCancelInput,
   'schedules.pause': scheduleActionInput,
@@ -270,5 +444,18 @@ export const mutateInputSchemas = {
   'approvals.approve': approvalsApproveInput,
   'approvals.reject': approvalsRejectInput,
   'approvals.request': approvalsRequestInput,
+  'issues.handle': issueActionInput,
+  'issues.delete': issueActionInput,
+  'notes.add': noteAddInput,
+  'notes.update': noteUpdateInput,
+  'notes.setCompleted': noteSetCompletedInput,
+  'notes.delete': noteActionInput,
+  'notes.clearCompleted': notesClearCompletedInput,
   'config.set': configSetInput,
+  'hooks.create': hooksCreateInput,
+  'hooks.update': hooksUpdateInput,
+  'hooks.setEnabled': hooksSetEnabledInput,
+  'hooks.remove': hooksRemoveInput,
+  'hooks.test': hooksTestInput,
+  'system.restart': systemRestartInput,
 } satisfies Record<MutateOp, z.ZodType>;

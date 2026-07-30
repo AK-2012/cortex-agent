@@ -53,56 +53,44 @@ fi
 echo "[run-tests] lint: no Slack emoji shortcodes"
 node --import tsx scripts/lint-no-slack-shortcodes.ts
 
-# ── Run tests ────────────────────────────────────────────────────
+# ── Machine-wide full-suite lock ─────────────────────────────────
+#
+# Concurrent full-suite runs (multiple worktree threads each spawning 16 forks)
+# thrash the box and cause load-induced flake cascades. Serialize them: one
+# full suite at a time, machine-wide. The wait happens BEFORE vitest starts,
+# so per-test timeouts are unaffected; only the caller's wall clock grows.
+# Bounded wait so a wedged holder cannot block forever.
 
-# node --test runs test *files* in parallel, defaulting to
-# os.availableParallelism() concurrent processes. On many-core machines (e.g. 72
-# cores) this spawns dozens of heavy tsx processes at once, overloading the box
-# and timing the whole suite out. Cap the concurrency; override via env.
-TEST_CONCURRENCY="${CORTEX_TEST_CONCURRENCY:-20}"
-# Integration tests fork real server subprocesses, so keep their fan-out lower.
-INTEGRATION_CONCURRENCY="${CORTEX_INTEGRATION_CONCURRENCY:-20}"
+LOCK_FILE="${CORTEX_TEST_LOCK:-/tmp/cortex-full-suite.lock}"
+LOCK_WAIT_SECS=1200
+exec 9>"$LOCK_FILE"
+if ! flock -n 9; then
+  echo "[run-tests] another full suite is running — waiting for lock (max ${LOCK_WAIT_SECS}s): $LOCK_FILE"
+  if ! flock -w "$LOCK_WAIT_SECS" 9; then
+    echo "[run-tests] ERROR: could not acquire test lock within ${LOCK_WAIT_SECS}s; retry later" >&2
+    exit 1
+  fi
+fi
 
-echo "[run-tests] running test suite (concurrency=$TEST_CONCURRENCY)"
+# ── Run tests (vitest) ───────────────────────────────────────────
+#
+# The suite runs under vitest: a single Vite server transpiles each module once
+# and caches it; the fork pool executes test files in parallel workers. Cap the
+# worker count via CORTEX_TEST_CONCURRENCY (read by vitest.config.ts). Isolation,
+# the `.js`→`.ts` resolver, per-file CORTEX_HOME setup, include/exclude globs and
+# timeouts all live in the config files.
+#
+# nice -n 10 keeps training jobs and interactive agents responsive while the
+# fork pool is hot; niceness is inherited by the worker forks.
 
-# Match the same glob pattern as the original npm test command.
-# Use nullglob to handle the case where no files match a pattern.
-shopt -s nullglob
-TEST_FILES=(
-  tests/*.test.ts
-  tests/core/*.test.ts
-  tests/agent-adapter/*.test.ts
-  tests/store/*.test.ts
-  tests/events/*.test.ts
-  tests/orch/*.test.ts
-  tests/threads/*.test.ts
-  tests/domain/**/*.test.ts
-  tests/platform/*.test.ts
-  tests/tui/*.test.ts
-  tests/tui/*.test.tsx
-)
-shopt -u nullglob
+echo "[run-tests] running unit suite, isolated shard (vitest, concurrency=${CORTEX_TEST_CONCURRENCY:-16})"
+CORTEX_TEST_SHARD=isolated nice -n 10 pnpm exec vitest run
 
-# Filter out debug/shim files and integration tests. Integration tests fork real
-# server subprocesses and need longer than the 15s unit-test timeout; running them
-# here would systematically time out and orphan the spawned app.ts process. They run
-# in a dedicated pass below with no 15s cap.
-FILTERED=()
-INTEGRATION=()
-for f in "${TEST_FILES[@]}"; do
-  case "$(basename "$f")" in
-    _shims-*|_combined*|_plan*) ;;
-    integration-*) INTEGRATION+=("$f") ;;
-    *) FILTERED+=("$f") ;;
-  esac
-done
-
-# --import ./tests/_test-home.ts is a belt-and-suspenders isolation guard (no-op here
-# since CORTEX_HOME is already set above; protects ad-hoc invocations of this command).
-node --import tsx --import ./tests/_test-home.ts --test --test-force-exit --test-concurrency="$TEST_CONCURRENCY" --test-timeout=15000 "${FILTERED[@]}"
+# Vetted pure-logic files run with isolate:false so each worker fork executes
+# the import graph once for many files (see tests/_shared-pool-manifest.ts).
+echo "[run-tests] running unit suite, shared shard (vitest, isolate=false, concurrency=${CORTEX_TEST_SHARED_CONCURRENCY:-4})"
+CORTEX_TEST_SHARD=shared nice -n 10 pnpm exec vitest run --passWithNoTests
 
 # ── Integration tests (forked servers; longer timeout, run last) ─────
-if [[ ${#INTEGRATION[@]} -gt 0 ]]; then
-  echo "[run-tests] running integration tests (concurrency=$INTEGRATION_CONCURRENCY)"
-  node --import tsx --test --test-force-exit --test-concurrency="$INTEGRATION_CONCURRENCY" --test-timeout=120000 "${INTEGRATION[@]}"
-fi
+echo "[run-tests] running integration tests (vitest, serial)"
+nice -n 10 pnpm exec vitest run --config vitest.integration.config.ts

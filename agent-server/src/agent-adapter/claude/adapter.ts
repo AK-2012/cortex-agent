@@ -1,7 +1,7 @@
-// input:  user message + session context, AgentSpawnConfig
-// output: runClaude / closeSession / ClaudeAdapter
-// pos:    Claude CLI session pool and AgentAdapter implementation
-// >>> If I am updated, update my header comment and the parent folder's CORTEX.md <<<
+// input:  session context, Claude streams, MCP config, usage
+// output: ClaudeAdapter turns, events, usage, and compact control
+// pos:    Claude session pool and print-stream adapter
+// >>> 一旦我被更新，务必更新我的开头注释与所属文件夹 CORTEX.md <<<
 
 import { spawn, ChildProcess } from 'child_process';
 import { createWriteStream, WriteStream } from 'fs';
@@ -13,8 +13,8 @@ import { createLogger } from '@core/log.js';
 import { handleRateLimitEvent } from '@domain/costs/rate-limit-throttle.js';
 import { fromCanonical } from '../normalize/tool-names.js';
 import { Capability, CAPABILITIES_BY_BACKEND } from '../capabilities.js';
-import type { AgentAdapter, AgentSpawnConfig, AgentProcess, Backend, UserMessage, ContinuationSink } from '../types.js';
-import type { AgentResult } from '@core/types/agent-types.js';
+import type { AgentAdapter, AgentCompactResult, AgentCompactUsage, AgentSpawnConfig, AgentProcess, Backend, UserMessage, ContinuationSink, InjectionAckSink } from '../types.js';
+import type { AgentResult, ContextUsage } from '@core/types/agent-types.js';
 import type { NormalizedEvent } from '../normalize/event-types.js';
 import { createEventStream } from '../normalize/event-stream.js';
 import {
@@ -41,8 +41,14 @@ import {
   isPlanFilePath,
   mergeSubstantialOutput,
   setActivePlanFile,
+  createStreamDeltaState,
+  parseStreamEvent,
+  takeTextBlockId,
+  type StreamDeltaState,
 } from './event-parser.js';
 import { BgTaskTracker, routeLine } from './bg-task-tracker.js';
+import { ClaudeContextUsageTracker } from './context-usage.js';
+import { resolveAutoCompactWindow } from './compact-window.js';
 
 const log = createLogger('claude-bridge');
 
@@ -60,9 +66,16 @@ interface PendingTurn {
   longestOutput: string | null;
   turnCount: number;
   onProgress: ((progress: any) => void) | null;
-  onAssistantMessage: ((text: string) => void) | null;
-  onToolUse: ((name: string, input: any) => void) | null;
+  /** Complete assistant text block. `blockId` ties it to the deltas that streamed it (absent when
+   *  nothing streamed — kill switch, older CLI, or a reply that produced no partial messages). */
+  onAssistantMessage: ((text: string, blockId?: string) => void) | null;
+  /** Incremental text chunk while a block is still being generated (never the accumulated total).
+   *  Web UI preview only — the complete message above stays authoritative. */
+  onAssistantDelta: ((text: string, blockId: string) => void) | null;
+  onToolUse: ((name: string, input: any, toolUseId: string) => void) | null;
+  onToolResult: ((toolUseId: string, content: string, isError: boolean) => void) | null;
   onCompact: ((info: { trigger: string; preTokens?: number }) => void) | null;
+  onContextUsage: ((usage: ContextUsage) => void) | null;
   rawStream: WriteStream;
   txtStream: WriteStream;
   killed: boolean;
@@ -88,6 +101,8 @@ interface ClaudeSessionOptions {
   extraEnv?: Record<string, string>;
   /** Extra CLI options from profile (e.g. {"--thinking": "xhigh"}). */
   extraOption?: Record<string, string>;
+  /** Thinking level from the profile's `thinking` field → `--effort <level>`. Absent → no flag. */
+  thinking?: string | null;
   /** Cortex execution context surfaced to the MCP server child as CORTEX_THREAD_ID/PROFILE/PROJECT/SESSION_NAME env vars.
    *  Captured at spawn time; later turns on the same session reuse the original snapshot. */
   context?: CortexAgentContext;
@@ -104,6 +119,7 @@ function deriveClaudeSpawnOptions(fields: {
   pluginDirs: string[] | null;
   outputStyle: string | null;
   extraOption: Record<string, string> | undefined;
+  thinking: string | null;
   needsResume: boolean;
   sessionId: string;
 }): ClaudeSpawnOptions {
@@ -116,9 +132,25 @@ function deriveClaudeSpawnOptions(fields: {
     pluginDirs: fields.pluginDirs,
     outputStyle: fields.outputStyle,
     extraOption: fields.extraOption,
+    thinking: fields.thinking,
     needsResume: fields.needsResume,
     sessionId: fields.sessionId,
   };
+}
+
+/**
+ * Extract the prompt text from a `--replay-user-messages` echo. `message.content` arrives either
+ * as a bare string or as text blocks. Returns null for anything else — notably the tool_result
+ * carriers print mode already emits as `user` lines, which must never be read as a prompt echo.
+ */
+export function extractReplayText(data: any): string | null {
+  const content = data?.message?.content;
+  if (typeof content === 'string') return content;
+  if (!Array.isArray(content)) return null;
+  const parts = content
+    .filter((b: any) => b?.type === 'text' && typeof b.text === 'string')
+    .map((b: any) => b.text as string);
+  return parts.length ? parts.join('') : null;
 }
 
 class ClaudeSession {
@@ -141,12 +173,28 @@ class ClaudeSession {
   private anthropicBaseUrl: string | undefined;
   private extraEnv: Record<string, string> | undefined;
   private extraOption: Record<string, string> | undefined;
+  private thinking: string | null;
   private context: CortexAgentContext | undefined;
   private currentTurn: PendingTurn | null = null;
+  /** Cursor over the `stream_event` sequence (--include-partial-messages). Session-scoped rather
+   *  than turn-scoped because the stream is a property of the process, and every `message_start`
+   *  resets it anyway. */
+  private streamDeltaState: StreamDeltaState = createStreamDeltaState();
+  /** Current provider-call usage plus configured/result-reconciled context window. */
+  private contextUsageTracker: ClaudeContextUsageTracker;
   /** Tracks in-flight background tasks (run_in_background) for this session. */
   private bgTracker = new BgTaskTracker();
   /** Set by orchestration to receive spontaneous background-task continuation turns. */
   private continuationSink: ContinuationSink | null = null;
+  /** Messages injected into an in-flight turn that the CLI has not echoed back yet, in write
+   *  order. Each is popped by its `--replay-user-messages` echo (the delivery ack). */
+  private pendingInjections: { prompt: string; text: string }[] = [];
+  /** Set by orchestration to receive injection delivery acks. */
+  private injectionAck: InjectionAckSink | null = null;
+  /** Set when an injected message was consumed with NO turn in flight — the CLI is about to start
+   *  a turn of its own for it. Consumed by the next assistant line, which opens the
+   *  synthetic turn that captures the reply. */
+  private injectionContinuationArmed = false;
   private alive: boolean = false;
   private needsResume: boolean;
   private idleTimer: ReturnType<typeof setTimeout> | null = null;
@@ -165,6 +213,12 @@ class ClaudeSession {
     this.sessionKey = options.sessionKey || channel;
     this.needsResume = options.needsResume;
     this.modelName = options.model || null;
+    // Settings are read per session because the CLI reads them per spawn, and the spawn always
+    // runs with `cwd: DATA_DIR` (see spawn below).
+    this.contextUsageTracker = new ClaudeContextUsageTracker(
+      this.modelName,
+      resolveAutoCompactWindow(DATA_DIR),
+    );
     this.isUserInitiated = options.isUserInitiated || false;
     this.callbackSource = options.callbackSource || null;
     this.scheduleTaskId = options.scheduleTaskId || null;
@@ -177,6 +231,7 @@ class ClaudeSession {
     this.anthropicBaseUrl = options.anthropicBaseUrl;
     this.extraEnv = options.extraEnv;
     this.extraOption = options.extraOption;
+    this.thinking = options.thinking ?? null;
     this.context = options.context;
     this.spawnProcess();
   }
@@ -191,6 +246,7 @@ class ClaudeSession {
       pluginDirs: this.pluginDirs,
       outputStyle: this.outputStyle,
       extraOption: this.extraOption,
+      thinking: this.thinking,
       needsResume: this.needsResume,
       sessionId: this.sessionId,
     });
@@ -234,7 +290,11 @@ class ClaudeSession {
     const sink = this.continuationSink;
     if (!sink) return;
     this.continuationSink = null;
-    if (!force && !this.bgTracker.hasPending() && !this.bgTracker.continuationArmed) return;
+    // An injected message that was never echoed back, or one already consumed into a spontaneous
+    // turn that never arrived, is work the caller is still waiting on — seal it like pending
+    // background work rather than dropping the sink silently.
+    const injectionOutstanding = this.pendingInjections.length > 0 || this.injectionContinuationArmed;
+    if (!force && !this.bgTracker.hasPending() && !this.bgTracker.continuationArmed && !injectionOutstanding) return;
     const result: AgentResult = {
       sessionId: this.sessionId,
       total_cost_usd: null, num_turns: null,
@@ -250,8 +310,8 @@ class ClaudeSession {
   private spawnProcess(): void {
     const env = buildClaudeEnv(this.channel, this.sessionId, this.callbackSource, this.scheduleTaskId, this.anthropicBaseUrl, this.extraEnv, this.context);
     const spawnOptions = this.toSpawnOptions();
-    // Template thread sessions load only the core MCP server (remote_* tools).
-    // Default / direct sessions load both core and ext servers.
+    // CORE_MCP_CONFIG marks template threads; spawn args add task, answer, and control layers.
+    // Default/direct sessions use the full core + tasks + manager-answer + ext config.
     if (this.context?.useCoreMcp) {
       spawnOptions.mcpConfigPath = CORE_MCP_CONFIG;
     }
@@ -263,6 +323,13 @@ class ClaudeSession {
     // cortex-feishu MCP server so the agent can read/write Feishu documents. buildSpawnArgs suppresses
     // it for thread/core sessions (CORE_MCP_CONFIG) regardless of this flag.
     spawnOptions.loadFeishuMcp = this.channel.startsWith('feishu:');
+    // Sessions that originate from the Web UI (channel carries the `web:` prefix) load the cortex-web
+    // MCP server so the agent can send files into the chat via send_file. buildSpawnArgs suppresses
+    // it for thread/core sessions (CORE_MCP_CONFIG) regardless of this flag.
+    spawnOptions.loadWebMcp = this.channel.startsWith('web:');
+    // User-message-initiated (non-thread) print sessions get the cortex-tui-bridge interaction
+    // tools; buildSpawnArgs suppresses them for thread/core sessions (CORE_MCP_CONFIG).
+    spawnOptions.isUserInitiated = this.isUserInitiated;
     const args = buildSpawnArgs(spawnOptions);
     log.info(`Spawning persistent process: ${this.sessionId.substring(0, 8)} ${this.needsResume ? '(resume)' : '(new)'}`);
 
@@ -304,8 +371,11 @@ class ClaudeSession {
       turnCount: 0,
       onProgress: options.onProgress || null,
       onAssistantMessage: options.onAssistantMessage || null,
+      onAssistantDelta: options.onAssistantDelta || null,
       onToolUse: options.onToolUse || null,
+      onToolResult: options.onToolResult || null,
       onCompact: options.onCompact || null,
+      onContextUsage: options.onContextUsage || null,
       rawStream: streams.rawStream,
       txtStream: streams.txtStream,
       killed: false,
@@ -322,12 +392,83 @@ class ClaudeSession {
     this.continuationSink = null;
   }
 
+  /** Register/replace the injection delivery-ack sink. Lifetime mirrors continuationSink. */
+  setInjectionAckSink(sink: InjectionAckSink): void {
+    this.injectionAck = sink;
+  }
+
+  clearInjectionAckSink(): void {
+    this.injectionAck = null;
+  }
+
+  /**
+   * Deliver a user message into the turn already in flight.
+   *
+   * Writes the SAME NDJSON user line a normal turn writes, but registers NO turn: the message is
+   * absorbed by the run already in progress, so the already-awaited turn promise covers it and no
+   * second result is fabricated. Cost/turn accounting stays with the running turn.
+   *
+   * Where it lands is a race the caller cannot control, so both outcomes are wired here:
+   *   - tool-result boundary → folds into the running turn, ONE result. Nothing extra
+   *     to do; the turn's own callbacks carry the reply.
+   *   - mid-text-generation → the CLI drains its queue only after this turn's result and then
+   *     starts a turn of its own. The echo handler arms the existing spontaneous-turn
+   *     path so that reply is captured by continuationSink instead of dropped.
+   *
+   * Returns false when there is no live process or no active turn — the caller then falls back to
+   * the normal queue.
+   */
+  injectUserMessage(message: UserMessage): boolean {
+    if (!this.alive || !this.proc?.stdin) return false;
+    // No turn in flight ⇒ nothing to inject INTO. A message written here would open an untracked
+    // turn whose reply nobody is awaiting; the caller must enqueue it as a normal turn instead.
+    if (!this.currentTurn) return false;
+
+    const files = (message.attachments || []).map((a) => ({
+      mimetype: a.mimeType, localPath: a.path, name: path.basename(a.path),
+    }));
+    const prompt = buildPrompt(message.text, files);
+    try {
+      this.writeTurnStdin(prompt);
+    } catch {
+      // writeTurnStdin already marked the session dead and rejected the in-flight turn — the pipe
+      // is gone, so report "cannot inject" rather than propagating into the caller's routing.
+      return false;
+    }
+    this.pendingInjections.push({ prompt, text: message.text });
+    this.resetIdleTimer();
+    this.bumpTurnIdleTimer();
+    log.info(`Injected mid-turn message into ${this.sessionId.substring(0, 8)} (${prompt.length} chars)`);
+    return true;
+  }
+
+  /**
+   * Handle a `--replay-user-messages` echo. The CLI echoes EVERY user message, so most echoes are
+   * the turn's own opening prompt and must be ignored; only an echo matching the head of the
+   * pending-injection queue is a delivery ack. Nothing else in the system reads these events.
+   */
+  private handleReplayEcho(data: any): void {
+    const text = extractReplayText(data);
+    if (text === null) return;
+    const head = this.pendingInjections[0];
+    if (!head || head.prompt !== text) return; // the turn's own prompt (or a tool_result carrier)
+    this.pendingInjections.shift();
+    // Consumed with no turn in flight ⇒ this is the post-result outcome: the CLI is starting a turn
+    // of its own. Arm the spontaneous-turn capture before its first assistant line arrives.
+    const foldedIntoTurn = !!this.currentTurn;
+    if (!foldedIntoTurn) this.injectionContinuationArmed = true;
+    const ack = this.injectionAck;
+    if (!ack) return;
+    try { ack.onDelivered({ text: head.text, foldedIntoTurn }); }
+    catch (e) { log.warn('injection onDelivered threw:', (e as Error).message); }
+  }
+
   /** Open a synthetic turn to capture the spontaneous continuation the CLI emits after a
    *  background task finishes. Its assistant text / result are routed to continuationSink
    *  (not to a send() promise — there is no caller awaiting it). */
-  private openContinuationTurn(): void {
+  private openContinuationTurn(label = '[background-task continuation]'): void {
     this.bgTracker.disarmContinuation();
-    const streams = this.createTurnStreams('[background-task continuation]');
+    const streams = this.createTurnStreams(label);
     const sink = this.continuationSink;
     this.currentTurn = {
       resolve: (value: any) => { try { sink?.onResult(value as AgentResult); } catch (e) { log.warn('continuation onResult threw:', (e as Error).message); } },
@@ -342,8 +483,16 @@ class ClaudeSession {
       turnCount: 0,
       onProgress: null,
       onAssistantMessage: sink ? (text: string) => { try { sink.onAssistantText(text); } catch (e) { log.warn('continuation onAssistantText threw:', (e as Error).message); } } : null,
-      onToolUse: sink?.onToolUse ? (name: string, input: any) => { try { sink.onToolUse!(name, input); } catch {} } : null,
+      // A spontaneous background-task continuation has no caller awaiting it and reaches the UI
+      // through the sink's complete messages only — nothing streams a preview for it.
+      onAssistantDelta: null,
+      onToolUse: sink?.onToolUse ? (name: string, input: any, toolUseId: string) => { try { sink.onToolUse!(name, input, toolUseId); } catch {} } : null,
+      onToolResult: sink?.onToolResult ? (toolUseId: string, content: string, isError: boolean) => { try { sink.onToolResult!(toolUseId, content, isError); } catch {} } : null,
       onCompact: null,
+      onContextUsage: sink?.onContextUsage ? (usage: ContextUsage) => {
+        try { sink.onContextUsage!(usage); }
+        catch (e) { log.warn('continuation onContextUsage threw:', (e as Error).message); }
+      } : null,
       rawStream: streams.rawStream,
       txtStream: streams.txtStream,
       killed: false,
@@ -385,9 +534,12 @@ class ClaudeSession {
     scheduleTaskId?: string | null;
     isUserInitiated?: boolean;
     onProgress?: ((progress: any) => void) | null;
-    onAssistantMessage?: ((text: string) => void) | null;
-    onToolUse?: ((name: string, input: any) => void) | null;
+    onAssistantMessage?: ((text: string, blockId?: string) => void) | null;
+    onAssistantDelta?: ((text: string, blockId: string) => void) | null;
+    onToolUse?: ((name: string, input: any, toolUseId: string) => void) | null;
+    onToolResult?: ((toolUseId: string, content: string, isError: boolean) => void) | null;
     onCompact?: ((info: { trigger: string; preTokens?: number }) => void) | null;
+    onContextUsage?: ((usage: ContextUsage) => void) | null;
   }): Promise<any> {
     if (!this.alive) {
       this.needsResume = true;
@@ -409,6 +561,41 @@ class ClaudeSession {
     this.turnIdleTimer = null;
     this.resetIdleTimer();
     return result;
+  }
+
+  /** Invoke Claude Code's local slash handler without recording a Cortex user turn. */
+  async compact(): Promise<AgentCompactResult> {
+    let confirmed = false;
+    let tokensBefore: number | null = null;
+    const result = await this.sendMessage('/compact', {
+      onCompact: (info) => {
+        confirmed = true;
+        tokensBefore = typeof info.preTokens === 'number' ? info.preTokens : null;
+      },
+    });
+    if (result.finalOutput?.trim() === 'Error: No messages to compact') {
+      return {
+        status: 'not-needed', tokensBefore: null, estimatedTokensAfter: null,
+        contextUsage: null, usage: null,
+      };
+    }
+    if (!confirmed) throw new Error('Claude did not confirm compaction with compact_boundary');
+    return {
+      status: 'compacted', tokensBefore, estimatedTokensAfter: null,
+      contextUsage: null, usage: this.compactUsage(result),
+    };
+  }
+
+  private compactUsage(result: AgentResult): AgentCompactUsage | null {
+    const tokens = this.lastTokenUsage;
+    if (!tokens && !result.total_cost_usd) return null;
+    return {
+      inputTokens: tokens?.input ?? 0,
+      outputTokens: tokens?.output ?? 0,
+      cacheReadTokens: tokens?.cacheRead ?? 0,
+      cacheWriteTokens: tokens?.cacheCreation ?? 0,
+      costUsd: result.total_cost_usd,
+    };
   }
 
   private bumpTurnIdleTimer(): void {
@@ -468,6 +655,30 @@ class ClaudeSession {
     else turn.reject(result.error);
   }
 
+  /** Preserve the complete result carrier that print mode emits as a `user` content block. */
+  private handleToolResultEvent(turn: PendingTurn, data: any): void {
+    if (typeof turn.onToolResult !== 'function') return;
+    const content = data.message?.content;
+    if (!Array.isArray(content)) return;
+    for (const block of content) {
+      if (!block || block.type !== 'tool_result') continue;
+      const toolUseId = typeof block.tool_use_id === 'string' ? block.tool_use_id : '';
+      let resultContent: string;
+      if (typeof block.content === 'string') {
+        resultContent = block.content;
+      } else if (Array.isArray(block.content)) {
+        const allText = block.content.every((item: any) => item?.type === 'text' && typeof item.text === 'string');
+        resultContent = allText
+          ? block.content.map((item: any) => item.text).join('\n')
+          : JSON.stringify(block.content);
+      } else {
+        resultContent = JSON.stringify(block.content ?? '');
+      }
+      try { turn.onToolResult(toolUseId, resultContent, block.is_error === true); }
+      catch (e) { log.warn('onToolResult threw:', (e as Error).message); }
+    }
+  }
+
   private handleAssistantEvent(turn: PendingTurn, data: any): void {
     turn.turnCount += 1;
     for (const block of (data.message?.content || [])) {
@@ -483,14 +694,19 @@ class ClaudeSession {
           turn.exitedPlanMode = true;
         }
         if (typeof turn.onToolUse === 'function') {
-          try { turn.onToolUse(block.name || '?', block.input || {}); }
+          try { turn.onToolUse(block.name || '?', block.input || {}, typeof block.id === 'string' ? block.id : ''); }
           catch (e) { log.warn('onToolUse threw:', (e as Error).message); }
         }
       }
       if (block.type === 'text' && block.text) {
         turn.finalOutput = block.text;
         if (block.text.length > (turn.longestOutput?.length || 0)) turn.longestOutput = block.text;
-        if (typeof turn.onAssistantMessage === 'function') turn.onAssistantMessage(block.text);
+        // Adopt the id of the text block that just streamed, so the UI can replace its accumulated
+        // preview with this authoritative text instead of appending a second row. The block's own
+        // position in `message.content` cannot serve: the CLI sends one assistant event per block,
+        // so that position is always 0 while the streamed index may be any number.
+        const blockId = takeTextBlockId(this.streamDeltaState) ?? undefined;
+        if (typeof turn.onAssistantMessage === 'function') turn.onAssistantMessage(block.text, blockId);
       }
     }
     if (typeof turn.onProgress === 'function') {
@@ -498,16 +714,46 @@ class ClaudeSession {
     }
   }
 
+  private emitContextUsage(data: unknown): void {
+    const usage = this.contextUsageTracker.observe(data);
+    const callback = this.currentTurn?.onContextUsage;
+    if (!usage || typeof callback !== 'function') return;
+    try { callback(usage); }
+    catch (e) { log.warn('onContextUsage threw:', (e as Error).message); }
+  }
+
   private handleLine(line: string) {
     if (!line) return;
     this.resetIdleTimer();
     this.bumpTurnIdleTimer();
+
+    let parsed: any;
+    let isJson = false;
+    try { parsed = JSON.parse(line); isJson = true; } catch { /* handled below */ }
+
+    // `stream_event` lines are the token-level preview of a block the CLI will also deliver
+    // complete. They dominate stdout once --include-partial-messages is on (measured: 74-86% of
+    // all lines), and everything they carry is repeated verbatim by the complete event, so they
+    // are deliberately kept out of the per-turn raw jsonl and the daemon log. Handled first, and
+    // separately, because everything below is about complete events.
+    if (isJson && parsed?.type === 'stream_event') {
+      this.emitContextUsage(parsed);
+      const delta = parseStreamEvent(parsed, this.streamDeltaState);
+      if (delta && typeof this.currentTurn?.onAssistantDelta === 'function') {
+        try { this.currentTurn.onAssistantDelta(delta.text, delta.blockId); }
+        catch (e) { log.warn('onAssistantDelta threw:', (e as Error).message); }
+      }
+      return;
+    }
+
     if (this.currentTurn?.rawStream) this.currentTurn.rawStream.write(line + '\n');
 
     try {
-      const data = JSON.parse(line);
-      // Context compaction boundary: Claude emits a system/compact_boundary line the instant it
-      // decides to compact. Surface it to the active turn so observers (e.g. Slack) can notify.
+      const data = parsed;
+      if (!isJson) throw new Error('not json');
+      // Context compaction boundary: invalidate the old provider-call cursor immediately, then
+      // surface the boundary to the active turn so observers (e.g. Slack) can notify.
+      if (data.type === 'system' && data.subtype === 'compact_boundary') this.emitContextUsage(data);
       if (data.type === 'system' && data.subtype === 'compact_boundary' && this.currentTurn?.onCompact) {
         const meta = data.compact_metadata ?? {};
         try {
@@ -519,18 +765,31 @@ class ClaudeSession {
       }
       if (data.type === 'rate_limit_event' && data.rate_limit_info) {
         const mode = this.anthropicBaseUrl?.match(/\/m\/([^/]+)\//)?.[1] || undefined;
-        handleRateLimitEvent(data.rate_limit_info, mode).catch(e => log.error('handleRateLimitEvent error:', e));
+        handleRateLimitEvent(data.rate_limit_info, {
+          provider: 'anthropic', displayName: 'Anthropic', mode,
+        }).catch(e => log.error('handleRateLimitEvent error:', e));
       }
+      // `--replay-user-messages` echo: the CLI's delivery ack for an injected message.
+      // Handled here and nowhere else — it is deliberately NOT fed to turn bookkeeping, background
+      // tracking, or conversation history (a `user` record there would shift every later turn
+      // index and break edit/rewind). Replays are inert for every other consumer.
+      if (data.type === 'user' && data.isReplay) this.handleReplayEcho(data);
+      if (data.type === 'user' && !data.isReplay && this.currentTurn) this.handleToolResultEvent(this.currentTurn, data);
       // Track background-task lifecycle on every line (even with no active turn) so the
       // pending count stays accurate across the turn boundary.
       this.bgTracker.observe(data);
-      // No active turn: a background task that just finished re-invokes the model and the
-      // CLI emits a spontaneous continuation turn. Open a synthetic turn for it so its
+      // No active turn, and the model just started speaking anyway: either a background task
+      // finished (bgTracker armed) or an injected message was consumed after this turn's result
+      // Both make the CLI open a turn of its own — open a synthetic turn for it so its
       // output is routed (to continuationSink) instead of being dropped.
-      if (!this.currentTurn && this.continuationSink && routeLine(this.bgTracker, data, false) === 'open-continuation') {
-        this.openContinuationTurn();
+      if (!this.currentTurn && this.continuationSink && data.type === 'assistant'
+          && (this.injectionContinuationArmed || routeLine(this.bgTracker, data, false) === 'open-continuation')) {
+        const fromInjection = this.injectionContinuationArmed;
+        this.injectionContinuationArmed = false;
+        this.openContinuationTurn(fromInjection ? '[injected-message continuation]' : '[background-task continuation]');
       }
       if (data.type === 'result' && this.currentTurn) {
+        this.emitContextUsage(data);
         this.handleResultEvent(this.currentTurn, data);
         return;
       }
@@ -553,10 +812,11 @@ class ClaudeSession {
 
   private resetIdleTimer() {
     if (this.idleTimer) clearTimeout(this.idleTimer);
-    // While background tasks are still running, the session must stay alive to receive the
-    // spontaneous continuation turn — even through a long silent wait. Don't arm idle-close
-    // (the overall maxTimer still bounds session lifetime).
-    if (this.bgTracker.hasPending()) {
+    // While background tasks are still running — or an injected message is queued inside the CLI
+    // awaiting its spontaneous turn — the session must stay alive to receive the continuation,
+    // even through a long silent wait. Don't arm idle-close (the overall maxTimer still bounds
+    // session lifetime).
+    if (this.bgTracker.hasPending() || this.pendingInjections.length > 0 || this.injectionContinuationArmed) {
       this.idleTimer = null;
       return;
     }
@@ -643,6 +903,15 @@ export function closeSession(channel: string, sessionKey?: string): void {
   if (session) session.close();
 }
 
+/** Hard-stop the pooled session for a channel (SIGTERM, same path the foreground Stop takes via
+ *  handle.kill()). Unlike closeSession's graceful stdin-end + 30s grace, this ends the process now
+ *  — used by the Stop path to actually kill background tasks still running inside it after the
+ *  foreground turn ended. Returns false when no live session exists for the key. */
+export function killSession(channel: string, sessionKey?: string): boolean {
+  const session = sessions.get(sessionKey || channel);
+  return session ? session.kill() : false;
+}
+
 /** Close all sessions whose key starts with the given prefix (used by Thread cleanup). */
 export function closeSessionsByPrefix(prefix: string): void {
   for (const [key, session] of sessions) {
@@ -667,7 +936,8 @@ export interface RunClaudeOptions {
   isUserInitiated?: boolean;
   onProgress?: any;
   onAssistantMessage?: any;
-  onToolUse?: ((name: string, input: any) => void) | null;
+  onToolUse?: ((name: string, input: any, toolUseId: string) => void) | null;
+  onToolResult?: ((toolUseId: string, content: string, isError: boolean) => void) | null;
   sessionKey?: string | null;
   claudeAgent?: string | null;
   systemPrompt?: string | null;
@@ -709,6 +979,7 @@ export function runClaude(userMessage: string, opts: RunClaudeOptions) {
     onProgress: opts.onProgress ?? null,
     onAssistantMessage: opts.onAssistantMessage ?? null,
     onToolUse: opts.onToolUse ?? null,
+    onToolResult: opts.onToolResult ?? null,
   });
   return { promise, kill() { return session.kill(); }, sessionId: effectiveSessionId };
 }
@@ -758,8 +1029,9 @@ function getOrCreateTuiSession(config: AgentSpawnConfig, sessionIdEffective: str
       pluginDirs: opts.pluginDirs,
       outputStyle: opts.outputStyle,
       extraOption: opts.extraOption ?? null,
-      // Mirror the print-mode rule (spawnProcess): template thread sessions load only the core MCP
-      // server. buildSpawnArgs reads this CORE_MCP_CONFIG marker to also suppress the TUI bridge.
+      thinking: opts.thinking ?? null,
+      // Mirror print mode: CORE_MCP_CONFIG marks template threads. buildSpawnArgs adds task and
+      // control-plane layers while suppressing the direct-session TUI bridge.
       mcpConfigPath: opts.context?.useCoreMcp ? CORE_MCP_CONFIG : undefined,
       callbackSource: opts.callbackSource,
       scheduleTaskId: opts.scheduleTaskId,
@@ -819,6 +1091,7 @@ function sessionOptionsFromSpawnConfig(config: AgentSpawnConfig): ClaudeSessionO
     anthropicBaseUrl: config.anthropicBaseUrl,
     extraEnv: config.env,
     extraOption: config.extraOption,
+    thinking: config.thinking ?? null,
     context: config.cortexContext,
   };
 }
@@ -838,9 +1111,11 @@ function computeSpawnArgsForConfig(config: AgentSpawnConfig): string[] {
     pluginDirs: opts.pluginDirs ?? null,
     outputStyle: opts.outputStyle ?? null,
     extraOption: opts.extraOption,
+    thinking: opts.thinking ?? null,
     needsResume: opts.needsResume,
     sessionId: opts.sessionIdEffective,
   });
+  spawnOptions.isUserInitiated = config.isUserInitiated;
   return buildSpawnArgs(spawnOptions);
 }
 
@@ -875,11 +1150,20 @@ export class ClaudeAdapter implements AgentAdapter {
         try {
           const result = await session.sendMessage(message.text, {
             files,
-            onAssistantMessage: (text: string) => stream.push({ type: 'assistant_text', text }),
-            onToolUse: (name: string, input: any) =>
-              stream.push({ type: 'tool_use', toolUseId: '', name, input }),
+            onAssistantMessage: (text: string, blockId?: string) =>
+              stream.push({ type: 'assistant_text', text, ...(blockId ? { blockId } : {}) }),
+            // Token-level preview of the block above. Same FIFO stream, so every delta is delivered
+            // before the complete message that supersedes it.
+            onAssistantDelta: (text: string, blockId: string) =>
+              stream.push({ type: 'assistant_delta', text, blockId }),
+            onToolUse: (name: string, input: any, toolUseId: string) =>
+              stream.push({ type: 'tool_use', toolUseId, name, input }),
+            onToolResult: (toolUseId: string, content: string, isError: boolean) =>
+              stream.push({ type: 'tool_result', toolUseId, content, ok: !isError }),
             onCompact: (info: { trigger: string; preTokens?: number }) =>
               stream.push({ type: 'context_compacted', trigger: info.trigger, preTokens: info.preTokens }),
+            onContextUsage: (usage: ContextUsage) =>
+              stream.push({ type: 'context_usage', ...usage }),
             onProgress: (p: { num_turns?: number } | null) => {
               stream.push({ type: 'turn_progress', numTurns: p?.num_turns ?? 0 });
             },
@@ -930,7 +1214,10 @@ export class ClaudeAdapter implements AgentAdapter {
         }
       },
       events: stream.iterable,
+      compact: (): Promise<AgentCompactResult> => session.compact(),
       setContinuationSink(sink: ContinuationSink): void { session.setContinuationSink(sink); },
+      injectUserMessage(message: UserMessage): boolean { return session.injectUserMessage(message); },
+      setInjectionAckSink(sink: InjectionAckSink): void { session.setInjectionAckSink(sink); },
       // Intentionally does NOT call session.close(): sessions are pooled per sessionKey and
       // reused across runAgentOnce turns. Pool-level cleanup goes through ClaudeAdapter.close(key)
       // or the legacy closeSession / closeSessionsByPrefix exports.
@@ -1048,13 +1335,21 @@ export function recoverTuiOrphans(exec?: TmuxExec): { found: string[]; killed: s
  *  testing handleLine / continuation routing. Initializes only the fields the line
  *  handlers touch. Callers should stub createTurnStreams to avoid log file I/O and
  *  register cleanup via t.after(() => session.close()) to clear the idle timer. */
-function makeSessionForTest(): ClaudeSession {
+function makeSessionForTest(
+  modelName: string | null = null,
+  autoCompactWindow: number | null = null,
+): ClaudeSession {
   const s = Object.create(ClaudeSession.prototype) as any;
   s.sessionId = 'test-session';
   s.channel = 'test';
   s.sessionKey = 'test';
   s.bgTracker = new BgTaskTracker();
+  s.streamDeltaState = createStreamDeltaState();
+  s.contextUsageTracker = new ClaudeContextUsageTracker(modelName, autoCompactWindow);
   s.continuationSink = null;
+  s.pendingInjections = [];
+  s.injectionAck = null;
+  s.injectionContinuationArmed = false;
   s.currentTurn = null;
   s.idleTimer = null;
   s.turnIdleTimer = null;

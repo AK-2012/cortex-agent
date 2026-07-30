@@ -2,7 +2,7 @@
 // output: verify profile generation: explicit choices, lexicographic listChoices, fallback plumb-through, no auto provider-specific profiles
 // pos:    Validate profile-generator pure logic (no filesystem in generateProfiles/mergeProfilesJson)
 
-import test from 'node:test';
+import { test } from 'vitest';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -48,7 +48,7 @@ test('generateProfiles: empty endpoints returns minimal plan-only profile', () =
 
 // ─── No auto-generated provider-specific profiles ────────────────
 
-test('generateProfiles: never generates deepseek-pro / deepseek-flash / codex profiles', () => {
+test('generateProfiles: never generates provider-specific tier profiles', () => {
   const result = generateProfiles([ANTHROPIC_PLAN, DEEPSEEK, OPENAI_CODEX]);
   for (const name of Object.keys(result.profiles)) {
     assert.ok(name === 'plan' || name === 'execute',

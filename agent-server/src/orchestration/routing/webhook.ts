@@ -1,4 +1,4 @@
-// input:  GitHub push, task-op, thread-op, manager-qa, remote cmd, hook HTTP events
+// input:  MCP sidecars, GitHub push, remote commands, hook events
 // output: startWebhookServer
 // pos:    GitHub/task-op/thread-op/manager-qa/hook webhook HTTP entry point
 // >>> If I am updated, update my header comment and the parent folder's CORTEX.md <<<
@@ -12,6 +12,8 @@ import { taskMutator } from '@domain/tasks/mutator.js';
 import { sendCommand, isDeviceOnline, getOnlineDevices } from '@domain/remote/client-manager.js';
 import { registerDispatchExecution } from '@domain/executions/registry.js';
 import { registerAskQuestion, registerPlanApproval } from './hook-bridge.js';
+import { normalizeAskLevel } from '@platform/index.js';
+import { sessionStore } from '@store/session-registry-repo.js';
 import { getCurrentPlanFilePath } from '@domain/agents/index.js';
 import { ctx as jobCtx } from '@domain/scheduling/job-registry.js';
 import { createThread, cancelThread, readArtifact, listTemplates, listAgents, checkSpawnGuards, getRootThreadId, registerChildSpawn, buildThreadTree, getTreeThreads, buildContractPrompt, buildMissionChain, isArtifactUnchangedSinceStepStart } from '@domain/threads/index.js';
@@ -22,6 +24,7 @@ import { buildStatusActionBlocks, buildSealedStatusActionBlocks, initStatusBlock
 import { threadStore } from '@store/thread-repo.js';
 import { fireThreadCallback } from '../thread-callback.js';
 import { askManager, getAnswer, submitAnswer } from '../manager-qa.js';
+import { sendAgentFile } from '../agent-file-send.js';
 import type { Destination, MessageRef } from '@platform/index.js';
 import type { RunThreadOptions } from '@core/types/thread-types.js';
 
@@ -108,6 +111,41 @@ const TASK_OP_HANDLERS = {
   resume: (data) => taskMutator.resume(data.task_id),
 };
 
+// --- /hook/ask-user-question (hook-facing ask API: level + sessionId→channel resolution) ---
+
+/** Resolve a session's bound conduit channel from the session registry, or null. */
+async function resolveSessionChannel(sessionId: unknown): Promise<string | null> {
+  if (typeof sessionId !== 'string' || !sessionId) return null;
+  const name = await sessionStore.lookupBySessionId(sessionId);
+  if (!name) return null;
+  const record = await sessionStore.lookupSession(name);
+  return record?.channel ?? null;
+}
+
+async function handleAskUserQuestion(data: any, res: http.ServerResponse): Promise<void> {
+  const { sessionId, questions, dryRun, threadId } = data;
+  const level = data.level === undefined ? null : normalizeAskLevel(data.level);
+  if (data.level !== undefined && !level) {
+    res.writeHead(400);
+    res.end(JSON.stringify({ error: `invalid level '${data.level}' (valid: info, warn, warning, error)` }));
+    return;
+  }
+  const channel = data.channel || await resolveSessionChannel(sessionId);
+  if (!channel || !questions?.length) {
+    res.writeHead(400);
+    res.end(JSON.stringify({ error: 'channel and questions required (channel may be resolved from a registered sessionId)' }));
+    return;
+  }
+  try {
+    const requestId = crypto.randomUUID();
+    const result = await registerAskQuestion(requestId, channel, sessionId, questions, dryRun === true, threadId, level);
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(result));
+  } catch (e) {
+    res.writeHead(500); res.end(JSON.stringify({ error: (e as Error).message }));
+  }
+}
+
 function createWebhookHandler(_options: {
   // `secret` (GitHub HMAC) is read at call time via getSecret(); kept in the type for
   // backward-compatible option passing from startWebhookServer.
@@ -182,6 +220,31 @@ function createWebhookHandler(_options: {
         } catch (e) {
           log.error(`task-op error: ${e.message}`);
           res.writeHead(500); res.end(JSON.stringify({ success: false, message: e.message }));
+        }
+      });
+      return;
+    }
+
+    // --- Agent-sent file (from the web-only cortex-web MCP `send_file` tool) ---
+    // The MCP server runs as a separate subprocess with no access to the daemon's conversation
+    // history or EventBus, so it proxies the file here. The daemon copies the file into the
+    // session's workspace/outputs area, records it on the transcript, and publishes the live event.
+    if (req.method === 'POST' && req.url === '/webhook/ui-file') {
+      readJsonBody(req, async (error, _body, data) => {
+        if (error) { res.writeHead(400); res.end('Bad JSON'); return; }
+        const { sessionId, filePath, fileName, caption } = data || {};
+        if (!sessionId || !filePath) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ success: false, error: 'sessionId and filePath required' }));
+          return;
+        }
+        try {
+          const meta = await sendAgentFile({ sessionId, filePath, fileName, caption });
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ success: true, data: meta }));
+        } catch (e) {
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ success: false, error: (e as Error).message }));
         }
       });
       return;
@@ -443,7 +506,7 @@ function createWebhookHandler(_options: {
       return;
     }
 
-    // --- Manager Q&A (DR-0016 up-ask channel, from cortex-core MCP sidecar) ---
+    // --- Manager Q&A (up-ask channel, from thread and manager-Q&A MCP sidecars) ---
     // ask:   a subtask registers a clarifying question → routed to its manager (woken) or a human.
     // poll:  the ask_manager tool polls this until the answer is present (synchronous block).
     // answer: the manager's answer_subtask tool (or a human reply) records the answer.
@@ -490,19 +553,7 @@ function createWebhookHandler(_options: {
     if (req.method === 'POST' && req.url === '/hook/ask-user-question') {
       readJsonBody(req, async (error, _body, data) => {
         if (error) { res.writeHead(400); res.end('Bad JSON'); return; }
-        const { sessionId, channel, questions, dryRun, threadId } = data;
-        if (!channel || !questions?.length) {
-          res.writeHead(400); res.end(JSON.stringify({ error: 'channel and questions required' }));
-          return;
-        }
-        try {
-          const requestId = crypto.randomUUID();
-          const result = await registerAskQuestion(requestId, channel, sessionId, questions, dryRun === true, threadId);
-          res.writeHead(200, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify(result));
-        } catch (e) {
-          res.writeHead(500); res.end(JSON.stringify({ error: (e as Error).message }));
-        }
+        await handleAskUserQuestion(data, res);
       });
       return;
     }

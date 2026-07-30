@@ -4,16 +4,16 @@ import { SkillsView } from './SkillsView';
 
 // Route /skills — desktop Skills browser (plan §12 A item 2 / 8a). Reuses the 1:1 LeftRail +
 // RightPanel; only the center pane renders SkillsView. Frame flex identical to WorkbenchPage /
-// OverviewPage / MemoryPage: 240px LeftRail / fluid center / 400px RightPanel.
+// OverviewPage / MemoryPage: 340px LeftRail / fluid center / 400px RightPanel.
 export function SkillsPage(): JSX.Element {
   return (
     <div
       style={{
         height: '100vh',
         minHeight: 640,
-        minWidth: 1180,
+        minWidth: 1280,
         display: 'flex',
-        background: '#fff',
+        background: 'var(--proto-card)',
         overflow: 'hidden',
       }}
     >

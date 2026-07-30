@@ -1,9 +1,9 @@
-// input:  hook-bridge.ts pure functions + session-activity-tracker subprocess
-// output: PI hook bridge toClaude/normalizePiInput/handlePre/Post tests
-// pos:    task d3ae PI hook bridge regression test
+// input:  hook-bridge functions + hook subprocesses
+// output: PI hook lifecycle and CORTEX injection regressions
+// pos:    Verifies PI-to-Cortex hook bridge behavior
 // >>> If I am updated, update my header comment and the parent folder's CORTEX.md <<<
 
-import test from 'node:test';
+import { test } from 'vitest';
 import assert from 'node:assert/strict';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
@@ -159,7 +159,7 @@ test('handlePostToolUse integration: session-activity-tracker writes read_file t
   const sessionId = `test-hook-bridge-${process.pid}-${Date.now()}`;
   const cortexHome = fs.mkdtempSync(path.join(os.tmpdir(), 'hook-bridge-'));
   process.env.CORTEX_HOME = cortexHome;
-  t.after(() => { delete process.env.CORTEX_HOME; fs.rmSync(cortexHome, { recursive: true, force: true }); });
+  t.onTestFinished(() => { delete process.env.CORTEX_HOME; fs.rmSync(cortexHome, { recursive: true, force: true }); });
   const logFile = path.join(cortexHome, 'logs', 'session-activity', `${sessionId}.jsonl`);
 
   // Clean up any prior run
@@ -199,18 +199,93 @@ test('handlePostToolUse integration: session-activity-tracker writes read_file t
 });
 
 // ---------------------------------------------------------------------------
-// Test 6: before_agent_start → cortex-md-injector → event.systemPrompt mutation
+// Test 6: handlePostToolUse — Edit receives CORTEX.md context parity
+// ---------------------------------------------------------------------------
+
+test('handlePostToolUse: Edit injects unseen CORTEX.md ancestor context', (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'pi-edit-cortex-'));
+  const cortexHome = fs.mkdtempSync(path.join(os.tmpdir(), 'pi-edit-cortex-home-'));
+  const previousHome = process.env.CORTEX_HOME;
+  process.env.CORTEX_HOME = cortexHome;
+  t.onTestFinished(() => {
+    if (previousHome === undefined) delete process.env.CORTEX_HOME;
+    else process.env.CORTEX_HOME = previousHome;
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(cortexHome, { recursive: true, force: true });
+  });
+
+  const target = path.join(root, 'target.txt');
+  fs.writeFileSync(path.join(root, 'CORTEX.md'), 'pi-edit-ancestor-rule');
+  fs.writeFileSync(target, 'after edit');
+
+  const result = handlePostToolUse({
+    toolName: 'edit',
+    toolCallId: 'tc-edit-cortex',
+    input: { path: target, old_string: 'before', new_string: 'after' },
+    content: [{ type: 'text', text: 'edited' }],
+    details: undefined,
+    isError: false,
+  }, makeCtx(`/fake/sessions/pi-edit-cortex-${process.pid}-${Date.now()}.jsonl`));
+
+  assert.ok(result, 'Edit should return augmented content');
+  assert.ok(result.content, 'Edit should include content blocks');
+  assert.ok(JSON.stringify(result.content).includes('pi-edit-ancestor-rule'));
+});
+
+// ---------------------------------------------------------------------------
+// Test 7: PI child hook preserves the stable Cortex cache session identity
+// ---------------------------------------------------------------------------
+
+test('runHookScript keeps CORTEX.md cache on the parent stable session id', (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'pi-stable-cache-'));
+  const cortexHome = fs.mkdtempSync(path.join(os.tmpdir(), 'pi-stable-cache-home-'));
+  const previousHome = process.env.CORTEX_HOME;
+  const previousSession = process.env.CORTEX_SESSION_ID;
+  const stableSessionId = `pi-track-${process.pid}-${Date.now()}`;
+  const backendSessionId = `${stableSessionId}-backend`;
+  process.env.CORTEX_HOME = cortexHome;
+  process.env.CORTEX_SESSION_ID = stableSessionId;
+  t.onTestFinished(() => {
+    if (previousHome === undefined) delete process.env.CORTEX_HOME;
+    else process.env.CORTEX_HOME = previousHome;
+    if (previousSession === undefined) delete process.env.CORTEX_SESSION_ID;
+    else process.env.CORTEX_SESSION_ID = previousSession;
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(cortexHome, { recursive: true, force: true });
+  });
+
+  fs.writeFileSync(path.join(root, 'CORTEX.md'), 'pi-stable-cache-rule');
+  const target = path.join(root, 'target.txt');
+  fs.writeFileSync(target, 'dummy');
+  const hooksDir = path.resolve(_dirname, '../defaults/hooks');
+
+  runHookScript(path.join(hooksDir, 'cortex-md-injector.mjs'), {
+    hook_event_name: 'PostToolUse',
+    session_id: backendSessionId,
+    tool_name: 'Read',
+    tool_input: { file_path: target },
+    tool_use_id: 'tc-stable-cache',
+    cwd: root,
+  });
+
+  const cacheDir = path.join(cortexHome, 'tmp', 'cortexmd-cache');
+  assert.ok(fs.existsSync(path.join(cacheDir, `${stableSessionId}.json`)));
+  assert.ok(!fs.existsSync(path.join(cacheDir, `${backendSessionId}.json`)));
+});
+
+// ---------------------------------------------------------------------------
+// Test 8: before_agent_start → cortex-md-injector → event.systemPrompt mutation
 // ---------------------------------------------------------------------------
 
 test('before_agent_start: runHookScript with cortex-md-injector appends CORTEX.md to event.systemPrompt', async (t) => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pi-before-agent-'));
-  t.after(() => fs.rmSync(tmpDir, { recursive: true, force: true }));
+  t.onTestFinished(() => fs.rmSync(tmpDir, { recursive: true, force: true }));
 
   // Isolate cache directory via CORTEX_HOME so the hook subprocess writes to a temp dir
   const cortexHome = fs.mkdtempSync(path.join(os.tmpdir(), 'pi-bridge-hook-home-'));
   const prevCortexHome = process.env.CORTEX_HOME;
   process.env.CORTEX_HOME = cortexHome;
-  t.after(() => {
+  t.onTestFinished(() => {
     process.env.CORTEX_HOME = prevCortexHome;
     fs.rmSync(cortexHome, { recursive: true, force: true });
   });
@@ -219,7 +294,7 @@ test('before_agent_start: runHookScript with cortex-md-injector appends CORTEX.m
   fs.writeFileSync(path.join(tmpDir, 'CORTEX.md'), 'pi-before-agent-content');
 
   const sessionId = `pi-before-agent-${process.pid}-${Date.now()}`;
-  t.after(() => {
+  t.onTestFinished(() => {
     try { fs.rmSync(path.join(cortexHome, 'tmp', 'cortexmd-cache', `${sessionId}.json`), { force: true }); } catch { /* ignore */ }
   });
 

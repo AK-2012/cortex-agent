@@ -1,9 +1,15 @@
+// input:  config queries, settings panels, Radix Dialog
+// output: global settings modal with section navigation
+// pos:    Desktop settings overlay shell and data bindings
+// >>> If I am updated, update my header comment and CORTEX.md <<<
+
 import * as RadixDialog from '@radix-ui/react-dialog';
 import { useState, type CSSProperties } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useTRPC } from '@/lib/trpc';
 import { useToast } from '@/design';
-import { SETTINGS_NAV, sectionMeta, type SettingsSectionKey } from './settings-nav';
+import { useVocab } from '@/i18n';
+import { getSettingsNav, getSectionMeta, type SettingsSectionKey } from './settings-nav';
 import {
   PlatformPanel,
   ProfilesPanel,
@@ -11,14 +17,15 @@ import {
   TemplatesPanel,
   McpPanel,
   NotificationsPanel,
-  HooksPanel,
   AdvancedPanel,
 } from './SettingsPanels';
 import { BudgetPanel } from './BudgetPanel';
+import { HooksPanel } from './HooksPanel';
+import { AppearancePanel } from './AppearancePanel';
 
 // Settings modal (design 12a–g, prototype.dc.html L721–1088; proto-shot 14-settings.png). Rebuilt
 // 1:1 on Radix Dialog (focus trap / Esc-close / focus-restore + backdrop scrim). Header + 210px left
-// nav + #F7F8FA content area; 9 panels switch client-side. Real config.get data feeds every panel;
+// nav + var(--proto-alt) content area; 9 panels switch client-side. Real config.get data feeds every panel;
 // the Budget panel drives a real config.set write. Raw inline styles/px/hex/font per §8.3.
 
 const MONO = "'IBM Plex Mono',monospace";
@@ -39,7 +46,7 @@ const MODAL_STYLE: CSSProperties = {
   maxWidth: '94vw',
   height: 680,
   maxHeight: '90vh',
-  background: '#fff',
+  background: 'var(--proto-card)',
   borderRadius: 14,
   boxShadow: '0 24px 64px rgba(16,24,40,.3)',
   zIndex: 61,
@@ -66,6 +73,7 @@ export interface SettingsModalProps {
 }
 
 export function SettingsModal({ open, onClose }: SettingsModalProps) {
+  const L = useVocab();
   return (
     <RadixDialog.Root
       open={open}
@@ -80,7 +88,7 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
           style={MODAL_STYLE}
           className="animate-cxmodal focus:outline-none motion-reduce:animate-none"
         >
-          <RadixDialog.Title style={SR_ONLY}>Settings</RadixDialog.Title>
+          <RadixDialog.Title style={SR_ONLY}>{L.settings}</RadixDialog.Title>
           {open ? <SettingsBody onClose={onClose} /> : null}
         </RadixDialog.Content>
       </RadixDialog.Portal>
@@ -89,16 +97,17 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
 }
 
 function SettingsBody({ onClose }: { onClose: () => void }) {
+  const L = useVocab();
   const trpc = useTRPC();
   const queryClient = useQueryClient();
   const { toast } = useToast();
-  const [section, setSection] = useState<SettingsSectionKey>('platform');
+  const [section, setSection] = useState<SettingsSectionKey>('appearance');
 
   const configQuery = useQuery(trpc.config.get.queryOptions({}));
   const costQuery = useQuery(trpc.cost.summary.queryOptions({}));
   const templateEntriesQuery = useQuery(trpc.threadTemplates.get.queryOptions({}));
   const snapshot = configQuery.data;
-  const meta = sectionMeta(section);
+  const meta = getSectionMeta(L, section);
 
   // profiles: a REAL config.set write — re-point defaultProfile, then read back (invalidate).
   const setProfile = useMutation(
@@ -106,9 +115,9 @@ function SettingsBody({ onClose }: { onClose: () => void }) {
       onSuccess: (_d, vars) => {
         queryClient.invalidateQueries(trpc.config.get.queryFilter({}));
         const name = vars.section === 'profiles' ? vars.value.defaultProfile : '';
-        toast({ title: `Default profile → ${name} · profiles.json written`, tone: 'done' });
+        toast({ title: `Default profile → ${name} · ${L.stToastDefaultProfile}`, tone: 'done' });
       },
-      onError: (e) => toast({ title: `Write failed: ${e.message}`, tone: 'failed' }),
+      onError: (e) => toast({ title: `${L.stToastWriteFailed}: ${e.message}`, tone: 'failed' }),
     }),
   );
 
@@ -116,8 +125,8 @@ function SettingsBody({ onClose }: { onClose: () => void }) {
   const requestApproval = useMutation(
     trpc.approvals.request.mutationOptions({
       onSuccess: () =>
-        toast({ title: 'Queued for approval — review in the Approval Center', tone: 'waiting' }),
-      onError: (e) => toast({ title: `Could not queue: ${e.message}`, tone: 'failed' }),
+        toast({ title: L.stToastQueuedApproval, tone: 'waiting' }),
+      onError: (e) => toast({ title: `${L.stToastCouldNotQueue}: ${e.message}`, tone: 'failed' }),
     }),
   );
 
@@ -135,30 +144,30 @@ function SettingsBody({ onClose }: { onClose: () => void }) {
         style={{
           height: 48,
           flex: 'none',
-          borderBottom: '1px solid #E7E9EE',
+          borderBottom: '1px solid var(--proto-line)',
           display: 'flex',
           alignItems: 'center',
           gap: 9,
           padding: '0 18px',
-          background: '#fff',
+          background: 'var(--proto-card)',
         }}
       >
-        <span style={{ fontSize: 13, fontWeight: 650, color: '#191C22' }}>Settings</span>
-        <span style={{ font: `400 10px ${MONO}`, color: '#98A1B0', marginLeft: 4 }}>~/.cortex/config/</span>
+        <span style={{ fontSize: 13, fontWeight: 650, color: 'var(--proto-ink)' }}>{L.settings}</span>
+        <span style={{ font: `400 10px ${MONO}`, color: 'var(--proto-muted-3)', marginLeft: 4 }}>{L.stConfigRoot}</span>
         <span
           onClick={onClose}
           role="button"
           style={{
             marginLeft: 'auto',
             font: `500 9.5px ${MONO}`,
-            color: '#98A1B0',
-            border: '1px solid #E7E9EE',
+            color: 'var(--proto-muted-3)',
+            border: '1px solid var(--proto-line)',
             borderRadius: 5,
             padding: '2px 6px',
             cursor: 'pointer',
           }}
         >
-          esc
+          {L.stEsc}
         </span>
       </div>
       {/* body: 210px nav + content (prototype L732) */}
@@ -167,13 +176,13 @@ function SettingsBody({ onClose }: { onClose: () => void }) {
           style={{
             width: 210,
             flex: 'none',
-            borderRight: '1px solid #E7E9EE',
-            background: '#FBFBFC',
+            borderRight: '1px solid var(--proto-line)',
+            background: 'var(--proto-rail)',
             padding: '10px 8px',
             overflow: 'auto',
           }}
         >
-          {SETTINGS_NAV.map((n) => {
+          {getSettingsNav(L).map((n) => {
             const active = n.key === section;
             return (
               <div
@@ -186,7 +195,7 @@ function SettingsBody({ onClose }: { onClose: () => void }) {
                   alignItems: 'center',
                   gap: 8,
                   padding: '7px 10px',
-                  background: active ? '#EEF0FA' : 'transparent',
+                  background: active ? 'var(--proto-accent-bg)' : 'transparent',
                   borderRadius: 8,
                   cursor: 'pointer',
                 }}
@@ -195,7 +204,7 @@ function SettingsBody({ onClose }: { onClose: () => void }) {
                   style={{
                     fontSize: 12,
                     fontWeight: 600,
-                    color: active ? '#4655D4' : '#22262E',
+                    color: active ? 'var(--proto-accent)' : 'var(--proto-ink-2)',
                     whiteSpace: 'nowrap',
                     overflow: 'hidden',
                     textOverflow: 'ellipsis',
@@ -207,7 +216,7 @@ function SettingsBody({ onClose }: { onClose: () => void }) {
                   style={{
                     marginLeft: 'auto',
                     font: `400 9px ${MONO}`,
-                    color: active ? '#4655D4' : '#B6BDC9',
+                    color: active ? 'var(--proto-accent)' : 'var(--proto-faint)',
                     flex: 'none',
                   }}
                 >
@@ -223,16 +232,21 @@ function SettingsBody({ onClose }: { onClose: () => void }) {
             minWidth: 0,
             overflow: 'auto',
             padding: '16px 22px',
-            background: '#F7F8FA',
+            background: 'var(--proto-alt)',
+            display: section === 'hooks' ? 'flex' : undefined,
+            flexDirection: section === 'hooks' ? 'column' : undefined,
           }}
         >
-          <div style={{ fontSize: 15, fontWeight: 650, color: '#191C22' }}>{meta.title}</div>
-          <div style={{ fontSize: 11, color: '#8A93A2', marginTop: 2 }}>{meta.sub}</div>
-          {configQuery.isLoading ? (
-            <div style={{ marginTop: 16, fontSize: 12, color: '#98A1B0' }}>Loading config…</div>
+          <div style={{ fontSize: 15, fontWeight: 650, color: 'var(--proto-ink)' }}>{meta.title}</div>
+          <div style={{ fontSize: 11, color: 'var(--proto-muted-2)', marginTop: 2 }}>{meta.sub}</div>
+          {section === 'appearance' ? (
+            // Device-local theme — no config.get dependency, so it renders even if config fails to load.
+            <AppearancePanel />
+          ) : configQuery.isLoading ? (
+            <div style={{ marginTop: 16, fontSize: 12, color: 'var(--proto-muted-3)' }}>{L.stLoadingConfig}</div>
           ) : configQuery.isError ? (
-            <div style={{ marginTop: 16, fontSize: 12, color: '#C03D33' }}>
-              Failed to load config: {configQuery.error.message}
+            <div style={{ marginTop: 16, fontSize: 12, color: 'var(--proto-danger)' }}>
+              {L.stFailedLoadConfig} {configQuery.error.message}
             </div>
           ) : snapshot ? (
             <PanelBody
@@ -283,8 +297,10 @@ function PanelBody({
       return <McpPanel snapshot={snapshot} />;
     case 'notifications':
       return <NotificationsPanel snapshot={snapshot} />;
+    // Hooks reads its own hooks.list query — the four-field config.get summary cannot carry a
+    // full declaration, let alone edit one.
     case 'hooks':
-      return <HooksPanel snapshot={snapshot} />;
+      return <HooksPanel />;
     case 'advanced':
       return <AdvancedPanel snapshot={snapshot} />;
     default:

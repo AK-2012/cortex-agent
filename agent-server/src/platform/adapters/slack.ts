@@ -1,6 +1,6 @@
 // input:  @slack/bolt, @slack/web-api, ../adapter.js, ../types.js
-// output: SlackAdapter + SlackAdapterConfig
-// pos:    Slack platform PlatformAdapter implementation
+// output: SlackAdapter with messages, files, and reaction markers
+// pos:    Slack PlatformAdapter implementation
 // >>> If I am updated, update my header comment and the parent folder's CORTEX.md <<<
 
 import { App } from '@slack/bolt';
@@ -34,8 +34,14 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { writeFile, readFile, mkdir } from 'fs/promises';
 import { CONFIG_DIR } from '@core/utils.js';
+import { reactionFailureReason, shouldWarnReactionFailure } from '../utils/reaction-diagnostics.js';
 
 const log = createLogger('slack');
+
+/** Waiting behind other work. */
+const QUEUED_REACTION = 'hourglass';
+/** Picked up by the agent — the ⏳ is replaced by this once the message is consumed. */
+const CONSUMED_REACTION = 'white_check_mark';
 
 const IMAGE_MIMES = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp']);
 const IMAGE_MAGIC: Record<string, string> = {
@@ -505,19 +511,43 @@ export class SlackAdapter implements PlatformAdapter {
 
   // --- Queue backpressure ---
 
-  private async _addHourglassReaction(ref: MessageRef): Promise<void> {
+  private async _setReaction(ref: MessageRef, name: string, add: boolean): Promise<void> {
     const channel = this._unwrap(ref.conduit);
-    await this.rateLimitedCall('reactions.add', channel, () =>
-      this.client.reactions.add({
-        channel,
-        name: 'hourglass',
-        timestamp: ref.messageId,
-      })
-    );
+    const method = add ? 'reactions.add' : 'reactions.remove';
+    const payload = { channel, name, timestamp: ref.messageId };
+    try {
+      await this.rateLimitedCall(method, channel, () =>
+        add ? this.client.reactions.add(payload) : this.client.reactions.remove(payload)
+      );
+    } catch (e) {
+      // Callers drop marker failures so a broken marker never breaks a turn; report once per cause.
+      const reason = reactionFailureReason(e);
+      if (shouldWarnReactionFailure(reason)) {
+        log.warn(`${method} :${name}: failed (${reason}) — queue markers will not appear; check the bot token's reactions:write scope`);
+      }
+      throw e;
+    }
   }
 
   async markQueued(ref: MessageRef): Promise<void> {
-    await this._addHourglassReaction(ref);
+    await this._setReaction(ref, QUEUED_REACTION, true);
+  }
+
+  async unmarkQueued(ref: MessageRef): Promise<void> {
+    // ⏳ → ✅. The two calls are independent: a stale or never-added hourglass must not cost the
+    // check, which is the part that tells the user their message was actually picked up.
+    let failure: unknown;
+    try {
+      await this._setReaction(ref, QUEUED_REACTION, false);
+    } catch (e) {
+      failure = e;
+    }
+    try {
+      await this._setReaction(ref, CONSUMED_REACTION, true);
+    } catch (e) {
+      failure ??= e;
+    }
+    if (failure !== undefined) throw failure;
   }
 
   // --- Files ---

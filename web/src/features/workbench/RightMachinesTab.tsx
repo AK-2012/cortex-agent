@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import type { MachineInfo } from '@cortex-agent/ui-contract';
 import { useTRPC } from '@/lib/trpc';
+import { useVocab } from '@/i18n';
 import { machinePill } from './right-panel-vm';
 
 // Machines tab — 1:1 from prototype.dc.html L1237–1274. Replaces the GAP-M structural stub with
@@ -18,19 +19,20 @@ const MACHINE_ICON = (
 );
 
 function MachineCard({ machine }: { machine: MachineInfo }) {
+  const L = useVocab();
   const pill = machinePill(machine.online);
-  const iconColor = machine.online ? '#4655D4' : '#8A93A2';
+  const iconColor = machine.online ? 'var(--proto-accent)' : 'var(--proto-muted-2)';
 
   const subParts: string[] = [];
-  if (machine.gpuCount != null) subParts.push(`GPU ×${machine.gpuCount}`);
+  if (machine.gpuCount != null) subParts.push(`${L.mGpu} ×${machine.gpuCount}`);
   subParts.push(machine.os);
-  if (machine.liveRuns > 0) subParts.push(`${machine.liveRuns} live run${machine.liveRuns !== 1 ? 's' : ''}`);
+  if (machine.liveRuns > 0) subParts.push(`${machine.liveRuns} ${L.mLiveRuns}`);
 
   return (
     <div
       style={{
-        background: '#fff',
-        border: '1px solid #E7E9EE',
+        background: 'var(--proto-card)',
+        border: '1px solid var(--proto-line)',
         borderRadius: 10,
         boxShadow: '0 1px 2px rgba(16,24,40,.03)',
         padding: '11px 14px 9px',
@@ -39,7 +41,7 @@ function MachineCard({ machine }: { machine: MachineInfo }) {
       {/* header row: icon · name · pill */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
         <span style={{ display: 'inline-flex', color: iconColor }}>{MACHINE_ICON}</span>
-        <span style={{ font: "600 12.5px 'IBM Plex Mono',monospace", color: '#191C22' }}>
+        <span style={{ font: "600 12.5px 'IBM Plex Mono',monospace", color: 'var(--proto-ink)' }}>
           {machine.name}
         </span>
         <span
@@ -58,7 +60,7 @@ function MachineCard({ machine }: { machine: MachineInfo }) {
       </div>
       {/* sub-line: GPU count · os · live-runs indicator */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 5 }}>
-        <span style={{ font: "400 10.5px 'IBM Plex Mono',monospace", color: '#98A1B0' }}>
+        <span style={{ font: "400 10.5px 'IBM Plex Mono',monospace", color: 'var(--proto-muted-3)' }}>
           {subParts.join(' · ')}
         </span>
         {machine.liveRuns > 0 && (
@@ -68,7 +70,7 @@ function MachineCard({ machine }: { machine: MachineInfo }) {
               width: 6,
               height: 6,
               borderRadius: '50%',
-              background: '#4655D4',
+              background: 'var(--proto-accent)',
               flexShrink: 0,
               animation: 'cxpulse 1.6s ease-in-out infinite',
             }}
@@ -80,6 +82,7 @@ function MachineCard({ machine }: { machine: MachineInfo }) {
 }
 
 export function RightMachinesTab() {
+  const L = useVocab();
   const trpc = useTRPC();
   const machinesQuery = useQuery(trpc.machines.list.queryOptions({}));
   const machines = machinesQuery.data ?? [];
@@ -94,12 +97,12 @@ export function RightMachinesTab() {
           alignItems: 'center',
           gap: 8,
           padding: '10px 18px',
-          borderBottom: '1px solid #EFF1F5',
+          borderBottom: '1px solid var(--proto-line-2)',
           flex: 'none',
         }}
       >
-        <span style={{ fontSize: 10.5, color: '#5B6472' }}>Machines</span>
-        <span style={{ marginLeft: 'auto', font: "500 10.5px 'IBM Plex Mono',monospace", color: '#5B6472' }}>
+        <span style={{ fontSize: 10.5, color: 'var(--proto-muted)' }}>{L.machines}</span>
+        <span style={{ marginLeft: 'auto', font: "500 10.5px 'IBM Plex Mono',monospace", color: 'var(--proto-muted)' }}>
           {countLabel}
         </span>
       </div>
@@ -126,26 +129,26 @@ export function RightMachinesTab() {
             style={{
               textAlign: 'center',
               padding: '26px 12px',
-              border: '1px dashed #E7E9EE',
+              border: '1px dashed var(--proto-line)',
               borderRadius: 10,
             }}
           >
-            <div style={{ fontSize: 11.5, fontWeight: 600, color: '#8A93A2' }}>No machines connected</div>
-            <div style={{ fontSize: 10.5, color: '#B6BDC9', marginTop: 4, lineHeight: 1.6 }}>
-              Connected machines (atlas, nimbus…) appear here once registered in machines.json.
+            <div style={{ fontSize: 11.5, fontWeight: 600, color: 'var(--proto-muted-2)' }}>{L.mNoMachines}</div>
+            <div style={{ fontSize: 10.5, color: 'var(--proto-faint)', marginTop: 4, lineHeight: 1.6 }}>
+              {L.rpNoMachinesHint}
             </div>
           </div>
         )}
 
         {machinesQuery.isPending && (
-          <div style={{ textAlign: 'center', fontSize: 11, color: '#98A1B0', padding: '24px 0' }}>
-            Loading machines…
+          <div style={{ textAlign: 'center', fontSize: 11, color: 'var(--proto-muted-3)', padding: '24px 0' }}>
+            {L.rpLoadingMachines}
           </div>
         )}
 
         {machinesQuery.isError && (
-          <div style={{ textAlign: 'center', fontSize: 11, color: '#C03D33', padding: '24px 0' }}>
-            Failed to load machines.
+          <div style={{ textAlign: 'center', fontSize: 11, color: 'var(--proto-danger)', padding: '24px 0' }}>
+            {L.rpFailedLoadMachines}
           </div>
         )}
       </div>

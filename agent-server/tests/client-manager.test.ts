@@ -1,10 +1,18 @@
-// input:  Node test runner + client-manager lifecycle
-// output: handshake + sendCommand + stop/idempotent tests
-// pos:    client-manager observability entry point regression test
+// input:  Vitest, client manager, WebSockets, HookBus mock
+// output: Client lifecycle hooks, commands and authentication tests
+// pos:    Verifies remote client registration and routing
 // >>> If I am updated, update my header comment and the parent folder's CORTEX.md <<<
 
-import test, { after } from 'node:test';
+import { test, beforeEach, afterAll, vi } from 'vitest';
 import assert from 'node:assert/strict';
+
+const hookBus = vi.hoisted(() => ({
+  emitCortexEvent: vi.fn(),
+}));
+
+vi.mock('@core/hook-bus.js', () => ({
+  emitCortexEvent: hookBus.emitCortexEvent,
+}));
 import { WebSocket, WebSocketServer } from 'ws';
 import {
   getOnlineDevices,
@@ -53,8 +61,13 @@ async function waitFor(pred: () => boolean, timeoutMs = 2000): Promise<void> {
   throw new Error('waitFor timed out');
 }
 
+beforeEach(() => {
+  hookBus.emitCortexEvent.mockReset();
+  hookBus.emitCortexEvent.mockResolvedValue([]);
+});
+
 // A single test-suite-wide cleanup guard: if any test leaks a started server we stop it here.
-after(() => {
+afterAll(() => {
   try { stopClientManager(); } catch {}
 });
 
@@ -82,7 +95,7 @@ test('stopClientManager is idempotent — safe to call when not started', () => 
 test('start + hello handshake populates devices; stopClientManager tears everything down', async (t) => {
   const port = await findEphemeralPort();
   startClientManager(port);
-  t.after(() => stopClientManager());
+  t.onTestFinished(() => stopClientManager());
 
   // Connect a fake client and send a hello frame.
   const ws = new WebSocket(`ws://127.0.0.1:${port}`, { headers: authHeaders });
@@ -106,6 +119,79 @@ test('start + hello handshake populates devices; stopClientManager tears everyth
   await waitFor(() => !isDeviceOnline('mock-device-1'));
 });
 
+test('client lifecycle emits connected and disconnected matcher payloads', async (t) => {
+  const port = await findEphemeralPort();
+  startClientManager(port);
+  t.onTestFinished(() => stopClientManager());
+
+  const ws = new WebSocket(`ws://127.0.0.1:${port}`, { headers: authHeaders });
+  await new Promise<void>((resolve, reject) => {
+    ws.once('open', () => resolve());
+    ws.once('error', reject);
+  });
+
+  ws.send(JSON.stringify({ type: 'hello', device: 'event-device', platform: 'linux', capabilities: [] }));
+  await waitFor(() => isDeviceOnline('event-device'));
+  assert.deepEqual(hookBus.emitCortexEvent.mock.calls[0], [
+    'cortex:client.connected',
+    { device: 'event-device' },
+  ]);
+
+  ws.close(1000, 'test complete');
+  await waitFor(() => !isDeviceOnline('event-device'));
+  await waitFor(() => hookBus.emitCortexEvent.mock.calls.length === 2);
+  assert.deepEqual(hookBus.emitCortexEvent.mock.calls[1], [
+    'cortex:client.disconnected',
+    { device: 'event-device', reason: 'test complete' },
+  ]);
+});
+
+test('failing client hooks do not change connection lifecycle outcomes', async (t) => {
+  const port = await findEphemeralPort();
+  startClientManager(port);
+  t.onTestFinished(() => stopClientManager());
+  hookBus.emitCortexEvent.mockRejectedValue(new Error('hook failed'));
+
+  const ws = new WebSocket(`ws://127.0.0.1:${port}`, { headers: authHeaders });
+  await new Promise<void>((resolve, reject) => {
+    ws.once('open', () => resolve());
+    ws.once('error', reject);
+  });
+
+  ws.send(JSON.stringify({ type: 'hello', device: 'failure-device', platform: 'linux', capabilities: [] }));
+  await waitFor(() => isDeviceOnline('failure-device'));
+  ws.close(1000, 'finished');
+  await waitFor(() => !isDeviceOnline('failure-device'));
+
+  assert.deepEqual(hookBus.emitCortexEvent.mock.calls.map(([event]) => event), [
+    'cortex:client.connected',
+    'cortex:client.disconnected',
+  ]);
+});
+
+test('manager shutdown emits a failing disconnected hook without changing teardown', async () => {
+  const port = await findEphemeralPort();
+  startClientManager(port);
+
+  const ws = new WebSocket(`ws://127.0.0.1:${port}`, { headers: authHeaders });
+  await new Promise<void>((resolve, reject) => {
+    ws.once('open', () => resolve());
+    ws.once('error', reject);
+  });
+  ws.send(JSON.stringify({ type: 'hello', device: 'shutdown-device', platform: 'linux', capabilities: [] }));
+  await waitFor(() => isDeviceOnline('shutdown-device'));
+  hookBus.emitCortexEvent.mockClear();
+  hookBus.emitCortexEvent.mockRejectedValueOnce(new Error('hook failed'));
+
+  assert.doesNotThrow(() => stopClientManager());
+
+  assert.equal(isDeviceOnline('shutdown-device'), false);
+  assert.deepEqual(hookBus.emitCortexEvent.mock.calls, [[
+    'cortex:client.disconnected',
+    { device: 'shutdown-device', reason: 'Server shutting down' },
+  ]]);
+});
+
 // --- Regression: WMI Win32_Process.Create cannot resolve npm-installed `.cmd` shims
 //     via PATH, so the Windows spawn command must wrap with `cmd.exe /c`.
 //     Without the wrapper, WMI returns ReturnValue=9 (Path Not Found) and an empty
@@ -116,7 +202,7 @@ test('start + hello handshake populates devices; stopClientManager tears everyth
 test('WS handshake rejects a connection with no x-cortex-token header', async (t) => {
   const port = await findEphemeralPort();
   startClientManager(port);
-  t.after(() => stopClientManager());
+  t.onTestFinished(() => stopClientManager());
 
   const ws = new WebSocket(`ws://127.0.0.1:${port}`); // no auth header
   const outcome = await new Promise<'open' | 'rejected'>((resolve) => {
@@ -132,7 +218,7 @@ test('WS handshake rejects a connection with no x-cortex-token header', async (t
 test('WS handshake rejects a connection with a wrong token', async (t) => {
   const port = await findEphemeralPort();
   startClientManager(port);
-  t.after(() => stopClientManager());
+  t.onTestFinished(() => stopClientManager());
 
   const ws = new WebSocket(`ws://127.0.0.1:${port}`, { headers: { 'x-cortex-token': 'wrong-token' } });
   const outcome = await new Promise<'open' | 'rejected'>((resolve) => {
@@ -147,7 +233,7 @@ test('WS handshake rejects a connection with a wrong token', async (t) => {
 test('WS handshake accepts a connection carrying the correct token', async (t) => {
   const port = await findEphemeralPort();
   startClientManager(port);
-  t.after(() => stopClientManager());
+  t.onTestFinished(() => stopClientManager());
 
   const ws = new WebSocket(`ws://127.0.0.1:${port}`, { headers: authHeaders });
   await new Promise<void>((resolve, reject) => {
@@ -261,7 +347,7 @@ test('buildRemoteInstallCommand falls back to the default when installCommand is
 //     no retry was scheduled. Combined with the WMI bug above, this caused my-pc to
 //     stay silently offline for 3 days. Fix: always schedule a retry on spawn failure.
 test('startRemoteClient schedules a retry when remote returns empty PID', async (t) => {
-  t.after(() => _testReset());
+  t.onTestFinished(() => _testReset());
 
   // Fake registry with one Windows device.
   _setMachineRegistryProviderForTesting(() => ({
@@ -276,7 +362,7 @@ test('startRemoteClient schedules a retry when remote returns empty PID', async 
 });
 
 test('startRemoteClient schedules a retry when SSH itself throws', async (t) => {
-  t.after(() => _testReset());
+  t.onTestFinished(() => _testReset());
 
   _setMachineRegistryProviderForTesting(() => ({
     'fake-linux': { cortexPath: '/home/x', gpuCount: 0, ssh: 'user@fake' },
@@ -291,7 +377,7 @@ test('startRemoteClient schedules a retry when SSH itself throws', async (t) => 
 test('sendCommand rejects pending commands when stopClientManager is called mid-flight', async (t) => {
   const port = await findEphemeralPort();
   startClientManager(port);
-  t.after(() => stopClientManager());
+  t.onTestFinished(() => stopClientManager());
 
   const ws = new WebSocket(`ws://127.0.0.1:${port}`, { headers: authHeaders });
   await new Promise<void>((resolve, reject) => {

@@ -15,13 +15,16 @@ $CORTEX_HOME/
 ├── config/
 │   ├── .env                      # Same file (symlinked / canonical location)
 │   ├── profiles.json             # Named agent profiles
-│   ├── thread-templates.json     # Agent definitions and orchestration templates
+│   ├── thread-templates/         # Thread config — one JSON per agent/template/shell
 │   ├── machines.json             # Machine registry for remote clients
 │   ├── budget.json               # Daily/monthly budget limits
-│   ├── mcp-config.json           # Full MCP server configuration
-│   ├── mcp-config-core.json      # Core-only MCP (remote_* tools)
-│   ├── mcp-config-tui.json       # TUI-mode MCP configuration
-│   └── session-hooks.json        # Session-level hook configuration
+│   ├── mcp-config.json           # Direct-session MCP configuration
+│   ├── mcp-config-core.json      # Remote execution/time layer
+│   ├── mcp-config-tasks.json     # Read-only task-monitoring layer
+│   ├── mcp-config-manager-qa.json # Shared manager-answer layer
+│   ├── mcp-config-thread.json    # Thread-control layer
+│   ├── mcp-config-tui.json       # TUI interaction layer
+│   └── hooks/                    # Hook registry — one JSON declaration per hook
 ├── data/
 │   ├── mode.json                 # Current runtime mode and profile
 │   ├── schedules.json            # Persistent scheduled task list
@@ -139,7 +142,8 @@ channel.
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `DEBUG` | — | Enable debug-level log output |
+| `DEBUG` | — | Enable server-wide debug mode. In addition to debug-level logs, the desktop transcript shows hover inspectors for the exact agent message and each tool call's complete input/result. Any non-empty value enables it; restart agent-server after changing it |
+| `CORTEX_DEBUG_TOOL_WARNING_CHARS` | `10000` | In DEBUG transcripts, mark a tool-name badge amber when its formatted complete parameters plus complete result strictly exceed this Unicode character count. Positive integers only; invalid values use the default. Restart agent-server after changing it |
 | `CORTEX_EVENT_LOG` | `on` | Set to `off` to disable event-bus logging |
 | `CORTEX_SHOW_TOOL_CALLS` | — | Inline tool-call rendering in VirtualMessage tails |
 | `CORTEX_DISABLE_USER_CONTEXT` | — | Set to `1` to disable injecting `USER.md` context into direct conversation turns (injected by default; multi-agent thread steps never receive it) |
@@ -149,6 +153,8 @@ channel.
 | `CORTEX_TURN_NOTIFY` | `on` | When a long-running turn finishes, Cortex posts a fresh message to the conversation so you get a push notification (the inline status seals to "✓ Done" with an edit, which Slack and Feishu do not notify on). Both success and failure are announced. Set to `0`/`false`/`off`/`no` to disable |
 | `CORTEX_TURN_NOTIFY_THRESHOLD_S` | `60` | Minimum turn duration, in seconds, before a completion notification is posted. Shorter turns stay quiet |
 | `CORTEX_AUTO_RESUME` | `on` | When a usage-limit window resets, Cortex automatically continues the conversations and threads that the limit interrupted, injecting a note to pick up where they left off. Set to `0`/`false` to leave interrupted work paused for manual continuation |
+
+`DEBUG` persists unabridged prompts, tool parameters, and tool results in per-session conversation-history files. These values can contain secrets, private file contents, or large outputs, and storage grows with their full size. Enable this mode only on a trusted development server and turn it off when inspection is complete. Turning it off immediately removes debug fields and buttons from transcript responses, but it does not delete records captured earlier.
 
 ### Task dispatch
 
@@ -197,11 +203,12 @@ uses. For a comparison of available backends, see
 | `defaultProfile` | string | yes | Name of the default profile when none is specified |
 | `profiles` | object | yes | Map of profile name to profile entry |
 | `profiles.<name>.model` | string | yes | Model identifier (e.g. `claude-sonnet-4-20250514`) |
-| `profiles.<name>.backend` | string | no | Backend: `claude`, `pi`, or `codex` (default: `claude`) |
+| `profiles.<name>.backend` | string | no | Backend: `claude` or `pi` (default: `claude`) |
 | `profiles.<name>.mode` | string | no | Operational mode identifier (free-form, e.g. `plan`, `execute`) |
 | `profiles.<name>.extraEnv` | object | no | Extra environment variables passed to the backend process. Keys must match `^[A-Z_][A-Z0-9_]*$`. |
 | `profiles.<name>.extraOption` | object | no | Extra CLI flags passed to the backend. Keys must start with `--`. |
 | `profiles.<name>.claudeBackend` | string | no | Claude adapter mode: `print` (default, uses `-p` + stream-json) or `tui` (interactive Claude under tmux + jsonl tail). Ignored for non-claude backends. |
+| `profiles.<name>.thinking` | string | no | Thinking level, in the backend's native value set: for `claude` one of `low`/`medium`/`high`/`xhigh`/`max` (passed as `--effort`), for `pi` one of `off`/`minimal`/`low`/`medium`/`high`/`xhigh` (passed as `--thinking`). Absent → no flag is passed. Fallback entries do not inherit it — each declares its own. |
 | `profiles.<name>.fallback` | array | no | Ordered list of fallback profile entries. If the primary backend fails, Cortex tries each fallback in order. Each fallback inherits unspecified fields from the primary. |
 
 ### Profile resolution
@@ -212,15 +219,16 @@ At agent spawn time, Cortex resolves the profile through this chain:
    template), use it.
 2. Otherwise, use `defaultProfile` from `profiles.json`.
 3. The resolved profile supplies `model`, `backend`, `mode`, `extraEnv`,
-   `extraOption`, and `claudeBackend`.
+   `extraOption`, `claudeBackend`, and `thinking`.
 4. If the backend call fails with a transient error, Cortex iterates
    through the `fallback` array (if any), trying each entry in order.
 
 ### Validation rules
 
-Profile names must match `^[a-zA-Z0-9_-]+$`. Backend must be one of
-`claude`, `codex`, or `pi`. `claudeBackend` must be `print` or `tui`
-if specified. Unknown fields are silently ignored.
+Profile names must match `^[a-zA-Z0-9_-]+$`. Backend must be `claude`
+or `pi`. `claudeBackend` must be `print` or `tui` if specified.
+`thinking`, if specified, must be a value from the entry's backend value
+set (see the fields table). Unknown fields are silently ignored.
 
 ## settings.json
 
@@ -236,7 +244,9 @@ system documentation.
 ## defaults/config/ layout
 
 The `agent-server/defaults/` directory in the npm package contains
-shipped defaults that are copied to `$CORTEX_HOME/` during init:
+shipped defaults. Most are copied to `$CORTEX_HOME/` during init; the hook
+assets and the thread-template entities are additionally re-synced by the
+server on every startup:
 
 | Source | Destination | Overwrite behavior |
 |---|---|---|
@@ -244,19 +254,20 @@ shipped defaults that are copied to `$CORTEX_HOME/` during init:
 | `defaults/gitignore` | `$CORTEX_HOME/.gitignore` | Never |
 | `defaults/.claude/settings.json` | `$CORTEX_HOME/.claude/settings.json` | Never |
 | `defaults/config/budget.json` | `$CORTEX_HOME/config/budget.json` | Only with `--force` |
-| `defaults/config/thread-templates.json` | `$CORTEX_HOME/config/thread-templates.json` | Only with `--force` |
-| `defaults/config/session-hooks.json` | `$CORTEX_HOME/config/session-hooks.json` | Only with `--force` |
+| `defaults/config/thread-templates/` | `$CORTEX_HOME/config/thread-templates/` | Per-file copy-if-missing, at init and again at every server start: a shipped agent/template/shell file you do not have yet is added; a file you already have is never overwritten — `--force` does not apply to this tree |
+| `defaults/config/hooks/` | `$CORTEX_HOME/config/hooks/` | Per-file CalVer sync at every server start: added when missing, refreshed when the shipped `version` is newer. A declaration with no `version` — yours — is never overwritten |
 | `defaults/prompts/` | `$CORTEX_HOME/prompts/` | Per-file: new files always added, existing preserved unless `--force` |
 | `defaults/plugins/` | `$CORTEX_HOME/plugins/` | Per-file: new files always added, existing preserved unless `--force` |
 | `defaults/rules/` | `$CORTEX_HOME/rules/` | Per-file: new files always added, existing preserved unless `--force` |
-| `defaults/hooks/` | `$CORTEX_HOME/hooks/` | Per-file: never overwrite unless `--force` |
+| `defaults/hooks/` | `$CORTEX_HOME/hooks/` | Per-file at init: never overwrite unless `--force`. At every server start, a shipped script is re-copied unless the deployed file already carries an equal or newer `@cortex-hook-version` |
 | `defaults/data/schedules.json` | `$CORTEX_HOME/data/schedules.json` | Never (unless `--force`) |
 | `defaults/context/` | `$CORTEX_HOME/context/` | Scaffold files: never overwrite |
 
 This design means npm package upgrades automatically deliver new prompts,
-plugins, rules, and hooks without overwriting user customizations.
-Config files (`thread-templates.json`, `budget.json`, etc.) require
-`--force` to replace.
+plugins, rules, hooks, and thread-template entities without overwriting user
+customizations. Whole-file config such as `budget.json` still requires
+`--force` to replace; `config/thread-templates/` is merged per file instead,
+so newly shipped entities reach existing installs without touching your edits.
 
 ## Hot-reload behavior
 
@@ -265,9 +276,16 @@ Config files (`thread-templates.json`, `budget.json`, etc.) require
   for the full scheduling system.
 - **`profiles.json`** — read fresh on every agent spawn. No restart needed
   to change profiles.
-- **`thread-templates.json`** — read fresh on every thread launch.
+- **`thread-templates/`** — each entity subdirectory (`agents/`, `templates/`,
+  `shells/`) is watched. Changes are debounced (300ms) and the whole config is
+  reloaded without a restart; a legacy single `thread-templates.json` is watched
+  the same way until it is migrated. See [threads.md](./threads.md).
 - **`.env`** — requires a daemon restart to pick up changes (loaded once
   at startup via dotenv).
+- **Hook declarations (`config/hooks/*.json`)** — the registry is re-read on
+  every agent spawn, so a new `agent:*` / `cc:*` / `pi:*` entry applies to the
+  next agent that starts. `cortex:*` entries are snapshotted at server start
+  and need a restart. See [hooks.md](./hooks.md).
 - **Hook scripts (`hooks/*.mjs`)** — read fresh on every hook invocation.
 - **Plugins, prompts, rules** — read fresh on each agent session spawn.
 
@@ -277,11 +295,11 @@ Config files (`thread-templates.json`, `budget.json`, etc.) require
 |---|---|---|
 | `.env` | Environment variables | `$CORTEX_HOME/config/.env` |
 | `profiles.json` | Agent profiles | `$CORTEX_HOME/config/profiles.json` |
-| `thread-templates.json` | Thread definitions | `$CORTEX_HOME/config/thread-templates.json` |
+| `thread-templates/` | Thread definitions — one JSON per agent/template/shell. Used when present; otherwise the loader falls back to the legacy single file `thread-templates.json`, which is split into this directory by a one-time startup migration | `$CORTEX_HOME/config/thread-templates/` |
 | `machines.json` | Machine registry | `$CORTEX_HOME/config/machines.json` |
 | `budget.json` | Budget limits | `$CORTEX_HOME/config/budget.json` |
 | `mcp-config.json` | MCP server config | `$CORTEX_HOME/config/mcp-config.json` |
 | `settings.json` | Claude hooks/permissions | `$CORTEX_HOME/.claude/settings.json` |
 | `mode.json` | Runtime mode | `$CORTEX_HOME/data/mode.json` |
 | `schedules.json` | Scheduled tasks | `$CORTEX_HOME/data/schedules.json` |
-| `session-hooks.json` | Session hooks | `$CORTEX_HOME/config/session-hooks.json` |
+| `hooks/*.json` | Hook declarations | `$CORTEX_HOME/config/hooks/` |

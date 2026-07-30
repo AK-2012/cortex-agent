@@ -1,9 +1,9 @@
-// input:  .env, PlatformAdapter, all extracted modules
-// output: Cortex agent server main entry — composition root only
-// pos:    agent-server main entry and wiring hub (S13: composition root, business branches in orchestration/)
+// input:  env/config, adapters, stores, services, HookBus
+// output: server runtime, lifecycle events, resume wakes
+// pos:    Agent-server composition root
 // >>> If I am updated, update my header comment and the parent folder's CORTEX.md <<<
 import * as dotenv from 'dotenv';
-import { mkdirSync } from 'fs';
+import { mkdirSync, promises as fsPromises } from 'fs';
 import * as path from 'path';
 import { createAdapterFromEnv, extractTuiAdapter } from '@platform/index.js';
 import type { PlatformAdapter } from '@platform/index.js';
@@ -13,29 +13,35 @@ import type { PlatformAdapter } from '@platform/index.js';
 import { startUiHttpIfEnabled } from '@entry/ui-http-gate.js';
 import { WORKSPACE_DIR, CONFIG_DIR, DATA_DIR, STORE_DIR, DEFAULTS_DIR, CONTEXT_DIR } from '@core/utils.js';
 import { tryAcquireSingletonLock, releaseSingletonLock } from '@core/singleton-lock.js';
-import { closeAllSessions, closeSession as closeClaudePooledSession, shutdownCodex } from '@domain/agents/index.js';
+import { closeAllSessions, closeSession as closeClaudePooledSession } from '@domain/agents/index.js';
 import { closeAllAdapters } from '../agent-adapter/index.js';
 import { recoverTuiOrphans } from '../agent-adapter/claude/adapter.js';
 import { startWebhookServer } from '@orch/routing/webhook.js';
 import * as pendingTaskTracker from '@domain/tasks/pending-tracker.js';
 import * as executionRegistry from '@domain/executions/registry.js';
 import { executionLogTailer } from '@domain/executions/log-tailer.js';
-import { initHookBridge } from '@orch/routing/hook-bridge.js';
+import { initHookBridge, resolveRequest as resolveHookRequest, setOnStale } from '@orch/routing/hook-bridge.js';
+import { interactionRecords } from '@orch/interactions/interaction-records.js';
+import * as askUserQuestion from '@orch/interactions/ask-user-question.js';
 import { registerCommands } from '@orch/routing/commands/index.js';
 import { cancelChannelRuns } from '@orch/routing/commands/cancel.js';
 import { taskStore } from '@domain/tasks/store.js';
 import { taskMutator } from '@domain/tasks/mutator.js';
+import { recoverOrphanedClaims } from '@domain/tasks/claim-recovery.js';
 import { projectDirRepo } from '@store/project-dir-repo.js';
 import { projectStore } from '@domain/projects/index.js';
 import { sendStartupDmIfConfigured } from './startup-notify.js';
+import { subscribeDaemonNotices } from './daemon-notice.js';
 import { startGateway, stopGateway } from '@domain/costs/gateway-manager.js';
 import { startClientManager, stopClientManager, startAllRemoteClients, getOnlineDevices, isDeviceOnline } from '@domain/remote/client-manager.js';
 import { checkAndUpdateClients, formatUpdateSlackMessage } from '@domain/remote/client-hot-reload.js';
 import { checkServerUpdate } from '@domain/system/server-update-check.js';
+import { emitSystemNotice } from '@domain/system/system-notice.js';
 import { threadStore } from '@store/thread-repo.js';
 import { sessionRepo, registerConduitProvider } from '@store/session-repo.js';
 import { conversationLedger } from '@store/conversation-ledger-repo.js';
 import { conversationHistory } from '@store/conversation-history-repo.js';
+import { pendingInjectionRepo } from '@store/pending-injection-repo.js';
 import { executionRepo } from '@store/execution-repo.js';
 import { loadConfig as loadThreadConfig, startConfigWatcher as startThreadConfigWatcher, setAdminNotifier as setConfigNotifier, migrateThreadTemplatesToDir, mergeThreadTemplates } from '@domain/threads/index.js';
 import { startMemoryWatcher } from '@domain/memory/watcher.js';
@@ -49,6 +55,7 @@ import { cleanupLogs, ensureMcpConfig } from './startup-helpers.js';
 import { createLogger } from '@core/log.js';
 import { ensureAuthTokens } from '@core/auth.js';
 import { runningExecutions } from '@core/running-executions.js';
+import { bgHeldSessions } from '@core/bg-held-sessions.js';
 import { planApprovals } from '@orch/interactions/plan-approvals.js';
 import { busyTracker } from '@orch/busy-tracker.js';
 import { buildExecutionStatusReport } from '@orch/status-helpers.js';
@@ -58,23 +65,31 @@ import { recoverWaitingThreads, registerTaskTreeSubscribers, reconcileWaitingTas
 import { ctx as jobCtx } from '@domain/scheduling/job-registry.js';
 import { buildInteractiveCallbacks } from '@orch/agent-runner.js';
 import { registerInteractionHandlers, initInteractionHandlers } from '@orch/interactions/interaction-handlers.js';
+import { respondToPlan } from '@orch/interactions/plan-response.js';
 import { CommandActionRouter } from '@orch/interactions/command-action-router.js';
 import { createUpdatePrompt } from '@orch/interactions/update-prompt.js';
 import { registerMessageHandler } from '@orch/routing/message-router.js';
-import { initRateLimitThrottle, isThrottled } from '@domain/costs/rate-limit-throttle.js';
+import { initRateLimitThrottle } from '@domain/costs/rate-limit-throttle.js';
 import { initResumeRegistry, getResumeCount, recordResume } from '@domain/costs/resume-registry.js';
-import { dispatchPendingResumes } from '../orchestration/resume-dispatcher.js';
+import {
+  dispatchPendingResumes,
+  registerResumeWakeOnAgentSettle,
+} from '../orchestration/resume-dispatcher.js';
 import { scheduleRepo } from '@store/schedule-repo.js';
+import { providerStateRepo } from '@store/provider-state-repo.js';
 import { runMigrations, migrateAistatusConfigLocation } from '@store/version-migrations.js';
 import { syncManagedHooks } from '@store/hook-sync.js';
+import { loadHookRegistry, type HookEntry } from '@store/hook-registry.js';
+import { emitCortexEvent, initHookBus } from '@core/hook-bus.js';
+import { CORTEX_VERSION } from '@core/version.js';
 import { syncManagedPlugins } from '@store/plugin-sync.js';
 import { costRepo } from '@store/cost-repo.js';
-import { profileRepo, startProfileWatcher, setAdminNotifier as setProfileNotifier } from '@store/profile-repo.js';
+import { PROFILES_FILE, profileRepo, startProfileWatcher, setAdminNotifier as setProfileNotifier } from '@store/profile-repo.js';
 import { sessionStore } from '@store/session-registry-repo.js';
 import { cleanupAllBackups } from '@domain/sessions/session-backup.js';
 import { createDirectSession } from '@domain/sessions/session-lifecycle.js';
 import { setSessionAsync } from '@domain/sessions/session.js';
-import { resolveBackendForChannel } from '@domain/agents/index.js';
+import { isSessionCompactionSupported, resolveBackendForChannel, switchChannelProfile } from '@domain/agents/index.js';
 import { initDiskMonitor, stopDiskMonitor } from '@domain/monitor/disk-monitor.js';
 import { loadMachinesFromFile, startMachineRegistryWatcher, stopMachineRegistryWatcher, setAdminNotifier as setMachineNotifier, getMachineRegistry } from '@domain/tasks/dispatch-utils.js';
 import { EventBus, createEventLogger } from '@events/index.js';
@@ -84,6 +99,9 @@ import { ensurePIAgentDirs } from '../agent-adapter/pi/agent-dir.js';
 import { initOutboundQueue, getOutboundQueue } from '@store/outbound-queue.js';
 import { createUiService } from '@domain/ui-service/index.js';
 import { sendWebUserMessage } from '../orchestration/session-send.js';
+import { rewindWebSession } from '../orchestration/session-rewind.js';
+import { compactActiveSessionContext, compactSessionContext } from '../orchestration/session-compact.js';
+import { recoverPendingInjections } from '../orchestration/pending-injection-recovery.js';
 import { createTuiSessionService } from '@domain/tui-session/index.js';
 import { enqueue, conduitQueues } from '@orch/conduit-queue.js';
 import { getCostSummary } from '@domain/costs/cost-tracker.js';
@@ -106,6 +124,20 @@ configureEnvForMode(loadMode());
 setLocale(process.env.CORTEX_LANG ? normalizeLocale(process.env.CORTEX_LANG) : loadLang());
 
 const log = createLogger('app');
+
+function initConfiguredHooks(): void {
+  let entries: HookEntry[] = [];
+  try {
+    entries = loadHookRegistry();
+  } catch (error) {
+    log.error(`Startup: hook registry load failed: ${(error as Error).message}`);
+  }
+  initHookBus({ entries });
+  const enabled = entries.filter((entry) => entry.enabled !== false);
+  const ccCount = enabled.filter((entry) => entry.event.startsWith('cc:')).length;
+  const cortexCount = enabled.filter((entry) => entry.event.startsWith('cortex:')).length;
+  log.info(`Startup: mounted ${enabled.length} hooks (${ccCount} cc / ${cortexCount} cortex)`);
+}
 
 // --- Singleton lock ---
 // app.js owns ports 3001 (webhook) / 3002 (client-manager); a second instance would
@@ -159,7 +191,19 @@ process.on('uncaughtException', (err) => {
 const bus = new EventBus();
 createEventLogger(bus);
 initHookBridge(bus); // S5: wire hook-bridge to publish ask-user.requested / plan.submitted
+interactionRecords.init({ history: conversationHistory, bus }); // web-interactions-redesign: persistent interaction entities
+// TTL expiry: mark the web interaction entity expired + clean the live resolver maps, so every
+// connected client sees the card gray out (the entity resolve broadcasts session.interaction).
+setOnStale((requestId, channel) => {
+  if (!channel.startsWith('web:')) return;
+  void interactionRecords.resolve({ id: requestId, status: 'expired', resolvedVia: 'timeout' });
+  planApprovals.reject(requestId);
+  askUserQuestion.deleteGroupByHookRequestId(requestId);
+});
 runningExecutions.setBus(bus);   // S6-A: wire lifecycle events
+// Web bg-hold snapshot: mirror every session.status event into the bg-held registry so
+// sessions.list can serve the held state as a queryable snapshot (snapshot + delta).
+bus.subscribe('session.status', (e) => bgHeldSessions.onSessionStatus(e));
 planApprovals.setBus(bus);  // S6-A: wire plan.approved events
 busyTracker.setBus(bus);    // S6-C: wire busy/idle IPC through event bus
 taskMutator.setBus(bus);    // c39d: wire task lifecycle events
@@ -177,6 +221,7 @@ startMachineRegistryWatcher();
 
 // --- Create platform adapter (replaces direct Slack App instantiation) ---
 const adapter: PlatformAdapter = createAdapterFromEnv();
+registerResumeWakeOnAgentSettle(bus, adapter);
 
 // Wire EventBus + injected dependencies into the TUI gateway before start() so it can
 // subscribe to bus events and resolve sessions during its own start()/handshake lifecycle.
@@ -195,7 +240,7 @@ if (tuiGateway) {
 
 // --- Wire hot-reload admin notifiers ---
 const notifyAdmin = (text: string) => {
-  adapter.postMessage({ type: 'system-notice' }, { text }).catch(() => {});
+  void emitSystemNotice(adapter, { text });
 };
 setProfileNotifier(notifyAdmin);
 setConfigNotifier(notifyAdmin);
@@ -222,6 +267,7 @@ const dispatchCommand = registerCommands({
   scheduler,
   cancelDispatchedTask,
   getExecutionStatusReport: buildExecutionStatusReport,
+  compactSessionByChannel: compactActiveSessionContext,
   commandRouter,
 });
 
@@ -237,9 +283,7 @@ const handleMessageEdit = createEditHandler({
   // Claude CLI runs in stream-json mode and pools the subprocess per channel; an alive
   // pooled process keeps the conversation history in memory and ignores the rolled-back
   // JSONL on disk. Close it here so the next runAgent spawns a fresh process with
-  // `--resume <sessionId>`. PI/codex spawn fresh subprocesses per turn, so the close is
-  // a no-op for them (we still call through for symmetry — adapter exits early when
-  // there's nothing to close).
+  // `--resume <sessionId>`. PI spawns a fresh subprocess per turn, so the close is a no-op.
   closePooledSession: (channel, backend) => {
     if (backend === 'claude') closeClaudePooledSession(channel);
   },
@@ -260,7 +304,12 @@ let _uiHttpServer: { close: () => Promise<void> } | null = null;
 
 // --- Graceful shutdown ---
 process.on('SIGTERM', async () => {
-  closeAllSessions(); shutdownCodex(); closeAllAdapters().catch(() => {}); stopClientManager(); stopMachineRegistryWatcher(); _stopProfileWatcher?.();
+  void emitCortexEvent('cortex:server.shutdown', {
+    version: CORTEX_VERSION,
+    pid: process.pid,
+    reason: 'SIGTERM',
+  }).catch(() => {});
+  closeAllSessions(); closeAllAdapters().catch(() => {}); stopClientManager(); stopMachineRegistryWatcher(); _stopProfileWatcher?.();
   await _uiHttpServer?.close().catch(() => {});
   stopDiskMonitor();
   // Stop scheduler timers BEFORE draining repo writes — otherwise a late-firing
@@ -272,7 +321,7 @@ process.on('SIGTERM', async () => {
   // `writeFile(tmp)` and `rename(tmp, target)` in atomic-write.ts leaves orphan .tmp.* siblings.
   // Daemon gives 5s before SIGKILL — well over the time needed to flush a few MB of JSON.
   try {
-    await Promise.allSettled([bus.close(), oq.flush(), threadStore.flush(), sessionRepo.flush(), conversationLedger.flush(), conversationHistory.flush(), taskStore.flush(), executionRepo.flush(), projectDirRepo.flush(), scheduleRepo.flush(), costRepo.flush(), profileRepo.flush(), sessionStore.flush()]);
+    await Promise.allSettled([bus.close(), oq.flush(), threadStore.flush(), sessionRepo.flush(), conversationLedger.flush(), conversationHistory.flush(), pendingInjectionRepo.flush(), taskStore.flush(), executionRepo.flush(), projectDirRepo.flush(), scheduleRepo.flush(), providerStateRepo.flush(), costRepo.flush(), profileRepo.flush(), sessionStore.flush()]);
   } catch {}
   await stopGateway(); process.exit(0);
 });
@@ -287,6 +336,7 @@ process.on('SIGTERM', async () => {
   // Refresh version-stamped hooks in DATA_DIR/hooks from the shipped defaults. init's deployHooks
   // only copies-if-missing, so without this an existing install never picks up hook code fixes.
   await syncManagedHooks();
+  initConfiguredHooks();
   // Deploy new plugins and refresh updated skills in DATA_DIR/plugins from the shipped defaults.
   // init's copyDefaults (copy-if-missing, only on `cortex init`) never reaches an existing install,
   // so without this a new plugin or an updated skill never propagates on upgrade.
@@ -311,6 +361,14 @@ process.on('SIGTERM', async () => {
   await executionRegistry.markMissingRunningExecutionsStale(
     (record) => record.kind === 'dispatch' && !!record.dispatch?.machine && record.dispatch.machine !== 'local',
   );
+
+  // A server restart closes every in-process injection window. Commit any durable orphan before
+  // the UI transport starts so the first transcript snapshot cannot expose a forever-pending row.
+  const recoveredPending = await recoverPendingInjections().catch((error) => {
+    log.error(`recoverPendingInjections failed: ${(error as Error).message}`);
+    return 0;
+  });
+  if (recoveredPending > 0) log.info(`Recovered ${recoveredPending} pending injected message(s)`);
 
   // ── Wire UI service into the TUI gateway ────────────────────────────────
   //
@@ -348,9 +406,10 @@ process.on('SIGTERM', async () => {
     runningExecutions,
     costSummary: getCostSummary,
     conversationHistory,
+    pendingInjections: pendingInjectionRepo,
     // S4 chat send: inject a genuine user turn into a session via the orchestration send path.
     // Injected here (entry layer) so the ui-service domain never imports orchestration.
-    sendSessionMessage: ({ channel, text }) => sendWebUserMessage({ channel, text, adapter }),
+    sendSessionMessage: ({ channel, text, attachments }) => sendWebUserMessage({ channel, text, attachments, adapter }),
     // Machines screen: join static config (getMachineRegistry) + live WebSocket state (getOnlineDevices/
     // isDeviceOnline). Injected here (entry layer) so the ui-service domain never imports remote/.
     clientRegistry: {
@@ -362,6 +421,14 @@ process.on('SIGTERM', async () => {
     // channel-cancel path (same code the no-arg/`--all` !cancel command uses). Injected here so the
     // ui-service domain never imports orchestration.
     cancelSessionRun: ({ channel }) => cancelChannelRuns(channel),
+    // Manual context compact: both the Web mutation and !compact command share the idle-only
+    // orchestration coordinator; sessions.list receives the matching display capability hint.
+    supportsSessionCompaction: (session) => isSessionCompactionSupported(session),
+    compactSession: ({ sessionId }) => compactSessionContext(sessionId),
+    // Message edit + rewind (sessions.rewind, desktop design 23 / mobile 7): roll the session back
+    // to the edited turn and re-send. Injected here so the ui-service domain never imports
+    // orchestration.
+    rewindSession: (opts) => rewindWebSession({ ...opts, adapter }),
     // Workbench "+ New session": create a fresh live direct session. Wired here (entry layer) to the
     // domain primitive with the real session/ledger singletons, so ui-service never imports store.
     createDirectSession: (opts) => createDirectSession({
@@ -370,8 +437,84 @@ process.on('SIGTERM', async () => {
       initConversation: async (channel, a) => { await conversationLedger.initConversation(channel, a); },
       resolveBackend: resolveBackendForChannel,
     }, opts),
+    // Web profile switch: apply the shared per-channel profile-switch rule (same one the Slack/Feishu
+    // `!profile` command uses). Wired here so the ui-service domain never imports domain/agents.
+    switchSessionProfile: (opts) => switchChannelProfile(opts),
+    // Draft attachment migration: when a draft session is created with uploaded files, move
+    // them from the temporary draft directory to the real session's attachment directory.
+    moveDraftAttachments: async ({ draftUploadId, sessionId, attachments }) => {
+      if (!draftUploadId) return attachments;
+      const srcDir = path.join(WORKSPACE_DIR, 'attachments', draftUploadId);
+      const dstDir = path.join(WORKSPACE_DIR, 'attachments', sessionId);
+      try {
+        await fsPromises.mkdir(dstDir, { recursive: true });
+        return await Promise.all(attachments.map(async (a) => {
+          const srcPath = path.join(srcDir, a.path.split('/').slice(2).join('/'));
+          const fileName = a.path.split('/').pop() || a.name;
+          const dstPath = path.join(dstDir, fileName);
+          try {
+            await fsPromises.rename(srcPath, dstPath);
+          } catch {
+            // File may already be moved or missing — keep the original path.
+          }
+          return { ...a, path: `attachments/${sessionId}/${fileName}` };
+        }));
+      } catch {
+        // Best-effort — if the move fails, the original paths still work if the draft dir
+        // hasn't been cleaned up yet.
+        return attachments;
+      }
+    },
     bus,
     adapter,
+    // Web UI: pending interactions for a channel (sessions.pendingInteraction query) —
+    // served from the interaction entity index, so the plan card rehydrates with FULL content.
+    getPendingAskUser: (channel) => {
+      const entry = interactionRecords.getPendingByChannel(channel).find((e) => e.kind === 'ask-user');
+      if (!entry) return null;
+      return { requestId: entry.id, questions: entry.payload.questions ?? [] };
+    },
+    getPendingPlan: (channel) => {
+      const entry = interactionRecords.getPendingByChannel(channel).find((e) => e.kind === 'plan-approval');
+      if (!entry) return null;
+      return { requestId: entry.id, planContent: entry.payload.planContent ?? '', planFilePath: entry.payload.planFilePath ?? null };
+    },
+    // Transcript materialization liveness signal (pending rows with no live entry derive to expired).
+    isInteractionPending: (id) => interactionRecords.isPending(id),
+    // Web bg-hold snapshot: sessions.list serves the held state so it survives session switches /
+    // app restarts (the registry mirrors session.status events — subscribed at the bus wiring above).
+    isSessionBgHeld: (sessionId) => bgHeldSessions.has(sessionId),
+    // Web UI ask-user-question: resolve a pending interaction by requestId. The MCP tool blocks
+    // on the HTTP response; this callback collects answers, resolves the entity (which persists
+    // the record and broadcasts session.interaction to every client), and unblocks the tool.
+    answerQuestion: (requestId, answers) => {
+      const rec = interactionRecords.get(requestId);
+      if (rec && rec.status !== 'pending') return 'already-resolved';
+      const group = askUserQuestion.getGroupByHookRequestId(requestId);
+      if (!group) {
+        // No group (raw hook request) — unblock the webhook directly if it exists.
+        if (!resolveHookRequest(requestId, { answers })) return 'not-found';
+        void interactionRecords.resolve({ id: requestId, status: 'answered', result: { answers }, resolvedVia: 'web' });
+        return 'resolved';
+      }
+      for (const q of group.questions) {
+        const answer = answers[q.question];
+        if (answer !== undefined) {
+          group.answers.set(q.pendingId, { header: q.header, value: answer });
+        }
+      }
+      if (!askUserQuestion.tryResolveHook(group)) return 'not-found';
+      void interactionRecords.resolve({ id: requestId, status: 'answered', result: { answers }, resolvedVia: 'web' });
+      return 'resolved';
+    },
+    // Web UI plan-approval: resolve or reject a pending plan by requestId. First-writer-wins;
+    // the entity resolve persists + broadcasts, so no separate history/session-message writes.
+    respondPlan: (requestId, approved, feedback) => respondToPlan(
+      { planApprovals, interactionRecords },
+      requestId,
+      approved,
+      feedback,
+    ),
   });
   extractTuiAdapter(adapter)?.setUiService(uiService);
 
@@ -389,6 +532,9 @@ process.on('SIGTERM', async () => {
   }
 
   await adapter.start();
+
+  // Let the supervisor reach the operator through us — it has no platform adapter of its own.
+  subscribeDaemonNotices(adapter);
 
   try {
     const notified = await sendStartupDmIfConfigured(adapter, {
@@ -421,10 +567,20 @@ process.on('SIGTERM', async () => {
   );
   loadThreadConfig();
   startThreadConfigWatcher();
-  _stopProfileWatcher = startProfileWatcher();
+  _stopProfileWatcher = startProfileWatcher(profileRepo, PROFILES_FILE, () => {
+    bus.publish({ type: 'config.changed', section: 'profiles' });
+  });
   threadStore.load();
   await threadStore.markRunningAsFailedOnStartup();
   await threadStore.cleanup();
+
+  // Crash-orphan claim recovery: a dispatch claim whose owner died with the server keeps the
+  // task invisible to the dispatcher forever (claimed → not actionable → never re-dispatched),
+  // stranding it and any manager suspended on it. Runs after markRunningAsFailedOnStartup so
+  // surviving waiting/rate_limited threads still protect their claims; remote cortex-run tasks
+  // (status pending / pending-tracker) and manual claims are respected. Before scheduler.start
+  // so recovered tasks are back in the queue for the first dispatch cycle.
+  await recoverOrphanedClaims().catch((e) => log.error(`recoverOrphanedClaims failed: ${(e as Error).message}`));
 
   // --- Rate-limit recovery (ordered; must run after threadStore.load) ---
   // 1) hydrate the persisted resume queue. 2) Reconcile orphaned rate-limited threads: any thread
@@ -432,25 +588,30 @@ process.on('SIGTERM', async () => {
   //    represented in the queue — dropped by a prior dispatcher skip, or a queue/throttle desync
   //    across restart — is re-queued (idempotent, dedupe by threadId). 3) Arm the throttle; its
   //    restart-recovery may fire onResume synchronously, draining the (already-reconciled) queue.
-  //    4) If nothing is throttled and entries remain, drain now so a clean window resumes them.
+  //    4) Evaluate any remaining entries against the restored active-provider set.
   await initResumeRegistry({
-    save: (entries) => scheduleRepo.setResumeQueue(entries),
-    load: () => scheduleRepo.getResumeQueue(),
-  });
+    save: (entries) => providerStateRepo.setResumeQueue(entries),
+    load: () => providerStateRepo.getResumeQueue(),
+  }, () => { bus.publish({ type: 'rate-limit.changed' }); });
   let reQueuedRateLimited = 0;
   for (const t of threadStore.getAll()) {
     if (t.status === 'rate_limited') {
-      recordResume({ kind: 'thread', threadId: t.id, channel: t.channel, userMessage: t.userMessage ?? '', recordedAt: Date.now() });
+      recordResume({
+        kind: 'thread', provider: t.metadata?.rateLimitProvider ?? null,
+        threadId: t.id, channel: t.channel,
+        userMessage: t.userMessage ?? '', recordedAt: Date.now(),
+      });
       reQueuedRateLimited++;
     }
   }
   if (reQueuedRateLimited > 0) log.info(`Reconciled ${reQueuedRateLimited} rate-limited thread(s) into the resume queue`);
   await initRateLimitThrottle(adapter, {
-    save: (state) => scheduleRepo.setRateLimitThrottle(state),
-    load: () => scheduleRepo.getRateLimitThrottle(),
-  }, () => { void dispatchPendingResumes(adapter); });
-  if (!isThrottled() && getResumeCount() > 0) {
-    log.info(`Startup: ${getResumeCount()} pending resume(s), no active throttle — draining`);
+    save: (state) => providerStateRepo.setRateLimitThrottle(state),
+    load: () => providerStateRepo.getRateLimitThrottle(),
+  }, () => { void dispatchPendingResumes(adapter); },
+  () => { bus.publish({ type: 'rate-limit.changed' }); });
+  if (getResumeCount() > 0) {
+    log.info(`Startup: evaluating ${getResumeCount()} pending provider resume(s)`);
     void dispatchPendingResumes(adapter);
   }
 
@@ -474,7 +635,7 @@ process.on('SIGTERM', async () => {
       const updateResult = await checkAndUpdateClients();
       if (updateResult) {
         log.info(`Client hot-reload: ${updateResult.devices.length} devices updated in ${updateResult.duration}ms`);
-        await adapter.postMessage({ type: 'system-notice' }, { text: formatUpdateSlackMessage(updateResult) }).catch((e: any) => log.warn(`Hot-reload DM failed: ${e.message}`));
+        await emitSystemNotice(adapter, { text: formatUpdateSlackMessage(updateResult) });
       }
     } catch (e) {
       log.error(`Client hot-reload check failed: ${(e as Error).message}`);
@@ -547,5 +708,9 @@ process.on('SIGTERM', async () => {
   // already terminal on disk but whose event/settle delivery was lost to a race (2026-06-29).
   startWaitingManagerSweep();
 
+  void emitCortexEvent('cortex:server.start', {
+    version: CORTEX_VERSION,
+    pid: process.pid,
+  }).catch(() => {});
   log.info(`Cortex agent is running (${adapter.name}) — backend: ${getActiveBackend()}`);
 })();

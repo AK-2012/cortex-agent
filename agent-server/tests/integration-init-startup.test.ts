@@ -1,11 +1,12 @@
-// input:  Node test runner, child_process spawn, fs, cli.ts, app.ts
-// output: Integration tests: init (non-interactive), server start/stop, config validation
-// pos:    End-to-end integration test for cortex init + start lifecycle via subprocess fork
+// input:  child processes, init CLI, server app, hook registry
+// output: Init plus server lifecycle hook integration tests
+// pos:    Verifies initialized startup and graceful shutdown
+// >>> If I am updated, update my header comment and the parent folder's CORTEX.md <<<
 
-import test, { after } from 'node:test';
+import { test, afterAll } from 'vitest';
 import assert from 'node:assert/strict';
 import { spawn, type ChildProcess } from 'node:child_process';
-import { mkdtempSync, existsSync, readFileSync, writeFileSync, rmSync, statSync, readdirSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, existsSync, readFileSync, writeFileSync, rmSync, statSync, readdirSync } from 'node:fs';
 import * as path from 'node:path';
 import * as os from 'node:os';
 import { fileURLToPath } from 'node:url';
@@ -49,7 +50,7 @@ function killTree(child: ChildProcess): void {
   catch { try { child.kill('SIGKILL'); } catch { /* already gone */ } }
 }
 
-after(() => {
+afterAll(() => {
   for (const c of liveChildren) killTree(c);
   liveChildren.clear();
 });
@@ -136,6 +137,35 @@ async function cortexInit(homeDir: string, stdinAnswers: string): Promise<void> 
     `cortex init failed with exitCode=${initResult.exitCode}\nstderr: ${initResult.stderr}`);
 }
 
+function installLifecycleHook(
+  homeDir: string,
+  filePrefix: string,
+  event: string,
+  scriptName: string,
+): void {
+  const entry = {
+    id: filePrefix,
+    event,
+    run: { script: scriptName, timeout: 2 },
+  };
+  writeFileSync(
+    path.join(homeDir, 'config', 'hooks', `${filePrefix}.json`),
+    JSON.stringify(entry),
+  );
+}
+
+async function waitForPayload(filePath: string, timeoutMs = 3_000): Promise<Record<string, unknown>> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (existsSync(filePath)) {
+      const lines = readFileSync(filePath, 'utf8').trim().split('\n').filter(Boolean);
+      if (lines.length > 0) return JSON.parse(lines.at(-1)!);
+    }
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  throw new Error(`Timed out waiting for hook payload: ${filePath}`);
+}
+
 // ─── Tests ────────────────────────────────────────────────────────
 
 /**
@@ -188,6 +218,10 @@ test('Test 1: cortex init creates valid directory structure (non-interactive)', 
     const files = [
       path.join(tempDir, 'config', '.env'),
       path.join(tempDir, 'config', 'mcp-config.json'),
+      path.join(tempDir, 'config', 'mcp-config-core.json'),
+      path.join(tempDir, 'config', 'mcp-config-tasks.json'),
+      path.join(tempDir, 'config', 'mcp-config-manager-qa.json'),
+      path.join(tempDir, 'config', 'mcp-config-thread.json'),
       path.join(tempDir, 'data', 'mode.json'),
       // DR-0017 D6 Phase 2.5: thread-templates is a directory (one file per entity)
       path.join(tempDir, 'config', 'thread-templates', 'templates', 'default.json'),
@@ -196,6 +230,19 @@ test('Test 1: cortex init creates valid directory structure (non-interactive)', 
     for (const f of files) {
       assert.ok(existsSync(f), `Expected file to exist: ${f}`);
     }
+
+    const tasksConfig = JSON.parse(
+      readFileSync(path.join(tempDir, 'config', 'mcp-config-tasks.json'), 'utf-8'),
+    );
+    const managerQaConfig = JSON.parse(
+      readFileSync(path.join(tempDir, 'config', 'mcp-config-manager-qa.json'), 'utf-8'),
+    );
+    const threadConfig = JSON.parse(
+      readFileSync(path.join(tempDir, 'config', 'mcp-config-thread.json'), 'utf-8'),
+    );
+    assert.deepEqual(Object.keys(tasksConfig.mcpServers), ['cortex-tasks']);
+    assert.deepEqual(Object.keys(managerQaConfig.mcpServers), ['cortex-manager-qa']);
+    assert.deepEqual(Object.keys(threadConfig.mcpServers), ['cortex-thread']);
 
     // Assert .env contains CORTEX_MACHINE
     const envContent = readFileSync(path.join(tempDir, 'config', '.env'), 'utf-8');
@@ -230,8 +277,30 @@ test('Test 2: Server starts and shuts down cleanly in initialized environment', 
   const tempDir = mkdtempSync(path.join(os.tmpdir(), 'cortex-int-'));
   let child: ChildProcess | undefined;
   try {
-    // Init first
+    // Init first, then remove one generated layer to prove startup recreates it.
     await cortexInit(tempDir, 'claude\nnone\nn\nn\nn\nn\n');
+    const managerQaConfigPath = path.join(tempDir, 'config', 'mcp-config-manager-qa.json');
+    rmSync(managerQaConfigPath);
+    assert.equal(existsSync(managerQaConfigPath), false);
+    const configHooksDir = path.join(tempDir, 'config', 'hooks');
+    const hookScriptsDir = path.join(tempDir, 'hooks');
+    mkdirSync(configHooksDir, { recursive: true });
+    mkdirSync(hookScriptsDir, { recursive: true });
+    writeFileSync(path.join(configHooksDir, 'zz-invalid.json'), '{bad json');
+
+    const startPayloadPath = path.join(tempDir, 'start-event.jsonl');
+    const shutdownPayloadPath = path.join(tempDir, 'shutdown-event.jsonl');
+    const failingCaptureScript = (payloadPath: string) => [
+      "import { appendFileSync } from 'node:fs';",
+      "let input = '';",
+      "process.stdin.setEncoding('utf8');",
+      "process.stdin.on('data', (chunk) => { input += chunk; });",
+      `process.stdin.on('end', () => { appendFileSync(${JSON.stringify(payloadPath)}, input + '\\n'); process.exitCode = 7; });`,
+    ].join('\n');
+    writeFileSync(path.join(hookScriptsDir, 'capture-fail-start.mjs'), failingCaptureScript(startPayloadPath));
+    writeFileSync(path.join(hookScriptsDir, 'capture-fail-shutdown.mjs'), failingCaptureScript(shutdownPayloadPath));
+    installLifecycleHook(tempDir, 'aa-start-capture-fail', 'cortex:server.start', 'capture-fail-start.mjs');
+    installLifecycleHook(tempDir, 'ab-shutdown-capture-fail', 'cortex:server.shutdown', 'capture-fail-shutdown.mjs');
 
     // Fork app.ts directly with test platform
     const webhookPort = String(randomPort());
@@ -273,6 +342,16 @@ test('Test 2: Server starts and shuts down cleanly in initialized environment', 
     });
 
     assert.ok(ready, `Server did not emit readiness signal within 60s.\nstdout: ${stdout.slice(0, 2000)}\nstderr: ${stderr.slice(0, 2000)}`);
+    assert.match(stdout, /Startup: mounted \d+ hooks \(\d+ cc \/ \d+ cortex\)/);
+    assert.match(stderr, /\[hook-registry\] skipped zz-invalid\.json/);
+    assert.ok(existsSync(managerQaConfigPath), 'startup must recreate manager-Q&A MCP config');
+    const managerQaConfig = JSON.parse(readFileSync(managerQaConfigPath, 'utf-8'));
+    assert.deepEqual(Object.keys(managerQaConfig.mcpServers), ['cortex-manager-qa']);
+
+    const startPayload = await waitForPayload(startPayloadPath);
+    assert.deepEqual(Object.keys(startPayload).sort(), ['pid', 'version']);
+    assert.equal(startPayload.pid, child.pid);
+    assert.equal(startPayload.version, JSON.parse(readFileSync(path.join(TEST_ROOT, 'package.json'), 'utf8')).version);
 
     // Send SIGTERM and wait for clean exit
     child.kill('SIGTERM');
@@ -290,7 +369,14 @@ test('Test 2: Server starts and shuts down cleanly in initialized environment', 
 
     assert.equal(exitCode, 0, `Server exited with code ${exitCode} after SIGTERM.\nstderr: ${stderr.slice(0, 2000)}`);
 
-    // Assert startup messages appear in output
+    const shutdownPayload = await waitForPayload(shutdownPayloadPath);
+    assert.deepEqual(Object.keys(shutdownPayload).sort(), ['pid', 'reason', 'version']);
+    assert.equal(shutdownPayload.pid, child.pid);
+    assert.equal(shutdownPayload.version, startPayload.version);
+    assert.equal(shutdownPayload.reason, 'SIGTERM');
+
+    // Both capture hooks exit non-zero after recording stdin. Reaching both captures,
+    // readiness, and exit code 0 proves hook failure does not change host outcomes.
     assert.match(stdout, /Cortex agent is running/);
   } finally {
     if (child) killTree(child);

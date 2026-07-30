@@ -206,9 +206,13 @@ Cortex 会把启动通知、审批请求和其他运维消息发送到管理频�
 
 前往 **[https://open.feishu.cn/app](https://open.feishu.cn/app)**，点击 **创建 agentic 应用**（Create Agentic App）。输入应用名称（例如 `CortexAgent`），选择头像，然后点击 **创建**。
 
+![创建飞书智能体应用](./images/feishu-create-agentic-app.png)
+
 #### b) 复制 App ID 和 App Secret
 
 创建后，应用页面会显示 **App ID** 和 **App Secret**。复制它们。
+
+![复制飞书 App ID 和 App Secret](./images/feishu-app-credentials.png)
 
 回到终端，在 `FEISHU_APP_ID` 和 `FEISHU_APP_SECRET` 提示处粘贴。
 
@@ -257,9 +261,30 @@ Cortex 运行 `nvidia-smi` 并打印数量。无需输入。如果没有 NVIDIA 
 
 ### 2.10 自动检测后端用于网关/配置？
 
-如果你已在其他终端中运行了 `claude login` 和/或 `pi login`，回答 **Yes**。Cortex 会扫描你的 `~/.claude/.credentials.json` 和 `~/.pi/agent/` 来发现端点，并让你选择哪个发现的（mode, model）对成为 `plan` 配置（由执行智能体使用——planner、doc-writer、coder 等），哪个成为 `execute` 配置（由审查智能体使用）。
+如果你已在其他终端中登录过后端，回答 **Yes**。Cortex 会扫描你的 `~/.claude/.credentials.json` 和 `~/.pi/agent/` 来发现端点，并让你选择哪个发现的（mode, model）对成为 `plan` 配置（由执行智能体使用——planner、doc-writer、coder 等），哪个成为 `execute` 配置（由审查智能体使用）。
+
+如果还没有登录：新开一个终端，输入 `claude`（或 `pi`，取决于你在 2.2 中选择的后端）启动会话，然后在会话里输入 `/login`，按提示选择与你的订阅相符的登录方式。
+
+![后端登录提示](./images/backend-login.png)
+
+登录完成后回到向导，回答 **Yes**，凭据即会被识别。
 
 你也可以稍后通过 `cortex setup-gateway` 运行此步骤。
+
+### 2.11 后端登录过期怎么办
+
+后端凭据会在一段时间后过期。过期后智能体运行会失败并报认证错误，例如：
+
+```
+Failed to authenticate. API Error: 401 OAuth access token has expired.
+Re-authenticate to continue.
+```
+
+处理方法与上面的登录流程相同：新开一个终端，输入 `claude`（或 `pi`，取决于你使用的后端）启动会话，然后在会话里输入 `/login`，按提示选择与你的订阅相符的登录方式。
+
+![后端登录提示](./images/backend-login.png)
+
+登录完成后，刷新的凭据会在下一次智能体运行时被识别。如果端点或模型发生了变化，重新运行 `cortex setup-gateway`，让 `plan` 与 `execute` 配置指向新的后端。
 
 ---
 
@@ -283,12 +308,16 @@ Cortex initialized at /home/you/.cortex. Run `cortex daemon` to launch.
 │   ├── preferences.json        # 操作者界面语言
 │   ├── budget.json             # 每日/每月预算限制
 │   ├── machines.json           # 本机能力（gpuCount、路径）
-│   ├── mcp-config.json         # 主 MCP 服务器入口
-│   ├── mcp-config-core.json    # 受限上下文的子集
-│   ├── mcp-config-tui.json     # TUI 模式的子集
+│   ├── mcp-config.json         # 直接会话 MCP 服务器
+│   ├── mcp-config-core.json    # 远程执行/时间分层
+│   ├── mcp-config-tasks.json   # 只读任务监控分层
+│   ├── mcp-config-manager-qa.json # 共享 manager 回答分层
+│   ├── mcp-config-thread.json  # 线程控制分层
+│   ├── mcp-config-tui.json     # TUI 交互分层
 │   ├── profiles.json           # 命名的（后端、模型）配置
-│   ├── session-hooks.json      # 会话级钩子管道
-│   └── thread-templates.json   # 多智能体线程定义
+│   ├── thread-templates/       # 多智能体线程定义
+│   │   └── agents/、templates/、shells/   # 每个实体一个 JSON 文件
+│   └── hooks/                  # 钩子注册表——每个钩子一个 JSON 声明
 ├── data/
 │   ├── mode.json               # 当前模式 + 活跃配置
 │   └── schedules.json          # 初始化的周期性任务

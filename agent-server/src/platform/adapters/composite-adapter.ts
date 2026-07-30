@@ -1,6 +1,6 @@
 // input:  ../adapter.js, ../types.js, ../output-stream.js, ./tui/index.js
-// output: CompositeAdapter + FanOutOutputStream + extractTuiAdapter
-// pos:    Composite adapter — wraps N sub-adapters (Slack/Feishu/TUI) behind one PlatformAdapter surface; routes by conduit prefix
+// output: CompositeAdapter, FanOutOutputStream, extractTuiAdapter
+// pos:    Routes platform operations and marker lifecycle by conduit
 // >>> If I am updated, update my header comment and the parent folder's CORTEX.md <<<
 
 import type { PlatformAdapter } from '../adapter.js';
@@ -106,6 +106,61 @@ function noopOutputStream(): OutputStream {
   };
 }
 
+// ── No-op platform adapter ────────────────────────────────────────
+
+/**
+ * Lightweight no-op PlatformAdapter for conduits not owned by any real platform
+ * adapter (e.g. web UI sessions with `web:` conduits). Returns valid dummy
+ * MessageRefs from postMessage so downstream code that reads statusMsg.messageId
+ * doesn't break; all mutation operations (updateMessage, deleteMessage, etc.) are
+ * no-ops. This allows the agent runner to start and stream output through SSE
+ * events without trying to post to a non-existent Slack channel.
+ */
+function createNoopAdapter(): PlatformAdapter {
+  let _msgSeq = 0;
+  return {
+    name: 'noop',
+    capabilities: {
+      threads: false,
+      messageEdit: false,
+      fileUpload: false,
+      modals: false,
+      richFormatting: false,
+      reactions: false,
+      maxMessageLength: Infinity,
+      maxThreadDepth: 0,
+    },
+    start: async () => {},
+    stop: async () => {},
+    onMessage: () => {},
+    onMessageEdit: () => {},
+    onAction: () => {},
+    onModalSubmit: () => {},
+    postMessage: async (dest) => ({
+      conduit: (dest as any).conduit ?? '',
+      messageId: `noop_${++_msgSeq}_${Date.now()}`,
+    }),
+    updateMessage: async () => {},
+    deleteMessage: async () => {},
+    postInteractive: async () => ({
+      conduit: '',
+      messageId: `noop_${++_msgSeq}_${Date.now()}`,
+    }),
+    openModal: async () => {},
+    markQueued: async () => {},
+    unmarkQueued: async () => {},
+    uploadFile: async () => {},
+    downloadFile: async () => ({ localPath: '', mimetype: '', name: '' }),
+    getPermalink: async () => null,
+    openOutputStream: () => noopOutputStream(),
+    bindProjectConduit: async () => {},
+    unbindProjectConduit: async () => {},
+    getProjectConduits: async () => ({}),
+    resolveInboundProject: async () => null,
+    ownsConduit: () => false,
+  };
+}
+
 // ── Composite ref aggregation ─────────────────────────────────────
 
 /** Build the MessageRef returned by a fan-out post. Top-level fields mirror the first
@@ -133,6 +188,8 @@ export class CompositeAdapter implements PlatformAdapter {
   private _adapters: PlatformAdapter[];
   /** Cached TUI gateway reference (if any) for setBus / extractTuiAdapter. */
   private _tui: TuiGatewayAdapter | null;
+  /** No-op adapter for unowned conduits (e.g. web sessions). */
+  private _noop: PlatformAdapter = createNoopAdapter();
 
   constructor(adapters: PlatformAdapter[]) {
     if (adapters.length === 0) {
@@ -174,9 +231,11 @@ export class CompositeAdapter implements PlatformAdapter {
 
   // ── Outbound routing helpers ────────────────────────────────────
 
-  /** Route a conduit to its owning sub-adapter (falls back to the first). */
+  /** Route a conduit to its owning sub-adapter. Returns a no-op adapter when no real
+   *  platform owns this conduit (e.g. web UI sessions with `web:` conduits) — this
+   *  prevents the blind fallback from routing web messages to Slack (channel_not_found). */
   private _adapterForConduit(conduit: string): PlatformAdapter {
-    return this._adapters.find(a => a.ownsConduit(conduit)) ?? this._adapters[0];
+    return this._adapters.find(a => a.ownsConduit(conduit)) ?? this._noop;
   }
 
   private _adapterForRef(ref: MessageRef): PlatformAdapter {
@@ -267,6 +326,10 @@ export class CompositeAdapter implements PlatformAdapter {
 
   async markQueued(ref: MessageRef): Promise<void> {
     await this._adapterForRef(ref).markQueued(ref);
+  }
+
+  async unmarkQueued(ref: MessageRef): Promise<void> {
+    await this._adapterForRef(ref).unmarkQueued(ref);
   }
 
   async uploadFile(destination: Destination, filePath: string, opts?: FileUploadOpts): Promise<void> {

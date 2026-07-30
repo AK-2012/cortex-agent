@@ -1,18 +1,29 @@
+// input:  runtime shared zod schema maps
+// output: scope completeness and project-notes input assertions
+// pos:    Runtime UI-contract schema guard
+// >>> 一旦我被更新，务必更新我的开头注释与所属文件夹 CORTEX.md <<<
+
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { queryInputSchemas, mutateInputSchemas } from './schemas.js';
 
 const QUERY_SCOPES = [
-  'projects.list', 'sessions.list', 'sessions.transcript', 'threads.list', 'threads.get', 'tasks.list',
-  'tasks.verification', 'schedules.list', 'executions.list', 'executions.get', 'memory.tree', 'memory.file',
-  'approvals.list', 'cost.summary', 'config.get', 'machines.list',
+  'projects.list', 'sessions.list', 'sessions.transcript', 'sessions.pendingInteraction', 'threads.list',
+  'threads.get', 'tasks.list', 'tasks.verification', 'schedules.list', 'executions.list', 'executions.get',
+  'memory.tree', 'memory.file', 'approvals.list', 'issues.list', 'notes.list', 'cost.summary', 'config.get',
+  'hooks.list', 'machines.list', 'skills.list', 'threadTemplates.get', 'system.daemonStatus', 'system.rateLimitStatus',
 ] as const;
 
 const MUTATE_OPS = [
-  'projects.create', 'sessions.create', 'sessions.send', 'sessions.cancel', 'threads.cancel', 'executions.cancel', 'schedules.pause', 'schedules.resume',
+  'projects.create', 'sessions.create', 'sessions.send', 'sessions.cancel', 'sessions.compact', 'sessions.setProfile',
+  'sessions.createAndSend', 'sessions.markRead', 'sessions.answerQuestion', 'sessions.respondPlan',
+  'sessions.rewind',
+  'threads.cancel', 'executions.cancel', 'schedules.pause', 'schedules.resume',
   'schedules.remove', 'schedules.add', 'tasks.claim', 'tasks.unclaim', 'tasks.complete',
   'tasks.block', 'tasks.unblock', 'approvals.approve', 'approvals.reject', 'approvals.request',
-  'config.set',
+  'issues.handle', 'issues.delete', 'notes.add', 'notes.update', 'notes.setCompleted', 'notes.delete',
+  'notes.clearCompleted', 'config.set', 'hooks.create', 'hooks.update', 'hooks.setEnabled', 'hooks.remove',
+  'hooks.test', 'system.restart',
 ] as const;
 
 test('every QueryScope has an input schema', () => {
@@ -31,6 +42,7 @@ test('every MutateOp has an input schema', () => {
 
 test('query schemas accept valid input', () => {
   assert.deepEqual(queryInputSchemas['projects.list'].parse({}), {});
+  assert.deepEqual(queryInputSchemas['system.rateLimitStatus'].parse({}), {});
   assert.equal(
     queryInputSchemas['tasks.list'].parse({ projectId: 'p', status: 'open', actionable: true }).status,
     'open',
@@ -47,6 +59,10 @@ test('query schemas accept valid input', () => {
   assert.deepEqual(queryInputSchemas['cost.summary'].parse({ projectId: null }), { projectId: null });
   // threads.get requires a threadId
   assert.deepEqual(queryInputSchemas['threads.get'].parse({ threadId: 'thr_a' }), { threadId: 'thr_a' });
+  assert.deepEqual(
+    queryInputSchemas['threads.get'].parse({ threadId: 'thr_a', includeArtifactContent: true }),
+    { threadId: 'thr_a', includeArtifactContent: true },
+  );
   // memory.tree requires a projectId
   assert.deepEqual(queryInputSchemas['memory.tree'].parse({ projectId: 'p' }), { projectId: 'p' });
   // memory.file requires projectId + path
@@ -59,6 +75,9 @@ test('query schemas accept valid input', () => {
     queryInputSchemas['sessions.transcript'].parse({ sessionId: 'sess-1' }),
     { sessionId: 'sess-1' },
   );
+  // issues.list / notes.list require a projectId
+  assert.deepEqual(queryInputSchemas['issues.list'].parse({ projectId: 'p' }), { projectId: 'p' });
+  assert.deepEqual(queryInputSchemas['notes.list'].parse({ projectId: 'p' }), { projectId: 'p' });
   // approvals.list: status optional + enum
   assert.deepEqual(queryInputSchemas['approvals.list'].parse({}), {});
   assert.deepEqual(
@@ -76,6 +95,8 @@ test('query schemas reject invalid input', () => {
   assert.throws(() => queryInputSchemas['memory.file'].parse({ projectId: 'p' }));
   assert.throws(() => queryInputSchemas['sessions.transcript'].parse({}));
   assert.throws(() => queryInputSchemas['approvals.list'].parse({ status: 'nope' }));
+  assert.throws(() => queryInputSchemas['issues.list'].parse({}));
+  assert.throws(() => queryInputSchemas['notes.list'].parse({}));
 });
 
 test('mutate schemas require their mandatory fields', () => {
@@ -95,16 +116,19 @@ test('mutate schemas require their mandatory fields', () => {
     mutateInputSchemas['tasks.block'].parse({ projectId: 'p', taskId: 'f184', reason: 'stuck' }),
     { projectId: 'p', taskId: 'f184', reason: 'stuck' },
   );
-  // sessions.send requires sessionId + non-empty text
+  // sessions.send requires sessionId + text; empty text is schema-legal (attachment-only sends —
+  // the handler enforces "text or attachments")
   assert.deepEqual(
     mutateInputSchemas['sessions.send'].parse({ sessionId: 'sess-1', text: 'hi' }),
     { sessionId: 'sess-1', text: 'hi' },
   );
-  assert.throws(() => mutateInputSchemas['sessions.send'].parse({ sessionId: 'sess-1', text: '' }));
+  assert.equal(mutateInputSchemas['sessions.send'].parse({ sessionId: 'sess-1', text: '' }).text, '');
   assert.throws(() => mutateInputSchemas['sessions.send'].parse({ sessionId: 'sess-1' }));
   // sessions.cancel requires sessionId
   assert.deepEqual(mutateInputSchemas['sessions.cancel'].parse({ sessionId: 'sess-1' }), { sessionId: 'sess-1' });
   assert.throws(() => mutateInputSchemas['sessions.cancel'].parse({}));
+  assert.deepEqual(mutateInputSchemas['sessions.compact'].parse({ sessionId: 'sess-1' }), { sessionId: 'sess-1' });
+  assert.throws(() => mutateInputSchemas['sessions.compact'].parse({}));
   // missing required id
   assert.throws(() => mutateInputSchemas['threads.cancel'].parse({}));
   assert.throws(() => mutateInputSchemas['tasks.claim'].parse({ projectId: 'p' }));
@@ -115,6 +139,27 @@ test('mutate schemas require their mandatory fields', () => {
     { id: 'a1', feedback: 'no' },
   );
   assert.throws(() => mutateInputSchemas['approvals.approve'].parse({}));
+  // issues.handle / issues.delete require projectId + id
+  assert.deepEqual(
+    mutateInputSchemas['issues.handle'].parse({ projectId: 'p', id: 'i1' }),
+    { projectId: 'p', id: 'i1' },
+  );
+  assert.deepEqual(
+    mutateInputSchemas['issues.delete'].parse({ projectId: 'p', id: 'i1' }),
+    { projectId: 'p', id: 'i1' },
+  );
+  assert.throws(() => mutateInputSchemas['issues.handle'].parse({ id: 'i1' }));
+  assert.throws(() => mutateInputSchemas['issues.delete'].parse({ projectId: 'p' }));
+  assert.deepEqual(
+    mutateInputSchemas['notes.add'].parse({ projectId: 'p', text: '  note  ' }),
+    { projectId: 'p', text: 'note' },
+  );
+  assert.deepEqual(
+    mutateInputSchemas['notes.setCompleted'].parse({ projectId: 'p', id: 'n1', completed: true }),
+    { projectId: 'p', id: 'n1', completed: true },
+  );
+  assert.throws(() => mutateInputSchemas['notes.add'].parse({ projectId: 'p', text: 'two\nlines' }));
+  assert.throws(() => mutateInputSchemas['notes.update'].parse({ projectId: 'p', id: 'n1', text: '' }));
 });
 
 test('config.get accepts an empty object', () => {

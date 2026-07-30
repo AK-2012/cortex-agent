@@ -3,7 +3,7 @@
 // pos:    Verify child→parent result delivery and parent re-entry (DR-0014 Phase 2/4)
 // >>> If I am updated, update my header comment and the parent folder's CORTEX.md <<<
 
-import test, { after } from 'node:test';
+import { test, afterAll } from 'vitest';
 import assert from 'node:assert/strict';
 import { threadStore } from '../src/store/thread-repo.js';
 import {
@@ -18,7 +18,7 @@ import type { ThreadRecord, ThreadStatus } from '../src/core/types/thread-types.
 const createdThreadIds = new Set<string>();
 let seq = 0;
 
-after(async () => {
+afterAll(async () => {
   for (const id of createdThreadIds) await threadStore.delete(id);
   await threadStore.flush();
 });
@@ -98,7 +98,10 @@ test('buildChildResultNotice includes status, cost, contract fields, and verific
   assert.match(notice, /thread_result/);
   // Acceptance discipline: verify deliverable, do not trust the child's self-report.
   assert.match(notice, /done.?when/i);
+  assert.match(notice, /cortex-task spawn/);
+  assert.match(notice, /thread_wait/);
   assert.match(notice, /thread_abort/);
+  assert.doesNotMatch(notice, /thread_start/);
 });
 
 // --- fireThreadCallback terminal guard ---

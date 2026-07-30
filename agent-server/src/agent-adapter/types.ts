@@ -1,14 +1,14 @@
-// input:  nothing (leaf type-only module)
-// output: AgentAdapter / AgentSpawnConfig / AgentProcess / Backend
-// pos:    Core contract types of the Agent adapter abstraction layer
-// >>> If I am updated, update my header comment and the parent folder's CORTEX.md <<<
+// input:  normalized events, backend capabilities, MCP context
+// output: agent adapter, process, context, and sink contracts
+// pos:    Shared backend adapter type definitions
+// >>> 一旦我被更新，务必更新我的开头注释与所属文件夹 CORTEX.md <<<
 
 import type { Capability } from './capabilities.js';
 import type { NormalizedEvent } from './normalize/event-types.js';
 import type { NormalizedHookSpec } from './normalize/hooks.js';
-import type { AgentResult } from '@core/types/agent-types.js';
+import type { AgentResult, ContextUsage } from '@core/types/agent-types.js';
 
-export type Backend = 'claude' | 'codex' | 'pi';
+export type Backend = 'claude' | 'pi';
 
 export interface UserMessage {
   text: string;
@@ -46,11 +46,11 @@ export interface AgentSpawnConfig {
   cwd?: string;
 
   // --- Claude-specific passthroughs (task f7cf); other backends ignore these ---
-  /** DR-0008 Phase 3 cleanup target. Channel identifier; Claude uses for session-pool key fallback, Codex for route key. */
+  /** Channel identifier used for Claude session-pool key fallback. */
   channel?: string;
   /** DR-0008 Phase 3 cleanup target. Claude `--agent` CLI flag. */
   claudeAgent?: string;
-  /** DR-0008 Phase 3 cleanup target. MCP env + log context; both Claude and Codex read it. */
+  /** MCP environment and Claude log context. */
   callbackSource?: string;
   /** DR-0008 Phase 3 cleanup target. Forwarded to MCP env + Claude log context. */
   scheduleTaskId?: string;
@@ -79,17 +79,24 @@ export interface AgentSpawnConfig {
    *  Ignored for non-claude backends. Sourced from the active profile's claudeBackend field. */
   claudeBackend?: 'print' | 'tui';
 
-  /** Cortex execution context surfaced to the MCP server child as CORTEX_THREAD_ID/PROFILE/PROJECT/SESSION_NAME env vars
-   *  (and into Codex route-context.json). Read by mcp tools/context.ts and tools/schedule.ts so LLMs running inside
-   *  the agent can self-discover their thread / profile / project / session-name without guessing. */
+  /** Thinking level from the active profile's `thinking` field (backend-native value, validated at
+   *  profile load). Claude passes `--effort <level>`; PI passes `--thinking <level>`. */
+  thinking?: string;
+
+  /** Cortex execution context surfaced to MCP children as CORTEX_* environment variables so
+   *  agents can discover their thread, profile, project, and session without guessing. */
   cortexContext?: {
     threadId?: string | null;
     profile?: string | null;
     project?: string | null;
     sessionName?: string | null;
+    /** Stable Cortex tracking id (decoupled from the backend `sessionId`). Surfaced as
+     *  CORTEX_SESSION_ID so session-activity logs + MCP context tools key on the stable UI-facing
+     *  identity rather than the backend CLI's self-assigned id. Falls back to `sessionId` when unset. */
+    trackSessionId?: string | null;
     /** Cortex execution record id, surfaced as CORTEX_EXECUTION_ID to subprocess env. */
     executionId?: string | null;
-    /** When true, load only core MCP server (remote_* tools). Used by template thread sessions. */
+    /** When true, load core + tasks + manager-answer + thread MCP layers. */
     useCoreMcp?: boolean;
     threadDepth?: number | null;
     /** Owning dispatch task id/project, surfaced as CORTEX_TASK_ID / CORTEX_TASK_PROJECT. */
@@ -108,11 +115,46 @@ export interface AgentSpawnConfig {
 export interface ContinuationSink {
   /** Assistant text from the continuation turn (append to the original reply). */
   onAssistantText: (text: string) => void;
-  /** Optional tool_use trace from the continuation turn. */
-  onToolUse?: (name: string, input: any) => void;
+  /** Optional tool_use trace from the continuation turn, preserving its correlation id. */
+  onToolUse?: (name: string, input: any, toolUseId?: string) => void;
+  /** Optional full normalized tool result from the continuation turn. */
+  onToolResult?: (toolUseId: string, content: string, isError: boolean) => void;
+  /** Optional exact context snapshot from the spontaneous provider call. */
+  onContextUsage?: (usage: ContextUsage) => void;
   /** Continuation turn's terminating result. `result.pendingBackgroundTasks` is the number
    *  of background tasks still running (0 ⇒ safe to seal the status as complete). */
   onResult: (result: AgentResult) => void;
+}
+
+/**
+ * Lifecycle acknowledgement for mid-turn injected messages.
+ *
+ * A successful backend write only queues the message. `onDelivered` fires when the backend begins
+ * consuming it; `onUndelivered` seals an accepted message that the backend later rejects or loses.
+ * `foldedIntoTurn` tells orchestration whether the already tracked run will carry the reply (`true`)
+ * or a spontaneous continuation sink must carry it (`false`).
+ */
+export interface InjectionAckSink {
+  /** Fired once per injected message, when the backend reports having consumed it. */
+  onDelivered: (message: { text: string; foldedIntoTurn: boolean }) => void;
+  /** Optional terminal edge for a message accepted by Cortex but never consumed by the backend. */
+  onUndelivered?: (message: { text: string }) => void;
+}
+
+export interface AgentCompactUsage {
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
+  costUsd: number | null;
+}
+
+export interface AgentCompactResult {
+  status: 'compacted' | 'not-needed';
+  tokensBefore: number | null;
+  estimatedTokensAfter: number | null;
+  contextUsage: ContextUsage | null;
+  usage: AgentCompactUsage | null;
 }
 
 export interface AgentProcess {
@@ -123,9 +165,17 @@ export interface AgentProcess {
   send(message: UserMessage): Promise<AgentResult>;
   /** Async iterable of normalized events. Iterator returns done after close(). */
   events: AsyncIterable<NormalizedEvent>;
+  /** Run backend-native manual context compaction without creating a conversational turn. */
+  compact?(): Promise<AgentCompactResult>;
   /** Register a sink for spontaneous background-task continuation turns (Claude backend only).
    *  Persists across normal turns; the adapter clears it on session close/kill. */
   setContinuationSink?(sink: ContinuationSink): void;
+  /** Inject a user message into a turn already in flight, without opening a new Cortex run.
+   *  Returns false when the backend cannot inject right now (no live process / no active turn). */
+  injectUserMessage?(message: UserMessage): boolean;
+  /** Register a backend-neutral sink for mid-turn injection lifecycle acks. Persists across turns;
+   *  the adapter clears it on session close/kill. */
+  setInjectionAckSink?(sink: InjectionAckSink): void;
   close(): Promise<void>;
   kill(): boolean;
 }

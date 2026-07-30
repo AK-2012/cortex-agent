@@ -1,5 +1,10 @@
-import '../_test-home.js'; // MUST be first: isolate CORTEX_HOME before paths.ts loads
-import test from 'node:test';
+// input:  isolated test home, fake UiService, typed tRPC caller
+// output: AppRouter routing including session compact and errors
+// pos:    Transport-contract regression coverage including rate-limit status
+// >>> If I am updated, update my header comment and the parent folder's CORTEX.md <<<
+
+import '../_test-home.js'; // MUST be first import: isolate CORTEX_HOME before paths.ts loads
+import { test } from 'vitest';
 import assert from 'node:assert/strict';
 import { TRPCError } from '@trpc/server';
 import { createAppRouter } from '@domain/ui-service/app-router.js';
@@ -90,6 +95,7 @@ const QUERY_CASES: Array<{ scope: QueryScope; call: (c: any) => Promise<unknown>
   { scope: 'executions.get', call: (c) => c.executions.get({ executionId: 'e1' }), input: {} },
   { scope: 'cost.summary', call: (c) => c.cost.summary({}), input: {} },
   { scope: 'skills.list', call: (c) => c.skills.list({}), input: {} },
+  { scope: 'system.rateLimitStatus', call: (c) => c.system.rateLimitStatus({}), input: {} },
 ];
 
 test('every query routes to the correct scope and unwraps Result.data', async () => {
@@ -109,6 +115,7 @@ const MUTATE_CASES: Array<{ op: MutateOp; call: (c: any) => Promise<unknown>; }>
   { op: 'projects.create', call: (c) => c.projects.create({ name: 'nimbus' }) },
   { op: 'sessions.send', call: (c) => c.sessions.send({ sessionId: 's1', text: 'hi' }) },
   { op: 'sessions.cancel', call: (c) => c.sessions.cancel({ sessionId: 's1' }) },
+  { op: 'sessions.compact', call: (c) => c.sessions.compact({ sessionId: 's1' }) },
   { op: 'threads.cancel', call: (c) => c.threads.cancel({ threadId: 't1' }) },
   { op: 'executions.cancel', call: (c) => c.executions.cancel({ executionId: 'e1' }) },
   { op: 'schedules.pause', call: (c) => c.schedules.pause({ scheduleId: 's1' }) },
@@ -133,10 +140,6 @@ test('every mutation routes to the correct op and unwraps Result.data', async ()
   }
 });
 
-test('coverage: exactly 10 queries + 14 mutations exercised', () => {
-  assert.equal(QUERY_CASES.length, 10);
-  assert.equal(MUTATE_CASES.length, 14);
-});
 
 // ── Err → TRPCError mapping ──────────────────────────────────────────────────────────
 

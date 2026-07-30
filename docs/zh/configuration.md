@@ -13,13 +13,16 @@ $CORTEX_HOME/
 ├── config/
 │   ├── .env                      # 同一个文件（符号链接/规范位置）
 │   ├── profiles.json             # 命名的智能体配置
-│   ├── thread-templates.json     # 智能体定义和编排模板
+│   ├── thread-templates/         # 线程配置——每个 agent/template/shell 一个 JSON
 │   ├── machines.json             # 远程客户端机器注册表
 │   ├── budget.json               # 每日/每月预算限制
-│   ├── mcp-config.json           # 完整 MCP 服务器配置
-│   ├── mcp-config-core.json      # 仅核心 MCP（remote_* 工具）
-│   ├── mcp-config-tui.json       # TUI 模式 MCP 配置
-│   └── session-hooks.json        # 会话级钩子配置
+│   ├── mcp-config.json           # 直接会话 MCP 配置
+│   ├── mcp-config-core.json      # 远程执行/时间分层
+│   ├── mcp-config-tasks.json     # 只读任务监控分层
+│   ├── mcp-config-manager-qa.json # 共享 manager 回答分层
+│   ├── mcp-config-thread.json    # 线程控制分层
+│   ├── mcp-config-tui.json       # TUI 交互分层
+│   └── hooks/                    # 钩子注册表——每个钩子一个 JSON 声明
 ├── data/
 │   ├── mode.json                 # 当前运行时模式和配置
 │   ├── schedules.json            # 持久化的调度任务列表
@@ -123,7 +126,8 @@ $CORTEX_HOME/
 
 | 变量 | 默认值 | 用途 |
 |---|---|---|
-| `DEBUG` | — | 启用调试级日志输出 |
+| `DEBUG` | — | 启用 agent-server 全局调试模式。除调试级日志外，desktop 会在 transcript 中提供 hover 检查按钮，用于查看实际发送给 agent 的完整消息，以及每次工具调用的完整参数和结果。任意非空值都会启用；修改后需重启 agent-server |
+| `CORTEX_DEBUG_TOOL_WARNING_CHARS` | `10000` | DEBUG transcript 中，若格式化后的完整参数与完整结果之和严格超过该 Unicode 字符数，则将工具名称 badge 标黄。仅接受正整数，非法值回退默认值；修改后需重启 agent-server |
 | `CORTEX_EVENT_LOG` | `on` | 设置为 `off` 以禁用事件总线日志 |
 | `CORTEX_SHOW_TOOL_CALLS` | — | 在 VirtualMessage 尾部内联渲染工具调用 |
 | `CORTEX_DISABLE_USER_CONTEXT` | — | 设置为 `1` 以禁用将 `USER.md` 上下文注入普通直接对话轮次（默认注入；多 agent thread 步骤不会收到） |
@@ -133,6 +137,8 @@ $CORTEX_HOME/
 | `CORTEX_TURN_NOTIFY` | `on` | 当一个耗时较长的回合结束时，Cortex 向会话发送一条新消息，让你收到推送通知（内联状态是以编辑方式封口为「✓ 完成」，而 Slack 与飞书都不会对消息编辑推送）。成功和失败都会提醒。设置为 `0`/`false`/`off`/`no` 以关闭 |
 | `CORTEX_TURN_NOTIFY_THRESHOLD_S` | `60` | 触发完成提醒所需的最短回合时长（秒）。更短的回合保持静默 |
 | `CORTEX_AUTO_RESUME` | `on` | 当用量限制窗口重置后，Cortex 自动继续被该限制中断的对话与线程，并注入一条提示让其从中断处接着做。设置为 `0`/`false` 可让被中断的工作保持暂停、由人工继续 |
+
+`DEBUG` 会把未截断的 prompt、工具参数和工具结果持久化到各 session 的 conversation-history 文件中。这些内容可能包含密钥、私有文件内容或体积很大的输出，存储占用也会按完整内容持续增长。仅应在可信的开发服务器上临时启用，检查完成后及时关闭。关闭后 transcript 响应会立即停止返回调试字段，相关按钮也会消失，但此前已写入的记录不会被自动删除。
 
 ### 任务派发
 
@@ -178,11 +184,12 @@ $CORTEX_HOME/
 | `defaultProfile` | string | 是 | 未指定配置时使用的默认配置名称 |
 | `profiles` | object | 是 | 配置名称到配置项的映射 |
 | `profiles.<name>.model` | string | 是 | 模型标识符（如 `claude-sonnet-4-20250514`） |
-| `profiles.<name>.backend` | string | 否 | 后端：`claude`、`pi` 或 `codex`（默认：`claude`） |
+| `profiles.<name>.backend` | string | 否 | 后端：`claude` 或 `pi`（默认：`claude`） |
 | `profiles.<name>.mode` | string | 否 | 运行模式标识符（自由格式，如 `plan`、`execute`） |
 | `profiles.<name>.extraEnv` | object | 否 | 传递给后端进程的额外环境变量。键必须匹配 `^[A-Z_][A-Z0-9_]*$`。 |
 | `profiles.<name>.extraOption` | object | 否 | 传递给后端的额外 CLI 标志。键必须以 `--` 开头。 |
 | `profiles.<name>.claudeBackend` | string | 否 | Claude 适配器模式：`print`（默认，使用 `-p` + stream-json）或 `tui`（在 tmux 下交互式 Claude + jsonl tail）。非 claude 后端忽略。 |
+| `profiles.<name>.thinking` | string | 否 | 思考档位，取后端原生值域：`claude` 为 `low`/`medium`/`high`/`xhigh`/`max` 之一（以 `--effort` 传递），`pi` 为 `off`/`minimal`/`low`/`medium`/`high`/`xhigh` 之一（以 `--thinking` 传递）。不写则不传任何标志。fallback 条目不继承——每条自行声明。 |
 | `profiles.<name>.fallback` | array | 否 | 有序的回退配置项列表。如果主后端失败，Cortex 按顺序尝试每个回退项。每个回退项继承主配置中未指定的字段。 |
 
 ### 配置解析
@@ -191,12 +198,12 @@ $CORTEX_HOME/
 
 1. 如果显式提供了配置名称（通过 `--profile` 或线程模板），使用它。
 2. 否则，使用 `profiles.json` 中的 `defaultProfile`。
-3. 解析后的配置提供 `model`、`backend`、`mode`、`extraEnv`、`extraOption` 和 `claudeBackend`。
+3. 解析后的配置提供 `model`、`backend`、`mode`、`extraEnv`、`extraOption`、`claudeBackend` 和 `thinking`。
 4. 如果后端调用因瞬态错误失败，Cortex 遍历 `fallback` 数组（如果有），按顺序尝试每个条目。
 
 ### 验证规则
 
-配置名称必须匹配 `^[a-zA-Z0-9_-]+$`。后端必须是 `claude`、`codex` 或 `pi` 之一。如果指定，`claudeBackend` 必须是 `print` 或 `tui`。未知字段会被静默忽略。
+配置名称必须匹配 `^[a-zA-Z0-9_-]+$`。后端必须是 `claude` 或 `pi`。如果指定，`claudeBackend` 必须是 `print` 或 `tui`。如果指定 `thinking`，其值必须属于该条目后端的值域（见字段表）。未知字段会被静默忽略。
 
 ## settings.json
 
@@ -206,7 +213,7 @@ $CORTEX_HOME/
 
 ## defaults/config/ 布局
 
-npm 包中的 `agent-server/defaults/` 目录包含在 init 期间复制到 `$CORTEX_HOME/` 的发布默认值：
+npm 包中的 `agent-server/defaults/` 目录包含随包发布的默认值。多数在 init 期间复制到 `$CORTEX_HOME/`；钩子资产与线程模板实体还会在服务器每次启动时重新同步：
 
 | 源 | 目标 | 覆盖行为 |
 |---|---|---|
@@ -214,23 +221,24 @@ npm 包中的 `agent-server/defaults/` 目录包含在 init 期间复制到 `$CO
 | `defaults/gitignore` | `$CORTEX_HOME/.gitignore` | 从不 |
 | `defaults/.claude/settings.json` | `$CORTEX_HOME/.claude/settings.json` | 从不 |
 | `defaults/config/budget.json` | `$CORTEX_HOME/config/budget.json` | 仅 `--force` |
-| `defaults/config/thread-templates.json` | `$CORTEX_HOME/config/thread-templates.json` | 仅 `--force` |
-| `defaults/config/session-hooks.json` | `$CORTEX_HOME/config/session-hooks.json` | 仅 `--force` |
+| `defaults/config/thread-templates/` | `$CORTEX_HOME/config/thread-templates/` | 逐文件 copy-if-missing，init 时与之后每次服务器启动时各执行一次：你尚未拥有的 agent/template/shell 文件会被拷入；你已有的文件绝不被覆盖——`--force` 对这棵树不生效 |
+| `defaults/config/hooks/` | `$CORTEX_HOME/config/hooks/` | 每次服务器启动时逐文件按 CalVer 同步：缺失则添加，发布的 `version` 更新则刷新。没有 `version` 的声明（你自己的）永不被覆盖 |
 | `defaults/prompts/` | `$CORTEX_HOME/prompts/` | 逐文件：新文件总是添加，已有文件保留除非 `--force` |
 | `defaults/plugins/` | `$CORTEX_HOME/plugins/` | 逐文件：新文件总是添加，已有文件保留除非 `--force` |
 | `defaults/rules/` | `$CORTEX_HOME/rules/` | 逐文件：新文件总是添加，已有文件保留除非 `--force` |
-| `defaults/hooks/` | `$CORTEX_HOME/hooks/` | 逐文件：从不覆盖除非 `--force` |
+| `defaults/hooks/` | `$CORTEX_HOME/hooks/` | init 时逐文件：从不覆盖除非 `--force`。每次服务器启动时，除非已部署文件带有相等或更新的 `@cortex-hook-version`，否则重新复制发布的脚本 |
 | `defaults/data/schedules.json` | `$CORTEX_HOME/data/schedules.json` | 从不（除非 `--force`） |
 | `defaults/context/` | `$CORTEX_HOME/context/` | 脚手架文件：从不覆盖 |
 
-这种设计意味着 npm 包升级会自动提供新的提示、插件、规则和钩子，而不会覆盖用户的自定义内容。配置文件（`thread-templates.json`、`budget.json` 等）需要 `--force` 才能替换。
+这种设计意味着 npm 包升级会自动提供新的提示、插件、规则、钩子和线程模板实体，而不会覆盖用户的自定义内容。整文件型配置（如 `budget.json`）仍需 `--force` 才能替换；`config/thread-templates/` 则改为逐文件合并，新发货的实体能到达已有安装，同时不动你的改动。
 
 ## 热重载行为
 
 - **`schedules.json`** — 通过文件监视器监视。更改在几秒钟内生效，无需重启。完整调度系统参见 [scheduling.md](./scheduling.md)。
 - **`profiles.json`** — 每次生成智能体时重新读取。更改配置无需重启。
-- **`thread-templates.json`** — 每次启动线程时重新读取。
+- **`thread-templates/`** — 每个实体子目录（`agents/`、`templates/`、`shells/`）都被监视。变更去抖（300ms）后整体重载配置，无需重启；旧的单文件 `thread-templates.json` 在迁移前以同样方式被监视。参见 [threads.md](./threads.md)。
 - **`.env`** — 需要守护进程重启才能生效（启动时通过 dotenv 加载一次）。
+- **钩子声明（`config/hooks/*.json`）** — 注册表在每次智能体生成时重新读取，因此新增的 `agent:*` / `cc:*` / `pi:*` 条目对下一个启动的智能体生效。`cortex:*` 条目在服务器启动时被快照，需重启才生效。参见 [hooks.md](./hooks.md)。
 - **钩子脚本（`hooks/*.mjs`）** — 每次钩子调用时重新读取。
 - **插件、提示、规则** — 每次智能体会话生成时重新读取。
 
@@ -240,11 +248,11 @@ npm 包中的 `agent-server/defaults/` 目录包含在 init 期间复制到 `$CO
 |---|---|---|
 | `.env` | 环境变量 | `$CORTEX_HOME/config/.env` |
 | `profiles.json` | 智能体配置 | `$CORTEX_HOME/config/profiles.json` |
-| `thread-templates.json` | 线程定义 | `$CORTEX_HOME/config/thread-templates.json` |
+| `thread-templates/` | 线程定义——每个 agent/template/shell 一个 JSON。目录存在时使用它；否则加载器回落读取旧的单文件 `thread-templates.json`，该文件会被一次性启动迁移拆分进本目录 | `$CORTEX_HOME/config/thread-templates/` |
 | `machines.json` | 机器注册表 | `$CORTEX_HOME/config/machines.json` |
 | `budget.json` | 预算限制 | `$CORTEX_HOME/config/budget.json` |
 | `mcp-config.json` | MCP 服务器配置 | `$CORTEX_HOME/config/mcp-config.json` |
 | `settings.json` | Claude 钩子/权限 | `$CORTEX_HOME/.claude/settings.json` |
 | `mode.json` | 运行时模式 | `$CORTEX_HOME/data/mode.json` |
 | `schedules.json` | 调度任务 | `$CORTEX_HOME/data/schedules.json` |
-| `session-hooks.json` | 会话钩子 | `$CORTEX_HOME/config/session-hooks.json` |
+| `hooks/*.json` | 钩子声明 | `$CORTEX_HOME/config/hooks/` |

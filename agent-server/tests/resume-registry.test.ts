@@ -1,9 +1,9 @@
 // input:  Node test runner + resume-registry module
-// output: record/dedupe/take/persistence-roundtrip tests
+// output: provider readiness, counts, dedupe, persistence tests
 // pos:    Validate the rate-limit resume registry (interrupted session/thread bookkeeping)
 // >>> If I am updated, update my header comment and the parent folder's CORTEX.md <<<
 
-import test from 'node:test';
+import { test } from 'vitest';
 import assert from 'node:assert/strict';
 import { importFresh } from './module-loader.js';
 
@@ -21,9 +21,9 @@ async function freshModule() {
   return await importFresh('./../src/domain/costs/resume-registry.js') as typeof import('../src/domain/costs/resume-registry.js');
 }
 
-async function freshModuleWithCleanup(t: import('node:test').TestContext) {
+async function freshModuleWithCleanup(t: { onTestFinished: (fn: () => unknown) => void }) {
   const mod = await freshModule();
-  t.after(() => mod._testReset());
+  t.onTestFinished(() => mod._testReset());
   return mod;
 }
 
@@ -108,6 +108,38 @@ test('initResumeRegistry hydrates from persisted entries', async (t) => {
   assert.equal(mod.getResumeCount(), 2);
   const kinds = mod.takeAllResumes().map((e: any) => e.kind).sort();
   assert.deepEqual(kinds, ['direct', 'thread']);
+});
+
+test('takeReadyResumes drains only providers that are no longer active', async (t) => {
+  const mod = await freshModuleWithCleanup(t);
+  const persistence = makePersistenceStub();
+  await mod.initResumeRegistry(persistence as any);
+
+  mod.recordResume({ kind: 'direct', provider: 'provider-a', channel: 'C1', userMessage: 'a', recordedAt: 1 });
+  mod.recordResume({ kind: 'thread', provider: 'provider-b', threadId: 'thr_b', channel: 'C2', userMessage: 'b', recordedAt: 2 });
+  mod.recordResume({ kind: 'direct', provider: null, channel: 'legacy', userMessage: 'legacy', recordedAt: 3 });
+
+  const first = mod.takeReadyResumes(['provider-b']);
+  assert.deepEqual(first.map((entry: any) => entry.provider), ['provider-a']);
+  assert.equal(mod.getResumeCount(), 2);
+  assert.deepEqual(mod.getResumeCountsByProvider(), {
+    'provider-b': { sessions: 0, threads: 1 },
+  });
+
+  const final = mod.takeReadyResumes([]);
+  assert.deepEqual(final.map((entry: any) => entry.provider), [null, 'provider-b']);
+  assert.equal(mod.getResumeCount(), 0);
+});
+
+test('resume registry publishes changes when entries are queued and drained', async (t) => {
+  const mod = await freshModuleWithCleanup(t);
+  let changes = 0;
+  await mod.initResumeRegistry(makePersistenceStub() as any, () => { changes++; });
+
+  mod.recordResume({ kind: 'direct', provider: 'provider-a', channel: 'C1', userMessage: 'a', recordedAt: 1 });
+  mod.takeReadyResumes([]);
+
+  assert.equal(changes, 2);
 });
 
 test('recordResume works in-memory before init (no persistence)', async (t) => {

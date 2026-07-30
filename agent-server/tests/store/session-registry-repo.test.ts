@@ -1,9 +1,9 @@
 // input:  Node test runner, assert, tmp filesystem
-// output: regression tests for SessionRegistryRepo (concurrent mutate, flush ordering, cache consistency, new API methods, name index)
+// output: SessionRegistryRepo concurrency, cache, context snapshot, and API regressions
 // pos:    verifies store/session-registry-repo.ts Pattern A guarantees
 // >>> If I am updated, update my header comment and the parent folder's CORTEX.md <<<
 
-import test from 'node:test';
+import { test, beforeAll, afterAll } from 'vitest';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -14,11 +14,11 @@ import { SessionRegistryRepo, deriveSessionOrigin } from '../../src/store/sessio
 
 let tmpDir: string;
 
-test.before(async () => {
+beforeAll(async () => {
   tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'cortex-session-registry-repo-test-'));
 });
 
-test.after(async () => {
+afterAll(async () => {
   await fs.rm(tmpDir, { recursive: true, force: true });
 });
 
@@ -51,6 +51,38 @@ test('SessionRegistryRepo - 10 concurrent registerSession produce all 10 entries
   for (const name of names) {
     assert.ok(registeredNames.has(name), `missing: ${name}`);
   }
+});
+
+test('SessionRegistryRepo - updateSession persists the latest context usage snapshot', async () => {
+  const { repo } = createRepoWithPath();
+  await repo.registerSession('cortex-context', makeOpts('sess-context', { backend: 'pi' }));
+  const contextUsage = {
+    usedTokens: 60000,
+    contextWindow: 200000,
+    percent: 30,
+    accuracy: 'estimate' as const,
+    updatedAt: '2026-07-27T12:00:00.000Z',
+  };
+
+  await repo.updateSession('cortex-context', { contextUsage });
+  repo.invalidate();
+
+  assert.deepEqual((await repo.getById('sess-context'))?.contextUsage, contextUsage);
+});
+
+// ── Context snapshot update by stable id ───────────────────────
+
+test('SessionRegistryRepo - updateContextUsage sets and clears a snapshot by stable session id', async () => {
+  const { repo } = createRepoWithPath();
+  await repo.registerSession('cortex-context-id', makeOpts('sess-context-id', { backend: 'pi' }));
+  const usage = {
+    usedTokens: 12000, contextWindow: 200000, percent: 6,
+    accuracy: 'estimate' as const, updatedAt: '2026-07-28T01:00:00.000Z',
+  };
+  await repo.updateContextUsage('sess-context-id', usage);
+  assert.deepEqual((await repo.getById('sess-context-id'))?.contextUsage, usage);
+  await repo.updateContextUsage('sess-context-id', null);
+  assert.equal((await repo.getById('sess-context-id'))?.contextUsage, undefined);
 });
 
 // ── (b) Mid-mutate flush resolves after all pending mutations ──
@@ -109,7 +141,7 @@ test('SessionRegistryRepo - migrate converts name-keyed old format to sessionId-
   // Write old-format JSON: name-keyed, values without name/projectId fields.
   const oldFormat = {
     'cortex-abc': { sessionId: 'sess-abc', channel: 'C001', backend: 'claude', kind: 'local', createdAt: '2025-01-01T00:00:00.000Z', lastUsedAt: '2025-06-01T00:00:00.000Z', label: 'first', profileName: null },
-    'cortex-def': { sessionId: 'sess-def', channel: 'C002', backend: 'codex', kind: 'scheduled', createdAt: '2025-02-01T00:00:00.000Z', lastUsedAt: '2025-06-02T00:00:00.000Z', label: null, profileName: 'dev' },
+    'cortex-def': { sessionId: 'sess-def', channel: 'C002', backend: 'pi', kind: 'scheduled', createdAt: '2025-02-01T00:00:00.000Z', lastUsedAt: '2025-06-02T00:00:00.000Z', label: null, profileName: 'dev' },
   };
   await fs.writeFile(filePath, JSON.stringify(oldFormat, null, 2));
 
@@ -437,4 +469,29 @@ test('SessionRegistryRepo - name index survives invalidate', async () => {
   const r = await repo.lookupSession('cortex-persist');
   assert.ok(r);
   assert.equal(r!.sessionId, 'sess-persist');
+});
+
+// ── markRead (unread tracking) ─────────────────────────────────
+
+test('SessionRegistryRepo - markRead stamps lastReadAt on the target session only', async () => {
+  const { repo } = createRepoWithPath();
+  await repo.registerSession('cortex-read01', makeOpts('sess-read-1'));
+  await repo.registerSession('cortex-read02', makeOpts('sess-read-2'));
+
+  const before = new Date().toISOString();
+  await repo.markRead('sess-read-1');
+
+  const s1 = await repo.getById('sess-read-1');
+  const s2 = await repo.getById('sess-read-2');
+  assert.ok(s1?.lastReadAt, 'target session has lastReadAt');
+  assert.ok(s1!.lastReadAt! >= before, 'lastReadAt is stamped now');
+  assert.equal(s2?.lastReadAt ?? null, null, 'other session untouched');
+});
+
+test('SessionRegistryRepo - markRead is a no-op for an unknown sessionId', async () => {
+  const { repo } = createRepoWithPath();
+  await repo.registerSession('cortex-read03', makeOpts('sess-read-3'));
+  await repo.markRead('sess-missing');
+  const s = await repo.getById('sess-read-3');
+  assert.equal(s?.lastReadAt ?? null, null);
 });

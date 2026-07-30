@@ -1,4 +1,5 @@
 import type { CSSProperties, Ref } from 'react';
+import { useVocab } from '@/i18n';
 
 // Pure presentational chrome for the execution log drawer (design 09-exec-logs, prototype.dc.html
 // L1544–1560) — hooks-free so it is render-testable and screenshottable in isolation. Exact inline
@@ -37,7 +38,7 @@ const PILL_STYLE: CSSProperties = {
   padding: '1.5px 7px',
   borderRadius: 999,
   background: '#2A2F3A',
-  color: '#9AA3E8',
+  color: 'var(--proto-accent-2)',
 };
 
 const BODY_STYLE: CSSProperties = {
@@ -71,14 +72,15 @@ export function LogDrawerView({
   scrollRef,
   onScroll,
 }: LogDrawerViewProps) {
+  const L = useVocab();
   return (
     <>
       {/* Header (prototype L1545) */}
       <div style={HEADER_STYLE}>
-        <span style={{ font: "600 12px 'IBM Plex Mono',monospace", color: '#E8EAF2' }}>{title}</span>
+        <span style={{ font: "600 12px 'IBM Plex Mono',monospace", color: 'var(--proto-line)' }}>{title}</span>
         {pill ? <span style={PILL_STYLE}>{pill}</span> : null}
         <span
-          style={{ marginLeft: 'auto', font: "400 9.5px 'IBM Plex Mono',monospace", color: '#5B6472' }}
+          style={{ marginLeft: 'auto', font: "400 9.5px 'IBM Plex Mono',monospace", color: 'var(--proto-muted)' }}
         >
           {meta}
         </span>
@@ -87,7 +89,7 @@ export function LogDrawerView({
           aria-label="Close"
           role="button"
           tabIndex={0}
-          style={{ color: '#8A93A2', fontSize: 13, cursor: 'pointer', padding: '2px 4px' }}
+          style={{ color: 'var(--proto-muted-2)', fontSize: 13, cursor: 'pointer', padding: '2px 4px' }}
         >
           ✕
         </span>
@@ -95,37 +97,27 @@ export function LogDrawerView({
 
       {/* Log body (prototype L1551) */}
       <div ref={scrollRef} onScroll={onScroll} data-execution-log style={BODY_STYLE}>
-        {notice ? <div style={{ color: '#5B6472' }}>{notice}</div> : null}
+        {notice ? <div style={{ color: 'var(--proto-muted)' }}>{notice}</div> : null}
         {dropped > 0 ? (
-          <div style={{ color: '#C79A3E' }}>
-            … {dropped} line{dropped === 1 ? '' : 's'} dropped
+          <div style={{ color: 'var(--proto-amber)' }}>
+            … {dropped} {L.exLinesDropped}
           </div>
         ) : null}
         {lines.map((line, i) => (
-          <div key={i} style={{ color: '#C6CBE8', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+          <div key={i} style={{ color: 'var(--proto-accent-bg)', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
             {line}
           </div>
         ))}
-        {/* Trailing live-clock + blinking caret (prototype L1555) */}
+        {/* Trailing live-clock (prototype L1555) */}
         <div>
-          <span style={{ color: '#5B6472' }}>{now}</span>{' '}
-          <span
-            style={{
-              display: 'inline-block',
-              width: 7,
-              height: 12,
-              background: '#9AA3E8',
-              verticalAlign: -2,
-              animation: 'cxblink 1.1s steps(1) infinite',
-            }}
-          />
+          <span style={{ color: 'var(--proto-muted)' }}>{now}</span>
         </div>
       </div>
 
       {/* Footer (prototype L1557) */}
       <div style={FOOTER_STYLE}>
-        <span style={{ font: "400 9.5px 'IBM Plex Mono',monospace", color: '#5B6472' }}>
-          heartbeat 30s · missed 0 · → costs.jsonl
+        <span style={{ font: "400 9.5px 'IBM Plex Mono',monospace", color: 'var(--proto-muted)' }}>
+          {L.exFooterHeartbeat}
         </span>
         <button
           type="button"
@@ -137,14 +129,14 @@ export function LogDrawerView({
             fontSize: 11,
             fontWeight: 600,
             color: '#E88',
-            border: '1px solid #4A3336',
+            border: '1px solid var(--proto-danger)',
             borderRadius: 7,
             padding: '4px 12px',
             cursor: killDisabled ? 'default' : 'pointer',
             background: 'transparent',
           }}
         >
-          Kill run
+          {L.exKillRun}
         </button>
       </div>
     </>

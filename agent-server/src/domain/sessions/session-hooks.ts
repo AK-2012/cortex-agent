@@ -1,15 +1,11 @@
-// input:  agent-server/session-hooks.json (lazy-read), spawn() subprocess, OutputStream
-// output: runSessionHook() unified pipeline + fireAndForgetPreCloseHook (onNew) + onMessageEnd helpers
-//         + runHookInjection / onNewInjectSessionKey (isolated pool key for the onNew pre-close turn)
-// pos:    session-level hook subsystem — config loading, subprocess spawn, unified Slack-display pipeline
-//         (parallel to thread-hook system, scoped to channel/session rather than thread)
+// input:  hook registry/events, agent sessions, OutputStream
+// output: session dispatch, diagnostics, and injection helpers
+// pos:    Dispatches session events and injects prompt results
 // >>> If I am updated, update my header comment and the parent folder's CORTEX.md <<<
-
-import { spawn } from 'child_process';
-import { readFileSync } from 'fs';
-import * as path from 'path';
-import { DATA_DIR, CONFIG_DIR } from '@core/paths.js';
+import * as path from 'node:path';
+import { emitCortexEvent, type HookEmitResult } from '@core/hook-bus.js';
 import { createLogger } from '@core/log.js';
+import { HOOKS_DIR } from '@core/paths.js';
 import { Icons } from '../../core/icons.js';
 import type { PlatformAdapter, OutputStream } from '@platform/index.js';
 import { runAgent, resolveBackendForChannel } from '@domain/agents/index.js';
@@ -19,11 +15,14 @@ import type { AgentHandle } from '@core/types/agent-types.js';
 import { getSessionAsync } from '@domain/sessions/session.js';
 import { sessionStore } from '@store/session-registry-repo.js';
 import { conversationLedger } from '@store/conversation-ledger-repo.js';
+import { filterHookEntries, loadHookRegistry, type HookEntry } from '@store/hook-registry.js';
 
 const log = createLogger('session-hook');
-
-const CONFIG_FILE = path.join(CONFIG_DIR, 'session-hooks.json');
 const DEFAULT_TIMEOUT_MS = 60_000;
+const SESSION_EVENTS = {
+  onNew: 'cortex:session.new',
+  onMessageEnd: 'cortex:session.messageEnd',
+} as const;
 
 // ── Config types ──────────────────────────────────────────────────────────────
 
@@ -33,34 +32,23 @@ export interface SessionHookConfig {
   timeout?: number;
 }
 
-export interface SessionHooksFile {
-  onNew?: SessionHookConfig;
-  onMessageEnd?: SessionHookConfig;
+export type HookName = keyof typeof SESSION_EVENTS;
+
+function normalizeHookEntry(entry: HookEntry): SessionHookConfig {
+  const command = entry.run.script === undefined
+    ? entry.run.command
+    : `node ${path.join(HOOKS_DIR, entry.run.script)}`;
+  return {
+    command,
+    timeout: entry.run.timeout === undefined
+      ? DEFAULT_TIMEOUT_MS
+      : entry.run.timeout * 1_000,
+  };
 }
 
-type HookName = 'onNew' | 'onMessageEnd';
-
-function loadConfigFile(): SessionHooksFile | null {
-  let raw: string;
-  try {
-    raw = readFileSync(CONFIG_FILE, 'utf8');
-  } catch {
-    return null;
-  }
-  try {
-    return JSON.parse(raw) as SessionHooksFile;
-  } catch (e: any) {
-    log.warn(`Failed to parse ${CONFIG_FILE}: ${e?.message || e}`);
-    return null;
-  }
-}
-
-function loadHookConfig(name: HookName): SessionHookConfig | null {
-  const parsed = loadConfigFile();
-  if (!parsed) return null;
-  const cfg = parsed[name];
-  if (!cfg || typeof cfg.command !== 'string' || cfg.command.trim() === '') return null;
-  return cfg;
+export function loadHookConfig(name: HookName): SessionHookConfig | null {
+  const entries = filterHookEntries(loadHookRegistry(), { event: SESSION_EVENTS[name] });
+  return entries[0] ? normalizeHookEntry(entries[0]) : null;
 }
 
 export function isOnNewHookConfigured(): boolean {
@@ -69,78 +57,6 @@ export function isOnNewHookConfigured(): boolean {
 
 export function isOnMessageEndHookConfigured(): boolean {
   return loadHookConfig('onMessageEnd') !== null;
-}
-
-// ── Subprocess runner (shared) ────────────────────────────────────────────────
-
-interface SpawnOptions {
-  cfg: SessionHookConfig;
-  stdinPayload: string;
-  env: NodeJS.ProcessEnv;
-  label: string;
-}
-
-interface SpawnResult {
-  stdout: string;     // trimmed
-  stderr: string;     // truncated to last 2000 chars
-  error?: string;     // set on non-zero exit / timeout / spawn error
-}
-
-function spawnHookProcess({ cfg, stdinPayload, env, label }: SpawnOptions): Promise<SpawnResult> {
-  const timeout = cfg.timeout ?? DEFAULT_TIMEOUT_MS;
-  const args = cfg.args ?? [];
-
-  return new Promise<SpawnResult>((resolve) => {
-    let stdout = '';
-    let stderr = '';
-    let settled = false;
-
-    const proc = spawn('sh', ['-c', `${cfg.command} "$@"`, 'hook', ...args], {
-      stdio: ['pipe', 'pipe', 'pipe'],
-      cwd: DATA_DIR,
-      timeout,
-      env,
-    });
-
-    proc.stdout.on('data', (chunk: Buffer) => { stdout += chunk.toString(); });
-    proc.stderr.on('data', (chunk: Buffer) => { stderr += chunk.toString(); });
-
-    const finish = (result: SpawnResult) => {
-      if (settled) return;
-      settled = true;
-      resolve(result);
-    };
-
-    proc.on('error', (err) => {
-      log.error(`spawn error (${label}): ${err.message}`);
-      finish({ stdout: '', stderr: stderr.slice(-2000), error: err.message });
-    });
-
-    proc.on('close', (code, signal) => {
-      const trimmed = stdout.trim();
-      const tail = stderr.slice(-2000);
-      if (signal === 'SIGTERM' || signal === 'SIGKILL') {
-        log.error(`timed out after ${timeout}ms (${label})`);
-        finish({ stdout: '', stderr: tail, error: `timed out after ${timeout}ms` });
-        return;
-      }
-      if (code !== 0) {
-        const msg = `exited with code ${code}`;
-        log.error(`${msg} (${label})${stderr ? ': ' + stderr.trim() : ''}`);
-        finish({ stdout: '', stderr: tail, error: msg });
-        return;
-      }
-      if (stderr) log.warn(`stderr (${label}): ${stderr.trim()}`);
-      finish({ stdout: trimmed, stderr: tail });
-    });
-
-    try {
-      proc.stdin.write(stdinPayload);
-      proc.stdin.end();
-    } catch (e: any) {
-      log.warn(`stdin write failed (${label}): ${e?.message || e}`);
-    }
-  });
 }
 
 // ── Unified hook pipeline ─────────────────────────────────────────────────────
@@ -271,8 +187,11 @@ function buildHookEnv(name: HookName, ctx: SessionHookContext): NodeJS.ProcessEn
   return env;
 }
 
-function buildHookStdin(name: HookName, ctx: SessionHookContext): string {
-  return JSON.stringify({
+function buildHookPayload(
+  name: HookName,
+  ctx: SessionHookContext,
+): Record<string, unknown> {
+  return {
     channel: ctx.channel,
     sessionId: ctx.sessionId,
     sessionName: ctx.sessionName,
@@ -280,18 +199,57 @@ function buildHookStdin(name: HookName, ctx: SessionHookContext): string {
     profile: ctx.profile ?? null,
     trigger: name === 'onNew' ? 'new' : 'messageEnd',
     timestampIso: new Date().toISOString(),
+  };
+}
+
+async function flushHookStream(stream: OutputStream, label: string, phase: string): Promise<void> {
+  await stream.flush().catch((error: any) => {
+    log.warn(`stream.flush ${phase} failed (${label}): ${error?.message || error}`);
   });
 }
 
-/** Unified pipeline: post status line → spawn subprocess → post preview/error line →
- *  optionally inject stdout as a fresh agent turn. Every Slack write goes through
- *  `stream` so hook output and the follow-up agent turn share one continuous thread.
- *
- *  Caller controls the `stream`:
- *    - onMessageEnd: pass the assistant turn's stream so hook lines extend the same
- *      reply chain (no top-level leak).
- *    - onNew: pass a fresh stream anchored at the last assistant message's thread parent
- *      (resolved via resolveSessionThreadTs). */
+interface SessionHookResult {
+  stdout: string;
+  error?: string;
+}
+
+function asSessionHookResult(result: HookEmitResult): SessionHookResult | null {
+  if (result.error) return { stdout: '', error: result.error };
+  if (typeof result.result === 'string') return { stdout: result.result };
+  return null;
+}
+
+async function handleHookResult(
+  result: SessionHookResult,
+  spec: SessionHookSpec,
+  stream: OutputStream,
+  deps: InjectDeps,
+  label: string,
+): Promise<void> {
+  if (result.error) {
+    stream.emitText(spec.format.errorLine(result.error));
+    await flushHookStream(stream, label, 'after error');
+    return;
+  }
+  if (!result.stdout) {
+    const empty = spec.format.emptyLine?.();
+    if (empty) stream.emitText(empty);
+    await flushHookStream(stream, label, 'on empty');
+    return;
+  }
+  stream.emitText(spec.format.previewLine(result.stdout));
+  if (!spec.inject) {
+    await flushHookStream(stream, label, 'no-inject');
+    return;
+  }
+  try {
+    await runHookInjection(result.stdout, spec, stream, deps);
+  } finally {
+    await flushHookStream(stream, label, 'after inject');
+  }
+}
+
+/** Run configured session subscribers and preserve the display/injection pipeline. */
 export async function runSessionHook(
   spec: SessionHookSpec,
   stream: OutputStream,
@@ -299,43 +257,24 @@ export async function runSessionHook(
 ): Promise<void> {
   const cfg = loadHookConfig(spec.name);
   if (!cfg) return;
-
-  const label = (cfg.args && cfg.args.length) ? `${cfg.command} ${cfg.args.join(' ')}` : cfg.command;
-
   stream.emitText(spec.format.statusLine());
-
-  const result = await spawnHookProcess({
-    cfg,
-    stdinPayload: buildHookStdin(spec.name, spec.ctx),
-    env: buildHookEnv(spec.name, spec.ctx),
-    label,
-  });
-
-  if (result.error) {
-    stream.emitText(spec.format.errorLine(result.error));
-    await stream.flush().catch((e: any) => log.warn(`stream.flush after error failed (${label}): ${e?.message || e}`));
-    return;
+  const results = await emitCortexEvent(
+    SESSION_EVENTS[spec.name],
+    buildHookPayload(spec.name, spec.ctx),
+    {
+      env: buildHookEnv(spec.name, spec.ctx),
+      defaultTimeoutMs: DEFAULT_TIMEOUT_MS,
+    },
+  );
+  let handled = false;
+  for (const emitted of results) {
+    if (emitted.stderr) log.warn(`stderr (${emitted.id}): ${emitted.stderr.trim()}`);
+    const result = asSessionHookResult(emitted);
+    if (!result) continue;
+    handled = true;
+    await handleHookResult(result, spec, stream, deps, emitted.id);
   }
-
-  if (!result.stdout) {
-    const empty = spec.format.emptyLine?.();
-    if (empty) stream.emitText(empty);
-    await stream.flush().catch((e: any) => log.warn(`stream.flush on empty failed (${label}): ${e?.message || e}`));
-    return;
-  }
-
-  stream.emitText(spec.format.previewLine(result.stdout));
-
-  if (!spec.inject) {
-    await stream.flush().catch((e: any) => log.warn(`stream.flush no-inject failed (${label}): ${e?.message || e}`));
-    return;
-  }
-
-  try {
-    await runHookInjection(result.stdout, spec, stream, deps);
-  } finally {
-    await stream.flush().catch((e: any) => log.warn(`stream.flush after inject failed (${label}): ${e?.message || e}`));
-  }
+  if (!handled) await flushHookStream(stream, cfg.command, 'no-result');
 }
 
 // ── onNew (pre-close) entry points ────────────────────────────────────────────

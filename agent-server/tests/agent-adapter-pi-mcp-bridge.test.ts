@@ -1,23 +1,26 @@
-// input:  _test exports from mcp-bridge + MCP SDK
-// output: mapMcpContent unit + listTools/cost_query integration
-// pos:    PI mcp-bridge content mapping and integration test
-// >>> If I am updated, update my header comment and the parent folder's CORTEX.md <<<
+// input:  PI MCP bridge, privilege env, fake and real clients
+// output: scoped loading, mapping, retry, and stdio contracts
+// pos:    PI MCP bridge behavior tests
+// >>> 一旦我被更新，务必更新我的开头注释与所属文件夹 CORTEX.md <<<
 
-import test from 'node:test';
+import { test } from 'vitest';
 import assert from 'node:assert/strict';
-import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { resolve, dirname } from 'node:path';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
-import { _test } from '../src/agent-adapter/pi/mcp-bridge.js';
-// Source-of-truth tool lists — assert the built servers match what the source declares,
-// so this test self-maintains instead of drifting against hardcoded counts.
-import { TOOL_NAMES as CORE_TOOLS } from '../src/domain/mcp/core-server.js';
-import { TOOL_NAMES as SLACK_TOOLS } from '../src/domain/mcp/slack-server.js';
-import { FEISHU_TOOL_NAMES as FEISHU_TOOLS } from '../src/domain/mcp/feishu/index.js';
-
-const { mapMcpContent, shouldLoadSlack, shouldLoadFeishu } = _test;
+import {
+  installMcpBridge,
+  type McpBridgeDeps,
+} from '../src/agent-adapter/pi/mcp-bridge.js';
+import {
+  mapMcpContent,
+  shouldLoadFeishu,
+  shouldLoadSlack,
+  shouldLoadThreadControl,
+  shouldLoadWeb,
+} from '../src/agent-adapter/pi/mcp-bridge-logic.js';
+import type { ExtensionAPI } from '../src/agent-adapter/pi/pi-ext-types.js';
 
 // The CORE_SERVER_PATH / EXT_SERVER_PATH exported from mcp-bridge resolves relative to its own
 // location: when loaded via tsx from src/ those siblings don't exist; when running compiled from
@@ -25,17 +28,7 @@ const { mapMcpContent, shouldLoadSlack, shouldLoadFeishu } = _test;
 // test verifies the deployed (npm install) behavior — `npm run build` must have run first.
 const TESTS_DIR = dirname(fileURLToPath(import.meta.url));
 const DIST_DIR = resolve(TESTS_DIR, '../dist');
-const CORE_SERVER_PATH = resolve(DIST_DIR, 'domain/mcp/core-server.js');
 const EXT_SERVER_PATH = resolve(DIST_DIR, 'domain/mcp/server.js');
-const SLACK_SERVER_PATH = resolve(DIST_DIR, 'domain/mcp/slack-server.js');
-const FEISHU_SERVER_PATH = resolve(DIST_DIR, 'domain/mcp/feishu-server.js');
-
-const EXT_TOOLS = [
-  'cost_query', 'query_executions',
-  'cortex_context',
-  'cortex_schedule_add', 'cortex_schedule_list', 'cortex_schedule_get',
-  'cortex_schedule_remove', 'cortex_schedule_pause', 'cortex_schedule_resume',
-];
 
 // --- Test C: mapMcpContent pure unit tests ---
 
@@ -82,6 +75,20 @@ test('shouldLoadFeishu: false for slack / bare / empty channels', () => {
   assert.equal(shouldLoadFeishu(undefined), false);
 });
 
+// --- shouldLoadWeb: gate the cortex-web server on Web-UI-originated sessions ---
+
+test('shouldLoadWeb: true when channel carries the web: prefix', () => {
+  assert.equal(shouldLoadWeb('web:abc123'), true);
+});
+
+test('shouldLoadWeb: false for slack / feishu / bare / empty channels', () => {
+  assert.equal(shouldLoadWeb('slack:C0123'), false);
+  assert.equal(shouldLoadWeb('feishu:oc_abc'), false);
+  assert.equal(shouldLoadWeb('C0123'), false);
+  assert.equal(shouldLoadWeb(''), false);
+  assert.equal(shouldLoadWeb(undefined), false);
+});
+
 // --- shouldLoadSlack: gate the cortex-slack server on Slack-originated sessions ---
 
 test('shouldLoadSlack: true when channel carries the slack: prefix', () => {
@@ -95,107 +102,164 @@ test('shouldLoadSlack: false for feishu / bare / empty channels', () => {
   assert.equal(shouldLoadSlack(undefined), false);
 });
 
-// --- Path constants sanity ---
+// --- shouldLoadThreadControl: gate lifecycle tools on thread context ---
 
-test('compiled core-server.js exists at expected dist location', () => {
-  assert.ok(existsSync(CORE_SERVER_PATH), `expected ${CORE_SERVER_PATH} on disk — run \`npm run build\` first`);
+test('shouldLoadThreadControl: true when CORTEX_THREAD_ID is present', () => {
+  assert.equal(shouldLoadThreadControl('thr_abc123'), true);
 });
 
-test('compiled server.js exists at expected dist location', () => {
-  assert.ok(existsSync(EXT_SERVER_PATH), `expected ${EXT_SERVER_PATH} on disk — run \`npm run build\` first`);
+test('shouldLoadThreadControl: false for empty or missing thread ids', () => {
+  assert.equal(shouldLoadThreadControl(''), false);
+  assert.equal(shouldLoadThreadControl(undefined), false);
 });
 
-test('compiled slack-server.js exists at expected dist location', () => {
-  assert.ok(existsSync(SLACK_SERVER_PATH), `expected ${SLACK_SERVER_PATH} on disk — run \`npm run build\` first`);
-});
+type BridgeEvent = 'before_agent_start' | 'session_shutdown';
+type BridgeHandler = (event: Record<string, never>, ctx: Record<string, never>) => Promise<void> | void;
 
-test('compiled feishu-server.js exists at expected dist location', () => {
-  assert.ok(existsSync(FEISHU_SERVER_PATH), `expected ${FEISHU_SERVER_PATH} on disk — run \`npm run build\` first`);
-});
+function createPiHarness() {
+  const handlers = new Map<BridgeEvent, BridgeHandler>();
+  const registered: string[] = [];
+  const pi = {
+    on(event: BridgeEvent, handler: BridgeHandler) {
+      handlers.set(event, handler);
+    },
+    registerTool(tool: { name: string }) {
+      registered.push(tool.name);
+    },
+  } as unknown as ExtensionAPI;
+  return {
+    pi,
+    registered,
+    fire: async (event: BridgeEvent) => handlers.get(event)?.({}, {}),
+  };
+}
 
-// --- Test A: listTools integration (real MCP subprocesses) ---
+function fakeHandle(name: string, listTools: () => Promise<unknown> = async () => ({
+  tools: [{ name: `${name}_tool`, description: name, inputSchema: { type: 'object' } }],
+})) {
+  return {
+    client: {
+      listTools,
+      callTool: async () => ({ content: [{ type: 'text', text: name }] }),
+    },
+    transport: { close: async () => undefined },
+  } as any;
+}
 
-test('core-server exposes its declared TOOL_NAMES via StdioClientTransport', { timeout: 15000 }, async () => {
-  const transport = new StdioClientTransport({
-    command: 'node',
-    args: [CORE_SERVER_PATH],
-    stderr: 'pipe',
+function retryDeps(overrides: Partial<McpBridgeDeps>): McpBridgeDeps {
+  return {
+    env: { CORTEX_THREAD_ID: 'thr_retry' },
+    reportFailure: () => undefined,
+    spawnClient: async (_path, name) => fakeHandle(name),
+    ...overrides,
+  };
+}
+
+test('subagent MCP bridge exposes only cortex-core', async () => {
+  const harness = createPiHarness();
+  const spawned: string[] = [];
+  const deps = retryDeps({
+    env: {
+      CORTEX_PI_SUBAGENT: '1',
+      CORTEX_THREAD_ID: 'thr_parent',
+      SLACK_CHANNEL: 'slack:C0123',
+    },
+    spawnClient: async (_path, name) => {
+      spawned.push(name);
+      return fakeHandle(name);
+    },
   });
-  const client = new Client({ name: 'test-core-server', version: '1.0.0' });
-  await client.connect(transport);
-  try {
-    const { tools } = await client.listTools();
-    const names = tools.map((t) => t.name);
-    for (const expected of CORE_TOOLS) {
-      assert.ok(names.includes(expected), `expected tool '${expected}' in core-server listTools`);
-    }
-    assert.equal(names.length, CORE_TOOLS.length, `expected exactly ${CORE_TOOLS.length} tools in core-server`);
-  } finally {
-    await transport.close();
-  }
+
+  await installMcpBridge(harness.pi, deps);
+  await harness.fire('before_agent_start');
+
+  assert.deepEqual(spawned, ['core']);
+  assert.deepEqual(harness.registered, ['core_tool']);
 });
 
-test('ext-server exposes 9 non-remote tools via StdioClientTransport', { timeout: 15000 }, async () => {
-  const transport = new StdioClientTransport({
-    command: 'node',
-    args: [EXT_SERVER_PATH],
-    stderr: 'pipe',
+test('top-level direct MCP bridge loads manager answers without thread control', async () => {
+  const harness = createPiHarness();
+  const spawned: string[] = [];
+  const deps = retryDeps({
+    env: {},
+    spawnClient: async (_path, name) => {
+      spawned.push(name);
+      return fakeHandle(name);
+    },
   });
-  const client = new Client({ name: 'test-ext-server', version: '1.0.0' });
-  await client.connect(transport);
-  try {
-    const { tools } = await client.listTools();
-    const names = tools.map((t) => t.name);
-    for (const expected of EXT_TOOLS) {
-      assert.ok(names.includes(expected), `expected tool '${expected}' in ext-server listTools`);
-    }
-    assert.equal(names.length, EXT_TOOLS.length, `expected exactly ${EXT_TOOLS.length} tools in ext-server`);
-  } finally {
-    await transport.close();
-  }
+
+  await installMcpBridge(harness.pi, deps);
+  await harness.fire('before_agent_start');
+
+  assert.deepEqual(spawned, ['core', 'tasks', 'manager-qa', 'ext']);
+  assert.deepEqual(harness.registered, [
+    'core_tool', 'tasks_tool', 'manager-qa_tool', 'ext_tool',
+  ]);
 });
 
-test('slack-server exposes its declared SLACK_TOOL_NAMES via StdioClientTransport', { timeout: 15000 }, async () => {
-  const transport = new StdioClientTransport({
-    command: 'node',
-    args: [SLACK_SERVER_PATH],
-    stderr: 'pipe',
+test('required MCP connect failure retries next turn without duplicate tools', async () => {
+  const harness = createPiHarness();
+  const attempts = new Map<string, number>();
+  const failures: unknown[] = [];
+  const deps = retryDeps({
+    reportFailure: (error) => failures.push(error),
+    spawnClient: async (_path, name) => {
+      const attempt = (attempts.get(name) ?? 0) + 1;
+      attempts.set(name, attempt);
+      if (name === 'manager-qa' && attempt === 1) throw new Error('manager answers unavailable');
+      return fakeHandle(name);
+    },
   });
-  const client = new Client({ name: 'test-slack-server', version: '1.0.0' });
-  await client.connect(transport);
-  try {
-    const { tools } = await client.listTools();
-    const names = tools.map((t) => t.name);
-    for (const expected of SLACK_TOOLS) {
-      assert.ok(names.includes(expected), `expected tool '${expected}' in slack-server listTools`);
-    }
-    assert.equal(names.length, SLACK_TOOLS.length, `expected exactly ${SLACK_TOOLS.length} tools in slack-server`);
-  } finally {
-    await transport.close();
-  }
-});
 
-test('feishu-server exposes its declared FEISHU_TOOL_NAMES via StdioClientTransport', { timeout: 15000 }, async () => {
-  const transport = new StdioClientTransport({
-    command: 'node',
-    args: [FEISHU_SERVER_PATH],
-    stderr: 'pipe',
+  await installMcpBridge(harness.pi, deps);
+  await harness.fire('before_agent_start');
+  assert.deepEqual(harness.registered, []);
+  assert.equal(failures.length, 1);
+  assert.match((failures[0] as Error).message, /manager-qa.*connect/);
+
+  await harness.fire('before_agent_start');
+  assert.deepEqual(harness.registered.sort(), [
+    'core_tool', 'ext_tool', 'manager-qa_tool', 'tasks_tool', 'thread_tool',
+  ]);
+  await harness.fire('before_agent_start');
+  assert.equal(harness.registered.length, 5);
+  assert.deepEqual(Object.fromEntries(attempts), {
+    core: 1, tasks: 1, 'manager-qa': 2, thread: 1, ext: 1,
   });
-  const client = new Client({ name: 'test-feishu-server', version: '1.0.0' });
-  await client.connect(transport);
-  try {
-    const { tools } = await client.listTools();
-    const names = tools.map((t) => t.name);
-    for (const expected of FEISHU_TOOLS) {
-      assert.ok(names.includes(expected), `expected tool '${expected}' in feishu-server listTools`);
-    }
-    assert.equal(names.length, FEISHU_TOOLS.length, `expected exactly ${FEISHU_TOOLS.length} tools in feishu-server`);
-  } finally {
-    await transport.close();
-  }
 });
 
-// --- Test B: cost_query returns text content (via ext-server) ---
+test('required MCP list failure retries discovery before registering tools', async () => {
+  const harness = createPiHarness();
+  const listAttempts = new Map<string, number>();
+  const failures: unknown[] = [];
+  const deps = retryDeps({
+    reportFailure: (error) => failures.push(error),
+    spawnClient: async (_path, name) => fakeHandle(name, async () => {
+      const attempt = (listAttempts.get(name) ?? 0) + 1;
+      listAttempts.set(name, attempt);
+      if (name === 'manager-qa' && attempt === 1) throw new Error('list unavailable');
+      return { tools: [{ name: `${name}_tool`, description: name, inputSchema: { type: 'object' } }] };
+    }),
+  });
+
+  await installMcpBridge(harness.pi, deps);
+  await harness.fire('before_agent_start');
+  assert.deepEqual(harness.registered, []);
+  assert.equal(failures.length, 1);
+  assert.match((failures[0] as Error).message, /manager-qa.*list/);
+
+  await harness.fire('before_agent_start');
+  assert.deepEqual(harness.registered.sort(), [
+    'core_tool', 'ext_tool', 'manager-qa_tool', 'tasks_tool', 'thread_tool',
+  ]);
+  await harness.fire('before_agent_start');
+  assert.equal(harness.registered.length, 5);
+  assert.deepEqual(Object.fromEntries(listAttempts), {
+    core: 2, tasks: 2, 'manager-qa': 2, thread: 1, ext: 1,
+  });
+});
+
+// Real transport integration: invoking one tool exercises server startup, registration, RPC, and mapping.
 
 test('cost_query tool returns text content when called', { timeout: 15000 }, async () => {
   const transport = new StdioClientTransport({

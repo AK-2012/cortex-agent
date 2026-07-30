@@ -1,13 +1,10 @@
 // input:  buildResumeOptions(thread) from orchestration/thread-callback
-// output: resumed RunThreadOptions.statusMsg is restored from metadata.statusMsgRef
-// pos:    Regression for the 2026-06-23 finding: rate-limit (and suspended-parent) resume rebuilt
-//         options with statusMsg=null, so the resumed runThread loop's update calls (gated on
-//         opts.statusMsg) were no-ops — the Slack status message froze at "Paused — rate limited"
-//         even though the thread ran to completion. Fix: read metadata.statusMsgRef back into opts.
+// output: restored status message without rebuilding lifecycle hooks
+// pos:    Verifies persisted thread resume option reconstruction
 // >>> If I am updated, update my header comment and the parent folder's CORTEX.md <<<
 
 import './_test-home.js'; // MUST be first: isolate CORTEX_HOME before paths.ts loads
-import test, { after } from 'node:test';
+import { test, afterAll } from 'vitest';
 import assert from 'node:assert/strict';
 import { threadStore } from '../src/store/thread-repo.js';
 import { buildResumeOptions } from '../src/orchestration/thread-callback.js';
@@ -18,7 +15,7 @@ import type { ThreadRecord, ThreadStatus } from '../src/core/types/thread-types.
 const createdThreadIds = new Set<string>();
 let seq = 0;
 
-after(async () => {
+afterAll(async () => {
   for (const id of createdThreadIds) await threadStore.delete(id);
   await threadStore.flush();
   jobCtx.adapter = null;
@@ -42,12 +39,20 @@ function makeThread(over: Partial<ThreadRecord> = {}): ThreadRecord {
   return rec;
 }
 
-test('buildResumeOptions restores statusMsg from metadata.statusMsgRef', () => {
+test('buildResumeOptions restores statusMsg without rebuilding dispatch hooks', () => {
   jobCtx.adapter = new MockAdapter();
-  const t = makeThread();
+  const t = makeThread({
+    metadata: {
+      trigger: 'task-dispatch',
+      taskId: 'a1b2',
+      taskProject: 'atlas',
+      statusMsgRef: { conduit: 'C-rs-test', messageId: 'msg-42' },
+    },
+  });
   const opts = buildResumeOptions(t);
   assert.ok(opts, 'expected options to be built');
   assert.deepEqual(opts!.statusMsg, { conduit: 'C-rs-test', messageId: 'msg-42' });
+  assert.equal(opts!.extraHooks, undefined);
 });
 
 test('buildResumeOptions leaves statusMsg null when no statusMsgRef was persisted', () => {

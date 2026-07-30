@@ -3,7 +3,7 @@
 // pos:    Verify !skills group discovery and namespace completion
 // >>> If I am updated, update my header comment and the parent folder's CORTEX.md <<<
 
-import test from 'node:test';
+import { test } from 'vitest';
 import assert from 'node:assert/strict';
 import {
   getDisplaySkillNames,
@@ -12,7 +12,7 @@ import {
   normalizeSkillCommandPrefix,
 } from '../src/domain/memory/skill-scanner.js';
 
-test('getDisplaySkillNames surfaces plugin skills and excludes codex-only skills', () => {
+test('getDisplaySkillNames surfaces plugin skills and excludes namespaced-only aliases', () => {
   const skills = [...getDisplaySkillNames()];
 
   assert.ok(skills.includes('code-standards'), 'expected cortex-coder:code-standards to be discovered');

@@ -1,5 +1,11 @@
+// input:  task repo, lifecycle and project-lock operations
+// output: task mutations and terminal events
+// pos:    Serializes task mutations across processes
+// >>> If I am updated, update my header comment and the parent folder's CORTEX.md <<<
+
 import { taskStore, TaskRepo } from '@store/task-repo.js';
 import type { EventBus } from '@events/index.js';
+import { emitCortexEvent } from '@core/hook-bus.js';
 import {
   approveTask as lifecycleApproveTask,
   blockTask as lifecycleBlockTask,
@@ -21,7 +27,52 @@ import {
   decomposeTask as lifecycleDecomposeTask,
 } from './system/task-mutations.js';
 import { editTask as lifecycleEditTask } from './system/task-lifecycle-edit.js';
-import { assertLockHeld, getOwnerIdentity, isProjectLocked } from './system/task-lock.js';
+import {
+  acquireLock,
+  assertLockHeld,
+  getOwnerIdentity,
+  isProjectLocked,
+  releaseLock,
+} from './system/task-lock.js';
+
+interface AddTaskOptions {
+  plan?: string;
+  system?: boolean;
+}
+
+interface AddTaskRequest {
+  project: string;
+  text: string;
+  why: string;
+  doneWhen: string;
+  priority: string;
+  template: string | null;
+  dependsOn: string[] | null;
+  plan: string | null;
+}
+
+const SYSTEM_LOCK_RETRY_MS = 50;
+let systemLockSequence = 0;
+
+function addTaskRecord(request: AddTaskRequest): any {
+  return lifecycleAddTask(
+    request.project, request.text, request.why, request.doneWhen,
+    request.priority, request.template, request.dependsOn, request.plan,
+  );
+}
+
+async function acquireSystemProjectLock(project: string): Promise<string> {
+  const owner = `system:${process.pid}:${++systemLockSequence}`;
+  while (!acquireLock(project, { owner }).acquired) {
+    await new Promise((resolve) => setTimeout(resolve, SYSTEM_LOCK_RETRY_MS));
+  }
+  return owner;
+}
+
+function releaseSystemProjectLock(project: string, owner: string): void {
+  const result = releaseLock(project, owner);
+  if (!result.released) throw new Error(result.message || `Failed to release project lock for ${project}`);
+}
 
 export class TaskMutator {
   constructor(
@@ -80,6 +131,7 @@ export class TaskMutator {
       if (result.success) {
         this.store.refresh(); this.store.commitAndPush(`task-store: complete ${taskId}`);
         this.bus?.publish({ type: 'task.completed', taskId });
+        void emitCortexEvent('cortex:task.completed', { taskId, project: task.project }).catch(() => {});
       }
       return result;
     });
@@ -104,6 +156,7 @@ export class TaskMutator {
         this.store.refresh(); this.store.commitAndPush(`task-store: block ${taskId}`);
         // DR-0014 §8: a blocked task is a child's escalation — wake its waiting manager.
         this.bus?.publish({ type: 'task.blocked', taskId, reason });
+        void emitCortexEvent('cortex:task.blocked', { taskId, project: task.project, reason }).catch(() => {});
       }
       return result;
     });
@@ -182,12 +235,46 @@ export class TaskMutator {
     });
   }
 
-  async add(project: string, text: string, why: string, doneWhen: string, priority?: string, template?: string, dependsOn?: string[]): Promise<any> {
+  async add(
+    project: string,
+    text: string,
+    why: string,
+    doneWhen: string,
+    priority?: string,
+    template?: string,
+    dependsOn?: string[],
+    options: AddTaskOptions = {},
+  ): Promise<any> {
+    const request: AddTaskRequest = {
+      project, text, why, doneWhen,
+      priority: priority || 'medium',
+      template: template || null,
+      dependsOn: dependsOn || null,
+      plan: options.plan || null,
+    };
+    if (options.system) return this.addSystemTask(request);
     return this.store.runExclusive(() => {
       const lockError = assertLockHeld(project, getOwnerIdentity());
       if (lockError) return { success: false, message: lockError };
-      const result = lifecycleAddTask(project, text, why, doneWhen, priority || 'medium', template || null, dependsOn || null);
+      const result = addTaskRecord(request);
       if (result.success) { this.store.refresh(); this.store.commitAndPush(`task-store: add task to ${project}`); }
+      return result;
+    });
+  }
+
+  private async addSystemTask(request: AddTaskRequest): Promise<any> {
+    const owner = await acquireSystemProjectLock(request.project);
+    return this.store.runExclusive(() => {
+      let result: any;
+      try {
+        result = addTaskRecord(request);
+      } finally {
+        releaseSystemProjectLock(request.project, owner);
+      }
+      if (result.success) {
+        this.store.refresh();
+        this.store.commitAndPush(`task-store: add task to ${request.project}`);
+      }
       return result;
     });
   }

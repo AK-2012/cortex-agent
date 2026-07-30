@@ -1,0 +1,111 @@
+// input:  a UI-relative `workspace/…` file path + optional desktop RemoteConfig
+// output: URL builder + authenticated blob fetch + download/open helpers for workspace files
+// pos:    file transport for the chat file cards (15a user uploads + 20a agent-sent files). The
+//         ui-http server serves files at /api/files/download behind the same dual-path auth as tRPC.
+//         A plain <img src>/<a href> cannot set x-cortex-token, so previews/downloads fetch the bytes
+//         with the right auth (desktop: token header; browser/ui-http: same-origin proxy/Access) and
+//         wrap them in an object URL — correct in every mode.
+
+import { apiBase, authHeaders, isNativeShell, isMobileShell } from './desktop-config';
+
+const DOWNLOAD_PATH = '/api/files/download';
+
+// Native-shell (Tauri desktop/Android) IPC seam. A plain browser `<a download>` / window.open(blob)
+// is a NO-OP inside the WebView, so in the native shell downloads go through the `save_download`
+// command instead. Accessed via the global `window.__TAURI__` (the shell is built with
+// `withGlobalTauri: true`), so no `@tauri-apps/api` dependency is added.
+interface TauriGlobal {
+  core?: { invoke: <T = unknown>(cmd: string, args?: Record<string, unknown>) => Promise<T> };
+}
+function tauriCore(): TauriGlobal['core'] | undefined {
+  return (globalThis as unknown as { __TAURI__?: TauriGlobal }).__TAURI__?.core;
+}
+
+/** Build the download URL for a UI-relative `workspace/…` path. `disposition=inline` for preview. */
+export function fileDownloadUrl(relPath: string, disposition: 'inline' | 'attachment' = 'attachment'): string {
+  const qs = new URLSearchParams({ path: relPath, disposition });
+  return `${apiBase()}${DOWNLOAD_PATH}?${qs.toString()}`;
+}
+
+/** Fetch a workspace file's bytes (authenticated) and return an object URL. Caller revokes it. */
+export async function fetchFileObjectUrl(relPath: string, disposition: 'inline' | 'attachment' = 'inline'): Promise<string> {
+  const res = await fetch(fileDownloadUrl(relPath, disposition), { headers: authHeaders() });
+  if (!res.ok) throw new Error(`download failed: ${res.status}`);
+  const blob = await res.blob();
+  return URL.createObjectURL(blob);
+}
+
+/** Result of a download. `savedPath` is the absolute on-disk path in the native shell (returned by
+ *  `save_download`); it is undefined in the browser, where the download is handed to the browser's
+ *  own download manager and the final location is not observable to the page. */
+export interface DownloadResult {
+  savedPath?: string;
+}
+
+/**
+ * Save a workspace file to disk. A plain browser `<a download>` / `window.open(blob)` is a no-op
+ * inside the Tauri WebView, so the native shell routes downloads through native commands:
+ *   - Android (mobile shell): hand the authenticated file URL to the system DownloadManager
+ *     (`plugin:cortex-download|download`), which saves into the PUBLIC Downloads folder and raises
+ *     the native "download complete" notification. No location is returned (the OS notification is
+ *     the feedback), so `savedPath` is undefined.
+ *   - Desktop: fetch the bytes and hand them to `save_download`, which writes them to the OS
+ *     download dir and returns the saved absolute path.
+ *   - Browser / ui-http: the normal `<a download>`.
+ */
+export async function downloadFile(relPath: string, fileName?: string): Promise<DownloadResult> {
+  const name = fileName ?? relPath.split('/').pop() ?? 'download';
+
+  const core = isNativeShell() ? tauriCore() : undefined;
+  if (core) {
+    if (isMobileShell()) {
+      // Android → system DownloadManager: fetches the URL straight into public Downloads + notifies.
+      await core.invoke('plugin:cortex-download|download', {
+        url: fileDownloadUrl(relPath, 'attachment'),
+        fileName: name,
+        token: authHeaders()['x-cortex-token'],
+      });
+      return {};
+    }
+    const res = await fetch(fileDownloadUrl(relPath, 'attachment'), { headers: authHeaders() });
+    if (!res.ok) throw new Error(`download failed: ${res.status}`);
+    const bytes = Array.from(new Uint8Array(await res.arrayBuffer()));
+    const savedPath = await core.invoke<string>('save_download', { name, bytes });
+    return { savedPath };
+  }
+
+  const objUrl = await fetchFileObjectUrl(relPath, 'attachment');
+  const a = document.createElement('a');
+  a.href = objUrl;
+  a.download = name;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(objUrl), 10_000);
+  return {};
+}
+
+/** Copy a file's path to the clipboard (hover action). */
+export async function copyFilePath(relPath: string): Promise<void> {
+  try { await navigator.clipboard.writeText(relPath); } catch { /* clipboard blocked — no-op */ }
+}
+
+/**
+ * Open a saved file with the OS default application (desktop download-complete toast "Open file"
+ * action). Native shell only — invokes the `open_path` Tauri command with the absolute path that
+ * `save_download` returned. A no-op off-shell (a plain browser cannot open a local file path). */
+export async function openPath(absPath: string): Promise<void> {
+  const core = isNativeShell() ? tauriCore() : undefined;
+  if (!core) return;
+  await core.invoke('open_path', { path: absPath });
+}
+
+/**
+ * Reveal a saved file in the OS file manager — opens its containing folder, selecting the file where
+ * the platform supports it (desktop toast "Open folder" action). Native shell only — invokes the
+ * `reveal_path` Tauri command. A no-op off-shell. */
+export async function revealPath(absPath: string): Promise<void> {
+  const core = isNativeShell() ? tauriCore() : undefined;
+  if (!core) return;
+  await core.invoke('reveal_path', { path: absPath });
+}

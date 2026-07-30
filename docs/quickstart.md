@@ -260,10 +260,14 @@ Go to **[https://open.feishu.cn/app](https://open.feishu.cn/app)** and
 click **Create Agentic App**（创建 agentic 应用）. Enter an agent name
 (e.g. `CortexAgent`), pick an avatar, and click **Create**.
 
+![Create a Feishu agentic app](./images/feishu-create-agentic-app.png)
+
 #### b) Copy the App ID and App Secret
 
 After creation, the app page displays the **App ID** and **App Secret**.
 Copy them.
+
+![Copy the Feishu App ID and App Secret](./images/feishu-app-credentials.png)
 
 Back in your terminal, paste them at the `FEISHU_APP_ID` and
 `FEISHU_APP_SECRET` prompts.
@@ -332,14 +336,46 @@ displayed).
 
 ### 2.10 Auto-detect backends for gateway/profiles?
 
-Answer **Yes** if you already ran `claude login` and/or `pi login` in
-another shell. Cortex scans your `~/.claude/.credentials.json` and
+Answer **Yes** if you already logged in to your backend in another
+shell. Cortex scans your `~/.claude/.credentials.json` and
 `~/.pi/agent/` to discover endpoints and asks you to pick which
 discovered (mode, model) pair becomes the `plan` profile (used by
 executor agents — planner, doc-writer, coder, etc.) and which becomes
 the `execute` profile (used by reviewer agents).
 
+If you have not logged in yet, open a new terminal and run `claude`
+(or `pi`, depending on the backend you selected in step 2.2). Inside
+that session type `/login` and follow the prompts — pick the login
+method that matches your subscription.
+
+![Backend login prompt](./images/backend-login.png)
+
+Once the login finishes, come back to the wizard and answer **Yes** so
+the credentials are picked up.
+
 You can also run this later with `cortex setup-gateway`.
+
+### 2.11 When the backend login expires
+
+Backend credentials expire after a while. When they do, agent runs
+fail with an authentication error such as:
+
+```
+Failed to authenticate. API Error: 401 OAuth access token has expired.
+Re-authenticate to continue.
+```
+
+The fix is the same login flow as above. Open a new terminal and run
+`claude` (or `pi`, depending on the backend you use). Inside that
+session type `/login` and follow the prompts — pick the login method
+that matches your subscription.
+
+![Backend login prompt](./images/backend-login.png)
+
+Once the login finishes, the refreshed credentials are picked up on the
+next agent run. If the endpoint or model changed, re-run
+`cortex setup-gateway` so the `plan` and `execute` profiles point at
+the new backend.
 
 ---
 
@@ -363,12 +399,16 @@ Everything lives under `CORTEX_HOME` (default `~/.cortex/`):
 │   ├── preferences.json        # operator UI language
 │   ├── budget.json             # daily/monthly budget limits
 │   ├── machines.json           # this machine's capabilities (gpuCount, path)
-│   ├── mcp-config.json         # main MCP server entry
-│   ├── mcp-config-core.json    # subset for restricted contexts
-│   ├── mcp-config-tui.json     # subset for TUI mode
+│   ├── mcp-config.json         # direct-session MCP servers
+│   ├── mcp-config-core.json    # remote execution/time layer
+│   ├── mcp-config-tasks.json   # read-only task-monitoring layer
+│   ├── mcp-config-manager-qa.json # shared manager-answer layer
+│   ├── mcp-config-thread.json  # thread-control layer
+│   ├── mcp-config-tui.json     # TUI interaction layer
 │   ├── profiles.json           # named (backend, model) profiles
-│   ├── session-hooks.json      # session-level hook pipeline
-│   └── thread-templates.json   # multi-agent thread definitions
+│   ├── thread-templates/       # multi-agent thread definitions
+│   │   └── agents/, templates/, shells/   # one JSON file per entity
+│   └── hooks/                  # hook registry — one JSON declaration per hook
 ├── data/
 │   ├── mode.json               # current mode + active profile
 │   └── schedules.json          # seeded recurring tasks

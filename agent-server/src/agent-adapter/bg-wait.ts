@@ -1,7 +1,6 @@
-// input:  AgentProcess (setContinuationSink) + AgentResult + injectable timers
-// output: waitForBgContinuation / shouldAwaitBgInline / remainingBg + shared env gates
-//         (isBgContinuationEnabled / getBgGraceMs / getBgMaxWaitMs)
-// pos:    thread-session inline background-task wait (adapter layer, importable from domain)
+// input:  continuation sink, result, tool/context callbacks, timers
+// output: bounded inline wait forwarding complete tools and context snapshots
+// pos:    Thread-session continuation bridge
 // >>> If I am updated, update my header comment and the parent folder's CORTEX.md <<<
 //
 // Interactive turns hold their Slack status asynchronously (orchestration/lifecycle +
@@ -13,7 +12,7 @@
 // cannot hang a thread step forever.
 
 import { createLogger } from '@core/log.js';
-import type { AgentResult } from '@core/types/agent-types.js';
+import type { AgentResult, ContextUsage } from '@core/types/agent-types.js';
 import type { ContinuationSink } from './types.js';
 
 const log = createLogger('bg-wait');
@@ -74,7 +73,9 @@ export interface WaitForBgOpts {
   baseResult: AgentResult;
   /** Continuation assistant text forwarded here (the step's transcript/stream callback). */
   onAssistantText?: ((text: string) => void) | null;
-  onToolUse?: ((name: string, input: any) => void) | null;
+  onToolUse?: ((name: string, input: any, toolUseId: string) => void) | null;
+  onToolResult?: ((toolUseId: string, content: string, isError: boolean) => void) | null;
+  onContextUsage?: ((usage: ContextUsage) => void | Promise<void>) | null;
   graceMs?: number;
   maxWaitMs?: number;
   /** Injectable timers for tests. Production timers are unref'd. */
@@ -153,9 +154,18 @@ export function waitForBgContinuation(opts: WaitForBgOpts): Promise<AgentResult>
         if (settled) return;
         try { opts.onAssistantText?.(text); } catch (e) { log.warn('bg-wait onAssistantText threw:', (e as Error).message); }
       },
-      onToolUse: (name: string, input: any) => {
+      onToolUse: (name: string, input: any, toolUseId?: string) => {
         if (settled) return;
-        try { opts.onToolUse?.(name, input); } catch (e) { log.warn('bg-wait onToolUse threw:', (e as Error).message); }
+        try { opts.onToolUse?.(name, input, toolUseId ?? ''); } catch (e) { log.warn('bg-wait onToolUse threw:', (e as Error).message); }
+      },
+      onToolResult: (toolUseId: string, content: string, isError: boolean) => {
+        if (settled) return;
+        try { opts.onToolResult?.(toolUseId, content, isError); } catch (e) { log.warn('bg-wait onToolResult threw:', (e as Error).message); }
+      },
+      onContextUsage: (usage: ContextUsage) => {
+        if (settled) return;
+        try { void Promise.resolve(opts.onContextUsage?.(usage)).catch((e) => log.warn('bg-wait onContextUsage rejected:', (e as Error).message)); }
+        catch (e) { log.warn('bg-wait onContextUsage threw:', (e as Error).message); }
       },
       onResult: (cont: AgentResult) => {
         if (settled) return;

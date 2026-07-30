@@ -1,8 +1,15 @@
+// input:  cmdk, tRPC query data, router and Settings provider
+// output: Global searchable command-palette overlay
+// pos:    Dispatches page navigation and in-place modal commands
+// >>> 一旦我被更新，务必更新我的开头注释与所属文件夹 CORTEX.md <<<
 import { useEffect, useMemo, useState, type CSSProperties } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { Command } from 'cmdk';
 import { useTRPC } from '@/lib/trpc';
+import { useVocab } from '@/i18n';
+import { useSettings } from '@/features/settings/SettingsProvider';
+import { useThreadDetailModal } from '@/features/thread/ThreadDetailModal';
 import { selectPaletteRows, type PaletteRow } from './palette-items';
 
 // ⌘K command palette — 1:1 rebuild from prototype.dc.html L1295–1315 (task c967). The overlay
@@ -23,20 +30,20 @@ const HEADER_STYLE: CSSProperties = {
   alignItems: 'center',
   gap: 10,
   padding: '12px 16px',
-  borderBottom: '1px solid #EFF1F5',
+  borderBottom: '1px solid var(--proto-line-2)',
 };
 
 const INPUT_STYLE: CSSProperties = {
   flex: 1,
   fontSize: 13.5,
-  color: '#191C22',
+  color: 'var(--proto-ink)',
   fontFamily: 'inherit',
 };
 
 const ESC_STYLE: CSSProperties = {
   font: "500 9.5px 'IBM Plex Mono',monospace",
-  color: '#98A1B0',
-  border: '1px solid #E7E9EE',
+  color: 'var(--proto-muted-3)',
+  border: '1px solid var(--proto-line)',
   borderRadius: 5,
   padding: '2px 6px',
   cursor: 'pointer',
@@ -59,18 +66,18 @@ const GLYPH_STYLE: CSSProperties = {
   width: 20,
   height: 20,
   borderRadius: 6,
-  background: '#F1F2F5',
+  background: 'var(--proto-gray)',
   display: 'flex',
   alignItems: 'center',
   justifyContent: 'center',
   font: "600 9px 'IBM Plex Mono',monospace",
-  color: '#5B6472',
+  color: 'var(--proto-muted)',
   flex: 'none',
 };
 
 const SUB_STYLE: CSSProperties = {
   fontSize: 10.5,
-  color: '#98A1B0',
+  color: 'var(--proto-muted-3)',
   whiteSpace: 'nowrap',
   flex: 'none',
 };
@@ -78,7 +85,7 @@ const SUB_STYLE: CSSProperties = {
 const KBD_STYLE: CSSProperties = {
   marginLeft: 'auto',
   font: "400 9.5px 'IBM Plex Mono',monospace",
-  color: '#B6BDC9',
+  color: 'var(--proto-faint)',
   flex: 'none',
   paddingLeft: 10,
 };
@@ -87,20 +94,20 @@ const FOOTER_STYLE: CSSProperties = {
   display: 'flex',
   alignItems: 'center',
   padding: '7px 16px',
-  borderTop: '1px solid #F7F8FA',
-  background: '#FBFBFC',
+  borderTop: '1px solid var(--proto-alt)',
+  background: 'var(--proto-rail)',
 };
 
 const FOOTER_TEXT_STYLE: CSSProperties = {
   font: "400 9.5px 'IBM Plex Mono',monospace",
-  color: '#B6BDC9',
+  color: 'var(--proto-faint)',
 };
 
 const EMPTY_STYLE: CSSProperties = {
   padding: '18px 11px',
   textAlign: 'center',
   fontSize: 12.5,
-  color: '#98A1B0',
+  color: 'var(--proto-muted-3)',
 };
 
 export interface CommandPaletteProps {
@@ -110,98 +117,86 @@ export interface CommandPaletteProps {
 
 // A single palette row — glyph badge + label + sub + right-aligned kbd. cmdk sets
 // `data-[selected=true]` on the arrow-selected (or mouse-hovered) row; the prototype highlight
-// (#F5F6FD bg, #4655D4 label) is applied there via `.cmdk-row` CSS in index.css.
+// (var(--proto-accent-bg) bg, var(--proto-accent) label) is applied there via `.cmdk-row` CSS in index.css.
 function Row({ row, onSelect }: { row: PaletteRow; onSelect: () => void }) {
+  const L = useVocab();
+  // Nav rows carry vocab keys → localized; entity rows carry real data in label/sub.
+  const label = row.labelKey ? L[row.labelKey] : row.label;
+  const sub = row.subKey ? L[row.subKey] : row.sub;
   return (
     <Command.Item value={row.id} onSelect={onSelect} className="cmdk-row" style={ROW_STYLE}>
       <span style={GLYPH_STYLE}>{row.glyph}</span>
-      <span className="cmdk-row-label">{row.label}</span>
-      <span style={SUB_STYLE}>{row.sub}</span>
+      <span className="cmdk-row-label">{label}</span>
+      <span style={SUB_STYLE}>{sub}</span>
       <span style={KBD_STYLE}>{row.kbd}</span>
     </Command.Item>
   );
 }
 
-export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
+const STALE = 30_000;
+
+function usePaletteRows(open: boolean, query: string): PaletteRow[] {
   const trpc = useTRPC();
-  const navigate = useNavigate();
-  const [query, setQuery] = useState('');
-
-  // Reset the query each time the palette opens (fresh search).
-  useEffect(() => {
-    if (open) setQuery('');
-  }, [open]);
-
-  // Fetch the three lists only while the palette is open. `staleTime` lets the palette reuse the
-  // workbench's already-cached `sessions.list({})` instead of forcing a refetch on every open — a
-  // duplicate refetch entangles the shared httpBatchLink GET (sessions is also owned by the left
-  // rail) and the whole batch never settles, leaving threads/tasks stuck pending.
-  const STALE = 30_000;
-  const sessionsQuery = useQuery(trpc.sessions.list.queryOptions({}, { enabled: open, staleTime: STALE }));
-  const threadsQuery = useQuery(trpc.threads.list.queryOptions({}, { enabled: open, staleTime: STALE }));
-  const tasksQuery = useQuery(trpc.tasks.list.queryOptions({}, { enabled: open, staleTime: STALE }));
-
-  // We filter + cap ourselves (cmdk `shouldFilter={false}`): feeding cmdk every real entity
-  // renders hundreds of rows, which stalls the shared httpBatchLink fetch and blows up the panel.
-  const rows = useMemo<PaletteRow[]>(
-    () =>
-      selectPaletteRows(query, {
-        sessions: sessionsQuery.data ?? [],
-        threads: threadsQuery.data ?? [],
-        tasks: tasksQuery.data ?? [],
-      }),
-    [query, sessionsQuery.data, threadsQuery.data, tasksQuery.data],
+  const sessions = useQuery(trpc.sessions.list.queryOptions({}, { enabled: open, staleTime: STALE }));
+  const threads = useQuery(trpc.threads.list.queryOptions({}, { enabled: open, staleTime: STALE }));
+  const tasks = useQuery(trpc.tasks.list.queryOptions({}, { enabled: open, staleTime: STALE }));
+  return useMemo(
+    () => selectPaletteRows(query, {
+      sessions: sessions.data ?? [], threads: threads.data ?? [], tasks: tasks.data ?? [],
+    }),
+    [query, sessions.data, threads.data, tasks.data],
   );
+}
 
-  const go = (route: string, focusId?: string) => {
-    navigate(route, focusId ? { state: { focusId } } : undefined);
+function usePaletteTarget(onOpenChange: (open: boolean) => void) {
+  const navigate = useNavigate();
+  const { open: openSettings } = useSettings();
+  const { openThread } = useThreadDetailModal();
+  return (row: PaletteRow) => {
     onOpenChange(false);
+    if (row.modal === 'settings') return openSettings();
+    if (row.modal === 'thread' && row.focusId) return openThread(row.focusId);
+    if (row.route) navigate(row.route, row.focusId ? { state: { focusId: row.focusId } } : undefined);
   };
+}
 
+function PaletteHeader({ query, setQuery, close }: {
+  query: string; setQuery: (value: string) => void; close: () => void;
+}) {
+  const L = useVocab();
   return (
-    <Command.Dialog
-      open={open}
-      onOpenChange={onOpenChange}
-      label="Command palette"
-      shouldFilter={false}
-      loop
-      overlayClassName="cmdk-backdrop"
-      contentClassName="cmdk-panel"
-    >
-      <div style={HEADER_STYLE}>
-        <svg
-          width="13"
-          height="13"
-          viewBox="0 0 12 12"
-          fill="none"
-          stroke="#98A1B0"
-          strokeWidth="1.5"
-        >
-          <circle cx="5" cy="5" r="3.8" />
-          <path d="M8 8l2.6 2.6" />
-        </svg>
-        <Command.Input
-          autoFocus
-          value={query}
-          onValueChange={setQuery}
-          placeholder="Jump to session / thread / task / file…"
-          style={INPUT_STYLE}
-        />
-        <span style={ESC_STYLE} onClick={() => onOpenChange(false)}>
-          esc
-        </span>
-      </div>
+    <div style={HEADER_STYLE}>
+      <svg width="13" height="13" viewBox="0 0 12 12" fill="none" stroke="var(--proto-muted-3)" strokeWidth="1.5">
+        <circle cx="5" cy="5" r="3.8" /><path d="M8 8l2.6 2.6" />
+      </svg>
+      <Command.Input autoFocus value={query} onValueChange={setQuery} placeholder={L.cmdkPh} style={INPUT_STYLE} />
+      <span style={ESC_STYLE} onClick={close}>esc</span>
+    </div>
+  );
+}
 
-      <Command.List style={BODY_STYLE}>
-        <Command.Empty style={EMPTY_STYLE}>No results.</Command.Empty>
-        {rows.map((row) => (
-          <Row key={row.id} row={row} onSelect={() => go(row.route, row.focusId)} />
-        ))}
-      </Command.List>
+function PaletteResults({ rows, go }: { rows: PaletteRow[]; go: (row: PaletteRow) => void }) {
+  const L = useVocab();
+  return (
+    <Command.List style={BODY_STYLE}>
+      <Command.Empty style={EMPTY_STYLE}>{L.cpNoResults}</Command.Empty>
+      {rows.map((row) => <Row key={row.id} row={row} onSelect={() => go(row)} />)}
+    </Command.List>
+  );
+}
 
-      <div style={FOOTER_STYLE}>
-        <span style={FOOTER_TEXT_STYLE}>↑↓ navigate · ⏎ open · esc dismiss</span>
-      </div>
+export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
+  const L = useVocab();
+  const [query, setQuery] = useState('');
+  useEffect(() => { if (open) setQuery(''); }, [open]);
+  const rows = usePaletteRows(open, query);
+  const go = usePaletteTarget(onOpenChange);
+  return (
+    <Command.Dialog open={open} onOpenChange={onOpenChange} label="Command palette"
+      shouldFilter={false} loop overlayClassName="cmdk-backdrop" contentClassName="cmdk-panel">
+      <PaletteHeader query={query} setQuery={setQuery} close={() => onOpenChange(false)} />
+      <PaletteResults rows={rows} go={go} />
+      <div style={FOOTER_STYLE}><span style={FOOTER_TEXT_STYLE}>{L.cpFooterHint}</span></div>
     </Command.Dialog>
   );
 }

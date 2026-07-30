@@ -1,5 +1,5 @@
 import '../../_test-home.js'; // MUST be first: isolate CORTEX_HOME before paths.ts loads
-import test from 'node:test';
+import { test } from 'vitest';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import os from 'node:os';
@@ -180,8 +180,9 @@ function makeMinimalDeps(): UiServiceDeps {
       dailyCost: [], byTriggerScoped: {},
     }),
     bus: { subscribe: () => ({ unsubscribe: () => {} }), publish: () => {} } as any,
-    createDirectSession: async () => ({ sessionId: '', sessionName: '' }),
+    createDirectSession: async () => ({ sessionId: '', sessionName: '', channel: '' }),
     cancelSessionRun: async () => 0,
+    switchSessionProfile: async () => ({ ok: true, name: '', currentBackend: '', targetBackend: '', backendChanged: false }),
     clientRegistry: { getOnlineDevices: () => [], isDeviceOnline: () => false, getMachineRegistry: () => ({}) },
     adapter: { getProjectConduits: async () => ({}) } as any,
   };

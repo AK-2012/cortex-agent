@@ -1,6 +1,6 @@
 import '../../_test-home.js';
 import * as assert from 'node:assert';
-import { describe, it } from 'node:test';
+import { describe, it } from 'vitest';
 
 import { registerNamedSession, attachExistingSession, resetChannelSession, createDirectSession, SESSION_BACKENDS } from '@domain/sessions/session-lifecycle.js';
 import type { SessionRegistryWriter } from '@domain/sessions/session-lifecycle.js';
@@ -166,7 +166,6 @@ describe('resetChannelSession', () => {
     // Seed: write sessions for all backends + init conversation
     await setSessionAsync(channel, 'sid-reset-claude', 'claude');
     await setSessionAsync(channel, 'sid-reset-pi', 'pi');
-    await setSessionAsync(channel, 'sid-reset-codex', 'codex');
     await conversationLedger.initConversation(channel, {
       sessionId: 'sid-reset-claude',
       sessionName: 'cortex-reset',

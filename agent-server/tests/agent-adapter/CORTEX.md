@@ -1,21 +1,27 @@
 Please update me when files in this folder change
 
-DR-0008 §4.5 fixture-replay tests. Lock down three-backend NormalizedEvent sequences.
+Agent adapter tests: Claude and PI streams normalized into shared events, plus session behaviour.
 
 | filename | role | function |
 |---|---|---|
-| `replay-harness.ts` | Utility | parseClaudeLine/parseCodexRpc/replayPi + golden |
-| `normalize.test.ts` | Test | Edge cases: parse failure, unknown type, event dispatch |
-| `claude-adapter.test.ts` | Test | Claude fixture replay + shape invariant |
-| `codex-adapter.test.ts` | Test | Codex fixture replay |
-| `pi-adapter.test.ts` | Test | PI fixture replay |
-| `claude-tmux-control.test.ts` | Test | DR-0012 TmuxControl argv + tempfile spec (mock exec injection) |
-| `claude-cost-from-usage.test.ts` | Test | DR-0012 usageToCost pricing math + model normalization |
-| `claude-jsonl-tail.test.ts` | Test | DR-0012 JsonlEventNormalizer + JsonlTail file watcher |
-| `claude-adapter-tui.test.ts` | Test | DR-0012 ClaudeTuiSession turn lifecycle + cancel + cost (mocked tmux/tail) |
-| `bg-wait.test.ts` | Test | waitForBgContinuation merge/chain/interrupted/rate-limit/grace/cap + shouldAwaitBgInline gates + shared env-gate sources (thread inline bg wait) |
-| `claude-bg-task-tracker.test.ts` | Test | BgTaskTracker running/undelivered dual-set semantics (updated{completed/failed}→undelivered, killed→dropped, notification clears) + routeLine + isContinuationResult |
-| `claude-bg-continuation.test.ts` | Test | ClaudeSession handleLine wiring: pending/undelivered counts on result + spontaneous continuation routing to sink + handleProcessClose → backgroundInterrupted sink delivery (waiting window / mid-continuation crash, single-fire) + compact_boundary → onCompact (no child process) |
-| `fixtures/claude/` | Data | 5 Claude stream-json fixtures + golden |
-| `fixtures/codex/` | Data | 2 Codex JSON-RPC fixtures + golden |
-| `fixtures/pi/` | Data | 3 PI RPC fixtures + golden |
+| bg-wait.test.ts | test | inline background-task wait merge and gates |
+| claude-adapter.test.ts | test | Claude stream-json to normalized event replay |
+| claude-adapter-tui.test.ts | test | Claude TUI session turn lifecycle and cost |
+| claude-bg-continuation.test.ts | test | Claude spontaneous continuation routing |
+| claude-bg-task-tracker.test.ts | test | background task running and delivery tracking |
+| claude-compact-window.test.ts | test | Claude auto-compact window settings lookup |
+| claude-context-usage.test.ts | test | Claude context window usage tracking |
+| claude-cost-from-usage.test.ts | test | Claude TUI cost reconstruction from usage |
+| claude-jsonl-tail.test.ts | test | Claude jsonl normalizer and file tailer |
+| claude-mid-turn-inject.test.ts | test | Claude mid-turn user message injection |
+| claude-print-resume.test.ts | test | print-mode resume guard on fresh sessions |
+| claude-stream-deltas.test.ts | test | token-level assistant delta parsing |
+| claude-tmux-control.test.ts | test | tmux control argv and tempfile building |
+| claude-tui-resume.test.ts | test | TUI first-turn resume guard |
+| fixtures/ | subdir | recorded backend streams and golden outputs |
+| normalize-assistant-delta.test.ts | test | delta event union and backend capability |
+| normalize.test.ts | test | normalized event parser edge cases |
+| pi-adapter.test.ts | test | PI RPC to normalized event replay |
+| pi-context-usage-probe.test.ts | test | PI end-of-turn context usage probe |
+| pi-mid-turn-inject.test.ts | test | PI mid-turn prompt steering |
+| replay-harness.ts | helper | fixture replay and golden comparison helpers |

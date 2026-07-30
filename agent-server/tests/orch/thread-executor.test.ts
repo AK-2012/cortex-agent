@@ -1,15 +1,12 @@
 // input:  ThreadExecutor class
 // output: unit tests — thread routing coordination [S8-A]
-// pos:    verifies (a) +1/-1 trackPendingTask via injectable track; (b) enqueue called;
-//         (c) hourglass when queue exists; (d) threadExecutor singleton exists;
-//         (e) route() works without existing queue (no addReaction);
-//         (f) ThreadExecutor default constructor uses real enqueue
+// pos:    verifies queue marker lifecycle, busy tracking, buffering, and defaults
 // >>> If I am updated, update my header comment and the parent folder's CORTEX.md <<<
 
 import '../_test-home.js'; // MUST be first: isolate CORTEX_HOME before paths.ts loads
-import test from 'node:test';
+import { test } from 'vitest';
 import assert from 'node:assert/strict';
-import { ThreadExecutor, threadExecutor } from '../../src/orchestration/thread-executor.js';
+import { ThreadExecutor } from '../../src/orchestration/thread-executor.js';
 import { enqueue, conduitQueues } from '../../src/orchestration/conduit-queue.js';
 import { MockAdapter } from '../../src/platform/testing.js';
 
@@ -86,10 +83,12 @@ test('(c) route() calls addReaction(hourglass) when channel already has a runnin
   enqueue(channel, () => priorBlock);
 
   const enqueueCalls: string[] = [];
+  const enqueueFns: Array<() => Promise<void>> = [];
   const adapter = new MockAdapter();
   const executor = new ThreadExecutor({
-    enqueue: (ch, _fn) => { enqueueCalls.push(ch); return true; },
+    enqueue: (ch, fn) => { enqueueCalls.push(ch); enqueueFns.push(fn); return true; },
     track: () => {},
+    execute: async () => {},
   });
 
   const ctx = makeCtx(channel, { adapter, threadStartMatch: ['!thread coder hi', 'coder', 'hi'] as any });
@@ -100,17 +99,15 @@ test('(c) route() calls addReaction(hourglass) when channel already has a runnin
   assert.equal(adapter.marksQueued[0].ref.conduit, channel, 'markQueued called with correct channel');
   assert.equal(adapter.marksQueued[0].ref.messageId, 'M1', 'markQueued called with correct messageId');
   assert.equal(enqueueCalls.length, 1, 'enqueue was called');
+  assert.equal(adapter.marksUnqueued.length, 0, 'marker stays while the turn is pending');
+
+  await enqueueFns[0]();
+  assert.equal(adapter.marksUnqueued.length, 1, 'turn completion removes the marker');
+  assert.deepEqual(adapter.marksUnqueued[0].ref, { conduit: channel, messageId: 'M1' });
 
   unlockPrior();
   const tail = conduitQueues.get(channel);
   if (tail) await tail;
-});
-
-// ── (d) threadExecutor singleton exists ──────────────────────────────────────
-
-test('(d) threadExecutor singleton is a ThreadExecutor with a route method', () => {
-  assert.ok(threadExecutor instanceof ThreadExecutor);
-  assert.equal(typeof threadExecutor.route, 'function');
 });
 
 // ── (e) route() without existing queue does NOT call addReaction ───────────────
@@ -132,13 +129,6 @@ test('(e) route() on fresh channel skips addReaction (no prior queue)', async ()
   // No prior queue → markQueued was NOT called (conduitQueues.has returned false)
   assert.equal(adapter.marksQueued.length, 0, 'markQueued was not called when no prior queue');
   assert.ok(true, 'route() completed synchronously without throwing');
-});
-
-// ── (f) ThreadExecutor default constructor uses real enqueue ──────────────────
-
-test('(f) ThreadExecutor constructed with no opts uses module-level enqueue', () => {
-  const executor = new ThreadExecutor();
-  assert.equal(executor._enqueue, enqueue, 'defaults to module-level enqueue');
 });
 
 // ── (g) message buffering when thread has a running step ─────────────────────

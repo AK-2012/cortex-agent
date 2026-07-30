@@ -1,9 +1,9 @@
 // input:  piRpcLineToNormalized + createPIEventParserState
-// output: PI event parser unit tests (9 variants + edge cases)
+// output: PI parser coverage including context usage and settled terminal boundaries
 // pos:    PI rpc → NormalizedEvent translator full coverage
 // >>> If I am updated, update my header comment and the parent folder's CORTEX.md <<<
 
-import test from 'node:test';
+import { test } from 'vitest';
 import assert from 'node:assert/strict';
 import {
   piRpcLineToNormalized,
@@ -82,6 +82,50 @@ test('session_started: bootstrap dedup preserves sessionFile', () => {
   assert.equal(state.sessionId, 's-1');
 });
 
+test('context_usage: successful get_session_stats maps the PI estimate', () => {
+  const events = piRpcLineToNormalized(line({
+    type: 'response',
+    id: 'context-1',
+    command: 'get_session_stats',
+    success: true,
+    data: { contextUsage: { tokens: 425353, contextWindow: 1000000, percent: 42.5353 } },
+  }), freshState());
+
+  assert.deepEqual(events, [{
+    type: 'context_usage',
+    usedTokens: 425353,
+    contextWindow: 1000000,
+    percent: 42.5353,
+    accuracy: 'estimate',
+  }]);
+});
+
+test('context_usage: preserves PI nulls immediately after compaction', () => {
+  const events = piRpcLineToNormalized(line({
+    type: 'response', id: 'context-2', command: 'get_session_stats', success: true,
+    data: { contextUsage: { tokens: null, contextWindow: 272000, percent: null } },
+  }), freshState());
+
+  assert.deepEqual(events, [{
+    type: 'context_usage', usedTokens: null, contextWindow: 272000,
+    percent: null, accuracy: 'estimate',
+  }]);
+});
+
+test('context_usage: malformed usage and failed optional stats responses emit nothing', () => {
+  const malformed = piRpcLineToNormalized(line({
+    type: 'response', id: 'context-3', command: 'get_session_stats', success: true,
+    data: { contextUsage: { tokens: 12, contextWindow: 0, percent: 4 } },
+  }), freshState());
+  const failed = piRpcLineToNormalized(line({
+    type: 'response', id: 'context-4', command: 'get_session_stats', success: false,
+    error: 'stats unavailable',
+  }), freshState());
+
+  assert.deepEqual(malformed, []);
+  assert.deepEqual(failed, [], 'optional stats failure is not an agent error');
+});
+
 // ---------------------------------------------------------------------------
 // 2. assistant_text — message_update text_delta
 // ---------------------------------------------------------------------------
@@ -97,6 +141,35 @@ test('assistant_text: message_update text_delta with blockId', () => {
   assert.equal(evt.type, 'assistant_text');
   assert.equal(evt.text, 'hello');
   assert.equal(evt.blockId, 'm1');
+});
+
+test('assistant_text: blockId falls back to message.responseId (the real PI field)', () => {
+  // Real PI AssistantMessage has NO `id` — the stable per-message identifier the provider
+  // sets once, before any text_delta, is `responseId` (anthropic msg_… / openai chatcmpl_…).
+  const state = freshState();
+  const events = piRpcLineToNormalized(
+    line({
+      type: 'message_update',
+      message: { role: 'assistant', responseId: 'msg_abc123', timestamp: 1 },
+      assistantMessageEvent: { type: 'text_delta', delta: 'hello', contentIndex: 0 },
+    }),
+    state,
+  );
+  assert.equal(events.length, 1);
+  assert.equal((events[0] as any).blockId, 'msg_abc123');
+});
+
+test('assistant_text: message.id still wins over responseId when both are present', () => {
+  const state = freshState();
+  const events = piRpcLineToNormalized(
+    line({
+      type: 'message_update',
+      message: { id: 'm1', responseId: 'msg_abc123' },
+      assistantMessageEvent: { type: 'text_delta', delta: 'hello' },
+    }),
+    state,
+  );
+  assert.equal((events[0] as any).blockId, 'm1');
 });
 
 test('assistant_text: message_update without blockId', () => {
@@ -413,183 +486,157 @@ test('plan_written: content falls back to args.content if args.plan missing', ()
 });
 
 // ---------------------------------------------------------------------------
-// 7. rate_limit — auto_retry_start
+// 7. PI internal retry lifecycle — never a terminal Cortex event
 // ---------------------------------------------------------------------------
 
-test('rate_limit: auto_retry_start', () => {
+test('auto_retry_start and auto_retry_end are non-terminal lifecycle events', () => {
   const state = freshState();
-  const events = piRpcLineToNormalized(
-    line({ type: 'auto_retry_start', attempt: 1, errorMessage: '529 overloaded' }),
-    state,
+  assert.deepEqual(
+    piRpcLineToNormalized(line({
+      type: 'auto_retry_start',
+      attempt: 1,
+      errorMessage: 'Codex error: Our servers are currently overloaded.',
+    }), state),
+    [],
   );
-  assert.equal(events.length, 1);
-  assert.equal(events[0]?.type, 'rate_limit');
-  assert.ok((events[0] as any).raw);
+  assert.deepEqual(
+    piRpcLineToNormalized(line({ type: 'auto_retry_end', success: true, attempt: 1 }), state),
+    [],
+  );
 });
 
 // ---------------------------------------------------------------------------
-// 8. turn_complete — agent_end
+// 8. turn_complete — agent_settled after low-level agent_end
 // ---------------------------------------------------------------------------
 
-test('turn_complete: agent_end with cost data', () => {
+function agentEndThenSettle(
+  state: PIEventParserState,
+  agentEnd: Record<string, unknown>,
+) {
+  return [
+    ...piRpcLineToNormalized(line(agentEnd), state),
+    ...piRpcLineToNormalized(line({ type: 'agent_settled' }), state),
+  ];
+}
+
+test('turn_complete: agent_settled carries prior agent_end cost data', () => {
   const state = freshState();
-  const events = piRpcLineToNormalized(
-    line({ type: 'agent_end', messages: [{ role: 'assistant', usage: { cost: { total: 0.05 } } }] }),
-    state,
-  );
-  assert.equal(events.length, 1);
-  assert.deepEqual(events[0], { type: 'turn_complete', numTurns: 1, totalCostUsd: 0.05 });
+  const events = agentEndThenSettle(state, {
+    type: 'agent_end',
+    messages: [{ role: 'assistant', usage: { cost: { total: 0.05 } } }],
+  });
+  assert.deepEqual(events, [{ type: 'turn_complete', numTurns: 1, totalCostUsd: 0.05 }]);
 });
 
-test('turn_complete: agent_end multiple assistant messages sums cost', () => {
+test('turn_complete: multiple assistant messages sum cost', () => {
   const state = freshState();
-  const events = piRpcLineToNormalized(
-    line({ type: 'agent_end', messages: [
-      { role: 'assistant', usage: { cost: { total: 0.03 } } },
-      { role: 'user' },
-      { role: 'assistant', usage: { cost: { total: 0.02 } } },
-    ] }),
-    state,
-  );
-  const evt = events[0] as any;
-  assert.equal(evt.numTurns, 2);
-  assert.ok(Math.abs(evt.totalCostUsd - 0.05) < 1e-10);
+  const events = agentEndThenSettle(state, { type: 'agent_end', messages: [
+    { role: 'assistant', usage: { cost: { total: 0.03 } } },
+    { role: 'user' },
+    { role: 'assistant', usage: { cost: { total: 0.02 } } },
+  ] });
+  assert.deepEqual(events, [{ type: 'turn_complete', numTurns: 2, totalCostUsd: 0.05 }]);
 });
 
-test('turn_complete: agent_end no cost data → totalCostUsd: null', () => {
+test('turn_complete: no cost data preserves totalCostUsd null', () => {
   const state = freshState();
-  const events = piRpcLineToNormalized(
-    line({ type: 'agent_end', messages: [{ role: 'assistant' }] }),
-    state,
-  );
-  assert.equal((events[0] as any).totalCostUsd, null);
+  const events = agentEndThenSettle(state, {
+    type: 'agent_end', messages: [{ role: 'assistant' }],
+  });
+  assert.deepEqual(events, [{ type: 'turn_complete', numTurns: 1, totalCostUsd: null }]);
 });
 
-test('turn_complete: agent_end empty messages', () => {
-  const state = freshState();
-  const events = piRpcLineToNormalized(
-    line({ type: 'agent_end', messages: [] }),
-    state,
-  );
-  assert.deepEqual(events[0], { type: 'turn_complete', numTurns: 0, totalCostUsd: null });
+test('turn_complete: empty or missing messages settle with zero turns', () => {
+  for (const agentEnd of [{ type: 'agent_end', messages: [] }, { type: 'agent_end' }]) {
+    const events = agentEndThenSettle(freshState(), agentEnd);
+    assert.deepEqual(events, [{ type: 'turn_complete', numTurns: 0, totalCostUsd: null }]);
+  }
 });
 
-test('turn_complete: agent_end no messages field', () => {
+test('turn_complete: final assistant error surfaces on agent_settled', () => {
   const state = freshState();
-  const events = piRpcLineToNormalized(
-    line({ type: 'agent_end' }),
-    state,
-  );
-  assert.deepEqual(events[0], { type: 'turn_complete', numTurns: 0, totalCostUsd: null });
+  const events = agentEndThenSettle(state, { type: 'agent_end', messages: [{
+    role: 'assistant', provider: 'deepseek', model: 'deepseek-v4-flash',
+    stopReason: 'error', errorMessage: '400 Unknown mode: deepseek',
+  }] });
+  const terminal = events.find((event) => event.type === 'turn_complete');
+  assert.deepEqual(terminal, {
+    type: 'turn_complete', numTurns: 1, totalCostUsd: null,
+    error: '400 Unknown mode: deepseek',
+  });
 });
 
-test('turn_complete: assistant stopReason "error" surfaces errorMessage on turn_complete', () => {
-  const state = freshState();
-  const events = piRpcLineToNormalized(
-    line({ type: 'agent_end', messages: [
-      { role: 'assistant', provider: 'deepseek', model: 'deepseek-v4-flash', stopReason: 'error', errorMessage: '400 Unknown mode: deepseek' },
-    ] }),
-    state,
+test('turn_complete: missing errorMessage uses the generic PI error', () => {
+  const events = agentEndThenSettle(freshState(), {
+    type: 'agent_end', messages: [{ role: 'assistant', stopReason: 'error' }],
+  });
+  assert.equal(
+    (events[0] as any).error,
+    'PI agent reported an error during execution',
   );
-  const tc = events.find((e) => e.type === 'turn_complete') as any;
-  assert.ok(tc, 'turn_complete emitted');
-  assert.equal(tc.error, '400 Unknown mode: deepseek');
-});
-
-test('turn_complete: stopReason "error" without errorMessage falls back to generic message', () => {
-  const state = freshState();
-  const events = piRpcLineToNormalized(
-    line({ type: 'agent_end', messages: [{ role: 'assistant', stopReason: 'error' }] }),
-    state,
-  );
-  const tc = events.find((e) => e.type === 'turn_complete') as any;
-  assert.equal(tc.error, 'PI agent reported an error during execution');
 });
 
 test('turn_complete: successful turn has no error field', () => {
-  const state = freshState();
-  const events = piRpcLineToNormalized(
-    line({ type: 'agent_end', messages: [{ role: 'assistant', usage: { cost: { total: 0.01 } } }] }),
-    state,
-  );
-  assert.deepEqual(events[0], { type: 'turn_complete', numTurns: 1, totalCostUsd: 0.01 });
+  const events = agentEndThenSettle(freshState(), {
+    type: 'agent_end',
+    messages: [{ role: 'assistant', usage: { cost: { total: 0.01 } } }],
+  });
+  assert.deepEqual(events, [{ type: 'turn_complete', numTurns: 1, totalCostUsd: 0.01 }]);
 });
 
 // ---------------------------------------------------------------------------
-// 8b. cost_record — agent_end with provider/model (task 1e0b)
+// 8b. cost_record — emitted per agent_end before one settled terminal
 // ---------------------------------------------------------------------------
-// cost_record is emitted BEFORE turn_complete when the first assistant message has a non-empty
-// provider field. Existing tests (§8) use messages without provider, so they remain length===1.
 
-test('cost_record: agent_end with provider+model+usage → [cost_record, turn_complete]', () => {
-  const state = freshState();
-  const events = piRpcLineToNormalized(
-    line({ type: 'agent_end', messages: [
-      { role: 'assistant', provider: 'anthropic', model: 'claude-opus-4', usage: { input: 100, output: 50, cost: { total: 0.001 } } },
-    ] }),
-    state,
-  );
-  assert.equal(events.length, 2);
-  assert.deepEqual(events[0], { type: 'cost_record', provider: 'anthropic', model: 'claude-opus-4', tokens_in: 100, tokens_out: 50, cost_usd: 0.001 });
-  assert.deepEqual(events[1], { type: 'turn_complete', numTurns: 1, totalCostUsd: 0.001 });
+test('cost_record: provider/model/usage precedes settled turn_complete', () => {
+  const events = agentEndThenSettle(freshState(), { type: 'agent_end', messages: [{
+    role: 'assistant', provider: 'anthropic', model: 'claude-opus-4',
+    usage: { input: 100, output: 50, cost: { total: 0.001 } },
+  }] });
+  assert.deepEqual(events, [
+    { type: 'cost_record', provider: 'anthropic', model: 'claude-opus-4', tokens_in: 100, tokens_out: 50, cost_usd: 0.001 },
+    { type: 'turn_complete', numTurns: 1, totalCostUsd: 0.001 },
+  ]);
 });
 
-test('cost_record: agent_end multiple assistant messages — tokens summed, first provider/model wins', () => {
-  const state = freshState();
-  const events = piRpcLineToNormalized(
-    line({ type: 'agent_end', messages: [
-      { role: 'assistant', provider: 'anthropic', model: 'claude-opus-4', usage: { input: 200, output: 80, cost: { total: 0.003 } } },
-      { role: 'user' },
-      { role: 'assistant', provider: 'anthropic', model: 'claude-sonnet-4', usage: { input: 150, output: 60, cost: { total: 0.002 } } },
-    ] }),
-    state,
-  );
-  assert.equal(events.length, 2);
-  const cr = events[0] as any;
-  assert.equal(cr.type, 'cost_record');
-  assert.equal(cr.provider, 'anthropic');
-  assert.equal(cr.model, 'claude-opus-4', 'first assistant model wins');
-  assert.equal(cr.tokens_in, 350, 'tokens_in summed: 200+150');
-  assert.equal(cr.tokens_out, 140, 'tokens_out summed: 80+60');
-  assert.ok(Math.abs(cr.cost_usd - 0.005) < 1e-10);
-  const tc = events[1] as any;
-  assert.equal(tc.type, 'turn_complete');
-  assert.equal(tc.numTurns, 2);
-  assert.ok(Math.abs(tc.totalCostUsd - 0.005) < 1e-10);
+test('cost_record: multiple messages sum tokens and use the first identity', () => {
+  const events = agentEndThenSettle(freshState(), { type: 'agent_end', messages: [
+    { role: 'assistant', provider: 'anthropic', model: 'claude-opus-4', usage: { input: 200, output: 80, cost: { total: 0.003 } } },
+    { role: 'user' },
+    { role: 'assistant', provider: 'anthropic', model: 'claude-sonnet-4', usage: { input: 150, output: 60, cost: { total: 0.002 } } },
+  ] });
+  assert.deepEqual(events[0], {
+    type: 'cost_record', provider: 'anthropic', model: 'claude-opus-4',
+    tokens_in: 350, tokens_out: 140, cost_usd: 0.005,
+  });
+  assert.deepEqual(events[1], { type: 'turn_complete', numTurns: 2, totalCostUsd: 0.005 });
 });
 
-test('cost_record: agent_end without provider → no cost_record, only turn_complete', () => {
-  const state = freshState();
-  const events = piRpcLineToNormalized(
-    line({ type: 'agent_end', messages: [{ role: 'assistant', usage: { cost: { total: 0.05 } } }] }),
-    state,
-  );
-  assert.equal(events.length, 1, 'no cost_record when provider absent');
-  assert.equal(events[0]?.type, 'turn_complete');
+test('cost_record: missing or empty provider emits no low-level cost event', () => {
+  for (const provider of [undefined, '']) {
+    const state = freshState();
+    const messages = [{
+      role: 'assistant', provider, model: 'some-model',
+      usage: { input: 10, output: 5, cost: { total: 0.001 } },
+    }];
+    assert.deepEqual(
+      piRpcLineToNormalized(line({ type: 'agent_end', messages }), state),
+      [],
+    );
+    assert.equal(piRpcLineToNormalized(line({ type: 'agent_settled' }), state)[0]?.type, 'turn_complete');
+  }
 });
 
-test('cost_record: agent_end with empty string provider → no cost_record', () => {
+test('cost_record: absent token counts default to zero', () => {
   const state = freshState();
-  const events = piRpcLineToNormalized(
-    line({ type: 'agent_end', messages: [{ role: 'assistant', provider: '', model: 'some-model', usage: { input: 10, output: 5, cost: { total: 0.001 } } }] }),
-    state,
-  );
-  assert.equal(events.length, 1, 'empty provider string treated as absent');
-  assert.equal(events[0]?.type, 'turn_complete');
-});
-
-test('cost_record: agent_end with provider but no usage.input/output → tokens_in/tokens_out: 0', () => {
-  const state = freshState();
-  const events = piRpcLineToNormalized(
-    line({ type: 'agent_end', messages: [{ role: 'assistant', provider: 'openai', model: 'gpt-4o', usage: { cost: { total: 0.002 } } }] }),
-    state,
-  );
-  assert.equal(events.length, 2);
-  const cr = events[0] as any;
-  assert.equal(cr.type, 'cost_record');
-  assert.equal(cr.tokens_in, 0);
-  assert.equal(cr.tokens_out, 0);
-  assert.ok(Math.abs(cr.cost_usd - 0.002) < 1e-10);
+  const events = piRpcLineToNormalized(line({ type: 'agent_end', messages: [{
+    role: 'assistant', provider: 'openai', model: 'gpt-4o',
+    usage: { cost: { total: 0.002 } },
+  }] }), state);
+  assert.deepEqual(events, [{
+    type: 'cost_record', provider: 'openai', model: 'gpt-4o',
+    tokens_in: 0, tokens_out: 0, cost_usd: 0.002,
+  }]);
 });
 
 // ---------------------------------------------------------------------------
@@ -665,7 +712,6 @@ test('edge: unknown event type → []', () => {
   assert.deepEqual(piRpcLineToNormalized(line({ type: 'queue_update', data: {} }), state), []);
   assert.deepEqual(piRpcLineToNormalized(line({ type: 'turn_start' }), state), []);
   assert.deepEqual(piRpcLineToNormalized(line({ type: 'compaction_end', reason: 'threshold' }), state), []);
-  assert.deepEqual(piRpcLineToNormalized(line({ type: 'auto_retry_end' }), state), []);
   assert.deepEqual(piRpcLineToNormalized(line({ type: 'agent_start' }), state), []);
 });
 
@@ -683,6 +729,63 @@ test('context_compacted: compaction_start without reason defaults to auto', () =
   const state = freshState();
   const events = piRpcLineToNormalized(line({ type: 'compaction_start' }), state);
   assert.deepEqual(events, [{ type: 'context_compacted', trigger: 'auto' }]);
+});
+
+test('agent_settled: compaction continuation aggregates runs and resets after settlement', () => {
+  const state = freshState();
+  const first = piRpcLineToNormalized(line({
+    type: 'agent_end',
+    messages: [{
+      role: 'assistant', provider: 'openai', model: 'gpt-5.6-sol',
+      usage: { input: 100, output: 20, cost: { total: 0.02 } },
+    }],
+  }), state);
+  assert.deepEqual(first.map((event) => event.type), ['cost_record']);
+
+  assert.deepEqual(
+    piRpcLineToNormalized(line({ type: 'compaction_start', reason: 'threshold' }), state),
+    [{ type: 'context_compacted', trigger: 'threshold' }],
+  );
+  assert.deepEqual(piRpcLineToNormalized(line({ type: 'compaction_end' }), state), []);
+
+  const second = piRpcLineToNormalized(line({
+    type: 'agent_end',
+    messages: [{ role: 'assistant', usage: { cost: { total: 0.03 } } }],
+  }), state);
+  assert.deepEqual(second, []);
+  assert.deepEqual(
+    piRpcLineToNormalized(line({ type: 'agent_settled' }), state),
+    [{ type: 'turn_complete', numTurns: 2, totalCostUsd: 0.05 }],
+  );
+
+  piRpcLineToNormalized(line({
+    type: 'agent_end',
+    messages: [{ role: 'assistant', usage: { cost: { total: 0.01 } } }],
+  }), state);
+  assert.deepEqual(
+    piRpcLineToNormalized(line({ type: 'agent_settled' }), state),
+    [{ type: 'turn_complete', numTurns: 1, totalCostUsd: 0.01 }],
+  );
+});
+
+test('agent_settled: successful retry clears the earlier low-level run error', () => {
+  const state = freshState();
+  assert.deepEqual(piRpcLineToNormalized(line({
+    type: 'agent_end', willRetry: true,
+    messages: [{
+      role: 'assistant', stopReason: 'error', errorMessage: 'transient overload',
+      usage: { cost: { total: 0.01 } },
+    }],
+  }), state), []);
+  assert.deepEqual(piRpcLineToNormalized(line({
+    type: 'agent_end',
+    messages: [{ role: 'assistant', usage: { cost: { total: 0.02 } } }],
+  }), state), []);
+
+  assert.deepEqual(
+    piRpcLineToNormalized(line({ type: 'agent_settled' }), state),
+    [{ type: 'turn_complete', numTurns: 2, totalCostUsd: 0.03 }],
+  );
 });
 
 test('edge: successful non-bootstrap response → []', () => {

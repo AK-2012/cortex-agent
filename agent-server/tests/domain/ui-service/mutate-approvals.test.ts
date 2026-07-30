@@ -1,4 +1,4 @@
-import test from 'node:test';
+import { test } from 'vitest';
 import assert from 'node:assert/strict';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
@@ -52,8 +52,9 @@ function makeDeps(approvalsPath: string): UiServiceDeps {
     runningExecutions: { getAll: () => [] } as any,
     costSummary: async () => ({ today: 0, week: 0, month: 0, total: 0, byMode: {} as any, byProject: {}, byTrigger: {}, bySource: {}, byBackend: {}, tokens: {} as any, entryCount: 0, dailyBudget: 0, forecastToday: 0, dailyCost: [], byTriggerScoped: {} }),
     bus: { subscribe: () => ({ unsubscribe: () => {} }), publish: () => {} } as any,
-    createDirectSession: async () => ({ sessionId: '', sessionName: '' }),
+    createDirectSession: async () => ({ sessionId: '', sessionName: '', channel: '' }),
     cancelSessionRun: async () => 0,
+    switchSessionProfile: async () => ({ ok: true, name: '', currentBackend: '', targetBackend: '', backendChanged: false }),
     clientRegistry: { getOnlineDevices: () => [], isDeviceOnline: () => false, getMachineRegistry: () => ({}) },
     adapter: {} as any,
   };

@@ -1,4 +1,4 @@
-import test from 'node:test';
+import { test } from 'vitest';
 import assert from 'node:assert/strict';
 import { handleCostSummary } from '../../../src/domain/ui-service/query/cost.js';
 import type { UiServiceDeps } from '../../../src/domain/ui-service/types.js';
@@ -33,8 +33,9 @@ test('cost.summary delegates to costSummary and returns CostSummary', async () =
       return expected;
     },
     bus: { subscribe: () => ({ unsubscribe: () => {} }), publish: () => {} } as any,
-    createDirectSession: async () => ({ sessionId: '', sessionName: '' }),
+    createDirectSession: async () => ({ sessionId: '', sessionName: '', channel: '' }),
     cancelSessionRun: async () => 0,
+    switchSessionProfile: async () => ({ ok: true, name: '', currentBackend: '', targetBackend: '', backendChanged: false }),
     clientRegistry: { getOnlineDevices: () => [], isDeviceOnline: () => false, getMachineRegistry: () => ({}) },
     adapter: {} as any,
   };
@@ -62,8 +63,9 @@ test('cost.summary passes projectId filter', async () => {
       return { today: 0, week: 0, month: 0, total: 0, byMode: {} as any, byProject: {}, byTrigger: {}, bySource: {}, byBackend: {}, tokens: {} as any, entryCount: 0, dailyBudget: 0, forecastToday: 0, dailyCost: [], byTriggerScoped: {} };
     },
     bus: { subscribe: () => ({ unsubscribe: () => {} }), publish: () => {} } as any,
-    createDirectSession: async () => ({ sessionId: '', sessionName: '' }),
+    createDirectSession: async () => ({ sessionId: '', sessionName: '', channel: '' }),
     cancelSessionRun: async () => 0,
+    switchSessionProfile: async () => ({ ok: true, name: '', currentBackend: '', targetBackend: '', backendChanged: false }),
     clientRegistry: { getOnlineDevices: () => [], isDeviceOnline: () => false, getMachineRegistry: () => ({}) },
     adapter: {} as any,
   };

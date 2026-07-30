@@ -1,12 +1,13 @@
-// input:  HTTP hook requests (AskUserQuestion/ExitPlanMode)
-// output: register/resolve + bus publish
-// pos:    PreToolUse hook ↔ Slack interaction communication bridge (S5: callbacks replaced by EventBus)
+// input:  AskUserQuestion and ExitPlanMode requests
+// output: Hook resolution, blocking TTL, and interaction events
+// pos:    PreToolUse interaction communication bridge
 // >>> If I am updated, update my header comment and the parent folder's CORTEX.md <<<
 
 import { createLogger } from '@core/log.js';
 import type { EventBus } from '@events/index.js';
+import type { ChatNoticeLevel } from '@core/types/agent-types.js';
 
-const TTL_MS = 30 * 60 * 1000; // 30 minutes — matches ASK_USER_QUESTION_TTL_MS
+export const TTL_MS = 30 * 60 * 1000; // 30 minutes — matches ASK_USER_QUESTION_TTL_MS
 
 interface PendingRequest {
   resolve: (data: any) => void;
@@ -40,21 +41,22 @@ function setPlanNotify(_cb: PlanNotify): void { /* no-op, deprecated */ }
 
 // --- Registration (called by webhook routes, blocks until Slack interaction completes) ---
 
-function registerAskQuestion(requestId: string, channel: string, sessionId: string, questions: any[], dryRun = false, threadId?: string | null): Promise<any> {
+function registerAskQuestion(requestId: string, channel: string, sessionId: string, questions: any[], dryRun = false, threadId?: string | null, level?: ChatNoticeLevel | null): Promise<any> {
   return new Promise((resolve) => {
     if (!_bus) {
       log.error('bus not initialised; failing ask-user request immediately');
       resolve({ error: 'bus_not_initialized', answers: {} });
       return;
     }
+    const levelField = level ? { level } : {};
     if (dryRun) {
       // Smoke-test path: publish event for journal capture, skip Slack interaction, resolve synthetically.
-      _bus.publish({ type: 'ask-user.requested', requestId, channel, sessionId, threadId: threadId ?? null, questions, dryRun: true });
+      _bus.publish({ type: 'ask-user.requested', requestId, channel, sessionId, threadId: threadId ?? null, questions, ...levelField, dryRun: true });
       resolve({ dryRun: true, answers: {} });
       return;
     }
     pendingRequests.set(requestId, { resolve, channel, sessionId, createdAt: Date.now() });
-    _bus.publish({ type: 'ask-user.requested', requestId, channel, sessionId, threadId: threadId ?? null, questions });
+    _bus.publish({ type: 'ask-user.requested', requestId, channel, sessionId, threadId: threadId ?? null, questions, ...levelField });
   });
 }
 
@@ -88,10 +90,21 @@ function resolveRequest(requestId: string, data: any): boolean {
 
 // --- Cleanup stale requests ---
 
-function cleanupStale() {
-  const now = Date.now();
+type OnStale = (requestId: string, channel: string, sessionId: string) => void;
+let _onStale: OnStale | null = null;
+
+/** Register a callback fired when a pending request times out (wired by app.ts to mark the
+ *  interaction entity expired + clean the group/plan maps). Pass null to clear (tests). */
+function setOnStale(cb: OnStale | null): void {
+  _onStale = cb;
+}
+
+function cleanupStale(now: number = Date.now()) {
   for (const [id, req] of pendingRequests) {
     if (now - req.createdAt > TTL_MS) {
+      try { _onStale?.(id, req.channel, req.sessionId); } catch (e) {
+        log.error(`onStale callback failed for ${id}: ${(e as Error).message}`);
+      }
       req.resolve({ error: 'timeout', answers: {} });
       pendingRequests.delete(id);
     }
@@ -99,7 +112,7 @@ function cleanupStale() {
 }
 
 // Run cleanup every 5 minutes
-setInterval(cleanupStale, 5 * 60 * 1000).unref();
+setInterval(() => cleanupStale(), 5 * 60 * 1000).unref();
 
 // --- Per-channel streaming context (for thread-aware hook messages) ---
 
@@ -124,9 +137,18 @@ function getStreamingCallback(channel: string): ((text: string) => void) | null 
  * Publish plan.submitted directly (non-blocking, no pendingRequest).
  * Used by PI backend: the resolution goes through sendExtensionUiResponse, not resolveRequest.
  */
-function publishPlanSubmitted(requestId: string, channel: string, sessionId: string, planContent: string, extensionUiId: string, threadId?: string | null): void {
+function publishPlanSubmitted(
+  requestId: string,
+  channel: string,
+  sessionId: string,
+  planContent: string,
+  planFilePath: string | null,
+  extensionUiId: string,
+  threadId?: string | null,
+): void {
   if (!_bus) { log.error('bus not initialised; dropping PI plan.submitted'); return; }
-  _bus.publish({ type: 'plan.submitted', requestId, channel, sessionId, threadId: threadId ?? null, planContent, toolInput: {}, extensionUiId });
+  const toolInput = planFilePath ? { plan_file_path: planFilePath } : {};
+  _bus.publish({ type: 'plan.submitted', requestId, channel, sessionId, threadId: threadId ?? null, planContent, toolInput, extensionUiId });
 }
 
 /**
@@ -139,4 +161,4 @@ function publishAskUserRequested(requestId: string, channel: string, sessionId: 
   _bus.publish({ type: 'ask-user.requested', requestId, channel, sessionId, threadId: threadId ?? null, questions, extensionUiId });
 }
 
-export { initHookBridge, setQuestionNotify, setPlanNotify, registerAskQuestion, registerPlanApproval, resolveRequest, setStreamingCallback, clearStreamingCallback, getStreamingCallback, publishPlanSubmitted, publishAskUserRequested };
+export { initHookBridge, setQuestionNotify, setPlanNotify, registerAskQuestion, registerPlanApproval, resolveRequest, setOnStale, cleanupStale, setStreamingCallback, clearStreamingCallback, getStreamingCallback, publishPlanSubmitted, publishAskUserRequested };

@@ -1,10 +1,11 @@
-// input:  UiServiceDeps
-// output: createUiService(deps): UiService — facade routing scope/op strings to per-module handlers
-// pos:    transport-agnostic UI service facade
+// input:  UiServiceDeps and query/mutation handlers
+// output: createUiService with notes routing and private audit redaction
+// pos:    Transport-neutral UI-service dispatcher
+// >>> 一旦我被更新，务必更新我的开头注释与所属文件夹 CORTEX.md <<<
 
 import type { UiServiceDeps, UiService, QueryScope, MutateOp, Result } from './types.js';
 import { handleProjectsList } from './query/projects.js';
-import { handleSessionsList, handleSessionsTranscript } from './query/sessions.js';
+import { handleSessionsList, handleSessionsTranscript, handleSessionsPendingInteraction } from './query/sessions.js';
 import { handleThreadsList, handleThreadsGet } from './query/threads.js';
 import { handleTasksList } from './query/tasks.js';
 import { handleTaskVerification } from './query/task-verification.js';
@@ -12,14 +13,25 @@ import { handleSchedulesList } from './query/schedules.js';
 import { handleExecutionsList, handleExecutionsGet } from './query/executions.js';
 import { handleMemoryTree, handleMemoryFile } from './query/memory.js';
 import { handleApprovalsList } from './query/approvals.js';
+import { handleIssuesList } from './query/issues.js';
+import { handleNotesList } from './query/notes.js';
 import { handleCostSummary } from './query/cost.js';
 import { handleConfigGet } from './query/config.js';
+import { handleHooksList } from './query/hooks.js';
 import { handleMachinesList } from './query/machines.js';
 import { handleSkillsList } from './query/skills.js';
 import { handleThreadTemplatesGet } from './query/thread-templates.js';
+import { handleSystemDaemonStatus, handleSystemRateLimitStatus } from './query/system.js';
 import { handleConfigSet } from './mutate/config.js';
+import {
+  handleHooksCreate,
+  handleHooksUpdate,
+  handleHooksSetEnabled,
+  handleHooksRemove,
+  handleHooksTest,
+} from './mutate/hooks.js';
 import { handleCreateProject } from './mutate/projects.js';
-import { handleCreateSession, handleSendSession, handleCancelSession } from './mutate/sessions.js';
+import { handleCreateSession, handleSendSession, handleCancelSession, handleCompactSession, handleSetProfile, handleCreateAndSend, handleMarkReadSession, handleAnswerQuestion, handleRespondPlan, handleRewindSession } from './mutate/sessions.js';
 import { handleCancelThread } from './mutate/threads.js';
 import { handleCancelExecution } from './mutate/executions.js';
 import {
@@ -36,6 +48,15 @@ import {
   handleUnblockTask,
 } from './mutate/tasks.js';
 import { handleApproveApproval, handleRejectApproval, handleRequestApproval } from './mutate/approvals.js';
+import { handleIssuesDelete, handleIssuesHandle } from './mutate/issues.js';
+import {
+  handleNotesAdd,
+  handleNotesClearCompleted,
+  handleNotesDelete,
+  handleNotesSetCompleted,
+  handleNotesUpdate,
+} from './mutate/notes.js';
+import { handleSystemRestart } from './mutate/system.js';
 import { createSubscription } from './subscribe.js';
 import { resolveExecutionLogLocation } from '@domain/executions/log-tailer.js';
 
@@ -46,6 +67,7 @@ const queryHandlers: Record<string, QueryHandler> = {
   'projects.list': (deps) => handleProjectsList(deps),
   'sessions.list': (deps, params) => handleSessionsList(deps, params),
   'sessions.transcript': (deps, params) => handleSessionsTranscript(deps, params),
+  'sessions.pendingInteraction': (deps, params) => handleSessionsPendingInteraction(deps, params),
   'threads.list': (deps, params) => handleThreadsList(deps, params),
   'threads.get': (deps, params) => handleThreadsGet(deps, params),
   'tasks.list': (deps, params) => handleTasksList(deps, params),
@@ -56,11 +78,16 @@ const queryHandlers: Record<string, QueryHandler> = {
   'memory.tree': (deps, params) => handleMemoryTree(deps, params),
   'memory.file': (deps, params) => handleMemoryFile(deps, params),
   'approvals.list': (deps, params) => handleApprovalsList(deps, params),
+  'issues.list': (deps, params) => handleIssuesList(deps, params),
+  'notes.list': (deps, params) => handleNotesList(deps, params),
   'cost.summary': (deps, params) => handleCostSummary(deps, params),
   'config.get': (deps, params) => handleConfigGet(deps, params),
+  'hooks.list': (deps, params) => handleHooksList(deps, params),
   'machines.list': (deps, params) => handleMachinesList(deps, params),
   'skills.list': (deps, params) => handleSkillsList(deps, params),
   'threadTemplates.get': (deps, params) => handleThreadTemplatesGet(deps, params),
+  'system.daemonStatus': (_deps, params) => handleSystemDaemonStatus(params),
+  'system.rateLimitStatus': (_deps, params) => handleSystemRateLimitStatus(params),
 };
 
 const mutateHandlers: Record<string, MutateHandler> = {
@@ -68,6 +95,13 @@ const mutateHandlers: Record<string, MutateHandler> = {
   'sessions.create': (deps, args) => handleCreateSession(deps, args),
   'sessions.send': (deps, args) => handleSendSession(deps, args),
   'sessions.cancel': (deps, args) => handleCancelSession(deps, args),
+  'sessions.compact': (deps, args) => handleCompactSession(deps, args),
+  'sessions.setProfile': (deps, args) => handleSetProfile(deps, args),
+  'sessions.createAndSend': (deps, args) => handleCreateAndSend(deps, args),
+  'sessions.markRead': (deps, args) => handleMarkReadSession(deps, args),
+  'sessions.answerQuestion': (deps, args) => handleAnswerQuestion(deps, args),
+  'sessions.respondPlan': (deps, args) => handleRespondPlan(deps, args),
+  'sessions.rewind': (deps, args) => handleRewindSession(deps, args),
   'threads.cancel': (deps, args) => handleCancelThread(deps, args),
   'executions.cancel': (deps, args) => handleCancelExecution(deps, args),
   'schedules.pause': (deps, args) => handlePauseSchedule(deps, args),
@@ -82,8 +116,27 @@ const mutateHandlers: Record<string, MutateHandler> = {
   'approvals.approve': (deps, args) => handleApproveApproval(deps, args),
   'approvals.reject': (deps, args) => handleRejectApproval(deps, args),
   'approvals.request': (deps, args) => handleRequestApproval(deps, args),
+  'issues.handle': (deps, args) => handleIssuesHandle(deps, args),
+  'issues.delete': (deps, args) => handleIssuesDelete(deps, args),
+  'notes.add': (deps, args) => handleNotesAdd(deps, args),
+  'notes.update': (deps, args) => handleNotesUpdate(deps, args),
+  'notes.setCompleted': (deps, args) => handleNotesSetCompleted(deps, args),
+  'notes.delete': (deps, args) => handleNotesDelete(deps, args),
+  'notes.clearCompleted': (deps, args) => handleNotesClearCompleted(deps, args),
   'config.set': (deps, args) => handleConfigSet(deps, args),
+  'hooks.create': (deps, args) => handleHooksCreate(deps, args),
+  'hooks.update': (deps, args) => handleHooksUpdate(deps, args),
+  'hooks.setEnabled': (deps, args) => handleHooksSetEnabled(deps, args),
+  'hooks.remove': (deps, args) => handleHooksRemove(deps, args),
+  'hooks.test': (deps, args) => handleHooksTest(deps, args),
+  'system.restart': (_deps, args) => handleSystemRestart(args),
 };
+
+export function redactMutationAuditArgs(op: MutateOp, args: unknown): unknown {
+  if (!op.startsWith('notes.') || !args || typeof args !== 'object') return args;
+  const { text: _privateText, ...safe } = args as Record<string, unknown>;
+  return safe;
+}
 
 export function createUiService(deps: UiServiceDeps): UiService {
   return {
@@ -112,7 +165,7 @@ export function createUiService(deps: UiServiceDeps): UiService {
         deps.bus.publish({
           type: 'ui.mutate-invoked',
           op,
-          args,
+          args: redactMutationAuditArgs(op, args),
           result: result.ok ? { ok: true } : { ok: false, code: (result as any).code },
         });
         return result;
@@ -121,7 +174,7 @@ export function createUiService(deps: UiServiceDeps): UiService {
         deps.bus.publish({
           type: 'ui.mutate-invoked',
           op,
-          args,
+          args: redactMutationAuditArgs(op, args),
           result: { ok: false, code: 'internal' },
         });
         return errResult;

@@ -1,16 +1,19 @@
-// input:  thread-store, active-handles, mode-manager, domain/threads
-// output: executeLifecycleHook — Thread lifecycle hook executor
-// pos:    onStart/onTransition/onEnd hook subsystem for the Thread system
+// input:  thread store, HookBus, agents and executions
+// output: lifecycle event emitters and hook-agent execution
+// pos:    Adapts thread lifecycle hooks to the shared HookBus
 // >>> If I am updated, update my header comment and the parent folder's CORTEX.md <<<
 
-import { spawn } from 'child_process';
 import { readFileSync } from 'fs';
 import { threadStore } from '@store/thread-repo.js';
-import { getSessionKey, recordStepResult } from './index.js';
+import { getSessionKey, recordStepResult, resolveTargetResumeId } from './index.js';
 import { runAgent, getClaudeMode, getActiveBackend, getActiveProfile } from '../agents/index.js';
 import * as executionRegistry from '../executions/registry.js';
 import { sessionStore } from '@store/session-registry-repo.js';
-import { DATA_DIR } from '@core/utils.js';
+import {
+  emitCortexEvent,
+  type HookEmitResult,
+  type HookSpec,
+} from '@core/hook-bus.js';
 import { createLogger } from '@core/log.js';
 import { Icons } from '../../core/icons.js';
 import { runningExecutions } from '../../core/running-executions.js';
@@ -25,22 +28,31 @@ const log = createLogger('thread-hook');
 
 const DEFAULT_HOOK_TIMEOUT = 30000;
 
-/** Build context object to pass to hook script via stdin. */
-function buildHookContext(threadId: string, phase: 'start' | 'transition' | 'end', previousAgent?: string): HookContext {
+/** Build the complete payload passed to registry and scoped hooks through stdin. */
+function buildHookContext(
+  threadId: string,
+  phase: 'start' | 'transition' | 'end',
+  previousAgent?: string,
+): HookContext {
   const thread = threadStore.get(threadId)!;
   let artifactContent = '';
   try {
     artifactContent = readFileSync(thread.artifactPath, 'utf8');
   } catch {}
-
+  const taskProject = thread.metadata?.taskProject ?? null;
   return {
     threadId,
     templateName: thread.templateName || '',
     phase,
+    source: thread.metadata?.trigger ?? null,
+    project: taskProject ?? thread.projectId,
+    projectId: thread.projectId,
+    taskId: thread.metadata?.taskId ?? null,
+    taskProject,
     currentStepIndex: thread.currentStepIndex,
     steps: thread.steps,
     activeAgent: thread.activeAgent,
-    previousAgent,
+    previousAgent: previousAgent ?? null,
     artifactContent,
     userMessage: thread.userMessage,
     totalCostUsd: thread.totalCostUsd,
@@ -48,72 +60,27 @@ function buildHookContext(threadId: string, phase: 'start' | 'transition' | 'end
   };
 }
 
-/** Execute a hook script and parse its JSON result. Returns { insertAgent: false } on any error.
- *
- *  hookConfig.command is run via `sh -c 'command "$@"' hook <args>`, so the caller can write the
- *  full shell invocation (including interpreter, e.g. "node ~/.cortex/hooks/foo.mjs") and
- *  dynamic hookConfig.args become positional $1..$N on the command line. cwd = DATA_DIR.
- */
-async function executeHook(hookConfig: ThreadHookConfig, context: HookContext): Promise<HookResult> {
-  const timeout = hookConfig.timeout || DEFAULT_HOOK_TIMEOUT;
-  const command = hookConfig.command;
-  const args = hookConfig.args || [];
-  const label = args.length ? `${command} ${args.join(' ')}` : command;
+function normalizeScopedHook(id: string, config: ThreadHookConfig): HookSpec {
+  return {
+    id,
+    command: config.command,
+    args: config.args,
+    timeoutMs: config.timeout ?? DEFAULT_HOOK_TIMEOUT,
+    result: 'hook-result',
+  };
+}
 
-  return new Promise<HookResult>((resolve) => {
-    let stdout = '';
-    let stderr = '';
-    let settled = false;
-
-    // `sh -c '<command> "$@"' hook <args>`: the shell parses <command>, then appends <args> as
-    // positional params $1..$N. No manual quoting — args with spaces survive intact.
-    const proc = spawn('sh', ['-c', `${command} "$@"`, 'hook', ...args], {
-      stdio: ['pipe', 'pipe', 'pipe'],
-      cwd: DATA_DIR,
-      timeout,
-    });
-
-    proc.stdout.on('data', (chunk: Buffer) => { stdout += chunk.toString(); });
-    proc.stderr.on('data', (chunk: Buffer) => { stderr += chunk.toString(); });
-
-    proc.on('error', (err) => {
-      if (!settled) {
-        settled = true;
-        log.error(`Hook error (${label}): ${err.message}`);
-        resolve({ insertAgent: false });
-      }
-    });
-
-    proc.on('close', (code) => {
-      if (settled) return;
-      settled = true;
-
-      if (code !== 0) {
-        log.error(`Hook exited with code ${code} (${label})${stderr ? ': ' + stderr.trim() : ''}`);
-        resolve({ insertAgent: false });
-        return;
-      }
-
-      try {
-        const result = JSON.parse(stdout.trim());
-        // Valid if: has insertAgent (boolean), or has targetAgent (string)
-        if (typeof result.insertAgent !== 'boolean' && typeof result.targetAgent !== 'string') {
-          log.error(`Hook output missing insertAgent or targetAgent field (${label})`);
-          resolve({ insertAgent: false });
-          return;
-        }
-        if (typeof result.insertAgent !== 'boolean') result.insertAgent = false;
-        resolve(result as HookResult);
-      } catch (e: any) {
-        log.error(`Failed to parse hook output as JSON (${label}): ${e.message}`);
-        resolve({ insertAgent: false });
-      }
-    });
-
-    // Send context to stdin
-    proc.stdin.write(JSON.stringify(context));
-    proc.stdin.end();
-  });
+function asHookResult(emitted: HookEmitResult): HookResult | null {
+  if (emitted.error || typeof emitted.result !== 'object' || emitted.result === null) return null;
+  const value = emitted.result as Partial<HookResult>;
+  if (typeof value.insertAgent !== 'boolean' && typeof value.targetAgent !== 'string') {
+    log.error(`Hook output missing insertAgent or targetAgent field (${emitted.id})`);
+    return null;
+  }
+  return {
+    ...value,
+    insertAgent: typeof value.insertAgent === 'boolean' ? value.insertAgent : false,
+  } as HookResult;
 }
 
 /** Run a hook agent and record it as a step in the thread.
@@ -148,11 +115,10 @@ async function runHookAgent(
     }
     slotId = hookResult.targetAgent!;
     sessionKey = getSessionKey(threadId, slotId);
-    // sessionId: use slot's if available (persistSession=true), otherwise find from most recent step (persistSession=false)
-    // claude-bridge: sessionId does not matter when process is alive (finds process by sessionKey and writes to stdin); when dead, uses it for --resume
-    sessionId = targetSlot.sessionId
-      || [...thread.steps].reverse().find(s => s.agentSlotId === slotId)?.sessionId
-      || null;
+    // Backend resume target (track/backend decoupling aware): slot.backendSessionId, legacy
+    // slot.sessionId fallback, else the slot's most recent step. claude-bridge: the id does not
+    // matter while the process is alive (found by sessionKey, stdin write); when dead → --resume.
+    sessionId = resolveTargetResumeId(targetSlot, thread.steps);
     profileName = hookResult.profile
       ? (hookResult.profile === '__active__' ? getActiveProfile(opts.channel) : hookResult.profile)
       : (targetSlot.profile === '__active__' ? getActiveProfile(opts.channel) : targetSlot.profile);
@@ -273,8 +239,51 @@ async function runHookAgent(
   log.info(`Hook agent (${slackLabel}) completed for thread ${threadId}`);
 }
 
-/** Run a lifecycle hook (onStart/onTransition/onEnd) if configured.
- *  logSuffix lets callers preserve detailed log info (e.g. transition arrows). */
+export interface LifecycleHookConfigs {
+  template?: ThreadHookConfig;
+  extra?: ThreadHookConfig;
+}
+
+function scopedHooks(
+  context: HookContext,
+  configs: LifecycleHookConfigs,
+): HookSpec[] {
+  const hooks: HookSpec[] = [];
+  if (configs.template) {
+    hooks.push(normalizeScopedHook(`template:${context.templateName}:${context.phase}`, configs.template));
+  }
+  if (configs.extra) {
+    hooks.push(normalizeScopedHook(`extra:${context.threadId}:${context.phase}`, configs.extra));
+  }
+  return hooks;
+}
+
+/** Emit one lifecycle event with registry and per-call scoped hooks. */
+export async function executeLifecycleHooks(
+  threadId: string,
+  phase: 'start' | 'transition' | 'end',
+  configs: LifecycleHookConfigs,
+  opts: RunThreadOptions,
+  previousAgent?: string,
+  logSuffix?: string,
+): Promise<void> {
+  const context = buildHookContext(threadId, phase, previousAgent);
+  if (configs.template || configs.extra) {
+    const phaseName = `on${phase[0].toUpperCase()}${phase.slice(1)}`;
+    log.info(`Executing ${phaseName} hooks for thread ${threadId}${logSuffix ? ` ${logSuffix}` : ''}`);
+  }
+  const emitted = await emitCortexEvent(`cortex:thread.${phase}`, context, {
+    scopedHooks: scopedHooks(context, configs),
+  });
+  for (const item of emitted) {
+    const hookResult = asHookResult(item);
+    if (hookResult && (hookResult.insertAgent || hookResult.targetAgent)) {
+      await runHookAgent(threadId, hookResult, phase, opts);
+    }
+  }
+}
+
+/** Backward-compatible single scoped-hook entry point. */
 export async function executeLifecycleHook(
   threadId: string,
   phase: 'start' | 'transition' | 'end',
@@ -283,12 +292,12 @@ export async function executeLifecycleHook(
   previousAgent?: string,
   logSuffix?: string,
 ): Promise<void> {
-  if (!hookConfig) return;
-  const phaseName = `on${phase[0].toUpperCase()}${phase.slice(1)}`;
-  log.info(`Executing ${phaseName} hook for thread ${threadId}${logSuffix ? ' ' + logSuffix : ''}`);
-  const hookContext = buildHookContext(threadId, phase, previousAgent);
-  const hookResult = await executeHook(hookConfig, hookContext);
-  if (hookResult.insertAgent || hookResult.targetAgent) {
-    await runHookAgent(threadId, hookResult, phase, opts);
-  }
+  await executeLifecycleHooks(
+    threadId,
+    phase,
+    { template: hookConfig },
+    opts,
+    previousAgent,
+    logSuffix,
+  );
 }

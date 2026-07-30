@@ -3,23 +3,34 @@
 // pos:    verifies store/profile-repo.ts Pattern A guarantees
 // >>> If I am updated, update my header comment and the parent folder's CORTEX.md <<<
 
-import test from 'node:test';
+import { test, beforeAll, afterAll } from 'vitest';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
-import { ProfileRepo, startProfileWatcher } from '../../src/store/profile-repo.js';
+import { ProfileRepo, startProfileWatcher, setAdminNotifier } from '../../src/store/profile-repo.js';
 import type { ProfilesFile } from '../../src/domain/agents/profile-manager.js';
+
+// The watcher rides on real fs.watch events plus a module-internal 300ms debounce
+// (not injectable), so fake timers cannot fast-forward it. Poll for the observable
+// signal instead of sleeping fixed padding. Returns quietly on timeout — the
+// caller's assertions then fail with their own messages.
+async function waitFor(cond: () => boolean, timeoutMs = 3000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (!cond() && Date.now() < deadline) {
+    await new Promise(r => setTimeout(r, 10));
+  }
+}
 
 // ── Shared tmp directory ───────────────────────────────────────
 
 let tmpDir: string;
 
-test.before(async () => {
+beforeAll(async () => {
   tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'cortex-profile-repo-test-'));
 });
 
-test.after(async () => {
+afterAll(async () => {
   await fs.rm(tmpDir, { recursive: true, force: true });
 });
 
@@ -154,14 +165,15 @@ test('ProfileRepo - save() updates both async read() and readSync() cache', asyn
 
 // ── Hot-reload watcher ────────────────────────────────────────
 
-test('startProfileWatcher - invalidates cache and reloads on file change', async (t) => {
+test('startProfileWatcher - invalidates cache, reloads, and reports a valid file change', async (t) => {
   const { repo, filePath } = await createRepo();
   // Warm the sync cache.
   const initial = repo.readSync();
   assert.equal(initial.defaultProfile, 'a');
+  let successfulReloads = 0;
 
-  const stop = startProfileWatcher(repo, filePath);
-  t.after(() => stop());
+  const stop = startProfileWatcher(repo, filePath, () => { successfulReloads++; });
+  t.onTestFinished(() => stop());
 
   const updated: ProfilesFile = {
     defaultProfile: 'hot-loaded',
@@ -169,19 +181,29 @@ test('startProfileWatcher - invalidates cache and reloads on file change', async
   };
   await fs.writeFile(filePath, JSON.stringify(updated, null, 2));
 
-  // Wait for debounce (300 ms) + buffer.
-  await new Promise(r => setTimeout(r, 600));
+  // Wait for fs.watch event + 300ms debounce, observed via the reload callback.
+  await waitFor(() => successfulReloads >= 1);
 
   const fresh = repo.readSync();
   assert.equal(fresh.defaultProfile, 'hot-loaded', 'cache should be refreshed after file change');
+  assert.ok(successfulReloads >= 1, 'a successful reload should be reported');
 });
 
-test('startProfileWatcher - stop function prevents further reloads', async () => {
+test('startProfileWatcher - stop function prevents further reloads', async (t) => {
   const { repo, filePath } = await createRepo();
   repo.readSync(); // warm cache
 
   const stop = startProfileWatcher(repo, filePath);
   stop(); // stop immediately before any change
+
+  // Sentinel: a second, live watcher (own repo instance so it can't touch `repo`'s
+  // cache) proves the fs event + debounce pipeline for this write has fully fired —
+  // a deterministic replacement for a blind sleep. A buggy un-stopped watcher was
+  // registered earlier, so its debounce would fire no later than the sentinel's.
+  const sentinelRepo = new ProfileRepo(filePath);
+  let sentinelReloads = 0;
+  const stopSentinel = startProfileWatcher(sentinelRepo, filePath, () => { sentinelReloads++; });
+  t.onTestFinished(() => stopSentinel());
 
   const updated: ProfilesFile = {
     defaultProfile: 'should-not-appear',
@@ -189,28 +211,39 @@ test('startProfileWatcher - stop function prevents further reloads', async () =>
   };
   await fs.writeFile(filePath, JSON.stringify(updated, null, 2));
 
-  await new Promise(r => setTimeout(r, 600));
+  await waitFor(() => sentinelReloads >= 1);
+  // Small buffer so a (hypothetical) leaked debounce on the stopped watcher, armed
+  // by the same fs event, would have fired too.
+  await new Promise(r => setTimeout(r, 50));
 
   // Cache must NOT have been refreshed (watcher was stopped before the write).
   const current = repo.readSync();
   assert.equal(current.defaultProfile, 'a', 'cache should not be updated after watcher is stopped');
 });
 
-test('startProfileWatcher - logs and keeps old cache when reloaded file is invalid JSON', async (t) => {
+test('startProfileWatcher - logs, keeps old cache, and reports no success for invalid JSON', async (t) => {
   const { repo, filePath } = await createRepo();
   const initial = repo.readSync();
+  let successfulReloads = 0;
 
-  const stop = startProfileWatcher(repo, filePath);
-  t.after(() => stop());
+  const stop = startProfileWatcher(repo, filePath, () => { successfulReloads++; });
+  t.onTestFinished(() => stop());
+
+  // The failed-reload path's observable signal is the admin FAILED notice, emitted
+  // synchronously after the reload attempt gives up — poll for it instead of sleeping.
+  const notices: string[] = [];
+  setAdminNotifier((text) => { notices.push(text); });
+  t.onTestFinished(() => setAdminNotifier(() => {}));
 
   // Write invalid JSON to the file.
   await fs.writeFile(filePath, '{ not valid json !!!');
 
-  await new Promise(r => setTimeout(r, 600));
+  await waitFor(() => notices.some(n => /FAILED/.test(n)));
 
   // Cache must still hold the original valid data.
   const current = repo.readSync();
   assert.equal(current.defaultProfile, initial.defaultProfile, 'invalid JSON should not wipe cache');
+  assert.equal(successfulReloads, 0, 'a failed reload must not be reported as successful');
 });
 
 // ── On-disk schema unchanged (byte-level check) ───────────────

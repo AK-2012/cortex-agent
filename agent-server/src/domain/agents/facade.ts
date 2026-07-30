@@ -1,16 +1,17 @@
-// input:  config, agent-adapter, profile-manager, agent-types
-// output: runAgent / runAgentOnce / runWithAdapter + fallback chain + bridge helper re-exports
-// pos:    domain/agents — sole agent execution path [S11]
+// input:  configuration, adapters, profiles, MCP context
+// output: attributed runs, provider identity, and notices
+// pos:    Backend-neutral agent execution facade
+// >>> 一旦我被更新，务必更新我的开头注释与所属文件夹 CORTEX.md <<<
 
 import { getAdapter } from '../../agent-adapter/index.js';
-import type { AgentAdapter, AgentSpawnConfig, Backend } from '../../agent-adapter/index.js';
+import type { AgentAdapter, AgentCompactResult, AgentSpawnConfig, Backend } from '../../agent-adapter/index.js';
 import { shouldAwaitBgInline, waitForBgContinuation } from '../../agent-adapter/bg-wait.js';
 import { resolveProfileConfig } from './profile-manager.js';
 import type { ResolvedProfileConfig } from './profile-manager.js';
-import type { AgentHandle, AgentResult } from '@core/types/agent-types.js';
+import type { AgentHandle, AgentResult, ChatNoticeLevel, ContextUsage } from '@core/types/agent-types.js';
 import { recordCost } from '../costs/cost-tracker.js';
-import { configureEnvForMode, isRetryableResult, isRetryableError } from './config.js';
-import { isModeRateLimited, isThrottled } from '../costs/rate-limit-throttle.js';
+import { configureEnvForMode, isApiRateLimitError, isRetryableResult, isRetryableError } from './config.js';
+import { isProviderModeRateLimited, isProviderRateLimited, isThrottled } from '../costs/rate-limit-throttle.js';
 import { GATEWAY_URL } from '../costs/gateway-manager.js';
 import { createLogger } from '@core/log.js';
 import { loadCortexRules } from '../memory/rules-loader.js';
@@ -18,23 +19,179 @@ import { t } from '../../core/i18n.js';
 
 const log = createLogger('facade');
 
+function assistantNoticeLevel(text: string): ChatNoticeLevel | undefined {
+  return text.startsWith('API Error:') ? 'error' : undefined;
+}
+
+function configLabel(config: AgentConfig): string {
+  return `${config.model}/${config.mode || 'default'}`;
+}
+
+function terminalErrorText(message: string): string {
+  return message.startsWith('API Error:') ? message : t('status.errorBody', { message });
+}
+
+/** Track error notices within one provider attempt so terminal handling is durable but not noisy.
+ *  runWithAdapter drains its event loop before rejecting, so any API Error from that attempt has
+ *  already reached this tracker. A fallback starts a new dedupe window because its terminal
+ *  failure must not be hidden by the previous provider's notice. */
+class AttemptNoticeTracker {
+  readonly options: RunAgentOptions;
+  private readonly forward: RunAgentOptions['onAssistantMessage'];
+  private readonly generateNotices: boolean;
+  private attemptHasErrorNotice = false;
+
+  constructor(private readonly original: RunAgentOptions) {
+    this.forward = original.onAssistantMessage ?? null;
+    this.generateNotices = original.channel?.startsWith('web:') === true;
+    this.options = this.forward
+      ? { ...original, onAssistantMessage: (text, blockId, level) => this.observe(text, blockId, level) }
+      : original;
+  }
+
+  private observe(text: string, blockId?: string, level?: ChatNoticeLevel): void {
+    if (level === 'error') this.attemptHasErrorNotice = true;
+    this.forward?.(text, blockId, level);
+  }
+
+  private emitTerminal(message: string, displayText = terminalErrorText(message)): void {
+    if (!this.generateNotices || !this.forward || this.attemptHasErrorNotice) return;
+    this.attemptHasErrorNotice = true;
+    this.forward(displayText, undefined, 'error');
+  }
+
+  private emitAutoResume(provider: string | undefined): boolean {
+    if (!this.original.isUserInitiated || !isProviderRateLimited(provider)) return false;
+    if (this.generateNotices && this.forward && !this.attemptHasErrorNotice) {
+      this.attemptHasErrorNotice = true;
+      this.forward(t('notify.rateLimitAutoResume'), undefined, 'warning');
+    }
+    return true;
+  }
+
+  async transitionToFallback(
+    current: AgentConfig,
+    next: AgentConfig,
+    result: AgentResult | null,
+    error?: Error,
+  ): Promise<void> {
+    await this.original.onFallback?.(current, next, result, error);
+    if (this.generateNotices) {
+      this.observe(t('notify.agentFallback', {
+        from: configLabel(current), to: configLabel(next),
+      }), undefined, 'warning');
+    }
+    this.attemptHasErrorNotice = false;
+  }
+
+  emitTerminalError(error: unknown): void {
+    const value = error as {
+      message?: unknown;
+      cancelled?: boolean;
+      rateLimitProvider?: string;
+    } | null | undefined;
+    if (value?.cancelled) return;
+    const message = typeof value?.message === 'string' && value.message.length > 0
+      ? value.message
+      : String(error);
+    const resumableDirectError = this.original.trigger !== 'edit-retry'
+      && isApiRateLimitError(message)
+      && this.emitAutoResume(value?.rateLimitProvider);
+    if (!resumableDirectError) this.emitTerminal(message);
+  }
+
+  emitTerminalRateLimit(result: AgentResult): void {
+    if (this.emitAutoResume(result.rateLimitProvider)) return;
+    const detail = result.rateLimitMessage;
+    if (typeof detail === 'string' && detail.startsWith('API Error:')) this.emitTerminal(detail);
+    else this.emitTerminal(t('status.rateLimitedExhausted'), t('status.rateLimitedExhausted'));
+  }
+}
+
+const DEFAULT_PROVIDER_BY_BACKEND: Partial<Record<Backend, string>> = {
+  claude: 'anthropic',
+};
+
+export function resolveRateLimitProvider(config: Pick<AgentConfig, 'backend' | 'provider'>): string {
+  return config.provider || DEFAULT_PROVIDER_BY_BACKEND[config.backend] || config.backend;
+}
+
+function withRateLimitProvider(handle: AgentHandle, provider: string): AgentHandle {
+  return {
+    promise: handle.promise.then(
+      (result) => ({ ...result, rateLimitProvider: result.rateLimitProvider || provider }),
+      (error) => {
+        if (isRetryableError(error as Error)) {
+          (error as Error & { rateLimitProvider?: string }).rateLimitProvider ??= provider;
+        }
+        throw error;
+      },
+    ),
+    kill: () => handle.kill(),
+    get sessionId(): string | null { return handle.sessionId ?? null; },
+    get agentProcess() { return handle.agentProcess; },
+  };
+}
+
+function configIsRateLimited(config: AgentConfig): boolean {
+  return isProviderModeRateLimited(resolveRateLimitProvider(config), config.mode || 'api');
+}
+
+function rateLimitedResult(mode: string, provider: string): AgentResult {
+  return {
+    sessionId: null, total_cost_usd: null, num_turns: null,
+    rateLimited: true, rateLimitMessage: `Mode ${mode} is rate-limited`, rateLimitProvider: provider,
+    planFilePath: null, enteredPlanMode: false, exitedPlanMode: false, finalOutput: null,
+  };
+}
+
+function withTerminalNotices(handle: AgentHandle, notices: AttemptNoticeTracker): AgentHandle {
+  let killed = false;
+  return {
+    promise: handle.promise.then(
+      (result) => {
+        if (result.rateLimited) notices.emitTerminalRateLimit(result);
+        return result;
+      },
+      (error) => {
+        if (!killed) notices.emitTerminalError(error);
+        throw error;
+      },
+    ),
+    kill: () => {
+      killed = true;
+      return handle.kill();
+    },
+    get sessionId(): string | null { return handle.sessionId; },
+    get agentProcess() { return handle.agentProcess; },
+  };
+}
+
 // --- Types ---
 
 export interface AgentConfig {
   model: string;
-  backend: string;
+  backend: Backend;
   mode: string | null;
-  /** PI `--provider` (protocol). null → defaults to "anthropic". Only used for backend='pi'. */
+  /** Opaque rate-limit provider identity; for PI it also selects the request protocol. */
   provider?: string | null;
   extraEnv?: Record<string, string>;
   extraOption?: Record<string, string>;
   /** DR-0012: Claude adapter mode (print/tui). Only meaningful for backend='claude'. */
   claudeBackend?: 'print' | 'tui';
+  /** Thinking level from the profile (backend-native value: claude → --effort, pi → --thinking).
+   *  null/undefined → nothing is passed. */
+  thinking?: string | null;
 }
 
 export interface RunAgentOptions {
   profileName?: string | null;
+  /** Backend resume target (Claude `--resume` / PI `--session`). null → fresh (backend self-assigns
+   *  its own id). Decoupled from {@link trackSessionId}. */
   sessionId?: string | null;
+  /** Stable Cortex tracking id (UI-facing identity) — surfaced as CORTEX_SESSION_ID only; does NOT
+   *  drive backend resume. Defaults to `sessionId` when unset (threads / legacy callers). */
+  trackSessionId?: string | null;
   sessionKey?: string | null;
   channel?: string;
   files?: unknown[];
@@ -50,8 +207,8 @@ export interface RunAgentOptions {
   sessionName?: string | null;
   /** Cortex execution record id, surfaced as CORTEX_EXECUTION_ID to subprocess env. */
   executionId?: string | null;
-  /** When true, load only core MCP server (remote_* tools). Used by template thread sessions.
-   *  Default (undefined/false) loads full MCP config with cortex-ext tools. */
+  /** When true, load core + tasks + manager-answer + thread MCP layers.
+   *  Default loads direct core + tasks + manager-answer + ext. */
   useCoreMcp?: boolean;
   /** Recursion depth of the owning thread, surfaced to the spawned agent as CORTEX_THREAD_DEPTH
    *  so the thread_start MCP tool can forward it for the depth guard. */
@@ -61,8 +218,15 @@ export interface RunAgentOptions {
   taskId?: string | null;
   taskProject?: string | null;
   onProgress?: ((progress: any) => void) | null;
-  onAssistantMessage?: ((msg: string) => void) | null;
-  onToolUse?: ((name: string, input: any) => void) | null;
+  onContextUsage?: ((usage: ContextUsage) => void | Promise<void>) | null;
+  /** A complete assistant text block. `blockId` ties it to prior deltas; `noticeLevel` turns
+   *  system-authored text into semantic chat chrome without changing plain platform output. */
+  onAssistantMessage?: ((msg: string, blockId?: string, noticeLevel?: ChatNoticeLevel) => void) | null;
+  /** An incremental text chunk of a block still being generated (never the accumulated total).
+   *  Opt-in: callers that leave it unset receive complete messages only, exactly as before. */
+  onAssistantDelta?: ((text: string, blockId: string) => void) | null;
+  onToolUse?: ((name: string, input: any, toolUseId: string) => void) | null;
+  onToolResult?: ((toolUseId: string, content: string, isError: boolean) => void) | null;
   onFallback?: (current: AgentConfig, next: AgentConfig, result: AgentResult | null, error?: Error) => Promise<void>;
   [key: string]: any;
 }
@@ -126,13 +290,15 @@ function buildSpawnConfig(
     profile: options.profileName ?? null,
     project: options.project ?? null,
     sessionName: options.sessionName ?? null,
+    // Stable Cortex tracking id for CORTEX_SESSION_ID; falls back to the backend id (threads/legacy).
+    trackSessionId: options.trackSessionId ?? options.sessionId ?? null,
     executionId: options.executionId ?? null,
     useCoreMcp: options.useCoreMcp ?? undefined,
     threadDepth: options.threadDepth ?? null,
     taskId: options.taskId ?? null,
     taskProject: options.taskProject ?? null,
   };
-  const hasContext = !!(ctx.threadId || ctx.profile || ctx.project || ctx.sessionName || ctx.executionId || ctx.useCoreMcp || ctx.threadDepth != null || ctx.taskId || ctx.taskProject);
+  const hasContext = !!(ctx.threadId || ctx.profile || ctx.project || ctx.sessionName || ctx.trackSessionId || ctx.executionId || ctx.useCoreMcp || ctx.threadDepth != null || ctx.taskId || ctx.taskProject);
 
   // Load global rules (no paths frontmatter) and inject as appendSystemPrompt.
   // Scoped rules (with paths) are handled by the Read/Grep PostToolUse hook.
@@ -155,6 +321,7 @@ function buildSpawnConfig(
     env: config.extraEnv && Object.keys(config.extraEnv).length > 0 ? config.extraEnv : undefined,
     extraOption: config.extraOption && Object.keys(config.extraOption).length > 0 ? config.extraOption : undefined,
     claudeBackend: config.claudeBackend,
+    thinking: config.thinking || undefined,
     channel: options.channel,
     claudeAgent: options.claudeAgent ?? undefined,
     callbackSource: options.callbackSource ?? undefined,
@@ -164,7 +331,7 @@ function buildSpawnConfig(
     anthropicBaseUrl,
     // PI-specific routing: provider name (= profile mode) + gateway base URL. PI adapter writes
     // a multi-provider models.json (writeProvidersConfig) so every PI provider lands on the
-    // gateway. Claude / codex adapters ignore these fields.
+    // gateway. Claude ignores these fields.
     // PI routing: `provider` is the --provider (protocol; required for pi, validated at load — no
     // default). The gateway sub-path `/m/<mode>/<provider>` is derived from the profile's logical
     // `mode` (gateway.yaml owns the route).
@@ -197,17 +364,46 @@ export function runWithAdapter(
     try {
       for await (const event of proc.events) {
         switch (event.type) {
+          case 'session_started': {
+            // A resumed backend may recover from a missing/stale target by creating a new session.
+            // The changed identity is structured evidence of context discontinuity; same-id resume
+            // and ordinary fresh starts stay silent.
+            const changedWebResume = options.channel?.startsWith('web:')
+              && spawnConfig.resume
+              && spawnConfig.sessionId
+              && event.sessionId !== spawnConfig.sessionId;
+            if (changedWebResume) {
+              options.onAssistantMessage?.(t('notify.backendSessionReset'), undefined, 'warning');
+            }
+            break;
+          }
           case 'assistant_text':
-            options.onAssistantMessage?.(event.text);
+            options.onAssistantMessage?.(event.text, event.blockId, assistantNoticeLevel(event.text));
+            break;
+          case 'assistant_delta':
+            // Token-level preview. Only surfaces where a caller opted in by passing the callback —
+            // Slack / Feishu / Ink-TUI pass none, so no partial text can reach OutputStream.
+            options.onAssistantDelta?.(event.text, event.blockId);
             break;
           case 'tool_use':
-            options.onToolUse?.(event.name, event.input);
+            options.onToolUse?.(event.name, event.input, event.toolUseId);
+            break;
+          case 'tool_result':
+            options.onToolResult?.(event.toolUseId, event.content, !event.ok);
             break;
           case 'turn_progress':
             options.onProgress?.({
               num_turns: event.numTurns,
               total_cost_usd: null,
               duration_ms: null,
+            });
+            break;
+          case 'context_usage':
+            await options.onContextUsage?.({
+              usedTokens: event.usedTokens,
+              contextWindow: event.contextWindow,
+              percent: event.percent,
+              accuracy: event.accuracy,
             });
             break;
           case 'turn_complete':
@@ -234,14 +430,10 @@ export function runWithAdapter(
             }).catch(err => log.warn('recordCost failed:', (err as Error)?.message ?? err));
             break;
           case 'context_compacted':
-            // Notify the user that the context was compacted. Off by default; opt in via
-            // CORTEX_NOTIFY_COMPACTION=1. Reuses onAssistantMessage so the notice reaches the
-            // user through the same channel as normal assistant output.
+            // Off by default; when enabled, preserve the text path used by every platform while
+            // giving chat clients explicit presentation semantics instead of an emoji convention.
             if (process.env.CORTEX_NOTIFY_COMPACTION === '1') {
-              const tokens = event.preTokens
-                ? t('notify.contextCompactedTokens', { preTokens: event.preTokens })
-                : '';
-              options.onAssistantMessage?.(`🗜️ ${t('notify.contextCompacted', { trigger: event.trigger, tokens })}`);
+              options.onAssistantMessage?.(t('notify.contextCompacted'), undefined, 'info');
             }
             break;
           case 'plan_written':
@@ -275,6 +467,8 @@ export function runWithAdapter(
           baseResult: result,
           onAssistantText: options.onAssistantMessage ?? null,
           onToolUse: options.onToolUse ?? null,
+          onToolResult: options.onToolResult ?? null,
+          onContextUsage: options.onContextUsage ?? null,
         });
       }
       return result;
@@ -294,6 +488,128 @@ export function runWithAdapter(
   };
 }
 
+export interface CompactAgentRequest {
+  sessionId: string;
+  backend: Backend;
+  backendSessionId: string;
+  channel: string;
+  profileName: string | null;
+  projectId: string;
+  sessionName: string;
+}
+
+interface CompactCostEntry {
+  project: string;
+  trigger: string;
+  cost_usd: number | null;
+  backend: string;
+  mode: string;
+  source: string;
+  input_tokens: number;
+  output_tokens: number;
+  provider?: string;
+  model?: string;
+}
+
+export interface CompactAgentDeps {
+  resolveProfile: (profileName: string | null) => ResolvedProfileConfig;
+  getAdapter: (backend: Backend) => AgentAdapter;
+  configureMode: (mode: string, metadata?: Record<string, string>) => string | undefined;
+  recordCost: (entry: CompactCostEntry) => Promise<void>;
+}
+
+const compactAgentDeps: CompactAgentDeps = {
+  resolveProfile: resolveProfileConfig,
+  getAdapter,
+  configureMode: configureEnvForMode,
+  recordCost,
+};
+
+function supportsCompactProfile(backend: string, profile: ResolvedProfileConfig): boolean {
+  if (profile.backend !== backend) return false;
+  if (backend === 'pi') return true;
+  return backend === 'claude' && profile.claudeBackend !== 'tui';
+}
+
+export function isSessionCompactionSupported(
+  session: { backend: string; profileName: string | null },
+  resolve: CompactAgentDeps['resolveProfile'] = resolveProfileConfig,
+): boolean {
+  try {
+    return supportsCompactProfile(session.backend, resolve(session.profileName));
+  } catch {
+    return false;
+  }
+}
+
+function compactAgentConfig(profile: ResolvedProfileConfig): AgentConfig {
+  return {
+    model: profile.model,
+    backend: profile.backend,
+    mode: profile.mode,
+    provider: profile.provider,
+    extraEnv: profile.extraEnv,
+    extraOption: profile.extraOption,
+    claudeBackend: profile.claudeBackend,
+    thinking: profile.thinking,
+  };
+}
+
+function compactCostEntry(
+  request: CompactAgentRequest,
+  profile: ResolvedProfileConfig,
+  result: AgentCompactResult,
+): CompactCostEntry | null {
+  if (!result.usage) return null;
+  return {
+    project: request.projectId,
+    trigger: 'manual-compact',
+    cost_usd: result.usage.costUsd,
+    backend: request.backend,
+    mode: profile.mode || 'api',
+    source: 'estimate',
+    input_tokens: result.usage.inputTokens,
+    output_tokens: result.usage.outputTokens,
+    ...(profile.provider ? { provider: profile.provider } : {}),
+    ...(profile.model ? { model: profile.model } : {}),
+  };
+}
+
+export async function compactAgentContext(
+  request: CompactAgentRequest,
+  deps: CompactAgentDeps = compactAgentDeps,
+): Promise<AgentCompactResult> {
+  const profile = deps.resolveProfile(request.profileName);
+  if (!supportsCompactProfile(request.backend, profile)) {
+    throw new Error(`${request.backend} profile does not support manual context compaction`);
+  }
+  const config = compactAgentConfig(profile);
+  const baseUrl = deps.configureMode(profile.mode || 'api', {
+    project: request.projectId,
+    trigger: 'manual-compact',
+  });
+  const proc = deps.getAdapter(request.backend).spawn(buildSpawnConfig({
+    sessionId: request.backendSessionId,
+    trackSessionId: request.sessionId,
+    sessionKey: request.channel,
+    channel: request.channel,
+    profileName: request.profileName,
+    project: request.projectId,
+    trigger: 'manual-compact',
+    sessionName: request.sessionName,
+    isUserInitiated: true,
+  }, config, baseUrl));
+  try {
+    if (!proc.compact) throw new Error(`${request.backend} process does not support manual context compaction`);
+    const result = await proc.compact();
+    const cost = compactCostEntry(request, profile, result);
+    if (cost) await deps.recordCost(cost);
+    return result;
+  } finally {
+    await proc.close().catch(() => {});
+  }
+}
+
 export function runAgentOnce(message: string, options: RunAgentOptions, config: AgentConfig): AgentHandle {
   const effectiveMode = config.mode || 'api';
   const metadata: Record<string, string> = {};
@@ -304,37 +620,32 @@ export function runAgentOnce(message: string, options: RunAgentOptions, config: 
     Object.keys(metadata).length > 0 ? metadata : undefined,
   );
   const adapter = getAdapter(config.backend as Backend);
-  return runWithAdapter(adapter, message, options, config, anthropicBaseUrl);
+  const handle = runWithAdapter(adapter, message, options, config, anthropicBaseUrl);
+  return withRateLimitProvider(handle, resolveRateLimitProvider(config));
 }
 
 export function runAgent(message: string, options: RunAgentOptions = {}): AgentHandle {
   const profileConfig: ResolvedProfileConfig = resolveProfileConfig(options.profileName);
   const configs: AgentConfig[] = [
-    { model: profileConfig.model, backend: profileConfig.backend, mode: profileConfig.mode, provider: profileConfig.provider, extraEnv: profileConfig.extraEnv, extraOption: profileConfig.extraOption, claudeBackend: profileConfig.claudeBackend },
+    { model: profileConfig.model, backend: profileConfig.backend, mode: profileConfig.mode, provider: profileConfig.provider, extraEnv: profileConfig.extraEnv, extraOption: profileConfig.extraOption, claudeBackend: profileConfig.claudeBackend, thinking: profileConfig.thinking },
     ...(profileConfig.fallback || []),
   ];
+  const notices = new AttemptNoticeTracker(options);
+  const trackedOptions = notices.options;
 
-  // Single config — no fallback wrapper needed
+  // Single config — only terminal notice wrapping is needed.
   if (configs.length <= 1) {
     const effectiveMode = configs[0].mode || 'api';
-    if (isModeRateLimited(effectiveMode) && !options.isUserInitiated) {
+    if (configIsRateLimited(configs[0]) && !options.isUserInitiated) {
+      const result = rateLimitedResult(effectiveMode, resolveRateLimitProvider(configs[0]));
+      notices.emitTerminalRateLimit(result);
       return {
-        promise: Promise.resolve({
-          sessionId: null,
-          total_cost_usd: null,
-          num_turns: null,
-          rateLimited: true,
-          rateLimitMessage: `Mode ${effectiveMode} is rate-limited`,
-          planFilePath: null,
-          enteredPlanMode: false,
-          exitedPlanMode: false,
-          finalOutput: null,
-        }),
+        promise: Promise.resolve(result),
         kill: () => false,
         sessionId: null,
       };
     }
-    return runAgentOnce(message, options, configs[0]);
+    return withTerminalNotices(runAgentOnce(message, trackedOptions, configs[0]), notices);
   }
 
   // Multiple configs — wrap with fallback chain
@@ -346,26 +657,20 @@ export function runAgent(message: string, options: RunAgentOptions = {}): AgentH
       const config = configs[i];
       const isLast = i === configs.length - 1;
 
-      const attemptOptions: RunAgentOptions = i === 0 ? options : { ...options, sessionId: null };
+      const attemptOptions: RunAgentOptions = i === 0
+        ? trackedOptions
+        : { ...trackedOptions, sessionId: null };
 
       // Pre-flight: skip modes already known rate-limited without spawning CLI
       const effectiveMode = config.mode || 'api';
-      if (isModeRateLimited(effectiveMode) && !options.isUserInitiated) {
+      if (configIsRateLimited(config) && !options.isUserInitiated) {
         if (isLast) {
-          return {
-            sessionId: null,
-            total_cost_usd: null,
-            num_turns: null,
-            rateLimited: true,
-            rateLimitMessage: `Mode ${effectiveMode} is rate-limited`,
-            planFilePath: null,
-            enteredPlanMode: false,
-            exitedPlanMode: false,
-            finalOutput: null,
-          };
+          const result = rateLimitedResult(effectiveMode, resolveRateLimitProvider(config));
+          notices.emitTerminalRateLimit(result);
+          return result;
         }
         log.info(`${config.model}/${effectiveMode} rate-limited, skipping to fallback[${i}]`);
-        if (options.onFallback) await options.onFallback(config, configs[i + 1], null);
+        await notices.transitionToFallback(config, configs[i + 1], null);
         continue;
       }
 
@@ -374,24 +679,26 @@ export function runAgent(message: string, options: RunAgentOptions = {}): AgentH
       try {
         const result: AgentResult = await currentHandle.promise;
         if (!isRetryableResult(result) || isLast) {
+          if (result.rateLimited) notices.emitTerminalRateLimit(result);
           return result;
         }
         const modeLabel = config.mode || 'api';
         log.info(`${config.model}/${modeLabel} rate limited, trying fallback[${i}]`);
-        if (options.onFallback) {
-          await options.onFallback(config, configs[i + 1], result);
-        }
+        await notices.transitionToFallback(config, configs[i + 1], result);
       } catch (error) {
         if (killed) throw error;
-        if (!isRetryableError(error as Error) || isLast) throw error;
+        if (!isRetryableError(error as Error) || isLast) {
+          notices.emitTerminalError(error);
+          throw error;
+        }
         const modeLabel = config.mode || 'api';
         log.info(`${config.model}/${modeLabel} retryable error, trying fallback[${i}]`);
-        if (options.onFallback) {
-          await options.onFallback(config, configs[i + 1], null, error as Error);
-        }
+        await notices.transitionToFallback(config, configs[i + 1], null, error as Error);
       }
     }
-    throw new Error('All fallback configs exhausted without result');
+    const error = new Error('All fallback configs exhausted without result');
+    notices.emitTerminalError(error);
+    throw error;
   })();
 
   return {
@@ -411,9 +718,8 @@ export function allConfigsRateLimited(profileName: string | null): boolean {
   if (!isThrottled()) return false;
   try {
     const config = resolveProfileConfig(profileName);
-    const primaryMode = config.mode || 'api';
-    const allModes = [primaryMode, ...config.fallback.map(f => f.mode || primaryMode)];
-    return allModes.every(m => isModeRateLimited(m));
+    const configs: AgentConfig[] = [config, ...config.fallback];
+    return configs.every((candidate) => configIsRateLimited(candidate));
   } catch {
     return false;
   }
@@ -422,17 +728,19 @@ export function allConfigsRateLimited(profileName: string | null): boolean {
 // Exposed for tests/run-with-adapter.test.ts; not intended as a public API.
 export const _test = {
   runWithAdapter,
+  resolveRateLimitProvider,
+  withRateLimitProvider,
   buildSpawnConfig,
   filterChannelScopedPlugins,
 };
 
-// --- Bridge helper re-exports (replacing claude-bridge.ts / codex-bridge.ts) ---
+// --- Claude bridge helper re-exports ---
 
 export {
   closeSession,
+  killSession,
   closeSessionsByPrefix,
   closeAllSessions,
   _test as claudeTest,
 } from '../../agent-adapter/claude/adapter.js';
-export { shutdownCodex, buildMcpBlock } from '../../agent-adapter/codex/adapter.js';
 export { getCurrentPlanFilePath } from '../../agent-adapter/claude/event-parser.js';

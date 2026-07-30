@@ -1,6 +1,7 @@
-// input:  mode.json, profiles.json, env, gateway
-// output: loadMode/switchMode/setActiveBackend/setActiveProfile + all config helpers
-// pos:    domain/agents — mode/profile/backend/agent switching and adapter dispatch [S11]
+// input:  mode/profile stores, environment, gateway health
+// output: agent mode selection and retry error classifiers
+// pos:    Agent runtime configuration and failure policy
+// >>> If I am updated, update my header comment and the parent folder's CORTEX.md <<<
 
 import { readFileSync, writeFileSync } from 'fs';
 import { parse as parseDotenv } from 'dotenv';
@@ -10,6 +11,7 @@ import { STORE_DIR, CONFIG_DIR, GATEWAY_MANAGED_KEY_PLACEHOLDER } from '@core/ut
 import { getProfileModel, resolveProfileConfig } from './profile-manager.js';
 import { GATEWAY_URL, isGatewayHealthy } from '../costs/gateway-manager.js';
 import { createLogger } from '@core/log.js';
+import type { Backend } from '../../agent-adapter/types.js';
 
 const log = createLogger('config');
 
@@ -114,8 +116,9 @@ export function loadMode(): string {
   return DEFAULT_CLAUDE_MODE;
 }
 
-export function loadBackend(): string {
-  return loadModeFile().backend || 'claude';
+export function loadBackend(): Backend {
+  const backend = loadModeFile().backend;
+  return backend === 'pi' ? 'pi' : 'claude';
 }
 
 function loadClaudeModel(): string {
@@ -136,7 +139,7 @@ function loadDefaultAgent(): string | null {
 }
 
 let claudeMode: string = loadMode();
-let activeBackend: string = loadBackend();
+let activeBackend: Backend = loadBackend();
 let claudeModel: string = loadClaudeModel();
 let activeProfile: string | null = loadActiveProfile();
 let channelProfiles: Record<string, string> = loadChannelProfiles();
@@ -145,7 +148,7 @@ process.env.CORTEX_CLAUDE_MODEL = claudeModel;
 
 function saveModeFile(
   mode: string,
-  backend: string,
+  backend: Backend,
   model: string = claudeModel,
   profile: string | null = activeProfile,
   agent: string | null = defaultAgent,
@@ -163,10 +166,10 @@ export function saveMode(mode: string): void {
 }
 
 export function getClaudeMode(): string { return claudeMode; }
-export function getActiveBackend(): string { return activeBackend; }
+export function getActiveBackend(): Backend { return activeBackend; }
 export function getClaudeModel(): string { return claudeModel; }
 
-export function setActiveBackend(backend: string): void {
+export function setActiveBackend(backend: Backend): void {
   activeBackend = backend;
   saveModeFile(claudeMode, activeBackend, claudeModel);
 }
@@ -198,7 +201,7 @@ export function getActiveProfile(channel?: string): string | null {
  * Falls back to global activeBackend when the channel has no profile or the profile lookup
  * fails (e.g. profile was renamed/removed since channelProfiles was last persisted).
  */
-export function resolveBackendForChannel(channel?: string): string {
+export function resolveBackendForChannel(channel?: string): Backend {
   const profileName = getActiveProfile(channel);
   if (profileName) {
     try {
@@ -260,8 +263,18 @@ export function isRetryableResult(result: { rateLimited?: boolean } | null): boo
   return result?.rateLimited === true;
 }
 
+const PERMANENT_PROVIDER_ERROR = /(?:invalid[_ ]request|unauthorized|authentication|forbidden|not found|request body too large|context(?: window|_length).*exceed|insufficient[_ ](?:balance|quota)|billing|quota exhausted)/i;
+const TRANSIENT_HTTP_STATUS = /(?:^(?:error\s*)?(?:408|500|502|503|504)\b|\bhttp(?: status)?\s*[:=]?\s*(?:408|500|502|503|504)\b|\bstatus(?: code)?\s*[:=]?\s*(?:408|500|502|503|504)\b)/i;
+const TRANSIENT_TRANSPORT_ERROR = /(?:fetch failed|econnreset|econnrefused|etimedout|eai_again|enotfound|socket hang up|connection (?:reset|refused|terminated)|upstream connection error|temporary failure in name resolution|(?:request|connection|connect|network|socket|tls|upstream).*tim(?:ed? out|eout))/i;
+const TRANSIENT_PROVIDER_GUIDANCE = /\byou can retry your request\b/i;
+
 export function isRetryableError(error: Error | null | undefined): boolean {
-  return isApiRateLimitError(error?.message);
+  const message = error?.message;
+  if (!message || PERMANENT_PROVIDER_ERROR.test(message)) return false;
+  return isApiRateLimitError(message)
+    || TRANSIENT_HTTP_STATUS.test(message)
+    || TRANSIENT_TRANSPORT_ERROR.test(message)
+    || TRANSIENT_PROVIDER_GUIDANCE.test(message);
 }
 
 export function configureEnvForMode(mode: string, metadata?: Record<string, string>): string | undefined {

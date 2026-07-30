@@ -1,13 +1,9 @@
-// input:  node:test, FeishuAdapter
-// output: Unit tests for FeishuAdapter pure logic (form value normalization,
-//         inbound file extraction, project-report routing, thread reply conduit)
-// pos:    Regression tests for Feishu adapter bug fixes, incl. interactive-card
-//         config.update_multi (post-click update persistence) + reply_in_thread
-//         threading (cards land inside the 话题 topic) + reply/quote enrichment
-//         (parent_id pulls the quoted message's text+files via im.v1.message.get)
+// input:  FeishuAdapter and mocked Lark SDK calls
+// output: Feishu messaging, reaction, card, file, and reply tests
+// pos:    Verifies Feishu adapter platform mappings
 // >>> If I am updated, update my header comment and the parent folder's CORTEX.md <<<
 
-import test from 'node:test';
+import { test } from 'vitest';
 import assert from 'node:assert/strict';
 import { FeishuAdapter } from '../src/platform/adapters/feishu.js';
 import type { Destination } from '../src/platform/types.js';
@@ -583,6 +579,79 @@ test('Feishu modalToFeishuCard: submit button carries privateMetadata as value (
   assert.deepEqual(submit.value, { groupId: 'sid:rid' });
   // behaviors must NOT be present: it's mutually exclusive with form_submit in Feishu 2.0.
   assert.equal(submit.behaviors, undefined);
+});
+
+test('Feishu queue marker stores create reaction_id, deletes that exact OnIt reaction, and marks it consumed', async () => {
+  const a = makeAdapter();
+  const calls: Array<{ op: string; payload: any }> = [];
+  a.client = { im: { v1: { messageReaction: {
+    create: async (payload: any) => {
+      calls.push({ op: 'create', payload });
+      return { data: { reaction_id: 'react-7' } };
+    },
+    delete: async (payload: any) => { calls.push({ op: 'delete', payload }); },
+  } } } };
+  const ref = { conduit: 'feishu:oc_7', messageId: 'om_7' };
+
+  await a.markQueued(ref);
+  await a.unmarkQueued(ref);
+
+  assert.deepEqual(calls, [
+    {
+      op: 'create',
+      payload: {
+        path: { message_id: 'om_7' },
+        data: { reaction_type: { emoji_type: 'OnIt' } },
+      },
+    },
+    {
+      op: 'delete',
+      payload: { path: { message_id: 'om_7', reaction_id: 'react-7' } },
+    },
+    {
+      op: 'create',
+      payload: {
+        path: { message_id: 'om_7' },
+        data: { reaction_type: { emoji_type: 'CheckMark' } },
+      },
+    },
+  ]);
+});
+
+test('Feishu marks a message consumed even when no queued reaction id was ever stored', async () => {
+  const a = makeAdapter();
+  const created: string[] = [];
+  a.client = { im: { v1: { messageReaction: {
+    create: async (payload: any) => {
+      created.push(payload.data.reaction_type.emoji_type);
+      return { data: {} };
+    },
+    delete: async () => { assert.fail('nothing to delete without a stored reaction id'); },
+  } } } };
+
+  await a.unmarkQueued({ conduit: 'feishu:oc_7', messageId: 'om_7' });
+
+  assert.deepEqual(created, ['CheckMark']);
+});
+
+test('Feishu marker add/remove stay best-effort when the SDK rejects', async () => {
+  const ref = { conduit: 'feishu:oc_7', messageId: 'om_7' };
+  const addFailure = makeAdapter();
+  addFailure.client = { im: { v1: { messageReaction: {
+    create: async () => { throw new Error('add denied'); },
+  } } } };
+  await assert.doesNotReject(addFailure.markQueued(ref));
+
+  const removeFailure = makeAdapter();
+  let deleteCalls = 0;
+  removeFailure.client = { im: { v1: { messageReaction: {
+    create: async () => ({ data: { reaction_id: 'react-8' } }),
+    delete: async () => { deleteCalls++; throw new Error('delete denied'); },
+  } } } };
+  await removeFailure.markQueued(ref);
+  await assert.doesNotReject(removeFailure.unmarkQueued(ref));
+  await removeFailure.unmarkQueued(ref);
+  assert.equal(deleteCalls, 1, 'failed removal still clears local state instead of leaking');
 });
 
 test('Feishu admin auto-detect: group messages do not register an admin channel', async () => {

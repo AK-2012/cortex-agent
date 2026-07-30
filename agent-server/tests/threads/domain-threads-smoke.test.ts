@@ -2,7 +2,7 @@
 // These tests import directly from the new module paths (not via the thread-manager.ts shim)
 // to verify the split is importable and core pure functions work correctly.
 
-import test, { before, after } from 'node:test';
+import { test, beforeAll, afterAll } from 'vitest';
 import assert from 'node:assert/strict';
 
 import {
@@ -10,17 +10,16 @@ import {
   parseTarget,
   resolveStageName,
   resolveSystemVars,
-  THREAD_PROTOCOL_PREAMBLE,
 } from '../../src/domain/threads/index.js';
 import { threadStore } from '../../src/store/thread-repo.js';
 
 const createdThreadIds = new Set<string>();
 
-before(() => {
+beforeAll(() => {
   loadConfig();
 });
 
-after(async () => {
+afterAll(async () => {
   for (const id of createdThreadIds) await threadStore.delete(id);
   await threadStore.flush();
 });
@@ -86,12 +85,3 @@ test('resolveSystemVars: leaves unknown placeholders untouched', () => {
 test('resolveSystemVars: leaves plain text unchanged', () => {
   assert.equal(resolveSystemVars('no vars'), 'no vars');
 });
-
-// --- THREAD_PROTOCOL_PREAMBLE ---
-
-test('THREAD_PROTOCOL_PREAMBLE is a non-empty string with [Cortex Thread Protocol]', () => {
-  assert.ok(typeof THREAD_PROTOCOL_PREAMBLE === 'string');
-  assert.ok(THREAD_PROTOCOL_PREAMBLE.length > 0);
-  assert.ok(THREAD_PROTOCOL_PREAMBLE.includes('[Cortex Thread Protocol]'));
-});
-

@@ -1,27 +1,30 @@
-// input:  profiles.json config file (I/O delegated to store/profile-repo.ts)
-// output: load/list/get/resolveProfile + validate helpers
-// pos:    named agent profile resolution and fallback config chain. Business validation (validateProfilesFile) stays in this file,
-//         JSON I/O goes through profileRepo (Pattern A, DR-s12-gate). Public API maintains sync semantics.
+// input:  profiles.json through profileRepo
+// output: validated profile and fallback resolution
+// pos:    Resolves named Claude/PI profiles and provider identity
 // >>> If I am updated, update my header comment and the parent folder's CORTEX.md <<<
 import { profileRepo } from '@store/profile-repo.js';
+import type { Backend } from '../../agent-adapter/types.js';
 
 export interface ProfileEntry {
   model: string;
-  backend?: string;
+  backend?: Backend;
   /** Gateway route mode — a logical name resolved by gateway.yaml (e.g. "plan", "api", "anthropic").
    *  Used for ALL backends to build the gateway URL `/m/<mode>/<endpoint>`; gateway.yaml owns the
    *  upstream URL + keys for each mode. (For claude the endpoint is "anthropic"; for pi it is the
    *  `provider` below.) */
   mode?: string;
-  /** PI `--provider` (protocol family, e.g. "anthropic", "openai-codex"). Only meaningful for
-   *  backend='pi'; defaults to "anthropic" when omitted. Decoupled from `mode`: `mode` selects the
-   *  gateway route, `provider` selects the PI request protocol + the gateway endpoint segment. */
+  /** Opaque provider identity used by rate-limit isolation. For backend='pi' it also selects the
+   *  PI request protocol and gateway endpoint; PI profiles must declare it explicitly. */
   provider?: string;
   extraEnv?: Record<string, string>;
   extraOption?: Record<string, string>;
   /** DR-0012: opt into TUI-mode Claude (interactive tmux + jsonl tail). Default 'print' for backward
    *  compatibility. Only meaningful when backend='claude'. Other backends ignore the field. */
   claudeBackend?: 'print' | 'tui';
+  /** Optional thinking level. Backend-native value set, validated against the entry's effective
+   *  backend: claude → `--effort` (low/medium/high/xhigh/max), pi → `--thinking`
+   *  (off/minimal/low/medium/high/xhigh). Fallback entries do not inherit it. */
+  thinking?: string;
   fallback?: ProfileEntry[];
 }
 
@@ -37,16 +40,18 @@ export interface ResolvedProfile extends ProfileEntry {
 export interface ResolvedProfileConfig {
   name: string;
   model: string;
-  backend: string;
+  backend: Backend;
   mode: string | null;
-  /** PI `--provider` (protocol). null → adapter defaults to "anthropic". Ignored for non-pi backends. */
+  /** Opaque rate-limit provider identity; for PI it is also the required request protocol. */
   provider: string | null;
   extraEnv: Record<string, string>;
   extraOption: Record<string, string>;
   /** DR-0012: resolved claude adapter mode. 'print' (default, uses -p + stream-json) or 'tui'
    *  (interactive Claude under tmux + jsonl tail). Ignored for non-claude backends. */
   claudeBackend: 'print' | 'tui';
-  fallback: Array<{ model: string; backend: string; mode: string | null; provider: string | null; extraEnv: Record<string, string>; extraOption: Record<string, string>; claudeBackend: 'print' | 'tui' }>;
+  /** Thinking level (backend-native value). null → nothing is passed to the CLI. */
+  thinking: string | null;
+  fallback: Array<{ model: string; backend: Backend; mode: string | null; provider: string | null; extraEnv: Record<string, string>; extraOption: Record<string, string>; claudeBackend: 'print' | 'tui'; thinking: string | null }>;
 }
 
 const PROFILE_NAME_RE = /^[a-zA-Z0-9_-]+$/;
@@ -54,7 +59,11 @@ const MODE_NAME_RE = /^[a-zA-Z0-9_-]+$/;
 // provider shares mode's safe-name shape (alphanumeric, dash, underscore).
 const PROVIDER_NAME_RE = /^[a-zA-Z0-9_-]+$/;
 const ENV_KEY_RE = /^[A-Z_][A-Z0-9_]*$/;
-const VALID_BACKENDS = new Set(['claude', 'codex', 'pi']);
+const VALID_BACKENDS: ReadonlySet<string> = new Set(['claude', 'pi']);
+const THINKING_LEVELS_BY_BACKEND: Record<Backend, Set<string>> = {
+  claude: new Set(['low', 'medium', 'high', 'xhigh', 'max']),
+  pi: new Set(['off', 'minimal', 'low', 'medium', 'high', 'xhigh']),
+};
 
 function loadProfilesFile(): ProfilesFile {
   try {
@@ -66,7 +75,7 @@ function loadProfilesFile(): ProfilesFile {
   }
 }
 
-function validateProfileEntry(profile: unknown, label: string, inheritedBackend = 'claude'): void {
+function validateProfileEntry(profile: unknown, label: string, inheritedBackend: Backend = 'claude'): void {
   const p = profile as Record<string, unknown>;
   if (!p || typeof p !== 'object' || Array.isArray(p)) {
     throw new Error(`${label} must be an object`);
@@ -78,7 +87,7 @@ function validateProfileEntry(profile: unknown, label: string, inheritedBackend 
     throw new Error(`${label} has invalid backend: ${p.backend}`);
   }
   // Effective backend resolves to the explicit value, else the inherited one (primary → fallback).
-  const effectiveBackend = typeof p.backend === 'string' ? p.backend : inheritedBackend;
+  const effectiveBackend = (typeof p.backend === 'string' ? p.backend : inheritedBackend) as Backend;
   // PI requires an explicit provider — no default, no fallback (the PI `--provider` / gateway
   // endpoint group must be stated outright, never silently assumed).
   if (effectiveBackend === 'pi' && p.provider === undefined) {
@@ -125,6 +134,15 @@ function validateProfileEntry(profile: unknown, label: string, inheritedBackend 
       throw new Error(`${label} has invalid claudeBackend: ${String(p.claudeBackend)} (expected 'print' or 'tui')`);
     }
   }
+  if (p.thinking !== undefined) {
+    const levels = THINKING_LEVELS_BY_BACKEND[effectiveBackend];
+    if (!levels) {
+      throw new Error(`${label} declares thinking but backend '${effectiveBackend}' does not support it`);
+    }
+    if (typeof p.thinking !== 'string' || !levels.has(p.thinking)) {
+      throw new Error(`${label} has invalid thinking: ${String(p.thinking)} (backend '${effectiveBackend}' expects one of: ${[...levels].join(', ')})`);
+    }
+  }
 }
 
 /**
@@ -160,7 +178,7 @@ function validateProfilesFile(data: unknown): void {
     }
     validateProfileEntry(profile, `profile "${name}"`);
     const pe = profile as Record<string, unknown>;
-    const primaryBackend = typeof pe.backend === 'string' ? pe.backend : 'claude';
+    const primaryBackend = (typeof pe.backend === 'string' ? pe.backend : 'claude') as Backend;
     if (pe.fallback !== undefined) {
       if (!Array.isArray(pe.fallback)) {
         throw new Error(`profile "${name}" fallback must be an array`);
@@ -217,6 +235,7 @@ function resolveProfileConfig(name: string | null = null): ResolvedProfileConfig
     extraEnv: { ...(profile.extraEnv || {}) },
     extraOption: { ...(profile.extraOption || {}) },
     claudeBackend: resolveClaudeBackend(profile),
+    thinking: profile.thinking || null,
   };
   const fallback = (profile.fallback || []).map(fb => ({
     model: fb.model,
@@ -228,6 +247,9 @@ function resolveProfileConfig(name: string | null = null): ResolvedProfileConfig
     extraEnv: { ...(fb.extraEnv || {}) },
     extraOption: { ...(fb.extraOption || {}) },
     claudeBackend: fb.claudeBackend !== undefined ? resolveClaudeBackend(fb) : primary.claudeBackend,
+    // thinking does NOT inherit from primary (like provider) — value sets are backend-specific,
+    // so each entry must declare its own; undeclared → nothing is passed.
+    thinking: fb.thinking || null,
   }));
   return { name: resolvedName, ...primary, fallback };
 }

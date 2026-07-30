@@ -1,4 +1,4 @@
-import test from 'node:test';
+import { test } from 'vitest';
 import assert from 'node:assert/strict';
 import { handleExecutionsList } from '../../../src/domain/ui-service/query/executions.js';
 import type { UiServiceDeps } from '../../../src/domain/ui-service/types.js';
@@ -15,7 +15,7 @@ const mockExecutions = [
   },
   {
     id: 'exec_2', kind: 'dispatch', status: 'completed', channel: 'C2', project: 'proj2',
-    source: { trigger: 'dispatch' }, backend: 'codex', billingMode: 'api',
+    source: { trigger: 'dispatch' }, backend: 'pi', billingMode: 'api',
     session: { sessionId: 's2' }, thread: null,
     dispatch: { taskId: 't1', machine: 'server1' }, scheduleTaskId: 'sch1',
     runtime: { startedAt: new Date(now - 120000).toISOString(), updatedAt: new Date(now - 1000).toISOString(), endedAt: new Date(now - 1000).toISOString() },
@@ -47,8 +47,9 @@ function makeDeps(overrides: Partial<UiServiceDeps> = {}): UiServiceDeps {
     runningExecutions: { getAll: () => [] } as any,
     costSummary: async () => ({ today: 0, week: 0, month: 0, total: 0, byMode: {} as any, byProject: {}, byTrigger: {}, bySource: {}, byBackend: {}, tokens: {} as any, entryCount: 0, dailyBudget: 0, forecastToday: 0, dailyCost: [], byTriggerScoped: {} }),
     bus: { subscribe: () => ({ unsubscribe: () => {} }), publish: () => {} } as any,
-    createDirectSession: async () => ({ sessionId: '', sessionName: '' }),
+    createDirectSession: async () => ({ sessionId: '', sessionName: '', channel: '' }),
     cancelSessionRun: async () => 0,
+    switchSessionProfile: async () => ({ ok: true, name: '', currentBackend: '', targetBackend: '', backendChanged: false }),
     clientRegistry: { getOnlineDevices: () => [], isDeviceOnline: () => false, getMachineRegistry: () => ({}) },
     adapter: { getProjectConduits: async () => ({}) } as any,
     ...overrides,

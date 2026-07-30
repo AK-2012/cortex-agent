@@ -19,7 +19,64 @@ tauri-build = { version = "2", features = [] }
 tauri = { version = "2", features = [] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-keyring = { version = "3", features = [] }
+
+# Native OS/system notifications (design 1q: the mobile shell raises system notifications, not an
+# in-app banner). The Android System WebView does not implement the web Notifications API, so the SPA
+# reaches the OS only through this plugin's `sendNotification` command (JS side:
+# @tauri-apps/plugin-notification). Works on both desktop and Android.
+tauri-plugin-notification = "2"
+
+# Local plugin: saves agent-sent files to the PUBLIC Android Downloads folder via the system
+# DownloadManager (public Downloads + native "download complete" notification). Android does the real
+# work through a Kotlin bridge; on desktop it is a stub (the app uses its own `save_download` there).
+tauri-plugin-cortex-download = { path = "../tauri-plugin-cortex-download" }
+
+# ── Frontend OTA updater (all platforms) ──
+# reqwest/sha2/zip power the self-updating SPA on both desktop and Android. TLS = rustls with the
+# **ring** crypto provider + bundled Mozilla (webpki) roots. ring (not aws-lc-rs) is deliberate:
+# aws-lc-rs compiles + links but SIGABRTs at runtime on Android (crashing the whole process under
+# the release profile's panic=abort), whereas ring is the battle-tested Android backend. reqwest
+# uses `rustls-no-provider` so it does NOT pull aws-lc-rs; `run()` installs ring as the process
+# default CryptoProvider before any request. webpki-roots avoids needing the OS trust store.
+# sha2 and zip are already pure-Rust.
+reqwest = { version = "0.13", default-features = false, features = ["blocking", "json", "rustls-no-provider", "webpki-roots"] }
+rustls = { version = "0.23", default-features = false, features = ["ring"] }
+# webpki-roots: the Mozilla trust anchors we pin the OTA HTTPS client to. reqwest's rustls backend
+# compiles in `rustls-platform-verifier` and uses it as the DEFAULT cert verifier — which SIGABRTs on
+# Android (needs a JNI-initialized OS trust store we never wire up). We build an explicit rustls
+# ClientConfig against these roots and hand it to reqwest via `use_preconfigured_tls`, so the platform
+# verifier is never touched. Direct dep (was transitive via reqwest); the version matches the lock.
+webpki-roots = "1"
+sha2 = "0.10"
+zip = { version = "2", default-features = false, features = ["deflate"] }
+
+# ── Desktop-only dependencies ──
+# keyring: the OS keychain has NO Android backend (Android uses an app-private file store in
+#   creds.rs instead), so the crate is only pulled in for desktop targets.
+#   keyring v3 splits every platform backend behind a feature flag and enables NONE by default: with
+#   `features = []` the crate silently falls back to an in-process MOCK store, so `set_password`
+#   succeeds in-session but nothing is ever written to the OS credential store and `load()` returns
+#   None on the next launch (symptom: the connect screen reappears every launch, creds never persist).
+#   Enable the native backend per platform. Each feature only compiles its deps on the matching target
+#   (keyring gates them by `cfg`), so listing all three here is cross-platform-safe:
+#     windows-native        → Windows Credential Manager
+#     apple-native          → macOS Keychain
+#     sync-secret-service   → Linux Secret Service (D-Bus); crypto-rust = pure-Rust session crypto (no OpenSSL)
+[target.'cfg(not(target_os = "android"))'.dependencies]
+keyring = { version = "3", features = ["apple-native", "windows-native", "sync-secret-service", "crypto-rust"] }
+
+# ── Android-only dependencies ──
+# include_dir: embeds the built SPA (web/dist) into the binary as a first-run / offline seed, since
+#   Android's APK assets are not std::fs-readable files (unlike desktop's resource_dir/frontend-seed).
+#   Kept Android-only so `cargo build`/`cargo test` on the host don't require web/dist to exist.
+[target.'cfg(target_os = "android")'.dependencies]
+include_dir = "0.7"
+# Android stdout/stderr (eprintln!/println!) is NOT captured by logcat; the shell's diagnostics (OTA
+# stage/promote/skip, seed extract) were therefore invisible on-device. android_logger routes the
+# `log` facade to logcat under the `cortex-desktop` tag so `adb logcat` can observe them. Desktop keeps
+# eprintln! (visible on the terminal) — see the `shell_log!` macro in lib.rs.
+android_logger = "0.14"
+log = "0.4"
 
 [profile.release]
 panic = "abort"   # Strip expensive panic clean-up logic

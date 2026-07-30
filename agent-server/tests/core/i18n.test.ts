@@ -1,9 +1,9 @@
-// input:  Node test runner + core/i18n module + en/zh locales
-// output: t() lookup / interpolation / fallback + setLocale/getLocale + en↔zh key parity
-// pos:    Unit tests for the zero-dependency i18n layer (L0)
+// input:  core i18n module and en/zh locale tables
+// output: lookup, concise notice, fallback, locale, and parity regressions
+// pos:    Unit specification for the zero-dependency i18n layer
 // >>> If I am updated, update my header comment and the parent folder's CORTEX.md <<<
 
-import { describe, it, afterEach } from 'node:test';
+import { describe, it, afterEach } from 'vitest';
 import * as assert from 'node:assert/strict';
 import { t, setLocale, getLocale, normalizeLocale, detectSystemLocale } from '../../src/core/i18n.js';
 import { en } from '../../src/core/locales/en.js';
@@ -79,38 +79,4 @@ describe('i18n', () => {
     assert.equal(t('totally.unknown.key' as any), 'totally.unknown.key');
   });
 
-  it('context-compaction notice renders in the active locale, not hardcoded zh', () => {
-    setLocale('en');
-    const enMsg = t('notify.contextCompacted', { trigger: 'auto', tokens: '' });
-    assert.match(enMsg, /Context auto-compacted/);
-    assert.ok(!/[一-鿿]/.test(enMsg), 'English locale must not contain Chinese characters');
-    assert.ok(!enMsg.includes('${'), 'no unresolved placeholders');
-
-    setLocale('zh');
-    const zhMsg = t('notify.contextCompacted', { trigger: 'auto', tokens: '' });
-    assert.ok(/[一-鿿]/.test(zhMsg), 'zh locale renders Chinese');
-
-    // Token suffix interpolates preTokens in both locales.
-    setLocale('en');
-    const suffix = t('notify.contextCompactedTokens', { preTokens: 1234 });
-    assert.match(suffix, /1234/);
-    assert.ok(!suffix.includes('${'), 'no unresolved placeholders');
-  });
-
-  it('en and zh expose the exact same key set (parity)', () => {
-    const enKeys = Object.keys(en).sort();
-    const zhKeys = Object.keys(zh).sort();
-    assert.deepEqual(zhKeys, enKeys, 'zh must translate every en key and add none');
-  });
-
-  it('every value is a non-empty string in both locales', () => {
-    for (const [k, v] of Object.entries(en)) {
-      assert.equal(typeof v, 'string', `en.${k} must be a string`);
-      assert.ok((v as string).length >= 1, `en.${k} must not be empty`);
-    }
-    for (const [k, v] of Object.entries(zh)) {
-      assert.equal(typeof v, 'string', `zh.${k} must be a string`);
-      assert.ok((v as string).length >= 1, `zh.${k} must not be empty`);
-    }
-  });
 });

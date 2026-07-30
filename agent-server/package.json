@@ -1,6 +1,6 @@
 {
   "name": "@cortex-agent/server",
-  "version": "2026.6.24",
+  "version": "2026.7.30",
   "type": "module",
   "license": "MIT",
   "description": "Autonomous agent system for long-running projects — mission-driven, multi-agent pipelines, self-evolving skills.",
@@ -10,6 +10,7 @@
   "main": "dist/entry/app.js",
   "bin": {
     "cortex": "dist/entry/cli.js",
+    "cortex-hook": "dist/entry/hook-cli.js",
     "cortex-run": "dist/domain/tasks/system/cortex-run.js",
     "cortex-task": "dist/domain/tasks/system/task-cli.js"
   },
@@ -31,8 +32,8 @@
     "typecheck": "tsc --noEmit",
     "test": "bash scripts/run-tests.sh",
     "test:quick": "bash scripts/run-tests.sh --quick",
-    "test:integration": "node --import tsx --test tests/integration-init-startup.test.ts",
-    "test:file": "node --import tsx --import ./tests/_test-home.ts --test",
+    "test:integration": "pnpm exec vitest run --config vitest.integration.config.ts",
+    "test:file": "pnpm exec vitest run",
     "depcruise": "npx depcruise src --validate",
     "lint:no-slack-shortcodes": "node --import tsx scripts/lint-no-slack-shortcodes.ts"
   },
@@ -43,13 +44,14 @@
     "@slack/web-api": "^7.14.1",
     "@trpc/server": "^11",
     "aistatus": "^0.0.7",
-    "diff": "^7.0.0",
     "dotenv": "^16.4.7",
     "ink": "^5.2.1",
     "ink-text-input": "^6.0.0",
     "jose": "^6",
     "react": "^18.3.1",
     "string-width": "^7.2.0",
+    "turndown": "^7.2.4",
+    "turndown-plugin-gfm": "^1.0.2",
     "ws": "^8.20.0",
     "yaml": "^2.8.3",
     "zod": "^4.4.3"
@@ -60,14 +62,16 @@
   },
   "devDependencies": {
     "@sinclair/typebox": "^0.34.49",
-    "@types/diff": "^7.0.2",
     "@types/react": "^18.3.29",
+    "@types/turndown": "^5.0.6",
     "@types/ws": "^8.18.1",
     "dependency-cruiser": "^17.3.10",
     "ink-testing-library": "^4.0.0",
     "tsc-alias": "^1.8.0",
     "tsx": "^4.21.0",
-    "typescript": "^5.9.3"
+    "typescript": "^5.9.3",
+    "vite-tsconfig-paths": "^5.1.4",
+    "vitest": "^2.1.9"
   },
   "repository": "https://github.com/fangxm233/cortex-agent",
   "keywords": [

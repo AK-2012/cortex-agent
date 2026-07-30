@@ -1,37 +1,26 @@
-import { useEffect } from 'react';
-import { useQueryClient } from '@tanstack/react-query';
-import { useTRPC, useTRPCClient } from '@/lib/trpc';
+// input:  Shared live events and light/full threads.get query keys
+// output: useThreadGetLiveSync
+// pos:    Keeps one expanded thread detail query live
+// >>> If I am updated, update my header comment and CORTEX.md <<<
 
-// Thread lifecycle events (event-types.ts, bridged onto the UiService subscription). Any of them
-// can change what threads.get returns for the open card (a step starts/finishes, the thread ends),
-// so each invalidates the threads.get query for THIS thread → refetch → the card re-flows.
-const THREAD_EVENTS = [
-  'thread.created',
-  'thread.step.started',
-  'thread.step.finished',
-  'thread.completed',
-  'thread.failed',
-];
+import { useQueryClient } from '@tanstack/react-query';
+import { useTRPC } from '@/lib/trpc';
+import { useLiveEvents } from '@/features/live/LiveEventsProvider';
+import { TASK_LIVE_EVENTS, THREAD_LIVE_EVENTS } from '@/features/live/live-events';
+
+const THREAD_DETAIL_LIVE_EVENTS = [...THREAD_LIVE_EVENTS, ...TASK_LIVE_EVENTS] as const;
 
 /**
- * Open one SSE subscription for thread lifecycle events and invalidate the `threads.get` query
- * for `threadId` on each, so the inline thread card re-fetches live after a daemon-routed thread
- * transition. Closes on unmount. Mirrors features/workbench/useThreadsLiveSync.
+ * Listen for thread and task lifecycle events on the shared stream. Both can change an expanded
+ * `threads.get`: thread events move the pipeline, while task events update direct-subtask activity.
+ * A card adds one listener to the existing shared SSE connection.
  */
-export function useThreadGetLiveSync(threadId: string): void {
+export function useThreadGetLiveSync(threadId: string, includeArtifactContent = false): void {
   const trpc = useTRPC();
-  const client = useTRPCClient();
   const queryClient = useQueryClient();
+  const input = includeArtifactContent ? { threadId, includeArtifactContent: true } : { threadId };
 
-  useEffect(() => {
-    const sub = client.subscribe.subscribe(
-      { events: THREAD_EVENTS },
-      {
-        onData: () => {
-          queryClient.invalidateQueries(trpc.threads.get.queryFilter({ threadId }));
-        },
-      },
-    );
-    return () => sub.unsubscribe();
-  }, [client, queryClient, trpc, threadId]);
+  useLiveEvents(THREAD_DETAIL_LIVE_EVENTS, () => {
+    queryClient.invalidateQueries(trpc.threads.get.queryFilter(input));
+  });
 }

@@ -1,8 +1,30 @@
-// input:  UiServiceDeps + TasksListParams
-// output: handleTasksList → TaskInfo[]
-// pos:    query handler for 'tasks.list'
+// input:  UiServiceDeps, TasksListParams, task records
+// output: Task DTOs with lifecycle, approval and completion time
+// pos:    Task DTO mapper and tasks.list query handler
+// >>> If I am updated, update my header comment and CORTEX.md <<<
 
 import type { UiServiceDeps, TaskInfo, TasksListParams } from '../types.js';
+
+export function toTaskInfo(t: any): TaskInfo {
+  return {
+    id: t.id,
+    text: t.text,
+    project: t.project,
+    status: t.status === 'done' ? 'done' : 'open',
+    priority: t.priority || 'medium',
+    actionable: !!(t.status === 'open' && !t.claimed_by && !t.blocked_by && !t.paused),
+    claimedBy: t.claimed_by ?? null,
+    blockedBy: t.blocked_by ?? null,
+    approvalNeeded: t.approval_needed === true,
+    approvedAt: t.approved_at ?? null,
+    dependsOn: t.depends_on || [],
+    plan: t.plan ?? null,
+    template: t.template || 'coder-review',
+    why: t.why || null,
+    doneWhen: t.done_when || null,
+    completedAt: t.completed_at ?? null,
+  };
+}
 
 export async function handleTasksList(
   deps: UiServiceDeps,
@@ -23,19 +45,5 @@ export async function handleTasksList(
     });
   }
 
-  return tasks.map((t: any): TaskInfo => ({
-    id: t.id,
-    text: t.text,
-    project: t.project,
-    status: t.status === 'done' ? 'done' : 'open',
-    priority: t.priority || 'medium',
-    actionable: !!(t.status === 'open' && !t.claimed_by && !t.blocked_by && !t.paused),
-    claimedBy: t.claimed_by ?? null,
-    blockedBy: t.blocked_by ?? null,
-    dependsOn: t.depends_on || [],
-    plan: t.plan ?? null,
-    template: t.template || 'coder-review',
-    why: t.why || null,
-    doneWhen: t.done_when || null,
-  }));
+  return tasks.map(toTaskInfo);
 }

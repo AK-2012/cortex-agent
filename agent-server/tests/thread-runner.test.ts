@@ -1,9 +1,9 @@
-// input:  node:test, thread-runner internal helper functions, threadStore
-// output: buildThreadSummary/initThreadContext/finalizeThread tests
-// pos:    thread-runner post-refactor regression test for 9 helper functions
+// input:  thread runner helpers, thread store, mock adapter
+// output: runner lifecycle and wait-control regression tests
+// pos:    Verifies thread runtime helpers in isolation
 // >>> If I am updated, update my header comment and the parent folder's CORTEX.md <<<
 
-import test, { before, after } from 'node:test';
+import { test, beforeAll, afterAll } from 'vitest';
 import assert from 'node:assert/strict';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
@@ -15,6 +15,7 @@ import {
   initThreadContext,
   evaluateAndTransition,
   finalizeThread,
+  consumeWaitControl,
   getActiveHandle,
   cancelActiveThread,
   type ThreadRunResult,
@@ -31,7 +32,7 @@ let threadsBackup: string | null = null;
 let threadsBackupExisted = false;
 const testThreadIds = new Set<string>();
 
-before(() => {
+beforeAll(() => {
   try {
     threadsBackup = fs.readFileSync(THREADS_FILE, 'utf8');
     threadsBackupExisted = true;
@@ -41,7 +42,7 @@ before(() => {
   }
 });
 
-after(async () => {
+afterAll(async () => {
   if (threadsBackupExisted && threadsBackup != null) {
     fs.writeFileSync(THREADS_FILE, threadsBackup);
   } else {
@@ -206,6 +207,31 @@ test('evaluateAndTransition returns false for ad-hoc thread (no template)', asyn
   assert.equal(result, false);
 });
 
+// --- wait-control boundary ---
+
+test('consumeWaitControl forwards explicit selectors before clearing the control', async () => {
+  const firstId = uniqueThreadId('wait-first');
+  const secondId = uniqueThreadId('wait-second');
+  const parentId = uniqueThreadId('wait-parent');
+  registerTestThread(makeThreadRecord({ id: firstId, channel: 'C-wait', status: 'running' }));
+  registerTestThread(makeThreadRecord({ id: secondId, channel: 'C-wait', status: 'running' }));
+  registerTestThread(makeThreadRecord({
+    id: parentId,
+    channel: 'C-wait',
+    metadata: {
+      waitingOn: [firstId, secondId],
+      childThreadIds: [firstId, secondId],
+      pendingControl: { action: 'wait', onThreads: [secondId], onTasks: null },
+    },
+  }));
+  const control = threadStore.get(parentId)!.metadata!.pendingControl!;
+
+  assert.equal(await consumeWaitControl(parentId, control), true);
+  const updated = threadStore.get(parentId)!;
+  assert.equal(updated.metadata!.pendingControl, null);
+  assert.deepEqual(updated.metadata!.waitingOn, [secondId]);
+});
+
 // --- finalizeThread ---
 
 test('finalizeThread falls back to lastAgentResult.finalOutput when artifact missing', async () => {
@@ -309,11 +335,6 @@ test('finalizeThread returns null executionId when no steps exist', async () => 
 });
 
 // --- Re-exports delegate to running-executions ---
-
-test('getActiveHandle / cancelActiveThread proxy to runningExecutions', () => {
-  assert.equal(typeof getActiveHandle, 'function');
-  assert.equal(typeof cancelActiveThread, 'function');
-});
 
 test('getActiveHandle returns null for unknown channel (pass-through delegation)', () => {
   const result = getActiveHandle('channel-does-not-exist-' + Math.random());

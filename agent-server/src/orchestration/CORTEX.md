@@ -1,26 +1,35 @@
 Please update me when files in this folder change
 
-orch/ — Orchestration layer. Coordinates platform message routing, per-channel queue, agent lifecycle
-and plan approval state. Depends on core / store / events / domain / platform, must not be imported by domain layer.
+Orchestration layer for agent-server: routes incoming turns to agents and threads and manages their lifecycle.
+Coordinates queues, session state, background continuations, and cross-thread callbacks.
 
 | filename | role | function |
 |---|---|---|
-| `conduit-queue.ts` | singleton | per-conduit serial Promise queue (conduitQueues Map + enqueue(), [S6-B]) |
-| `superseded-edits.ts` | singleton | Message edit supersede marker (mark/check/clear API, [S6-B]) |
-| `interactions/plan-approvals.ts` | singleton | Unified requestId-keyed plan approval state (merges pendingPlans + pendingHookPlans, publishes plan.approved [S6-A]) |
-| `busy-tracker.ts` | singleton | activeLlmCount tracking + publish llm.active-count-delta + IPC busy/idle signaling ([S6-C], S13 subscriber-as-source-of-truth) |
-| `orchestrator.ts` | orchestration | Two-branch decision tree (thread-match / default), message-router.ts sole routing exit ([S8]) |
-| `agent-runner.ts` | orchestration | Plain user-message path: session/status/ledger/callbacks + runConversation (no thread), message-router.ts default branch sole execution path ([S8]). At the conversation-history append sites (appendUser / appendAssistant / appendTool) also publishes `session.message` via `publishSessionMessage` (S4 chat live stream) |
-| `session-send.ts` | S4 chat | `sendWebUserMessage({channel,text,adapter})` — inject a GENUINE user turn (senderId `WEB_UI_SENDER` ≠ SYNTHETIC_CALLBACK_SENDER) into a session by reusing `agentRunner.route` (fire-and-forget); wired into ui-service via the injected `sendSessionMessage` dep in entry/app.ts so the ui-service domain never imports orchestration |
-| `session-events.ts` | S4 chat | `publishSessionMessage(payload)` — emit a `session.message` CortexEvent on the shared bus (read from job-registry `ctx.bus`, the same seam thread-callback uses); no-op when no bus is wired |
-| `conversation-runner.ts` | orchestration | runConversation — executes a single plain user turn against the default agent WITHOUT a thread (replaces the legacy default-thread wrapper); register/complete under channel key, executionId-scoped Cancel |
-| `bg-continuation.ts` | helper | CC background-task continuation (default ON; opt out via CORTEX_BG_CONTINUATION=0/false): buildContinuationSink (merge follow-up into the same reply; dispatches interrupted → onInterrupted, remaining running+undelivered → onWaiting with split), isBgContinuationEnabled (re-export from agent-adapter/bg-wait) / isInteractiveChannel / shouldHoldForBg gates. lifecycle.ts holds the status in a "waiting" state while background work remains and seals it on continuation / grace timeout / interruption |
-| `bg-wait-guard.ts` | helper | bounds the bg-continuation waiting window (2026-07-10 C(2) fix): F1 busy bracket (trackPendingTask +1 for the whole window so a deferred daemon restart cannot fire and kill the Claude child), F5 grace watchdog for work-done-but-unnotified tasks (CORTEX_BG_GRACE_S, default 90s — CC may never send task_notification), F6 max-wait cap for never-ending tasks (CORTEX_BG_WAIT_MAX_S, default 30min; seals as still-running, keeps the sink for late merge). Env getters live in agent-adapter/bg-wait (shared with the thread inline wait) and are re-exported here |
-| `turn-notify.ts` | helper | Push a NEW message (Slack + Feishu via PlatformAdapter) when a long-running user turn finishes — the sealed "✓ Done" status is an edit and does not notify. Gated by isTurnNotifyEnabled (default ON; opt out CORTEX_TURN_NOTIFY=0/false/off/no), isInteractiveChannel scope, and getTurnNotifyThresholdS (CORTEX_TURN_NOTIFY_THRESHOLD_S, default 60s). Called from lifecycle.ts on success (handleAgentSuccess / finalizeBackgroundContinuation) and on hard error (handleAgentError); never throws |
-| `thread-executor.ts` | orchestration | Wraps thread routing (thread-add / thread-continue / thread-start), message-router.ts thread branch sole execution path ([S8]) |
-| `dispatch-reconciler.ts` | background | stale dispatch cleanup timer (S13: extracted from entry/app.ts) |
-| `resume-dispatcher.ts` | background | rate-limit auto-resume: drains resume-registry on throttle clear, re-enters direct sessions (agentRunner.route, serial per channel) / threads (resumeRateLimitedThread, fire-and-forget concurrent). Each detached thread resume holds the daemon busy gate (`track` dep = trackPendingTask, +1 sync at fire / -1 in finally after run+settle) so a pending .restart cannot fire mid-resume and SIGKILL the streaming thread (2026-07-09 fix; direct resumes rely on agentRunner internal tracking — no double-count) |
-| `thread-callback.ts` | callback | fireThreadCallback / notifyThreadParent / notifyTaskParentThreads / reconcileWaitingTasks (DR-0017 W1: task-children delivery dedupes cross-incarnation via domain/tasks/acceptance-ledger — accepted children never re-deliver, un-verdicted ones re-deliver to a fresh manager incarnation) + maybeRotateManager/buildRehydrationNotice (DR-0017 W3: manager session rotated at the resume chokepoint after CORTEX_MANAGER_ROTATE_STEPS steps — slots' sessionId cleared → fresh session with full directive+contract prompt, rehydration notice from task artifact + ledger pendings) / recoverWaitingThreads / registerTaskTreeSubscribers + resumeManagerForQuestion (DR-0016 wake a waiting manager to answer a subtask) + closeResumedTaskLoop (a task-dispatch thread re-entered via a resume path bypasses the dispatch cycle, so re-emit its task.completed/task.blocked) + sweepWaitingManagers/startWaitingManagerSweep (periodic disk-driven backstop, default 60s / CORTEX_WAITING_SWEEP_MS: reconcile every suspended manager's waitingOnTasks against disk so a delivery lost to a race still wakes it — 2026-06-29 fix: resumed worker left its manager suspended forever) — DR-0014 child-completion delivery + resident-manager wake-up (thread children via settle chain, task children via task.completed/task.blocked events) |
-| `manager-qa.ts` | up-ask channel | DR-0016: askManager / submitAnswer / getAnswer / tryAnswerFromHuman / buildQuestionNotice / buildOriginSessionNotice — a subtask asks its manager (woken via resumeManagerForQuestion); at the top of the tree (no manager thread) the ORIGIN session — the agent that dispatched the work — is woken as an agent (wakeSession → agentRunner.route) and answers via answer_subtask, only consulting the human (still-armed channelIndex + tryAnswerFromHuman backstop) if it cannot; the backstop skips synthetic wakeSession messages (SYNTHETIC_CALLBACK_SENDER) so the escalation notice itself is never consumed as "the human's answer" (2026-07-05 fix). Central question state is an in-memory Map (synchronous model, no persistence). Driven by the `/webhook/manager-qa` route and the ask_manager/answer_subtask MCP tools |
-| `routing/hook-bridge-subscribers.ts` | subscription | ask-user.requested / plan.submitted handler bodies (S13: extracted from entry/app.ts) |
-| `status-helpers.ts` | helper | execution / status-message / streaming-VM helpers (migrated from entry/, dep-cruiser cleanup); pure formatting has been sunk to `core/status-format.ts`. `sealThreadStatus` is the single terminal seal for the interactive `!thread` (thread-executor) and background/resume (thread-callback.sealSuspendedStatusMsg) paths — buildThreadSummary text ± sealed action blocks; the dispatch seal `finalizeThreadSuccess` stays separate (domain layer, task-framed durable text) |
+| agent-file-send.ts | chat | delivers an agent-produced file into a session |
+| agent-runner.ts | core | Routes provider-attributed plain user turns |
+| bg-continuation.ts | helper | forwards background continuation output |
+| bg-wait-guard.ts | guard | bounds the background task waiting window |
+| busy-tracker.ts | tracker | counts active LLM runs and signals busy state |
+| conduit-queue.ts | queue | serializes work per conduit |
+| conversation-runner.ts | runner | runs one plain user turn end to end |
+| delta-coalescer.ts | stream | batches assistant text deltas for web sessions |
+| dispatch-reconciler.ts | timer | cleans up stale dispatch executions |
+| durable-helpers.ts | util | builds durable post and update hooks |
+| lifecycle.ts | core | Finalizes provider-attributed turn outcomes |
+| manager-qa.ts | channel | relays subtask questions to managers and humans |
+| mid-turn-inject.ts | core | injects user messages into a running turn |
+| orchestrator.ts | router | picks the thread or default routing branch |
+| pending-injection-recovery.ts | recovery | commits and recovers pending injected turns |
+| resume-dispatcher.ts | runner | Resumes and requeues provider-paused work |
+| session-compact.ts | control | compacts an idle session's context |
+| session-events.ts | events | publishes session state events on the bus |
+| session-rewind.ts | chat | rewinds a web session to an edited turn |
+| session-send.ts | chat | sends a user turn into a web session |
+| status-helpers.ts | helper | builds and seals status messages |
+| superseded-edits.ts | tracker | marks channels superseded by a message edit |
+| thread-callback.ts | callback | Delivers framed child results and resumes parents |
+| thread-executor.ts | core | routes thread turns and runs threads |
+| turn-notify.ts | notify | notifies users when a long turn finishes |
+| web-bg-hold.ts | helper | holds web turns until background work seals |
+| interactions/ | subdir | approvals, prompts, and user interaction handling |
+| routing/ | subdir | message, edit, file, and webhook routing |

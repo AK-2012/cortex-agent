@@ -1,7 +1,13 @@
+// input:  TaskInfo, task verification query, task mutations
+// output: Task detail modal with fields, deps, and actions
+// pos:    Desktop task detail overlay
+// >>> If I am updated, update my header comment and the parent folder's CORTEX.md <<<
+
 import { useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import type { TaskInfo } from '@cortex-agent/ui-contract';
 import { useTRPC } from '@/lib/trpc';
+import { useVocab } from '@/i18n';
 import { buildTaskModalVm } from './task-modal-vm';
 import { buildTaskVerificationVm, type TaskVerificationVm } from './task-verification-vm';
 
@@ -13,17 +19,15 @@ import { buildTaskVerificationVm, type TaskVerificationVm } from './task-verific
 // REAL centerpiece: WHY + DONE-WHEN in Card A now bind the real `TaskInfo.why` / `TaskInfo.doneWhen`
 // (task store `why` / `done-when`); when a task genuinely has neither, the honest placeholder shows
 // (null-safe — no fabrication).
-// Card B (Done-when verification) + Card C (Dispatch history) now consume the REAL `tasks.verification`
-// scope: done-when achievement evidence (completed-note / completed-at / the completing
-// execution's output) + the per-task execution/dispatch join. Where the scope returns null / [] (task
-// not completed, no note, no completing execution, never dispatched) the card shows an honest
+// Card C (Dispatch history) consumes the REAL `tasks.verification` scope: the per-task
+// execution/dispatch join. Where the scope returns [] (never dispatched) the card shows an honest
 // placeholder — never fabricated evidence.
 // DATA GAP still flagged:
 //   • GAP-GPU          : no gpu on TaskInfo → Fields gpu renders "—" (matches the T-046 proto-shot).
 
 const CARD: React.CSSProperties = {
-  background: '#fff',
-  border: '1px solid #E7E9EE',
+  background: 'var(--proto-card)',
+  border: '1px solid var(--proto-line)',
   borderRadius: 10,
   boxShadow: '0 1px 2px rgba(16,24,40,.03)',
 };
@@ -32,87 +36,15 @@ const CARD_HEADER: React.CSSProperties = {
   display: 'flex',
   alignItems: 'center',
   padding: '10px 15px',
-  borderBottom: '1px solid #EFF1F5',
+  borderBottom: '1px solid var(--proto-line-2)',
 };
 
-const CARD_TITLE: React.CSSProperties = { fontSize: 11.5, fontWeight: 650, color: '#191C22' };
+const CARD_TITLE: React.CSSProperties = { fontSize: 11.5, fontWeight: 650, color: 'var(--proto-ink)' };
 
 // A muted note flagging a field with no real value (task not completed / never dispatched, etc.).
 function GapNote({ children }: { children: React.ReactNode }) {
   return (
-    <span style={{ fontStyle: 'italic', color: '#B6BDC9' }}>{children}</span>
-  );
-}
-
-const EVIDENCE_LABEL: React.CSSProperties = {
-  fontSize: 9.5,
-  fontWeight: 700,
-  letterSpacing: '.05em',
-  color: '#98A1B0',
-  display: 'block',
-  marginBottom: 3,
-};
-
-// Card B body — real done-when achievement evidence (completed-note / completed-at / completing
-// execution output). Honest placeholder when the task is not yet completed.
-function VerificationBody({ vv }: { vv: TaskVerificationVm }) {
-  if (!vv.completed) {
-    return (
-      <GapNote>
-        — not completed yet; done-when evidence appears once the task reaches done
-      </GapNote>
-    );
-  }
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 9, color: '#22262E' }}>
-      <div>
-        <span style={EVIDENCE_LABEL}>COMPLETED AT</span>
-        {vv.completedAt != null ? (
-          <span style={{ font: "400 10.5px 'IBM Plex Mono',monospace", color: '#5B6472' }}>
-            {vv.completedAt}
-          </span>
-        ) : (
-          <GapNote>— not recorded</GapNote>
-        )}
-      </div>
-      <div>
-        <span style={EVIDENCE_LABEL}>COMPLETION NOTE</span>
-        {vv.completedNote != null ? (
-          <span>{vv.completedNote}</span>
-        ) : (
-          <GapNote>— no completion note recorded</GapNote>
-        )}
-      </div>
-      <div>
-        <span style={EVIDENCE_LABEL}>COMPLETING RUN</span>
-        {vv.completingExecutionId != null ? (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-            <span style={{ font: "600 10.5px 'IBM Plex Mono',monospace", color: '#4655D4' }}>
-              {vv.completingExecutionId}
-            </span>
-            {vv.completingOutput != null ? (
-              <span
-                style={{
-                  fontSize: 10.5,
-                  color: '#5B6472',
-                  background: '#FBFBFC',
-                  border: '1px solid #EFF1F5',
-                  borderRadius: 7,
-                  padding: '6px 10px',
-                  whiteSpace: 'pre-wrap',
-                }}
-              >
-                {vv.completingOutput}
-              </span>
-            ) : (
-              <GapNote>— run recorded no final output</GapNote>
-            )}
-          </div>
-        ) : (
-          <GapNote>— no execution linked to this completion</GapNote>
-        )}
-      </div>
-    </div>
+    <span style={{ fontStyle: 'italic', color: 'var(--proto-faint)' }}>{children}</span>
   );
 }
 
@@ -128,23 +60,23 @@ function DispatchHistoryBody({ vv }: { vv: TaskVerificationVm }) {
             alignItems: 'center',
             gap: 8,
             padding: '6px 9px',
-            background: d.isCompleting ? '#F5F7FF' : '#FBFBFC',
-            border: `1px solid ${d.isCompleting ? '#DDE3FB' : '#EFF1F5'}`,
+            background: d.isCompleting ? 'var(--proto-accent-bg)' : 'var(--proto-rail)',
+            border: `1px solid ${d.isCompleting ? 'var(--proto-accent-bg)' : 'var(--proto-line-2)'}`,
             borderRadius: 7,
           }}
         >
           <span
             style={{ width: 6, height: 6, borderRadius: '50%', background: d.statusColor, flex: 'none' }}
           />
-          <span style={{ font: "600 10px 'IBM Plex Mono',monospace", color: '#4655D4' }}>
+          <span style={{ font: "600 10px 'IBM Plex Mono',monospace", color: 'var(--proto-accent)' }}>
             {d.executionId}
           </span>
-          <span style={{ fontSize: 9.5, color: '#8A93A2' }}>{d.machine}</span>
+          <span style={{ fontSize: 9.5, color: 'var(--proto-muted-2)' }}>{d.machine}</span>
           <span
             style={{
               marginLeft: 'auto',
               font: "400 9px 'IBM Plex Mono',monospace",
-              color: '#98A1B0',
+              color: 'var(--proto-muted-3)',
               flex: 'none',
             }}
           >
@@ -166,6 +98,7 @@ export interface TaskModalProps {
 }
 
 export function TaskModal({ task, allTasks, pending, onClose, onComplete, onUnblock }: TaskModalProps) {
+  const L = useVocab();
   const tm = buildTaskModalVm(task, allTasks);
   const trpc = useTRPC();
   // The modal mounts only when a task is opened, so this per-task query fires on open only.
@@ -208,7 +141,7 @@ export function TaskModal({ task, allTasks, pending, onClose, onComplete, onUnbl
           animation: 'cxmodal .26s cubic-bezier(.22,1,.36,1)',
           width: 760,
           maxHeight: '84vh',
-          background: '#F7F8FA',
+          background: 'var(--proto-alt)',
           borderRadius: 14,
           boxShadow: '0 24px 64px rgba(16,24,40,.3)',
           zIndex: 61,
@@ -221,15 +154,15 @@ export function TaskModal({ task, allTasks, pending, onClose, onComplete, onUnbl
         <div
           style={{
             flex: 'none',
-            background: '#fff',
-            borderBottom: '1px solid #E7E9EE',
+            background: 'var(--proto-card)',
+            borderBottom: '1px solid var(--proto-line)',
             display: 'flex',
             alignItems: 'center',
             gap: 9,
             padding: '12px 18px',
           }}
         >
-          <span style={{ font: "600 12.5px 'IBM Plex Mono',monospace", color: '#191C22' }}>
+          <span style={{ font: "600 12.5px 'IBM Plex Mono',monospace", color: 'var(--proto-ink)' }}>
             {tm.id}
           </span>
           <span
@@ -245,7 +178,7 @@ export function TaskModal({ task, allTasks, pending, onClose, onComplete, onUnbl
             {tm.pill.text}
           </span>
           <span
-            style={{ font: "400 9.5px 'IBM Plex Mono',monospace", color: '#98A1B0', marginLeft: 4 }}
+            style={{ font: "400 9.5px 'IBM Plex Mono',monospace", color: 'var(--proto-muted-3)', marginLeft: 4 }}
           >
             TASKS.yaml
           </span>
@@ -254,8 +187,8 @@ export function TaskModal({ task, allTasks, pending, onClose, onComplete, onUnbl
             style={{
               marginLeft: 'auto',
               font: "500 9.5px 'IBM Plex Mono',monospace",
-              color: '#98A1B0',
-              border: '1px solid #E7E9EE',
+              color: 'var(--proto-muted-3)',
+              border: '1px solid var(--proto-line)',
               borderRadius: 5,
               padding: '2px 6px',
               cursor: 'pointer',
@@ -293,26 +226,26 @@ export function TaskModal({ task, allTasks, pending, onClose, onComplete, onUnbl
                     marginTop: 5,
                   }}
                 />
-                <div style={{ fontSize: 13.5, fontWeight: 650, color: '#191C22', lineHeight: 1.4 }}>
+                <div style={{ fontSize: 13.5, fontWeight: 650, color: 'var(--proto-ink)', lineHeight: 1.4 }}>
                   {tm.title}
                 </div>
               </div>
-              <div style={{ fontSize: 11.5, lineHeight: 1.6, color: '#5B6472', marginTop: 7 }}>
+              <div style={{ fontSize: 11.5, lineHeight: 1.6, color: 'var(--proto-muted)', marginTop: 7 }}>
                 <span
                   style={{
                     fontSize: 9.5,
                     fontWeight: 700,
                     letterSpacing: '.05em',
-                    color: '#98A1B0',
+                    color: 'var(--proto-muted-3)',
                     marginRight: 7,
                   }}
                 >
-                  WHY
+                  {L.tkWhy}
                 </span>
                 {task.why != null ? (
                   <span>{task.why}</span>
                 ) : (
-                  <GapNote>— no `why` recorded on this task</GapNote>
+                  <GapNote>— {L.tkNoWhy}</GapNote>
                 )}
               </div>
               <div
@@ -320,11 +253,11 @@ export function TaskModal({ task, allTasks, pending, onClose, onComplete, onUnbl
                   fontSize: 9.5,
                   fontWeight: 700,
                   letterSpacing: '.05em',
-                  color: '#98A1B0',
+                  color: 'var(--proto-muted-3)',
                   margin: '11px 0 5px',
                 }}
               >
-                DONE-WHEN
+                {L.tkDoneWhen}
               </div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
                 {/* Real `doneWhen` (single done-when string from the task store) rendered in the
@@ -335,9 +268,9 @@ export function TaskModal({ task, allTasks, pending, onClose, onComplete, onUnbl
                     gap: 8,
                     fontSize: 11.5,
                     lineHeight: 1.5,
-                    color: '#22262E',
-                    background: '#FBFBFC',
-                    border: '1px solid #EFF1F5',
+                    color: 'var(--proto-ink-2)',
+                    background: 'var(--proto-rail)',
+                    border: '1px solid var(--proto-line-2)',
                     borderRadius: 7,
                     padding: '6px 10px',
                   }}
@@ -347,8 +280,8 @@ export function TaskModal({ task, allTasks, pending, onClose, onComplete, onUnbl
                       width: 12,
                       height: 12,
                       borderRadius: 4,
-                      border: '1.5px solid #D9DCE3',
-                      background: '#fff',
+                      border: '1.5px solid var(--proto-line-3)',
+                      background: 'var(--proto-card)',
                       boxSizing: 'border-box',
                       flex: 'none',
                       marginTop: 1.5,
@@ -357,53 +290,22 @@ export function TaskModal({ task, allTasks, pending, onClose, onComplete, onUnbl
                   {task.doneWhen != null ? (
                     <span>{task.doneWhen}</span>
                   ) : (
-                    <GapNote>— no done-when recorded on this task</GapNote>
+                    <GapNote>— {L.tkNoDoneWhen}</GapNote>
                   )}
                 </div>
-              </div>
-            </div>
-
-            {/* Card B — Done-when verification (prototype L1483-1492). Real evidence via tasks.verification. */}
-            <div style={CARD}>
-              <div style={CARD_HEADER}>
-                <span style={CARD_TITLE}>Done-when verification</span>
-                {vv && (
-                  <span
-                    style={{
-                      marginLeft: 'auto',
-                      fontSize: 9.5,
-                      fontWeight: 600,
-                      padding: '1px 7px',
-                      borderRadius: 999,
-                      background: vv.completed ? '#E9F4EE' : '#F1F2F5',
-                      color: vv.completed ? '#23854F' : '#8A93A2',
-                    }}
-                  >
-                    {vv.completed ? '✓ completed' : 'not completed'}
-                  </span>
-                )}
-              </div>
-              <div style={{ padding: '10px 15px', fontSize: 11, lineHeight: 1.55 }}>
-                {verifyQuery.isPending ? (
-                  <GapNote>— loading verification…</GapNote>
-                ) : verifyQuery.isError || !vv ? (
-                  <GapNote>— failed to load verification evidence</GapNote>
-                ) : (
-                  <VerificationBody vv={vv} />
-                )}
               </div>
             </div>
 
             {/* Card C — Dispatch history (prototype L1493-1506). Real per-task execution/dispatch join. */}
             <div style={CARD}>
               <div style={CARD_HEADER}>
-                <span style={CARD_TITLE}>Dispatch history</span>
+                <span style={CARD_TITLE}>{L.tkDispatchHistory}</span>
                 {vv && vv.hasDispatches && (
                   <span
                     style={{
                       marginLeft: 'auto',
                       font: "400 9px 'IBM Plex Mono',monospace",
-                      color: '#98A1B0',
+                      color: 'var(--proto-muted-3)',
                     }}
                   >
                     {vv.dispatches.length} run{vv.dispatches.length === 1 ? '' : 's'}
@@ -412,11 +314,11 @@ export function TaskModal({ task, allTasks, pending, onClose, onComplete, onUnbl
               </div>
               <div style={{ padding: '10px 15px', fontSize: 11, lineHeight: 1.55 }}>
                 {verifyQuery.isPending ? (
-                  <GapNote>— loading dispatch history…</GapNote>
+                  <GapNote>— {L.tkLoadingDispatch}</GapNote>
                 ) : verifyQuery.isError || !vv ? (
-                  <GapNote>— failed to load dispatch history</GapNote>
+                  <GapNote>— {L.tkDispatchFailed}</GapNote>
                 ) : !vv.hasDispatches ? (
-                  <GapNote>— no dispatches recorded for this task</GapNote>
+                  <GapNote>— {L.tkNoDispatches}</GapNote>
                 ) : (
                   <DispatchHistoryBody vv={vv} />
                 )}
@@ -429,18 +331,18 @@ export function TaskModal({ task, allTasks, pending, onClose, onComplete, onUnbl
             {/* Fields (prototype L1510-1517) */}
             <div style={CARD}>
               <div style={CARD_HEADER}>
-                <span style={CARD_TITLE}>Fields</span>
+                <span style={CARD_TITLE}>{L.tkFields}</span>
               </div>
               <div
                 style={{
                   padding: '8px 15px 10px',
                   font: "400 10px/2 'IBM Plex Mono',monospace",
-                  color: '#5B6472',
+                  color: 'var(--proto-muted)',
                 }}
               >
                 {tm.fields.map((f) => (
                   <div key={f.k} style={{ display: 'flex' }}>
-                    <span style={{ color: '#98A1B0' }}>{f.k}</span>
+                    <span style={{ color: 'var(--proto-muted-3)' }}>{f.k}</span>
                     <span style={{ marginLeft: 'auto', color: f.vColor, textAlign: 'right' }}>
                       {f.v}
                     </span>
@@ -452,12 +354,12 @@ export function TaskModal({ task, allTasks, pending, onClose, onComplete, onUnbl
             {/* Dependencies (prototype L1518-1530) */}
             <div style={CARD}>
               <div style={CARD_HEADER}>
-                <span style={CARD_TITLE}>Dependencies</span>
+                <span style={CARD_TITLE}>{L.tkDependencies}</span>
               </div>
               <div
                 style={{ padding: '10px 15px', display: 'flex', flexDirection: 'column', gap: 5 }}
               >
-                {tm.deps.map((dp) => (
+                {tm.hasDependencies ? tm.deps.map((dp) => (
                   <div
                     key={`${dp.label}:${dp.id}`}
                     style={{
@@ -485,7 +387,7 @@ export function TaskModal({ task, allTasks, pending, onClose, onComplete, onUnbl
                     <span
                       style={{
                         fontSize: 10.5,
-                        color: '#5B6472',
+                        color: 'var(--proto-muted)',
                         whiteSpace: 'nowrap',
                         overflow: 'hidden',
                         textOverflow: 'ellipsis',
@@ -497,14 +399,16 @@ export function TaskModal({ task, allTasks, pending, onClose, onComplete, onUnbl
                       style={{
                         marginLeft: 'auto',
                         font: "400 8.5px 'IBM Plex Mono',monospace",
-                        color: '#98A1B0',
+                        color: 'var(--proto-muted-3)',
                         flex: 'none',
                       }}
                     >
                       {dp.label}
                     </span>
                   </div>
-                ))}
+                )) : (
+                  <GapNote>— {L.tkNoDependencies}</GapNote>
+                )}
               </div>
             </div>
 
@@ -518,15 +422,15 @@ export function TaskModal({ task, allTasks, pending, onClose, onComplete, onUnbl
                     textAlign: 'center',
                     fontSize: 11,
                     fontWeight: 600,
-                    border: '1px solid #D9DCE3',
+                    border: '1px solid var(--proto-line-3)',
                     borderRadius: 8,
                     padding: '6px 0',
-                    color: '#191C22',
+                    color: 'var(--proto-ink)',
                     cursor: pending ? 'not-allowed' : 'pointer',
                     opacity: pending ? 0.5 : 1,
                   }}
                 >
-                  Unblock
+                  {L.mUnblock}
                 </span>
               )}
               <span
@@ -539,7 +443,7 @@ export function TaskModal({ task, allTasks, pending, onClose, onComplete, onUnbl
                   fontWeight: 600,
                   borderRadius: 8,
                   padding: '7px 0',
-                  color: '#fff',
+                  color: 'var(--ink-solid-fg)',
                   background: tm.completeBg,
                   cursor: tm.completable && !pending ? 'pointer' : 'not-allowed',
                   opacity: pending ? 0.6 : 1,

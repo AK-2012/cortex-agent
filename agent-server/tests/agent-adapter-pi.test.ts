@@ -1,9 +1,9 @@
 // input:  Node test runner + PIAdapter _test exports
-// output: PI framing/spawn-args/bootstrap/switch_session tests
-// pos:    Hermetic PI adapter regression (stub spawner)
+// output: PI framing/spawn/context/bootstrap/compact/switch tests
+// pos:    Hermetic PI adapter and subprocess context regressions
 // >>> If I am updated, update my header comment and the parent folder's CORTEX.md <<<
 
-import test from 'node:test';
+import { test } from 'vitest';
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
 import { PassThrough } from 'node:stream';
@@ -11,9 +11,9 @@ import { tmpdir } from 'node:os';
 import { join as pathJoin } from 'node:path';
 import { mkdirSync } from 'node:fs';
 import type { ChildProcess, SpawnOptions } from 'node:child_process';
-import { PIAdapter, _test as piTest } from '../src/agent-adapter/pi/adapter.js';
+import { PIAdapter } from '../src/agent-adapter/pi/adapter.js';
 import { encodeCommand, createLineSplitter } from '../src/agent-adapter/pi/framing.js';
-import { buildSpawnArgs } from '../src/agent-adapter/pi/spawn-args.js';
+import { buildPiEnv, buildSpawnArgs } from '../src/agent-adapter/pi/spawn-args.js';
 import { CAPABILITIES_BY_BACKEND } from '../src/agent-adapter/capabilities.js';
 
 // Writable temp session dir used by Group G tests (avoids root-level paths that fail with EACCES).
@@ -146,11 +146,91 @@ test('buildSpawnArgs accepts appendSystemPrompt array for repeated flag', () => 
   ]);
 });
 
+test('buildSpawnArgs: thinking level is passed as --thinking', () => {
+  const args = buildSpawnArgs({ sessionDir: '/x', thinking: 'high' });
+  const idx = args.indexOf('--thinking');
+  assert.ok(idx >= 0, '--thinking must be present');
+  assert.equal(args[idx + 1], 'high');
+});
+
+test('buildSpawnArgs: no --thinking when thinking is absent (backward compat)', () => {
+  assert.ok(!buildSpawnArgs({ sessionDir: '/x' }).includes('--thinking'));
+  assert.ok(!buildSpawnArgs({ sessionDir: '/x', thinking: null }).includes('--thinking'));
+});
+
 test('buildSpawnArgs emits no --skill when pluginDirs is empty or undefined', () => {
   const a = buildSpawnArgs({ sessionDir: '/x', pluginDirs: [] });
   assert.ok(!a.includes('--skill'));
   const b = buildSpawnArgs({ sessionDir: '/x' });
   assert.ok(!b.includes('--skill'));
+});
+
+// --- Group B2: PI subprocess context env ---
+
+test('spawn forwards authoritative Cortex thread context to the PI subprocess', () => {
+  const stub = makeStubSpawner();
+  const adapter = new PIAdapter(stub.spawn);
+  const proc = adapter.spawn({
+    sessionId: 'backend-session',
+    sessionKey: 'context-env',
+    resume: false,
+    callbackSource: 'thread',
+    scheduleTaskId: 'schedule-1',
+    env: { CORTEX_THREAD_ID: 'spoofed', CUSTOM_ENV: 'kept' },
+    cortexContext: {
+      threadId: 'thr_test',
+      profile: 'deepseek-pro',
+      project: 'vr-security',
+      sessionName: 'cortex-test',
+      trackSessionId: 'tracked-session',
+      executionId: 'exec-test',
+      threadDepth: 2,
+      taskId: 'ab1a',
+      taskProject: 'vr-security',
+    },
+  });
+
+  const env = stub.calls[0].opts.env as NodeJS.ProcessEnv;
+  assert.equal(env.CORTEX_THREAD_ID, 'thr_test');
+  assert.equal(env.CORTEX_PROFILE, 'deepseek-pro');
+  assert.equal(env.CORTEX_PROJECT, 'vr-security');
+  assert.equal(env.CORTEX_SESSION_NAME, 'cortex-test');
+  assert.equal(env.CORTEX_SESSION_ID, 'tracked-session');
+  assert.equal(env.CORTEX_EXECUTION_ID, 'exec-test');
+  assert.equal(env.CORTEX_THREAD_DEPTH, '2');
+  assert.equal(env.CORTEX_TASK_ID, 'ab1a');
+  assert.equal(env.CORTEX_TASK_PROJECT, 'vr-security');
+  assert.equal(env.CORTEX_CALLBACK_SOURCE, 'thread');
+  assert.equal(env.CORTEX_SCHEDULE_TASK_ID, 'schedule-1');
+  assert.equal(env.CORTEX_BACKEND, 'pi');
+  assert.equal(env.CUSTOM_ENV, 'kept');
+
+  stub.children[0].emit('close', 0, null);
+  void proc.close();
+});
+
+test('buildPiEnv removes stale optional Cortex context from the parent env', () => {
+  const stale = {
+    CORTEX_THREAD_ID: 'stale-thread',
+    CORTEX_PROFILE: 'stale-profile',
+    CORTEX_PROJECT: 'stale-project',
+    CORTEX_SESSION_NAME: 'stale-name',
+    CORTEX_EXECUTION_ID: 'stale-execution',
+    CORTEX_THREAD_DEPTH: '9',
+    CORTEX_TASK_ID: 'stale-task',
+    CORTEX_TASK_PROJECT: 'stale-task-project',
+    CORTEX_CALLBACK_SOURCE: 'stale-callback',
+    CORTEX_SCHEDULE_TASK_ID: 'stale-schedule',
+  };
+  const env = buildPiEnv({
+    sessionId: null,
+    piAgentDir: '/pi-agent',
+  }, stale);
+
+  for (const key of Object.keys(stale)) assert.equal(env[key], undefined, key);
+  assert.equal(env.CORTEX_SESSION_ID, undefined);
+  assert.equal(env.CORTEX_BACKEND, 'pi');
+  assert.equal(env.PI_CODING_AGENT_DIR, '/pi-agent');
 });
 
 // --- D1: --provider passed through from profile mode, not hardcoded ---
@@ -160,6 +240,25 @@ test('buildSpawnArgs: explicit provider opt is passed as --provider', () => {
   const idx = args.indexOf('--provider');
   assert.ok(idx >= 0, '--provider must be present');
   assert.equal(args[idx + 1], 'openai-codex');
+});
+
+test('PIAdapter spawns an openai-codex provider profile through PI', () => {
+  const stub = makeStubSpawner();
+  const adapter = new PIAdapter(stub.spawn);
+  const proc = adapter.spawn({
+    sessionId: null,
+    sessionKey: 'openai-codex-profile',
+    resume: false,
+    model: 'gpt-5.4-mini',
+    piProvider: 'openai-codex',
+  });
+
+  assert.equal(stub.calls[0].cmd, 'pi');
+  const providerIndex = stub.calls[0].args.indexOf('--provider');
+  assert.ok(providerIndex >= 0, '--provider must be present');
+  assert.equal(stub.calls[0].args[providerIndex + 1], 'openai-codex');
+  stub.children[0].emit('close', 0, null);
+  void proc.close();
 });
 
 test('buildSpawnArgs: provider opt is NOT defaulted to "anthropic" when only model given', () => {
@@ -250,6 +349,101 @@ test('bootstrap response with missing data.sessionId does not emit session_start
   assert.equal(result.done, true, 'iterator terminates without emitting session_started');
 });
 
+test('PI turn emits live context_usage during streaming without flushing partial text', async () => {
+  const stub = makeStubSpawner();
+  const adapter = new PIAdapter(stub.spawn);
+  const proc = adapter.spawn({ sessionId: null, sessionKey: 'context-live', resume: false });
+  const child = stub.children[0];
+  const iterator = proc.events[Symbol.asyncIterator]();
+
+  emitBootstrap(child, 'context-live-session');
+  await iterator.next();
+  let turnSettled = false;
+  const turn = proc.send({ text: 'hello' }).then((result) => { turnSettled = true; return result; });
+
+  child.stdout.emit('data', Buffer.from(JSON.stringify({
+    type: 'message_update', message: { id: 'm-live' },
+    assistantMessageEvent: { type: 'text_delta', delta: 'partial' },
+  }) + '\n'));
+  assert.deepEqual((await iterator.next()).value, {
+    type: 'assistant_delta', text: 'partial', blockId: 'm-live',
+  });
+
+  const liveStats = child.stdin.writeHistory
+    .map((frame) => JSON.parse(frame.trim()) as Record<string, unknown>)
+    .find((command) => command.type === 'get_session_stats');
+  assert.ok(liveStats, 'streaming output triggers a throttled stats query before settle');
+  child.stdout.emit('data', Buffer.from(JSON.stringify({
+    type: 'response', id: liveStats.id, command: 'get_session_stats', success: true,
+    data: { contextUsage: { tokens: 60100, contextWindow: 200000, percent: 30.05 } },
+  }) + '\n'));
+
+  assert.deepEqual((await iterator.next()).value, {
+    type: 'context_usage', usedTokens: 60100, contextWindow: 200000,
+    percent: 30.05, accuracy: 'estimate',
+  });
+  assert.equal(turnSettled, false, 'live context snapshot does not settle the turn');
+
+  child.stdout.emit('data', Buffer.from('{"type":"message_end"}\n'));
+  assert.deepEqual((await iterator.next()).value, {
+    type: 'assistant_text', text: 'partial', blockId: 'm-live',
+  });
+  assert.equal((await iterator.next()).value.type, 'turn_progress');
+
+  child.stdout.emit('data', Buffer.from('{"type":"agent_settled"}\n'));
+  await turn;
+  const finalStats = child.stdin.writeHistory
+    .map((frame) => JSON.parse(frame.trim()) as Record<string, unknown>)
+    .filter((command) => command.type === 'get_session_stats')
+    .at(-1)!;
+  assert.notEqual(finalStats.id, liveStats.id);
+  child.stdout.emit('data', Buffer.from(JSON.stringify({
+    type: 'response', id: finalStats.id, command: 'get_session_stats', success: true,
+    data: { contextUsage: { tokens: 60200, contextWindow: 200000, percent: 30.1 } },
+  }) + '\n'));
+  assert.equal((await iterator.next()).value.type, 'context_usage');
+  assert.equal((await iterator.next()).value.type, 'turn_complete');
+
+  child.emit('close', 0, null);
+  await proc.close();
+});
+
+test('settled PI turn emits context_usage before its terminal event', async () => {
+  const stub = makeStubSpawner();
+  const adapter = new PIAdapter(stub.spawn);
+  const proc = adapter.spawn({ sessionId: null, sessionKey: 'context-order', resume: false });
+  const child = stub.children[0];
+  const iterator = proc.events[Symbol.asyncIterator]();
+
+  emitBootstrap(child, 'context-session');
+  assert.equal((await iterator.next()).value.type, 'session_started');
+
+  const turn = proc.send({ text: 'hello' });
+  child.stdout.emit('data', Buffer.from('{"type":"agent_settled"}\n'));
+  await turn;
+
+  const stats = child.stdin.writeHistory
+    .map((frame) => JSON.parse(frame.trim()) as Record<string, unknown>)
+    .find((command) => command.type === 'get_session_stats');
+  assert.ok(stats, 'agent_settled sends one optional stats query');
+
+  child.stdout.emit('data', Buffer.from(JSON.stringify({
+    type: 'response', id: stats.id, command: 'get_session_stats', success: true,
+    data: { contextUsage: { tokens: 60000, contextWindow: 200000, percent: 30 } },
+  }) + '\n'));
+
+  assert.deepEqual((await iterator.next()).value, {
+    type: 'context_usage', usedTokens: 60000, contextWindow: 200000,
+    percent: 30, accuracy: 'estimate',
+  });
+  assert.deepEqual((await iterator.next()).value, {
+    type: 'turn_complete', numTurns: 0, totalCostUsd: null,
+  });
+
+  child.emit('close', 0, null);
+  await proc.close();
+});
+
 // --- Group D: exit-on-stdin-close + adapter session map cleanup ---
 
 test('close() ends stdin and resolves when child emits close', async () => {
@@ -333,14 +527,6 @@ test('PIAdapter exposes backend=pi with frozen capability matrix', () => {
   const adapter = new PIAdapter();
   assert.equal(adapter.backend, 'pi');
   assert.equal(adapter.capabilities, CAPABILITIES_BY_BACKEND.pi);
-});
-
-test('_test exports surface helpers for downstream tasks (a7f9 / 5754)', () => {
-  assert.equal(typeof piTest.buildSpawnArgs, 'function');
-  assert.equal(typeof piTest.encodeCommand, 'function');
-  assert.equal(typeof piTest.createLineSplitter, 'function');
-  assert.equal(typeof piTest.DEFAULT_SESSION_DIR, 'string');
-  assert.equal(typeof piTest.CLOSE_EXIT_WAIT_MS, 'number');
 });
 
 // --- Group F: extensionPaths / --extension flag (task 5754 MCP bridge) ---
@@ -587,6 +773,110 @@ test('G-6: sendTurn no-op when same session; auto-switches and writes prompt whe
   await proc2.close();
 });
 
+test('compact waits for bootstrap, sends correlated RPC, then returns post-compact stats', async () => {
+  const stub = makeStubSpawner();
+  const adapter = new PIAdapter(stub.spawn, G_SESSION_DIR);
+  const proc = adapter.spawn({ sessionId: null, sessionKey: 'compact-ok', resume: false } as any);
+  const child = stub.children[0];
+
+  const compactPromise = proc.compact!();
+  assert.equal(child.stdin.writeHistory.length, 1, 'bootstrap remains the only pre-ready frame');
+
+  child.stdout.write(Buffer.from(
+    '{"type":"response","id":"bootstrap","command":"get_state","success":true,"data":{"sessionId":"pi-compact"}}\n',
+  ));
+  await new Promise((resolve) => setImmediate(resolve));
+  const compactFrame = JSON.parse(child.stdin.writeHistory[1].trim()) as Record<string, unknown>;
+  assert.equal(compactFrame.type, 'compact');
+  assert.equal(typeof compactFrame.id, 'string');
+
+  child.stdout.write(Buffer.from(JSON.stringify({
+    type: 'response', id: compactFrame.id, command: 'compact', success: true,
+    data: {
+      summary: 'short summary', tokensBefore: 120000, estimatedTokensAfter: 18000,
+      usage: { input: 120000, output: 900, cacheRead: 10, cacheWrite: 20, cost: { total: 0.42 } },
+    },
+  }) + '\n'));
+  await new Promise((resolve) => setImmediate(resolve));
+  const statsFrame = JSON.parse(child.stdin.writeHistory[2].trim()) as Record<string, unknown>;
+  assert.equal(statsFrame.type, 'get_session_stats');
+
+  child.stdout.write(Buffer.from(JSON.stringify({
+    type: 'response', id: statsFrame.id, command: 'get_session_stats', success: true,
+    data: { contextUsage: { tokens: 19000, contextWindow: 200000, percent: 9.5 } },
+  }) + '\n'));
+
+  assert.deepEqual(await compactPromise, {
+    status: 'compacted',
+    tokensBefore: 120000,
+    estimatedTokensAfter: 18000,
+    contextUsage: { usedTokens: 19000, contextWindow: 200000, percent: 9.5, accuracy: 'estimate' },
+    usage: { inputTokens: 120000, outputTokens: 900, cacheReadTokens: 10, cacheWriteTokens: 20, costUsd: 0.42 },
+  });
+
+  const close = proc.close();
+  child.emit('close', 0);
+  await close;
+});
+
+test('compact maps PI no-history response to not-needed without requesting stats', async () => {
+  const stub = makeStubSpawner();
+  const adapter = new PIAdapter(stub.spawn, G_SESSION_DIR);
+  const proc = adapter.spawn({ sessionId: null, sessionKey: 'compact-empty', resume: false } as any);
+  const child = stub.children[0];
+  const compactPromise = proc.compact!();
+  emitBootstrap(child, 'pi-empty');
+  await new Promise((resolve) => setImmediate(resolve));
+  const frame = JSON.parse(child.stdin.writeHistory[1].trim()) as Record<string, unknown>;
+  child.stdout.write(Buffer.from(JSON.stringify({
+    type: 'response', id: frame.id, command: 'compact', success: false,
+    error: 'No messages to compact',
+  }) + '\n'));
+
+  assert.deepEqual(await compactPromise, {
+    status: 'not-needed', tokensBefore: null, estimatedTokensAfter: null,
+    contextUsage: null, usage: null,
+  });
+  assert.equal(child.stdin.writeHistory.length, 2);
+  const close = proc.close();
+  child.emit('close', 0);
+  await close;
+});
+
+test('compact rejects a correlated PI failure response', async () => {
+  const stub = makeStubSpawner();
+  const adapter = new PIAdapter(stub.spawn, G_SESSION_DIR);
+  const proc = adapter.spawn({ sessionId: null, sessionKey: 'compact-failed', resume: false } as any);
+  const child = stub.children[0];
+  const compactPromise = proc.compact!();
+  emitBootstrap(child, 'pi-failed');
+  await new Promise((resolve) => setImmediate(resolve));
+  const frame = JSON.parse(child.stdin.writeHistory[1].trim()) as Record<string, unknown>;
+  child.stdout.write(Buffer.from(JSON.stringify({
+    type: 'response', id: frame.id, command: 'compact', success: false,
+    error: 'compaction exploded',
+  }) + '\n'));
+
+  await assert.rejects(compactPromise, /compaction exploded/);
+  const close = proc.close();
+  child.emit('close', 0);
+  await close;
+});
+
+test('compact rejects promptly when the PI subprocess exits', async () => {
+  const stub = makeStubSpawner();
+  const adapter = new PIAdapter(stub.spawn, G_SESSION_DIR);
+  const proc = adapter.spawn({ sessionId: null, sessionKey: 'compact-exit', resume: false } as any);
+  const child = stub.children[0];
+  const compactPromise = proc.compact!();
+  emitBootstrap(child, 'pi-exit');
+  await new Promise((resolve) => setImmediate(resolve));
+  child.emit('close', 17, null);
+
+  await assert.rejects(compactPromise, /pi exited with code 17/i);
+  await proc.close();
+});
+
 test('G-7: spawn with resume=true + known sessionId passes --session flag', async () => {
   const stub = makeStubSpawner();
   const adapter = new PIAdapter(stub.spawn, G_SESSION_DIR);
@@ -612,18 +902,19 @@ test('G-7: spawn with resume=true + known sessionId passes --session flag', asyn
   stub.children[1].emit('close', 0, null);
 });
 
-test('G-8: spawn with resume=true + sessionId always passes --session <uuid>', () => {
+test('G-8: spawn with resume=true but UNKNOWN sessionId omits --session (starts fresh)', () => {
   const stub = makeStubSpawner();
   const adapter = new PIAdapter(stub.spawn, G_SESSION_DIR);
 
-  // With resume=true, --session <uuid> is always passed so PI can look it up
-  // in --session-dir (or create a new one if not found).
+  // PI can only RESUME an existing session (unlike Claude it cannot create one under an external
+  // id). When the id is unknown — not bootstrapped in this adapter instance and no matching file in
+  // --session-dir — the guard omits --session so PI bootstraps a fresh session instead of exiting
+  // with "No session found matching <id>". (Regression: web/pi sessions minted a Cortex UUID and
+  // forced resume, which PI rejected.)
   adapter.spawn({ sessionId: 'unknown-id', sessionKey: 'kR', resume: true });
 
   const { args } = stub.calls[0];
-  const sessionIdx = args.indexOf('--session');
-  assert.ok(sessionIdx !== -1, '--session flag present');
-  assert.equal(args[sessionIdx + 1], 'unknown-id', '--session receives UUID');
+  assert.equal(args.indexOf('--session'), -1, '--session omitted for an unknown resume target');
 
   stub.children[0].emit('close', 0, null);
 });

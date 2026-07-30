@@ -1,7 +1,22 @@
 // input:  nothing (leaf type-only module)
-// output: AgentResult / AgentHandle / AgentProgress types
-// pos:    Shared type definitions for agent run results and progress
+// output: Agent results with provider identity, handles, and usage types
+// pos:    Shared type definitions for agent execution and messages
 // >>> If I am updated, update my header comment and the parent folder's CORTEX.md <<<
+
+export type ChatNoticeLevel = 'info' | 'warning' | 'error';
+
+/** Backend-neutral snapshot of the tokens currently occupying an agent's context window. */
+export interface ContextUsage {
+  usedTokens: number | null;
+  contextWindow: number;
+  percent: number | null;
+  accuracy: 'exact' | 'estimate';
+}
+
+/** Durable/live session form of a context snapshot. */
+export interface SessionContextUsage extends ContextUsage {
+  updatedAt: string;
+}
 
 export interface AskUserQuestionInfo {
   toolUseId: string | null;
@@ -15,13 +30,14 @@ export interface AgentResult {
   num_turns: number | null;
   rateLimited: boolean;
   rateLimitMessage: string | null;
+  /** Opaque provider key used by provider-scoped throttle and resume bookkeeping. Set by the
+   *  agent facade for every attempt, including successful turns whose continuation may fail. */
+  rateLimitProvider?: string;
   planFilePath: string | null;
   enteredPlanMode: boolean;
   exitedPlanMode: boolean;
   askUserQuestions?: AskUserQuestionInfo[];
   finalOutput: string | null;
-  codexRateLimits?: Record<string, unknown>;
-  codexRawLogPath?: string | null;
   /** Number of background tasks (run_in_background) still running when this turn's
    *  result fired. >0 means the CC backend will spontaneously emit a continuation turn
    *  once they finish; orchestration holds the status in a "waiting" state instead of

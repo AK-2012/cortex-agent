@@ -1,13 +1,11 @@
-// input:  AgentRunner class, resolveDefaultAgent
-// output: unit tests — routing coordination + resolveDefaultAgent config [S8-A]
-// pos:    verifies (a) hourglass reaction when queue exists; (b) +1/-1 trackPendingTask;
-//         (c) enqueue called for channel; (d) resolveDefaultAgent with no agent;
-//         (e) resolveDefaultAgent with directive; (f) agentRunner singleton exists
+// input:  AgentRunner, queue, MockAdapter, agent config
+// output: context persistence, queue-marker, injection, busy, routing regressions
+// pos:    Verifies plain user-message orchestration
 // >>> If I am updated, update my header comment and the parent folder's CORTEX.md <<<
 
-import test from 'node:test';
+import { test } from 'vitest';
 import assert from 'node:assert/strict';
-import { AgentRunner, agentRunner, resolveDefaultAgent } from '../../src/orchestration/agent-runner.js';
+import { AgentRunner, resolveDefaultAgent, emitTurnProgress, persistSessionContextUsage } from '../../src/orchestration/agent-runner.js';
 import { conduitQueues, enqueue } from '../../src/orchestration/conduit-queue.js';
 import { MockAdapter } from '../../src/platform/testing.js';
 import { loadConfig } from '../../src/domain/threads/template-loader.js';
@@ -32,6 +30,67 @@ function makeCtx(overrides: Record<string, any> = {}) {
   };
 }
 
+test('persistSessionContextUsage writes before publishing the same timestamped snapshot', async () => {
+  const order: string[] = [];
+  let stored: any = null;
+  let published: any = null;
+
+  await persistSessionContextUsage(
+    {
+      sessionName: 'cortex-context', sessionId: 's-context', channel: 'web:context',
+      usage: { usedTokens: 60000, contextWindow: 200000, percent: 30, accuracy: 'estimate' },
+    },
+    {
+      now: () => '2026-07-27T12:00:00.000Z',
+      update: async (name, updates) => { order.push(`store:${name}`); stored = updates.contextUsage; },
+      publish: (snapshot) => { order.push('publish'); published = snapshot; },
+    },
+  );
+
+  assert.deepEqual(order, ['store:cortex-context', 'publish']);
+  assert.deepEqual(stored, {
+    usedTokens: 60000, contextWindow: 200000, percent: 30,
+    accuracy: 'estimate', updatedAt: '2026-07-27T12:00:00.000Z',
+  });
+  assert.deepEqual(published, {
+    sessionId: 's-context', channel: 'web:context', ...stored,
+  });
+});
+
+// ── emitTurnProgress: real agent-turn delta for the S4 chat composer ─────────
+
+test('emitTurnProgress publishes numTurns + updates the live execution on a numeric num_turns', () => {
+  const calls: { setNumTurns: number[]; publish: number[] } = { setNumTurns: [], publish: [] };
+  emitTurnProgress(
+    { sessionId: 's1', channel: 'C1', executionId: 'E1', setNumTurns: (n) => calls.setNumTurns.push(n), publish: (n) => calls.publish.push(n) },
+    { num_turns: 4 },
+  );
+  assert.deepEqual(calls.setNumTurns, [4]);
+  assert.deepEqual(calls.publish, [4]);
+});
+
+test('emitTurnProgress is a no-op when num_turns is missing / non-numeric', () => {
+  const calls: number[] = [];
+  const deps = { sessionId: 's1', channel: 'C1', executionId: 'E1', setNumTurns: (n: number) => calls.push(n), publish: (n: number) => calls.push(n) };
+  emitTurnProgress(deps, {});
+  emitTurnProgress(deps, { num_turns: null });
+  emitTurnProgress(deps, { num_turns: 'x' as any });
+  assert.deepEqual(calls, []);
+});
+
+test('emitTurnProgress skips publish when there is no sessionId, and skips setNumTurns when no executionId', () => {
+  const set: number[] = []; const pub: number[] = [];
+  // No sessionId → nothing published, but the live execution can still be updated.
+  emitTurnProgress({ sessionId: null, channel: 'C1', executionId: 'E1', setNumTurns: (n) => set.push(n), publish: (n) => pub.push(n) }, { num_turns: 2 });
+  assert.deepEqual(set, [2]);
+  assert.deepEqual(pub, []);
+  // No executionId → nothing to update on the live registry, but still published.
+  set.length = 0; pub.length = 0;
+  emitTurnProgress({ sessionId: 's1', channel: 'C1', executionId: null, setNumTurns: (n) => set.push(n), publish: (n) => pub.push(n) }, { num_turns: 2 });
+  assert.deepEqual(set, []);
+  assert.deepEqual(pub, [2]);
+});
+
 // ── (a) hourglass reaction when channel already has a queue ──────────────────
 
 test('(a) route() calls addReaction(hourglass) when channel already has a queue', async () => {
@@ -46,10 +105,12 @@ test('(a) route() calls addReaction(hourglass) when channel already has a queue'
   enqueue(channel, () => promise);
 
   const enqueueCalls: string[] = [];
+  const enqueueFns: Array<() => Promise<void>> = [];
   const trackCalls: number[] = [];
   const runner = new AgentRunner({
-    enqueue: (ch, _fn) => { enqueueCalls.push(ch); return true; },
+    enqueue: (ch, fn) => { enqueueCalls.push(ch); enqueueFns.push(fn); return true; },
     track: (d) => { trackCalls.push(d); },
+    execute: async () => {},
   });
 
   const adapter = new MockAdapter();
@@ -64,8 +125,96 @@ test('(a) route() calls addReaction(hourglass) when channel already has a queue'
 
   assert.equal(enqueueCalls.length, 1, 'enqueue was called for the channel');
   assert.equal(enqueueCalls[0], channel);
+  assert.equal(adapter.marksUnqueued.length, 0, 'marker stays while its turn is pending');
+
+  await enqueueFns[0]();
+  assert.deepEqual(adapter.marksUnqueued, [{ ref: { conduit: channel, messageId: 'M1' } }], 'turn completion removes the marker');
 
   // Clean up: unblock the prior queue and drain
+  unlockPrior();
+  const tail = conduitQueues.get(channel);
+  if (tail) await tail;
+});
+
+// ── (a2) mid-turn injection takes precedence over the queue ──────────────────
+
+test('(a) queued marker is removed even when the queued turn fails', async () => {
+  const channel = freshChannel();
+  let unlockPrior!: () => void;
+  const prior = new Promise<void>((resolve) => { unlockPrior = resolve; });
+  enqueue(channel, () => prior);
+
+  const enqueueFns: Array<() => Promise<void>> = [];
+  const adapter = new MockAdapter();
+  const runner = new AgentRunner({
+    enqueue: (_ch, fn) => { enqueueFns.push(fn); return true; },
+    track: () => {},
+    execute: async () => { throw new Error('controlled failure'); },
+  });
+  await runner.route(makeCtx({ channel, adapter }) as any);
+  await assert.rejects(enqueueFns[0], /controlled failure/);
+
+  assert.equal(adapter.marksQueued.length, 1);
+  assert.equal(adapter.marksUnqueued.length, 1, 'failure cleanup removes the marker exactly once');
+
+  unlockPrior();
+  const tail = conduitQueues.get(channel);
+  if (tail) await tail;
+});
+
+test('(a2) route() injects into the live turn instead of queuing it behind that turn', async () => {
+  const channel = freshChannel();
+  const { promise, resolve: unlockPrior } = (() => {
+    let res!: () => void;
+    const p = new Promise<void>(r => { res = r; });
+    return { promise: p, resolve: res };
+  })();
+  enqueue(channel, () => promise); // the channel is busy — today this message would wait
+
+  const enqueueCalls: string[] = [];
+  const trackCalls: number[] = [];
+  const runner = new AgentRunner({
+    enqueue: (ch, _fn) => { enqueueCalls.push(ch); return true; },
+    track: (d) => { trackCalls.push(d); },
+    tryInject: async () => true, // the backend took it into the running turn
+  });
+
+  const adapter = new MockAdapter();
+  await runner.route(makeCtx({ channel, adapter }) as any);
+
+  assert.equal(enqueueCalls.length, 0, 'an injected message is not queued behind the running turn');
+  assert.equal(adapter.marksQueued.length, 0, 'and is never marked queued — it is already in front of the model');
+  assert.deepEqual(trackCalls, [], 'the injection path owns its own busy bracket');
+
+  unlockPrior();
+  const tail = conduitQueues.get(channel);
+  if (tail) await tail;
+});
+
+test('(a2) route() falls back to the normal queue when there is no live turn to inject into', async () => {
+  const channel = freshChannel();
+  const { promise, resolve: unlockPrior } = (() => {
+    let res!: () => void;
+    const p = new Promise<void>(r => { res = r; });
+    return { promise: p, resolve: res };
+  })();
+  enqueue(channel, () => promise);
+
+  const enqueueCalls: string[] = [];
+  const trackCalls: number[] = [];
+  const runner = new AgentRunner({
+    enqueue: (ch, _fn) => { enqueueCalls.push(ch); return true; },
+    track: (d) => { trackCalls.push(d); },
+    tryInject: async () => false, // no live turn / incapable backend / !command
+  });
+
+  const adapter = new MockAdapter();
+  await runner.route(makeCtx({ channel, adapter }) as any);
+
+  assert.deepEqual(enqueueCalls, [channel], 'today’s queue behaviour is preserved exactly');
+  assert.equal(adapter.marksQueued.length, 1, 'and the queued-message feedback still fires');
+  assert.deepEqual(trackCalls, [+1], 'the queued turn takes the busy gate as before');
+
   unlockPrior();
   const tail = conduitQueues.get(channel);
   if (tail) await tail;
@@ -127,19 +276,5 @@ test('(d) resolveDefaultAgent with no default agent uses activeProfile for profi
   // The message is either the original or prepended with directive
   assert.ok(result.effectiveMessage.includes('my task'));
   assert.equal(result.defaultAgentName === null || typeof result.defaultAgentName === 'string', true);
-});
-
-// ── (e) agentRunner singleton exists and has route method ────────────────────
-
-test('(e) agentRunner singleton is an AgentRunner with a route method', () => {
-  assert.ok(agentRunner instanceof AgentRunner);
-  assert.equal(typeof agentRunner.route, 'function');
-});
-
-// ── (f) AgentRunner default constructor uses real enqueue + trackPendingTask ──
-
-test('(f) AgentRunner constructed with no opts uses module-level defaults', () => {
-  const runner = new AgentRunner();
-  assert.equal(runner._enqueue, enqueue, 'defaults to module-level enqueue');
 });
 

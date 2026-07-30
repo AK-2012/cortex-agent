@@ -1,46 +1,15 @@
+// input:  mobile session view models and thread DTO fixtures
+// output: mobile session view-model regression tests
+// pos:    Verifies legacy mobile session derivations
+// >>> If I am updated, update my header comment and CORTEX.md <<<
+
 import { describe, it, expect } from 'vitest';
-import type { ThreadDetail, ApprovalInfo } from '@cortex-agent/ui-contract';
-import {
-  sessionInitials,
-  headerStatus,
-  zhDivider,
-  buildMobileStepper,
-  mobileApprovalDesc,
-  toolChips,
-  DASH,
-} from './mobile-session-vm';
+import type { ThreadDetail } from '@cortex-agent/ui-contract';
+import { zhDivider, buildMobileStepper, toolChips } from './mobile-session-vm';
 
 // Pure view-model for the mobile session screen 5a (scheme.dc.html L2932-3003, task c880). Real
 // data is the only variable; every measurement lives in the presentational components. Neutral test
 // fixtures (守则11 — no private project/exp names).
-
-describe('sessionInitials', () => {
-  it('takes the first two word initials, uppercased', () => {
-    expect(sessionInitials({ label: 'nimbus orchard', name: 'x' })).toBe('NO');
-  });
-  it('falls back to name when label is null', () => {
-    expect(sessionInitials({ label: null, name: 'atlas' })).toBe('AT');
-  });
-  it('single word → first two letters', () => {
-    expect(sessionInitials({ label: null, name: 'atlas' })).toBe('AT');
-  });
-  it('empty → two dashes', () => {
-    expect(sessionInitials({ label: null, name: '' })).toBe(DASH + DASH);
-  });
-});
-
-describe('headerStatus', () => {
-  it('running with real turns and a dash cost placeholder', () => {
-    expect(headerStatus({ running: true, turns: 12 })).toEqual({
-      word: 'running',
-      turnsLabel: '12 turns',
-      cost: DASH,
-    });
-  });
-  it('idle when not streaming', () => {
-    expect(headerStatus({ running: false, turns: 0 }).word).toBe('idle');
-  });
-});
 
 describe('zhDivider', () => {
   const now = new Date(2026, 6, 9, 10, 0); // 2026-07-09 10:00 local
@@ -102,6 +71,7 @@ function detail(over: Partial<ThreadDetail> = {}): ThreadDetail {
     ],
     agentFlow: null,
     dispatches: [],
+    subtasks: [],
     children: [
       {
         id: 'thr_c1',
@@ -159,48 +129,31 @@ describe('buildMobileStepper', () => {
   });
 });
 
-function approval(over: Partial<ApprovalInfo> = {}): ApprovalInfo {
-  return {
-    id: 'ap1',
-    title: 'Over-budget dispatch',
-    operation: 'Dispatch the ablation sweep',
-    reason: 'Needs a large GPU window.',
-    impact: 'Budget only.',
-    command: 'cortex-run --dispatch',
-    status: 'pending',
-    queuedAt: '2026-07-09',
-    decidedAt: null,
-    feedback: null,
-    provenance: null,
-    taskRef: null,
-    ...over,
-  };
-}
-
-describe('mobileApprovalDesc', () => {
-  it('prefers the real reason', () => {
-    expect(mobileApprovalDesc(approval())).toBe('Needs a large GPU window.');
-  });
-  it('falls back to operation when reason is null', () => {
-    expect(mobileApprovalDesc(approval({ reason: null }))).toBe('Dispatch the ablation sweep');
-  });
-  it('dash when both absent (never fabricated)', () => {
-    expect(mobileApprovalDesc(approval({ reason: null, operation: null }))).toBe(DASH);
-  });
-});
-
 describe('toolChips', () => {
-  it('shows the first two tool names + overflow count', () => {
-    const chips = toolChips([
-      { kind: 'read', input: 'a' },
-      { kind: 'threads.status', input: 'b' },
-      { kind: 'grep', input: 'c' },
-      { kind: 'edit', input: 'd' },
-    ]);
-    expect(chips.names).toEqual(['read', 'threads.status']);
-    expect(chips.overflow).toBe(2);
+  const calls = [
+    { kind: 'read', input: 'a' },
+    { kind: 'threads.status', input: 'b' },
+    { kind: 'grep', input: 'c' },
+    { kind: 'edit', input: 'd' },
+  ];
+
+  it('uses the width-derived visible prefix instead of a fixed two-chip cap', () => {
+    const chips = toolChips(calls, { visibleCount: 3, hiddenCount: 1 });
+    expect(chips.names).toEqual(['read', 'threads.status', 'grep']);
+    expect(chips.overflow).toBe(1);
   });
-  it('no overflow when ≤ 2 calls', () => {
-    expect(toolChips([{ kind: 'read', input: 'a' }]).overflow).toBe(0);
+
+  it('can show fewer chips on a narrower row', () => {
+    expect(toolChips(calls, { visibleCount: 1, hiddenCount: 3 })).toEqual({
+      names: ['read'],
+      overflow: 3,
+    });
+  });
+
+  it('returns every name when the row fits', () => {
+    expect(toolChips(calls, { visibleCount: 4, hiddenCount: 0 })).toEqual({
+      names: ['read', 'threads.status', 'grep', 'edit'],
+      overflow: 0,
+    });
   });
 });

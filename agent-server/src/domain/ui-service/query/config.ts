@@ -1,12 +1,12 @@
-// input:  UiServiceDeps + ConfigGetParams (empty)
-// output: config.get handler → redacted ConfigSnapshot of ~/.cortex/config for the settings panel
-// pos:    query handler for 'config.get' (Stage 7 settings 12a–g). Pure `readConfigSnapshot`
-//         (dir args, hermetic) + thin `handleConfigGet` binding CONFIG_DIR / HOOKS_DIR.
-//         SECURITY: never returns .env values or raw machine ssh strings — only redacted markers.
+// input:  config root, mounted-hook registry, UI query types
+// output: redacted ConfigSnapshot with live backend profiles
+// pos:    Hermetic config.get snapshot reader
+// >>> If I am updated, update my header comment and CORTEX.md <<<
 
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { CONFIG_DIR, HOOKS_DIR } from '@core/paths.js';
+import { CONFIG_DIR } from '@core/paths.js';
+import { loadMountedHookSummaries } from '@store/hook-registry.js';
 import type {
   UiServiceDeps,
   ConfigGetParams,
@@ -19,6 +19,7 @@ import type {
   ConfigThreadTemplates,
   ConfigEnvEntry,
 } from '../types.js';
+import type { Backend } from '../../../agent-adapter/types.js';
 
 const MASK = '••••••••';
 
@@ -41,15 +42,6 @@ async function listJsonBasenames(dir: string): Promise<string[]> {
   }
 }
 
-async function listFiles(dir: string): Promise<string[]> {
-  try {
-    const entries = await fs.readdir(dir, { withFileTypes: true });
-    return entries.filter((e) => e.isFile()).map((e) => e.name).sort();
-  } catch {
-    return [];
-  }
-}
-
 function parseBudget(raw: any): ConfigBudget | null {
   if (!raw || typeof raw !== 'object') return null;
   return {
@@ -58,16 +50,27 @@ function parseBudget(raw: any): ConfigBudget | null {
   };
 }
 
+function isLiveBackend(value: unknown): value is Backend {
+  return value === 'claude' || value === 'pi';
+}
+
 function parseProfiles(raw: any): ConfigProfiles | null {
   if (!raw || typeof raw !== 'object' || !raw.profiles || typeof raw.profiles !== 'object') return null;
-  const profiles: ConfigProfileEntry[] = Object.entries(raw.profiles).map(([name, p]: [string, any]) => ({
-    name,
-    model: typeof p?.model === 'string' ? p.model : null,
-    backend: typeof p?.backend === 'string' ? p.backend : null,
-    mode: typeof p?.mode === 'string' ? p.mode : null,
-  }));
+  const profiles = Object.entries(raw.profiles).flatMap(([name, p]: [string, any]): ConfigProfileEntry[] => {
+    if (p?.backend != null && !isLiveBackend(p.backend)) return [];
+    return [{
+      name,
+      model: typeof p?.model === 'string' ? p.model : null,
+      backend: isLiveBackend(p?.backend) ? p.backend : null,
+      mode: typeof p?.mode === 'string' ? p.mode : null,
+      thinking: typeof p?.thinking === 'string' ? p.thinking : null,
+    }];
+  });
+  const requestedDefault = typeof raw.defaultProfile === 'string' ? raw.defaultProfile : null;
   return {
-    defaultProfile: typeof raw.defaultProfile === 'string' ? raw.defaultProfile : null,
+    defaultProfile: requestedDefault && profiles.some((profile) => profile.name === requestedDefault)
+      ? requestedDefault
+      : null,
     profiles,
   };
 }
@@ -120,9 +123,13 @@ async function readEnv(file: string): Promise<ConfigEnvEntry[]> {
  * arguments (no global paths) so it is hermetically testable against a fixture directory. Every
  * source file is independent: a missing / malformed file yields null (or []) for that field only.
  */
-export async function readConfigSnapshot(configDir: string, hooksDir: string): Promise<ConfigSnapshot> {
+export async function readConfigSnapshot(configDir: string): Promise<ConfigSnapshot> {
   const tt = path.join(configDir, 'thread-templates');
-  const [budgetRaw, profilesRaw, machinesRaw, mcpRaw, agents, templates, shells, hooks, env] = await Promise.all([
+  const hooks = loadMountedHookSummaries(
+    path.join(configDir, 'hooks'),
+    path.join(tt, 'templates'),
+  );
+  const [budgetRaw, profilesRaw, machinesRaw, mcpRaw, agents, templates, shells, env] = await Promise.all([
     readJson(path.join(configDir, 'budget.json')),
     readJson(path.join(configDir, 'profiles.json')),
     readJson(path.join(configDir, 'machines.json')),
@@ -130,7 +137,6 @@ export async function readConfigSnapshot(configDir: string, hooksDir: string): P
     listJsonBasenames(path.join(tt, 'agents')),
     listJsonBasenames(path.join(tt, 'templates')),
     listJsonBasenames(path.join(tt, 'shells')),
-    listFiles(hooksDir),
     readEnv(path.join(configDir, '.env')),
   ]);
 
@@ -147,5 +153,5 @@ export async function readConfigSnapshot(configDir: string, hooksDir: string): P
 }
 
 export async function handleConfigGet(_deps: UiServiceDeps, _params: ConfigGetParams): Promise<ConfigSnapshot> {
-  return readConfigSnapshot(CONFIG_DIR, HOOKS_DIR);
+  return readConfigSnapshot(CONFIG_DIR);
 }

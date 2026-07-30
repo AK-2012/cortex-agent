@@ -1,25 +1,39 @@
 Please update me when files in this folder change
 
-tests/orch/ — Regression tests for the orch/ orchestration layer.
-Covers API and event publication contracts for running-executions, channel-queue, superseded-edits, busy-tracker, and interactions/plan-approvals singletons (running-executions is in core/, tests are here, corresponding to Phase 1 Step 1).
+Regression tests for the orchestration layer: message routing, per-channel
+queueing, mid-turn injection, background holds and execution lifecycle.
 
 | filename | role | function |
 |---|---|---|
-| `running-executions.test.ts` | Test | RunningExecutions three-index consistency, kill chain, event publication (Phase 1 Step 1) |
-| `channel-queue.test.ts` | Test | conduitQueues Map + enqueue() serialization and auto-cleanup (S6-B) |
-| `superseded-edits.test.ts` | Test | supersededEdits mark/check/clear API (S6-B) |
-| `plan-approvals.test.ts` | Test | PlanApprovals register/lookup/resolve/reject/clearByChannel + plan.approved event (S6-A) |
-| `busy-tracker.test.ts` | Test | BusyTracker +1/-1 publish+IPC, multi-publisher aggregate, re-entrant safety (S6-C) |
-| `orchestrator.test.ts` | Test | Orchestrator two-branch decision tree: threadAddMatch / isActiveThread / threadStartMatch -> threadExecutor; no match -> agentRunner (S8-A) |
-| `agent-runner.test.ts` | Test | AgentRunner hourglass reaction, +1/-1 trackPendingTask, enqueue channel, resolveDefaultAgent pure function, singleton contract (S8-A) |
-| `agent-runner-wake-guard.test.ts` | Test | 2026-07-05 self-consumption regression: synthetic wakeSession notices (SYNTHETIC_CALLBACK_SENDER) bypass the manager-qa human-answer backstop in route(); real human replies still consumed; buildSyntheticWakeMessage shape sync |
-| `lifecycle-rate-limit.test.ts` | Test | handleAgentError thrown-rate-limit pause branch: throttled + rate-limit error + userMessage → recordResume(direct) + seal, no error post; normal error path otherwise (not throttled / no userMessage / non-rate-limit) |
-| `bg-continuation.test.ts` | Test | buildContinuationSink dispatch (merge text / waiting vs complete vs interrupted; running+undelivered split) + isBgContinuationEnabled / isInteractiveChannel / shouldHoldForBg gating |
-| `bg-wait-guard.test.ts` | Test | BgWaitGuard busy bracket (+1/-1 exactly once), grace watchdog (undelivered-only), max-wait cap (running), rearm switching, env-tunable durations |
-| `lifecycle-bg-hold.test.ts` | Test | handleAgentSuccess bg-hold integration: undelivered-only hold + sink, grace auto-seal, interrupted seal, max-wait cap seal + late-continuation re-seal |
-| `turn-notify.test.ts` | Test | isTurnNotifyEnabled / getTurnNotifyThresholdS gating + maybeNotifyTurnComplete dispatch (threshold/scope/disable gates, success metrics vs failure, threadId forwarding, never-throws) |
-| `thread-executor.test.ts` | Test | ThreadExecutor +1/-1 trackPendingTask, enqueue channel, hourglass reaction, singleton contract (S8-A) |
-| `thread-detached.test.ts` | Test | runThreadDetached holds the busy gate for the whole fire-and-forget thread AND across the onSettled callback (sync +1, -1 in finally on success/reject, balanced, deferred until callback settles — test e) — regression for restart killing MCP `thread_start` background threads / dropping the completion callback |
-| `seal-thread-status.test.ts` | Test | sealThreadStatus unifies the interactive `!thread` + background/resume terminal seal: text == buildThreadSummary; interactive style attaches SEALED action blocks (Cancel removed), background attaches none; delivery failure propagates (no internal swallow) |
-| `ask-user-question-pi.test.ts` | Test | PI ask-user-question branch: tryResolveHook extension_ui_response routing, multi-question join, incomplete does not resolve early (S3) |
-| `session-lifecycle-characterization.test.ts` | Test | Stage C characterization: resolveSessionName (existing→cached name, unknown→register with label/profileName/backend/projectId, null→generate only) + handleNewCmd (clears all backends + ledger + posts "new conversation") |
+| agent-runner-wake-guard.test.ts | test | Covers synthetic wake notice routing guard |
+| agent-runner.test.ts | test | Covers plain message routing and queue markers |
+| ask-user-question-pi.test.ts | test | Covers PI ask-user-question resolution |
+| bg-continuation.test.ts | test | Covers background continuation sink dispatch |
+| bg-wait-guard.test.ts | test | Covers background wait bracket, grace and cap |
+| busy-tracker.test.ts | test | Covers busy counter publish and aggregation |
+| cancel-bg-hold.test.ts | test | Covers stop during a background hold |
+| channel-queue.test.ts | test | Covers per-channel queue serialization |
+| edit-handler.test.ts | test | Covers message edit rollback and backend pick |
+| first-turn-interrupt-resume.test.ts | test | Covers prompt capture and first-turn interrupt |
+| hook-bridge-subscribers-web.test.ts | test | Covers hook to Web interaction delivery |
+| interaction-records.test.ts | test | Covers interaction create and resolve lifecycle |
+| lifecycle-bg-hold.test.ts | test | Covers lifecycle hold, grace and wait cap |
+| lifecycle-rate-limit.test.ts | test | Covers provider-attributed error recovery |
+| mid-turn-inject-persistence.test.ts | test | Covers durable ordering of pending injection |
+| mid-turn-inject.test.ts | test | Covers the mid-turn injection lifecycle |
+| orchestrator.test.ts | test | Covers thread versus agent routing choice |
+| pending-injection-recovery.test.ts | test | Covers injection idempotency and startup drain |
+| plan-approvals.test.ts | test | Covers plan approval state transitions |
+| plan-response.test.ts | test | Covers Web plan approve and reject delivery |
+| resume-dispatcher.test.ts | test | Covers ready dispatch, requeue and idle wake |
+| running-executions.test.ts | test | Covers execution registry indices and events |
+| seal-thread-status.test.ts | test | Covers terminal thread status sealing |
+| session-events.test.ts | test | Covers session event publication contract |
+| session-lifecycle-characterization.test.ts | test | Covers session naming and new session command |
+| session-send.test.ts | test | Covers Web user message build and send |
+| superseded-edits.test.ts | test | Covers superseded edit mark, check and clear |
+| teardown-execution.test.ts | test | Covers execution teardown and balanced events |
+| thread-detached.test.ts | test | Covers detached thread busy gate bracket |
+| thread-executor.test.ts | test | Covers thread queue markers and routing |
+| turn-notify.test.ts | test | Covers turn completion notification gating |
+| web-bg-hold.test.ts | test | Covers Web background hold status and seal |

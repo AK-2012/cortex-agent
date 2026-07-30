@@ -1,8 +1,14 @@
-// Pure nav model for the Settings modal (design 12a–g, prototype.dc.html L720–1090, script L2379).
-// The 9 left-nav panels + their content-header title/sub copy (verbatim EN from the prototype
-// secMeta, L2394–2404). Framework-free; no JSX, no hex. Precedent: features/overview/overview-vm.ts.
+// input:  localized vocabulary and selected settings section
+// output: ordered settings navigation and section metadata
+// pos:    Pure navigation model for the Settings modal
+// >>> If I am updated, update my header comment and the parent folder's CORTEX.md <<<
+
+// Labels are resolved via `getSettingsNav(L)` / `getSectionMeta(L, key)`.
+
+import type { Vocab } from '@/i18n';
 
 export type SettingsSectionKey =
+  | 'appearance'
   | 'platform'
   | 'profiles'
   | 'budget'
@@ -27,59 +33,75 @@ export interface SettingsSectionMeta {
   sub: string;
 }
 
-// prototype L2379–2388 — order is authoritative.
-export const SETTINGS_NAV: SettingsNavEntry[] = [
-  { key: 'platform', label: 'Platform', file: '.env' },
-  { key: 'profiles', label: 'Profiles', file: 'profiles.json' },
-  { key: 'budget', label: 'Budget', file: 'budget.json' },
-  { key: 'machines', label: 'Machines', file: 'machines.json' },
-  { key: 'templates', label: 'Thread templates', file: 'thread-templates' },
-  { key: 'mcp', label: 'MCP servers', file: 'mcp-config.json' },
-  { key: 'notifications', label: 'Notifications', file: '.env' },
-  { key: 'hooks', label: 'Hooks', file: 'hooks/*.mjs' },
-  { key: 'advanced', label: 'Advanced', file: 'feature flags' },
-];
-
-// prototype L2394–2404 — EN copy verbatim (the app default language is EN).
-export const SETTINGS_SECTION_META: Record<SettingsSectionKey, SettingsSectionMeta> = {
-  platform: {
-    title: 'Platform',
-    sub: 'config/.env — loaded once at daemon startup; the only restart-required config',
-  },
-  profiles: {
-    title: 'Profiles',
-    sub: 'config/profiles.json — read on every agent spawn, no restart needed',
-  },
-  budget: {
-    title: 'Budget',
-    sub: 'config/budget.json — hot-read, applies immediately; upgrades never overwrite (only --force)',
-  },
-  machines: {
-    title: 'Machines',
-    sub: 'config/machines.json — fs.watch hot-reload; clients auto-launched over SSH at startup',
-  },
-  templates: {
-    title: 'Thread templates',
-    sub: 'config/thread-templates.json — read fresh on every thread launch',
-  },
-  mcp: {
-    title: 'MCP servers',
-    sub: 'config/mcp-config.json — full / core / tui variants picked per runtime mode',
-  },
-  notifications: {
-    title: 'Notifications',
-    sub: '.env notification flags + system notice routing (fans out per platform)',
-  },
-  hooks: {
-    title: 'Hooks',
-    sub: 'three layers: in-agent · thread lifecycle · session — .mjs read fresh per invocation',
-  },
-  advanced: {
-    title: 'Advanced',
-    sub: 'feature flags — written to .env, restart to apply',
-  },
+// Vocab key for each nav label (also used as section meta title).
+const NAV_LABEL_KEYS: Record<SettingsSectionKey, keyof Vocab> = {
+  appearance: 'stNavAppearance',
+  platform: 'stNavPlatform',
+  profiles: 'stNavProfiles',
+  budget: 'stNavBudget',
+  machines: 'stNavMachines',
+  templates: 'stNavTemplates',
+  mcp: 'stNavMcp',
+  notifications: 'stNavNotifications',
+  hooks: 'stNavHooks',
+  advanced: 'stNavAdvanced',
 };
 
-export function sectionMeta(key: SettingsSectionKey): SettingsSectionMeta {
-  return SETTINGS_SECTION_META[key];
+// Vocab key for each section meta sub description.
+const NAV_SUB_KEYS: Record<SettingsSectionKey, keyof Vocab> = {
+  appearance: 'stMetaAppearanceSub',
+  platform: 'stMetaPlatformSub',
+  profiles: 'stMetaProfilesSub',
+  budget: 'stMetaBudgetSub',
+  machines: 'stMetaMachinesSub',
+  templates: 'stMetaTemplatesSub',
+  mcp: 'stMetaMcpSub',
+  notifications: 'stMetaNotificationsSub',
+  hooks: 'stMetaHooksSub',
+  advanced: 'stMetaAdvancedSub',
+};
+
+// File tags (prototype order). These are file paths — not translated.
+const NAV_FILES: Record<SettingsSectionKey, string> = {
+  appearance: 'this device',
+  platform: '.env',
+  profiles: 'profiles.json',
+  budget: 'budget.json',
+  machines: 'machines.json',
+  templates: 'thread-templates',
+  mcp: 'mcp-config.json',
+  notifications: '.env',
+  hooks: 'config/hooks',
+  advanced: 'feature flags',
+};
+
+// prototype L2379–2388 — order is authoritative.
+const NAV_ORDER: SettingsSectionKey[] = [
+  'appearance',
+  'platform',
+  'profiles',
+  'budget',
+  'machines',
+  'templates',
+  'mcp',
+  'notifications',
+  'hooks',
+  'advanced',
+];
+
+/** Returns the 9 nav entries with labels resolved from the given vocab. */
+export function getSettingsNav(L: Vocab): SettingsNavEntry[] {
+  return NAV_ORDER.map((key) => ({
+    key,
+    label: L[NAV_LABEL_KEYS[key]],
+    file: NAV_FILES[key],
+  }));
+}
+
+/** Returns section meta (title + sub) resolved from the given vocab. */
+export function getSectionMeta(L: Vocab, key: SettingsSectionKey): SettingsSectionMeta {
+  return {
+    title: L[NAV_LABEL_KEYS[key]],
+    sub: L[NAV_SUB_KEYS[key]],
+  };
 }

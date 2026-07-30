@@ -1,9 +1,9 @@
 // input:  PIAdapter stub + runWithAdapter + cost-tracker
-// output: agent_end → cost entry integration test
+// output: Per-run PI cost recording with settled completion
 // pos:    PI cost record end-to-end integration path
 // >>> If I am updated, update my header comment and the parent folder's CORTEX.md <<<
 
-import test from 'node:test';
+import { test, afterAll } from 'vitest';
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
 import { PassThrough } from 'node:stream';
@@ -81,9 +81,9 @@ function pushLine(child: StubChild, obj: unknown): void {
   child.stdout.write(JSON.stringify(obj) + '\n');
 }
 
-// --- Cleanup (N2H-3: test.after() ensures env is restored even on assertion failure) ---
+// --- Cleanup (N2H-3: afterAll() ensures env is restored even on assertion failure) ---
 
-test.after(() => {
+afterAll(() => {
   if (ORIGINAL_COSTS_FILE !== undefined) {
     process.env['CORTEX_COSTS_FILE'] = ORIGINAL_COSTS_FILE;
   } else {
@@ -100,7 +100,7 @@ test.after(() => {
 // Integration test: direct-pi run → cost entry with provider/model/tokens
 // ---------------------------------------------------------------------------
 
-test('pi-cost-record: agent_end with provider+model+usage → cost entry in costs file', async () => {
+test('pi-cost-record: agent_end records cost before agent_settled completes', async () => {
   // Redirect cost tracking to isolated temp file
   process.env['CORTEX_COSTS_FILE'] = COSTS_FILE;
   costRepo._testReset();
@@ -140,8 +140,7 @@ test('pi-cost-record: agent_end with provider+model+usage → cost entry in cost
   await Promise.resolve();
   await Promise.resolve();
 
-  // Emit agent_end with provider, model, and usage (non-zero cost).
-  // This triggers cost_record + turn_complete events in the event parser.
+  // agent_end records low-level usage; agent_settled terminates the Cortex turn.
   pushLine(child, {
     type: 'agent_end',
     messages: [
@@ -153,6 +152,7 @@ test('pi-cost-record: agent_end with provider+model+usage → cost entry in cost
       },
     ],
   });
+  pushLine(child, { type: 'agent_settled' });
   await Promise.resolve();
   await Promise.resolve();
 

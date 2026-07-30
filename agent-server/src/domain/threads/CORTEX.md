@@ -1,33 +1,21 @@
 Please update me when files in this folder change
 
-Thread domain layer — S7 split result of thread-manager.ts (1098 lines) (2026-04-26).
-External callers should import from index.ts, not reference sub-files directly.
+Thread domain layer — owns thread lifecycle, templates, prompts, step execution, and thread trees.
+Consumed by the orchestration and UI layers through the index barrel.
 
 | filename | role | function |
 |---|---|---|
-| `utils.ts` | utility | isDefaultThread / isAdHocThread / getSessionKey / parseTarget / resolveStageName |
-| `artifact-io.ts` | I/O | readArtifact / cleanupWorkspace / getModifiedFilesFromSession / getSessionFileChanges / renderModifiedFilesWithDiff / FileChange |
-| `template-loader.ts` | config | loadConfig (DR-0017 D6 Phase 2.5: directory form `config/thread-templates/{agents,templates,shells}/` preferred, legacy single file fallback; expands shell-binding templates via shell-templates, fail-soft per entry) / migrateThreadTemplatesToDir (one-time single-file → dir split + `.migrated-bak`) / mergeThreadTemplates (per-file copy-if-missing defaults dir → user dir) / startConfigWatcher (watches each entity subdir) / stopConfigWatcher / getTemplate / getAgent / listTemplates / listTemplateNames / listAgents / resolveFileRef |
-| `shell-templates.ts` | config | isShellBinding / expandShell — DR-0017 D6 Phase 2.5: GENERIC interpolation of a shell binding + a pure-JSON ShellDefinition (`shells/*.json`) into a full ThreadTemplate (`{param}` → agent name, `{param.entryStage}` → agent entryStage); no per-shell hardcoded expander; 7 validation semantics preserved |
-| `prompt-builder.ts` | build | buildStepPrompt / buildConversationPrompt / resolveSystemVars / resolveAgentSlotConfig / resolveTemplateAgents / resolveTemplateProfiles (template→profile set, used by task-dispatch rate-limit gating) / formatEndpoint / pickStepTemplate / THREAD_PROTOCOL_PREAMBLE |
-| `state-machine.ts` | state machine | createThread (DR-0017 W1: manager-template dispatch threads anchor artifactPath on the task node via core/task-node ensureTaskArtifact — durable, never truncated) / addAgentToThread / resolveNextStep / evaluateTransitions / recordStepResult / completeThread / failThread / cancelThread / abortThread / tryEnterWaiting (thread + task children, §8) / peekPendingControl / clearPendingControl / detectSplitFromControl (DR-0015 out-of-band control plane — replaces the old artifact string-marker detectors) / isArtifactUnchangedSinceStepStart + step-start artifact-hash baseline in createThread/recordStepResult (DR-0017 W2 checkpoint gate) |
-| `runner.ts` | runtime | runThread / continueThread / resumeThread / buildThreadSummary — thread execution engine, registers handle via runningExecutions. Threads are created by task dispatch (and resumed via the `/webhook/thread-op` `control` bridge). The agent-facing `thread_start` spawn tool was removed: delegation is via the task system (`cortex-task spawn`/`add`). At each step boundary the runner reads metadata.pendingControl (written out-of-band by the thread_abort/split/wait tools, DR-0015) and dispatches abort / split / wait — no artifact scanning. |
-| `tree.ts` | tree (DR-0014) | getRootThreadId / getTreeThreads / summarizeTree / checkSpawnGuards (width+nodes+budget) / registerChildSpawn / buildThreadTree — recursive thread-tree identity, resource guards, tree view |
-| `contract.ts` | contract (DR-0014) | buildContractPrompt / buildMissionChain / checkContractBudget — structured delegation contracts, ancestor goal chain, per-thread budget breaker |
-| `hook-runner.ts` | hook | executeLifecycleHook — lifecycle hook script executor + hook agent runner |
-| `thread-transcript.ts` | transcript | createStepTranscriptBuffer / flushStepTranscript — records a thread step's FULL conversation (assistant text + tool calls) into conversation-history keyed by the resolved result.sessionId, so thread sessions render in the UI (sessions.transcript). Events are buffered during the step (setupStepCallbacks) and flushed at step end (recordStepOutcome), because a fresh slot's sessionId is only known after the agent runs. |
-| `index.ts` | entry | barrel re-export, the only import point for all external callers |
-
-## Internal dependency order (acyclic)
-
-```
-utils.ts          → threadStore, thread-types
-artifact-io.ts    → threadStore, REPO_ROOT, fs, diff
-shell-templates.ts → thread-types (pure)
-template-loader.ts → DATA_DIR, REPO_ROOT, template-resolver, shell-templates, thread-types
-prompt-builder.ts  → template-loader, artifact-io, threadStore, thread-types, memory/user-context
-contract.ts        → thread-types (pure)
-tree.ts            → threadStore, thread-types
-state-machine.ts   → threadStore, template-loader, prompt-builder, utils, artifact-io, contract
-index.ts           → all of the above
-```
+| index.ts | entry | re-exports the core thread modules |
+| utils.ts | util | thread id, target, and stage name helpers |
+| artifact-io.ts | io | reads thread artifacts and modified file paths |
+| template-loader.ts | config | loads and hot-reloads thread template config |
+| template-resolver.ts | config | expands vars and blocks in prompt templates |
+| shell-templates.ts | config | turns a shell binding into a full template |
+| prompt-builder.ts | build | assembles resume-aware prompts and slot configs |
+| state-machine.ts | state | Drives lifecycle and stores provider pauses |
+| runner.ts | runtime | Runs steps and pauses/resumes provider outages |
+| hook-runner.ts | hook | Adapts lifecycle hooks to HookBus and hook agents |
+| thread-transcript.ts | record | records each step's conversation to history |
+| tree.ts | tree | tracks thread trees and spawn resource guards |
+| contract.ts | contract | builds delegation contracts and goal chains |
+| auto-thread.ts | util | decides auto compound and merges final outputs |

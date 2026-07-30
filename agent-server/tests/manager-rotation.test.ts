@@ -7,7 +7,7 @@
 // >>> If I am updated, update my header comment and the parent folder's CORTEX.md <<<
 
 import './_test-home.js'; // MUST be first: isolate CORTEX_HOME before paths.ts loads
-import test, { after } from 'node:test';
+import { test, afterAll } from 'vitest';
 import assert from 'node:assert/strict';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
@@ -23,7 +23,7 @@ const createdThreadIds = new Set<string>();
 const projectDirs: string[] = [];
 let seq = 0;
 
-after(async () => {
+afterAll(async () => {
   for (const id of createdThreadIds) await threadStore.delete(id);
   await threadStore.flush();
   for (const d of projectDirs) { try { fs.rmSync(d, { recursive: true, force: true }); } catch {} }
@@ -68,7 +68,7 @@ function makeManager(proj: string, taskId: string, over: Partial<ThreadRecord> =
     userMessage: 'contract text', userMessageTs: 'ts', workspacePath: '',
     artifactPath: `/tmp/rot-artifact-${id}.md`,
     agents: {
-      manager: { slotId: 'manager', profile: 'p', sessionId: 'sess-old', sessionName: null, status: 'idle', lastOutput: null, persistSession: true },
+      manager: { slotId: 'manager', profile: 'p', sessionId: 'sess-old', backendSessionId: 'backend-old', sessionName: null, status: 'idle', lastOutput: null, persistSession: true },
     },
     activeAgent: 'manager', activeStage: null, currentStepIndex: 6,
     steps: dummySteps(6), iterationCounts: {}, totalCostUsd: 0,
@@ -103,6 +103,7 @@ test('over threshold → session cleared, base reset, rehydration notice queued 
   assert.equal(await maybeRotateManager(mgr.id), true);
   const t = threadStore.get(mgr.id)!;
   assert.equal(t.agents.manager.sessionId, null, 'persisted session retired');
+  assert.equal(t.agents.manager.backendSessionId, null, 'backend resume target retired too (track/backend decoupling)');
   assert.equal(t.metadata?.rotationBaseStepIndex, 6, 'base reset to current step count');
   const notice = (t.metadata?.pendingMessages ?? []).join('\n');
   assert.match(notice, /fresh incarnation/i);

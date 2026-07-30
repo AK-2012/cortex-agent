@@ -1,9 +1,7 @@
-// Compile-time drift guard (no runtime effect). Asserts that each zod input
-// schema's inferred type is mutually assignable to the corresponding
-// QueryParamMap / MutateArgsMap entry in agent-server. If the backend contract
-// changes (a field added/removed/retyped) and a schema is not updated in
-// lock-step, `pnpm typecheck` fails here. This is the anti-drift test for the
-// contract package.
+// input:  shared zod schemas and agent-server query/mutation maps
+// output: exact-parity guards including project notes
+// pos:    Anti-drift boundary for the shared UI contract
+// >>> 一旦我被更新，务必更新我的开头注释与所属文件夹 CORTEX.md <<<
 
 import type { z } from 'zod';
 import type { QueryParamMap, MutateArgsMap, ExecutionsLogParams } from './dto.js';
@@ -14,6 +12,8 @@ import type {
   sessionsTranscriptInput,
   sessionsCreateInput,
   sessionsSendInput,
+  sessionsCompactInput,
+  sessionsSetProfileInput,
   threadsListInput,
   threadsGetInput,
   tasksListInput,
@@ -27,6 +27,14 @@ import type {
   approvalsApproveInput,
   approvalsRejectInput,
   approvalsRequestInput,
+  issuesListInput,
+  issueActionInput,
+  notesListInput,
+  noteAddInput,
+  noteUpdateInput,
+  noteSetCompletedInput,
+  noteActionInput,
+  notesClearCompletedInput,
   costSummaryInput,
   threadsCancelInput,
   executionsCancelInput,
@@ -38,9 +46,18 @@ import type {
   executionsLogInput,
   configGetInput,
   configSetInput,
+  hooksListInput,
+  hooksCreateInput,
+  hooksUpdateInput,
+  hooksSetEnabledInput,
+  hooksRemoveInput,
+  hooksTestInput,
   machinesListInput,
   skillsListInput,
   threadTemplatesGetInput,
+  systemDaemonStatusInput,
+  systemRateLimitStatusInput,
+  systemRestartInput,
 } from './schemas.js';
 
 // Mutual assignability: true only when A and B are structurally equivalent.
@@ -68,16 +85,23 @@ const _executionsGet: QueryParity<'executions.get', typeof executionsGetInput> =
 const _memoryTree: QueryParity<'memory.tree', typeof memoryTreeInput> = true;
 const _memoryFile: QueryParity<'memory.file', typeof memoryFileInput> = true;
 const _approvalsList: QueryParity<'approvals.list', typeof approvalsListInput> = true;
+const _issuesList: QueryParity<'issues.list', typeof issuesListInput> = true;
+const _notesList: QueryParity<'notes.list', typeof notesListInput> = true;
 const _costSummary: QueryParity<'cost.summary', typeof costSummaryInput> = true;
 const _configGet: QueryParity<'config.get', typeof configGetInput> = true;
+const _hooksList: QueryParity<'hooks.list', typeof hooksListInput> = true;
 const _machinesList: QueryParity<'machines.list', typeof machinesListInput> = true;
 const _skillsList: QueryParity<'skills.list', typeof skillsListInput> = true;
 const _threadTemplatesGet: QueryParity<'threadTemplates.get', typeof threadTemplatesGetInput> = true;
+const _systemDaemonStatus: QueryParity<'system.daemonStatus', typeof systemDaemonStatusInput> = true;
+const _systemRateLimitStatus: QueryParity<'system.rateLimitStatus', typeof systemRateLimitStatusInput> = true;
 
 // ── Mutate ops ────────────────────────────────────────────────────
 const _projectsCreate: MutateParity<'projects.create', typeof projectsCreateInput> = true;
 const _sessionsCreate: MutateParity<'sessions.create', typeof sessionsCreateInput> = true;
 const _sessionsSend: MutateParity<'sessions.send', typeof sessionsSendInput> = true;
+const _sessionsCompact: MutateParity<'sessions.compact', typeof sessionsCompactInput> = true;
+const _sessionsSetProfile: MutateParity<'sessions.setProfile', typeof sessionsSetProfileInput> = true;
 const _threadsCancel: MutateParity<'threads.cancel', typeof threadsCancelInput> = true;
 const _executionsCancel: MutateParity<'executions.cancel', typeof executionsCancelInput> = true;
 const _schedulesPause: MutateParity<'schedules.pause', typeof scheduleActionInput> = true;
@@ -90,9 +114,22 @@ const _tasksComplete: MutateParity<'tasks.complete', typeof taskCompleteInput> =
 const _tasksBlock: MutateParity<'tasks.block', typeof taskBlockInput> = true;
 const _tasksUnblock: MutateParity<'tasks.unblock', typeof taskActionInput> = true;
 const _configSet: MutateParity<'config.set', typeof configSetInput> = true;
+const _hooksCreate: MutateParity<'hooks.create', typeof hooksCreateInput> = true;
+const _hooksUpdate: MutateParity<'hooks.update', typeof hooksUpdateInput> = true;
+const _hooksSetEnabled: MutateParity<'hooks.setEnabled', typeof hooksSetEnabledInput> = true;
+const _hooksRemove: MutateParity<'hooks.remove', typeof hooksRemoveInput> = true;
+const _hooksTest: MutateParity<'hooks.test', typeof hooksTestInput> = true;
 const _approvalsApprove: MutateParity<'approvals.approve', typeof approvalsApproveInput> = true;
 const _approvalsReject: MutateParity<'approvals.reject', typeof approvalsRejectInput> = true;
 const _approvalsRequest: MutateParity<'approvals.request', typeof approvalsRequestInput> = true;
+const _issuesHandle: MutateParity<'issues.handle', typeof issueActionInput> = true;
+const _issuesDelete: MutateParity<'issues.delete', typeof issueActionInput> = true;
+const _notesAdd: MutateParity<'notes.add', typeof noteAddInput> = true;
+const _notesUpdate: MutateParity<'notes.update', typeof noteUpdateInput> = true;
+const _notesSetCompleted: MutateParity<'notes.setCompleted', typeof noteSetCompletedInput> = true;
+const _notesDelete: MutateParity<'notes.delete', typeof noteActionInput> = true;
+const _notesClearCompleted: MutateParity<'notes.clearCompleted', typeof notesClearCompletedInput> = true;
+const _systemRestart: MutateParity<'system.restart', typeof systemRestartInput> = true;
 
 // ── Subscriptions ─────────────────────────────────────────────────
 // Subscriptions have no query/mutate map entry; guard the input schema against its backend
@@ -103,10 +140,14 @@ const _executionsLog: Exact<z.infer<typeof executionsLogInput>, ExecutionsLogPar
 // checks are not tree-shaken away by the type checker.
 export const _contractParityChecked = [
   _projectsList, _sessionsList, _sessionsTranscript, _threadsList, _threadsGet, _tasksList, _schedulesList,
-  _executionsList, _executionsGet, _memoryTree, _memoryFile, _approvalsList, _costSummary, _configGet,
+  _executionsList, _executionsGet, _memoryTree, _memoryFile, _approvalsList, _notesList, _costSummary, _configGet,
   _machinesList, _skillsList, _threadTemplatesGet,
-  _projectsCreate, _sessionsCreate, _sessionsSend, _threadsCancel, _executionsCancel,
+  _projectsCreate, _sessionsCreate, _sessionsSend, _sessionsCompact, _sessionsSetProfile, _threadsCancel, _executionsCancel,
   _schedulesPause, _schedulesResume, _schedulesRemove, _schedulesAdd, _tasksClaim,
   _tasksUnclaim, _tasksComplete, _tasksBlock, _tasksUnblock,
-  _approvalsApprove, _approvalsReject, _approvalsRequest, _configSet, _executionsLog,
+  _approvalsApprove, _approvalsReject, _approvalsRequest, _issuesList, _issuesHandle, _issuesDelete,
+  _notesAdd, _notesUpdate, _notesSetCompleted, _notesDelete, _notesClearCompleted,
+  _configSet, _executionsLog,
+  _hooksList, _hooksCreate, _hooksUpdate, _hooksSetEnabled, _hooksRemove, _hooksTest,
+  _systemDaemonStatus, _systemRateLimitStatus, _systemRestart,
 ] as const;

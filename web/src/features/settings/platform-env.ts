@@ -1,4 +1,10 @@
+// input:  redacted environment entries and vocabulary keys
+// output: safe settings rows plus supported environment-key groups
+// pos:    Pure settings model for environment-backed panels
+// >>> If I am updated, update my header comment and the parent folder's CORTEX.md <<<
+
 import type { ConfigEnvEntry } from '@cortex-agent/ui-contract';
+import type { Vocab } from '@/i18n';
 
 // Pure helpers for the redacted .env view (Platform / Notifications / Advanced panels).
 // SECURITY: config.get NEVER returns a .env value — only { key, present, masked }. These helpers
@@ -27,11 +33,6 @@ export function envRow(index: EnvIndex, key: string): EnvRow {
   const entry = index[key];
   const present = entry?.present === true;
   return { key, present, display: present ? ENV_MASK : '—' };
-}
-
-/** All env keys (present or not) that start with `prefix` — for an honest listing of extra keys. */
-export function envKeysWithPrefix(env: ConfigEnvEntry[], prefix: string): string[] {
-  return env.filter((e) => e.key.startsWith(prefix)).map((e) => e.key);
 }
 
 /** True if any *present* env key matches the prefix — used to reflect platform presence honestly. */
@@ -72,22 +73,22 @@ export const NOTIFY_KEYS = {
   compaction: 'CORTEX_NOTIFY_COMPACTION',
 } as const;
 
-export const ADVANCED_FLAGS: { env: string; title: string; desc: string }[] = [
-  { env: 'DEBUG', title: 'Debug logging', desc: 'verbose output to daemon.log' },
-  { env: 'CORTEX_EVENT_LOG', title: 'Event-bus log', desc: 'records every event-bus message' },
+export const ADVANCED_FLAGS: { env: string; titleKey: keyof Vocab; descKey: keyof Vocab }[] = [
+  { env: 'DEBUG', titleKey: 'stAdvDebugTitle', descKey: 'stAdvDebugDesc' },
+  { env: 'CORTEX_EVENT_LOG', titleKey: 'stAdvEventLogTitle', descKey: 'stAdvEventLogDesc' },
   {
     env: 'CORTEX_SHOW_TOOL_CALLS',
-    title: 'Inline tool-call rendering',
-    desc: 'renders tool calls in message tails',
+    titleKey: 'stAdvToolCallsTitle',
+    descKey: 'stAdvToolCallsDesc',
   },
   {
     env: 'CORTEX_DISABLE_USER_CONTEXT',
-    title: 'Disable USER.md injection',
-    desc: 'direct turns inject by default; thread steps never do',
+    titleKey: 'stAdvDisableUserTitle',
+    descKey: 'stAdvDisableUserDesc',
   },
   {
     env: 'CORTEX_SERVER_UPDATE_DISABLE',
-    title: 'Disable auto-update check',
-    desc: 'update check is on by default',
+    titleKey: 'stAdvDisableUpdateTitle',
+    descKey: 'stAdvDisableUpdateDesc',
   },
 ];

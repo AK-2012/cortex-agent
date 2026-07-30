@@ -1,6 +1,7 @@
-// input:  UiServiceDeps + SessionsListParams / SessionsTranscriptParams
-// output: handleSessionsList → SessionInfo[]; handleSessionsTranscript → SessionTranscript
-// pos:    query handlers for 'sessions.list' and 'sessions.transcript'
+// input:  session/history stores plus process DEBUG size policy
+// output: session snapshots with compact support and transcript DTOs
+// pos:    Authoritative query boundary for session transcripts
+// >>> If I am updated, update my header comment and the parent folder's CORTEX.md <<<
 
 import type {
   UiServiceDeps,
@@ -9,7 +10,13 @@ import type {
   SessionsTranscriptParams,
   SessionTranscript,
   TranscriptTurn,
+  TranscriptMessage,
+  SessionsPendingInteractionParams,
+  SessionsPendingInteraction,
 } from '../types.js';
+import { effectiveBackendSessionId } from '@store/session-registry-repo.js';
+import type { HistoryEvent } from '@store/conversation-history-repo.js';
+import { isDebugMode, isDebugToolOverWarningThreshold } from '@core/debug-mode.js';
 
 export async function handleSessionsList(
   deps: UiServiceDeps,
@@ -38,29 +45,153 @@ export async function handleSessionsList(
     sessions = results;
   }
 
-  return sessions.map((s: any): SessionInfo => ({
-    sessionId: s.sessionId,
-    name: s.name,
-    projectId: s.projectId,
-    backend: s.backend,
-    kind: s.kind,
-    origin: s.origin ?? 'direct',
-    createdAt: s.createdAt,
-    lastUsedAt: s.lastUsedAt,
-    resumable: s.kind !== 'scheduled',
-    label: s.label ?? null,
-  }));
+  // Live running snapshot: an interactive turn = a non-thread execution registered on the
+  // session's channel (threads run their own executions on the same channel and must not
+  // mark the session itself running). Snapshot + delta: this field is the queryable snapshot;
+  // the `session.status` event stream is the delta.
+  const isChannelInTurn = (channel: string | undefined): boolean =>
+    !!channel && deps.runningExecutions.getByChannel(channel).some((e) => !e.threadId);
+
+  // Live agent-turn count of the in-flight interactive turn (the running snapshot): the non-thread
+  // execution on the channel carries its own live numTurns, updated in-memory on each turn_progress.
+  const liveTurnsForChannel = (channel: string | undefined): number | null => {
+    if (!channel) return null;
+    const exec = deps.runningExecutions.getByChannel(channel).find((e) => !e.threadId);
+    return exec && typeof (exec as any).numTurns === 'number' ? (exec as any).numTurns : null;
+  };
+
+  // Idle snapshot: the last COMPLETED interactive run's turn count AND total cost. One pass over the
+  // execution registry builds channel → latest non-thread execution (by startedAt), carrying both its
+  // numTurns and metrics.costUsd (same run). A running turn never falls back to this (avoids showing
+  // the previous run's count/cost during a fresh turn). costUsd is only known at turn end — there is
+  // no live in-memory cost source — so the running case has no live cost (null).
+  const lastRunByChannel = new Map<string, { startedAt: string; numTurns: number; costUsd: number | null }>();
+  for (const e of deps.executionRegistry.getAll()) {
+    const channel: string | undefined = e?.channel ?? undefined;
+    const numTurns: unknown = e?.metrics?.numTurns;
+    if (!channel || e?.thread?.threadId || typeof numTurns !== 'number') continue;
+    const startedAt: string = e?.runtime?.startedAt ?? '';
+    const costUsd: unknown = e?.metrics?.costUsd;
+    const prev = lastRunByChannel.get(channel);
+    if (!prev || startedAt.localeCompare(prev.startedAt) >= 0) {
+      lastRunByChannel.set(channel, { startedAt, numTurns, costUsd: typeof costUsd === 'number' ? costUsd : null });
+    }
+  }
+  const resolveNumTurns = (channel: string | undefined, running: boolean): number | null => {
+    if (running) return liveTurnsForChannel(channel);
+    return channel ? (lastRunByChannel.get(channel)?.numTurns ?? null) : null;
+  };
+  // Last run's cost: idle → the latest non-thread run's finalized cost; running → null (no live source).
+  const resolveCost = (channel: string | undefined, running: boolean): number | null => {
+    if (running) return null;
+    return channel ? (lastRunByChannel.get(channel)?.costUsd ?? null) : null;
+  };
+
+  const infos = sessions.map((s: any): SessionInfo => {
+    const inTurn = isChannelInTurn(s.channel);
+    // Web bg-hold snapshot: the foreground execution is gone from runningExecutions, but a
+    // background task still holds the session (running stays true per the session.status contract).
+    // A live foreground turn wins — the session then renders as plain running. Metrics
+    // (numTurns/costUsd) key off the foreground turn: a held session shows its last completed run.
+    const bgHeld = !inTurn && (deps.isSessionBgHeld?.(s.sessionId) ?? false);
+    const running = inTurn || bgHeld;
+    // Awaiting user action: the session is blocked on a pending ask-user question or plan approval
+    // (keyed by the session's channel). This is the ONLY signal that turns the rail dot amber —
+    // running/background stay blue. Absent deps (fixtures/TUI) ⇒ false.
+    const awaitingInput =
+      !!deps.getPendingAskUser?.(s.channel) || !!deps.getPendingPlan?.(s.channel);
+    return {
+      sessionId: s.sessionId,
+      // Backend CLI resume target (registry backendSessionId, legacy fallback to sessionId) — the
+      // real UUID the "Session ID" surface shows, decoupled from the track sessionId above.
+      backendSessionId: effectiveBackendSessionId(s),
+      name: s.name,
+      projectId: s.projectId,
+      backend: s.backend,
+      kind: s.kind,
+      origin: s.origin ?? 'direct',
+      createdAt: s.createdAt,
+      lastUsedAt: s.lastUsedAt,
+      resumable: s.kind !== 'scheduled',
+      label: s.label ?? null,
+      profileName: s.profileName ?? null,
+      contextUsage: s.contextUsage ?? null,
+      contextCompactionSupported: deps.supportsSessionCompaction?.(s) ?? false,
+      running,
+      backgroundRunning: bgHeld,
+      awaitingInput,
+      numTurns: resolveNumTurns(s.channel, inTurn),
+      costUsd: resolveCost(s.channel, inTurn),
+      // Unread = activity (lastUsedAt, bumped at turn end) after the user's last view
+      // (sessions.markRead → lastReadAt). Legacy records without lastReadAt → read.
+      unread: !!s.lastReadAt && s.lastUsedAt > s.lastReadAt,
+    };
+  });
+
+  // Title label-less sessions from their first user message so the left rail shows the conversation's
+  // opening text instead of the opaque `cortex-XXXX` name. Read-only + bounded (only for sessions
+  // with no persisted label, capped) so a large unscoped list stays cheap; new sessions already get a
+  // persisted label at their first turn (agent-runner.ensureSessionLabel).
+  const getFirstUserText = deps.conversationHistory.getFirstUserText;
+  if (getFirstUserText) {
+    const LABEL_DERIVE_CAP = 80;
+    let derived = 0;
+    for (const info of infos) {
+      if (derived >= LABEL_DERIVE_CAP) break;
+      if (info.label && info.label.trim()) continue;
+      derived++;
+      const first = await getFirstUserText(info.sessionId).catch(() => null);
+      if (first) info.label = first.length > 60 ? first.slice(0, 60) : first;
+    }
+  }
+
+  return infos;
 }
 
 // ── sessions.transcript (S4 chat) ─────────────────────────────────
 // Wrap the backend-independent conversation history and group its already-turn-tagged event
 // stream into turns. An absent/empty history is not an error — it maps to zero turns.
+
+/** Pending interactions older than this derive to expired at read time (matches the
+ *  hook-bridge / ask-user 30-minute TTLs). */
+const INTERACTION_TTL_MS = 30 * 60 * 1000;
+
+function transcriptDebugDetails(ev: HistoryEvent): TranscriptMessage['debug'] {
+  if (!isDebugMode() || ev.debug === undefined) return undefined;
+  if (ev.type !== 'tool' || !isDebugToolOverWarningThreshold(ev.debug)) return ev.debug;
+  return { ...ev.debug, overCharacterThreshold: true };
+}
+
+/** Legacy-compatible subtype derived from kind+status (old clients render InteractionRow off it). */
+function interactionSubtype(kind: string, status: string): string {
+  if (kind === 'plan-approval') return status === 'approved' ? 'plan-approved' : status === 'rejected' ? 'plan-rejected' : `plan-${status}`;
+  return status === 'answered' ? 'ask-user-answered' : `ask-user-${status}`;
+}
+
+async function pendingUserSnapshot(
+  deps: UiServiceDeps,
+  sessionId: string,
+): Promise<NonNullable<SessionTranscript['pendingUserMessages']>> {
+  const records = await deps.pendingInjections?.listBySession(sessionId) ?? [];
+  return records.map((record) => ({
+    id: record.id,
+    text: record.text,
+    ts: record.createdAt,
+    ...(record.attachments ? { attachments: record.attachments } : {}),
+  }));
+}
+
 export async function handleSessionsTranscript(
   deps: UiServiceDeps,
   params: SessionsTranscriptParams,
 ): Promise<SessionTranscript> {
+  // Read active state first, then committed history. Commit order is history → active remove, so
+  // this sequence must observe the message on at least one side of that cross-store handoff.
+  const pendingSnapshot = await pendingUserSnapshot(deps, params.sessionId);
   const history = await deps.conversationHistory.getHistory(params.sessionId);
-  if (!history) return { sessionId: params.sessionId, turns: [] };
+  if (!history) return { sessionId: params.sessionId, turns: [], pendingUserMessages: pendingSnapshot };
+  const committedIds = new Set(history.committedSourceIds ?? []);
+  const pendingUserMessages = pendingSnapshot.filter((message) => !committedIds.has(message.id));
 
   const byTurn = new Map<number, TranscriptTurn>();
   const order: number[] = [];
@@ -77,16 +208,71 @@ export async function handleSessionsTranscript(
     const curMs = Date.parse(ev.ts);
     const curValid = Number.isFinite(curMs);
     const elapsedMs = prevMs !== null && curValid ? curMs - prevMs : null;
+
+    // Interaction entity rows: derive `expired` for pending rows whose live resolver is gone
+    // (server restarted) or older than the TTL. The in-process pending index (via
+    // deps.isInteractionPending) is the liveness signal.
+    let interaction: TranscriptMessage['interaction'];
+    let entitySubtype: string | undefined;
+    if (ev.type === 'interaction' && ev.id) {
+      let status = ev.status ?? 'pending';
+      if (status === 'pending') {
+        const live = deps.isInteractionPending?.(ev.id) ?? false;
+        const age = curValid ? Date.now() - curMs : Infinity;
+        if (!live || age > INTERACTION_TTL_MS) status = 'expired';
+      }
+      interaction = {
+        id: ev.id,
+        kind: (ev.kind ?? 'ask-user') as NonNullable<TranscriptMessage['interaction']>['kind'],
+        status: status as NonNullable<TranscriptMessage['interaction']>['status'],
+        payload: ev.payload ?? {},
+        ...(ev.result !== undefined ? { result: ev.result } : {}),
+        ...(ev.resolvedVia !== undefined ? { resolvedVia: ev.resolvedVia } : {}),
+      };
+      entitySubtype = interactionSubtype(interaction.kind, interaction.status);
+    }
+
+    const debug = transcriptDebugDetails(ev);
     turn.messages.push({
-      type: ev.type,
+      type: ev.type as TranscriptMessage['type'],
       text: ev.type === 'tool' ? null : (ev.text ?? ''),
       toolName: ev.type === 'tool' ? (ev.toolName ?? '') : null,
       toolInput: ev.type === 'tool' ? (ev.toolInput ?? '') : null,
       ts: ev.ts,
       elapsedMs,
+      // Only materialize the key when present — an explicit `attachments: undefined` breaks
+      // deep-equality with the DTO shape (pre-existing red test, fixed in passing). Both user
+      // uploads (15a) and agent-sent files (20a, assistant events) carry attachments.
+      ...((ev.type === 'user' || ev.type === 'assistant') && ev.attachments !== undefined ? { attachments: ev.attachments } : {}),
+      ...(ev.type === 'assistant' && ev.noticeLevel !== undefined ? { noticeLevel: ev.noticeLevel } : {}),
+      // Edit+rewind marker (sessions.rewind): backs the「已编辑」badge + original-message card.
+      ...(ev.type === 'user' && ev.edited !== undefined ? { edited: ev.edited } : {}),
+      // Defense in depth: persisted debug records stay hidden when DEBUG is off. Large-tool
+      // warnings are derived here from the current agent-server env and never written to history.
+      ...(debug !== undefined ? { debug } : {}),
+      ...(ev.type === 'interaction' && (entitySubtype ?? ev.subtype) ? { subtype: entitySubtype ?? ev.subtype } : {}),
+      ...(interaction !== undefined ? { interaction } : {}),
     });
     prevMs = curValid ? curMs : null;
   }
 
-  return { sessionId: history.sessionId, turns: order.map((i) => byTurn.get(i)!) };
+  return {
+    sessionId: history.sessionId,
+    turns: order.map((i) => byTurn.get(i)!),
+    pendingUserMessages,
+  };
+}
+
+// ── sessions.pendingInteraction ───────────────────────────────────
+// Returns the current pending ask-user or plan approval for a session, if any.
+// Reads from the server's in-memory Maps (same lifetime as the blocked MCP tool).
+export async function handleSessionsPendingInteraction(
+  deps: UiServiceDeps,
+  params: SessionsPendingInteractionParams,
+): Promise<SessionsPendingInteraction> {
+  const channel = `web:${params.sessionId}`;
+  return {
+    askUser: deps.getPendingAskUser?.(channel) ?? null,
+    plan: deps.getPendingPlan?.(channel) ?? null,
+  };
 }

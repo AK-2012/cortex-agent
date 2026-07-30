@@ -1,6 +1,6 @@
-// input:  thread-templates.json, runtime thread state
-// output: TypeScript types and schema for Thread/Agent/Template/Hook/Stage
-// pos:    shared type definitions for the Thread system
+// input:  thread template config and durable runtime state
+// output: thread state, outage retries, and lifecycle types
+// pos:    Shared type definitions for the thread system
 // >>> If I am updated, update my header comment and the parent folder's CORTEX.md <<<
 
 // --- Thread Identity ---
@@ -17,7 +17,7 @@ export type ThreadStatus =
   | 'completed'    // all steps done, terminal
   | 'failed'       // unrecoverable error, terminal
   | 'cancelled'    // user cancelled, terminal
-  | 'aborted';     // agent self-aborted via [ABORT] marker in artifact, terminal
+  | 'aborted';     // agent self-aborted via the thread_abort tool, terminal
 
 // --- Stage Definition (optional per-stage prompt for multi-phase agents) ---
 
@@ -142,22 +142,25 @@ export interface HookResult {
   directive?: string;                 // agent role/identity definition, prepended to the prompt
 }
 
-/** Context received by hook script (stdin JSON) */
-export interface HookContext {
+/** Context received by lifecycle hook scripts through stdin. */
+export interface HookContext extends Record<string, unknown> {
   threadId: string;
   templateName: string;
   phase: 'start' | 'transition' | 'end';
+  source: string | null;
+  project: string;
+  projectId: string;
+  taskId: string | null;
+  taskProject: string | null;
   currentStepIndex: number;
   steps: AgentStep[];
-  activeAgent: string;               // the agent about to execute (the next agent on onTransition)
-  previousAgent?: string;            // the agent that just completed
+  activeAgent: string;               // the agent about to execute (the next agent on transition)
+  previousAgent: string | null;      // the agent that just completed
   artifactContent: string;           // current artifact file content
   userMessage: string;
   totalCostUsd: number;
-  /** Out-of-band control intent on this thread (DR-0015): 'abort' | 'split' | 'wait' | null.
-   *  Hooks (e.g. task-status-check) use this — NOT artifact scanning — to tell an intentional
-   *  non-completion (abort/split) from a stuck task. */
-  pendingControlAction?: 'abort' | 'split' | 'wait' | null;
+  /** Typed control intent used to distinguish intentional non-completion. */
+  pendingControlAction: 'abort' | 'split' | 'wait' | null;
 }
 
 /** Lifecycle hooks for thread templates */
@@ -244,7 +247,13 @@ export interface AgentStep {
   /** Stage name this step ran. Null for single-stage agents (no `stages` map declared). */
   stage: string | null;
   executionId: string | null;
+  /** Stable Cortex track id — the conversation-history / UI transcript key for this step
+   *  (minted at step start by beginStepSession; decoupled from the backend session id). */
   sessionId: string | null;
+  /** Backend session id resolved when the agent run settled — the `--resume` target.
+   *  Absent (undefined) on records written before the track/backend decoupling, where
+   *  `sessionId` held the backend id. */
+  backendSessionId?: string | null;
   sessionName: string | null;
   input: string;
   output: string | null;
@@ -260,7 +269,14 @@ export interface AgentStep {
 export interface AgentSlot {
   slotId: AgentSlotId;
   profile: string;
+  /** Stable Cortex track id — the conversation-history / UI transcript key. Minted at step
+   *  start (beginStepSession) so a RUNNING step is queryable/streamable; for persistSession
+   *  slots it stays stable across steps. Decoupled from the backend resume id. */
   sessionId: string | null;
+  /** Backend session id (`--resume` target), set when a step settles. Absent (undefined) on
+   *  records written before the track/backend decoupling, where `sessionId` held the backend
+   *  id — beginStepSession migrates those in place. */
+  backendSessionId?: string | null;
   sessionName: string | null;
   status: 'idle' | 'running' | 'completed';
   lastOutput: string | null;
@@ -351,6 +367,12 @@ export interface ThreadMetadata {
    *  task.completed / task.blocked events drain it; resume requires waitingOn AND
    *  waitingOnTasks both empty. Unlike thread children, task children survive restarts. */
   waitingOnTasks?: string[];
+  /** Stall marker for the wait-set deadlock guard: the computeStuckWaitSet key of the last
+   *  stall this manager was woken for. A waiting manager whose remaining awaited tasks are ALL
+   *  stuck behind blocked dependencies is woken once per distinct stall (wake-on-empty alone
+   *  would hang it forever); an identical stall never re-wakes — without this the periodic
+   *  sweep would wake it every cycle. Cleared on a normal (empty wait set) resume. */
+  stuckWakeKey?: string | null;
   /** Children whose results were already queued into pendingMessages — persistent
    *  idempotency for completion callbacks (survives restarts, unlike the in-memory fired set). */
   deliveredChildResults?: string[];
@@ -372,16 +394,21 @@ export interface ThreadMetadata {
   contract?: ThreadContract | null;
   /** Ancestor goal chain, root-first — injected into the child prompt to prevent drift. */
   missionChain?: string[];
-  /** Task association for task-dispatch threads, so a suspended parent can rebuild its
-   *  onEnd task-status-check hook on re-entry (extraHooks are not persisted). */
+  /** Task association persisted for lifecycle payloads and resumed dispatch work. */
   taskId?: string | null;
   taskProject?: string | null;
   /** Task text (TASKS.yaml `text`) at dispatch time, for the thread step status line so a glance
    *  shows what is running. Persisted because status updates outlive the in-memory selected task. */
   taskText?: string | null;
+  /** Followup created when a failed dispatch left completed-task review unresolved. */
+  reviewLeakFollowupTaskId?: string | null;
   /** Set when the thread was paused (status==='rate_limited') by an API rate limit, so the
    *  resume path and startup recovery can tell a rate-limit pause apart from a real failure. */
   interruptedByRateLimit?: boolean;
+  /** Opaque provider key whose active throttle owns this pause. Used for restart reconciliation. */
+  rateLimitProvider?: string | null;
+  /** Cumulative synthetic provider-outage resumes attempted by this thread. */
+  outageResumeCount?: number;
   /** Destination kind decided at spawn time, so re-entry can rebuild RunThreadOptions. */
   resumeDest?: 'interactive-reply' | 'project-report' | null;
   /** Live status message persisted at suspension so the post-resume settle can refresh it
@@ -398,8 +425,8 @@ export interface ThreadMetadata {
     kind?: string | null;            // abort: too-big | mis-scoped | blocked-external
     diagnosis?: string | null;       // abort: required free-text diagnosis (= thread.abortReason)
     subtasks?: any[] | null;         // split: decompose subtask array (decomposeTask shape)
-    onTasks?: string[] | null;       // wait: explicit task ids to wait on (optional hint)
-    onThreads?: string[] | null;     // wait: explicit thread ids to wait on (optional hint)
+    onTasks?: string[] | null;       // wait: explicit task wait set; any selector disables inference
+    onThreads?: string[] | null;     // wait: explicit thread wait set; any selector disables inference
     requestedAtStep?: number;        // step index at which the agent requested control
   } | null;
 }
@@ -443,11 +470,7 @@ export interface RunThreadOptions {
   onPlanWritten?: ((event: { path: string; content: string; toolUseId: string }) => void) | null;
   /** Called by the facade event loop when an ask_user_question NormalizedEvent fires (PI backend: during turn). */
   onAskUserQuestion?: ((event: { toolUseId: string; questions: Array<{ question: string; options?: string[]; multi?: boolean }> }) => void) | null;
-  /** Invoked when the thread terminates via agent abort, BEFORE onEnd hooks run, so the
-   *  dispatch path can block the owning task in time (DR-0015 problem 2: otherwise the onEnd
-   *  task-status-check sees a still-claimed task and "recovers" it by unclaiming, which lets the
-   *  dispatcher re-grab the task before the abort→block lands). Injected by task-dispatch; absent
-   *  for non-dispatch threads (no owning task). */
+  /** Invoked before end hooks when agent abort must block the owning dispatch task. */
   onAbort?: ((info: { taskId: string; project: string | null; reason: string | null }) => Promise<void> | void) | null;
   /** Per-call lifecycle hooks injected by the caller (task-dispatcher / scheduled-runner / etc.).
    *  Executed AFTER the template's hook at the same phase (template first, extra second) and share

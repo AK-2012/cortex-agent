@@ -1,19 +1,19 @@
 Please update me when files in this folder change
 
-Task system domain — TASKS.md reading (parser), writing (mutator), dispatch (dispatcher), archiving (archiver).
-mutator.ts takes over the 17 mutation forwarding responsibilities from the original store/task-repo.ts, serializing write operations via taskStore.runExclusive.
+Task system domain: reads and writes TASKS.yaml, dispatches tasks to agents, archives finished work.
+Also tracks dispatched runs, records acceptance verdicts, and recovers claims orphaned by a crash.
 
 | filename | role | function |
 |---|---|---|
-| `parser.ts` | read path | TASKS.md parsing |
-| `mutator.ts` | write path | 17 mutations via `taskStore.runExclusive`: claim / complete / block / add / batchEdit, etc. |
-| `acceptance-ledger.ts` | ledger | DR-0017 W1 task-keyed acceptance ledger (`context/projects/{project}/manager/{taskId}/ledger.json`): readLedger / recordDelivered / recordVerdict / pendingDeliveries — cross-incarnation delivery dedupe ('accepted' never re-delivers; pending/rejected re-deliver at-least-once per manager incarnation); verdict write path = `cortex-task verdict` (system/task-cli.ts handleVerdict); writes are sync-atomic via core atomicWriteSync |
-| `task-lock.ts` | lock | TASKS.yaml file-level lock primitives (acquire / release / read / assert) |
-| `lint.ts` | validation | TASKS.md format check |
-| `archiver.ts` | archive | Completed task archiving |
-| `dispatcher.ts` | dispatch | Automatic task dispatch |
-| `dispatch-utils.ts` | utility | Dispatch helper functions |
-| `pending-tracker.ts` | tracker | Pending task tracking |
-| `store.ts` | adapter | Store access adaptation layer |
-| `recommendation/` | subdirectory | Task recommendation |
-| `system/` | subdirectory | Task CLI and state machine (CORTEX.md exists) |
+| acceptance-ledger.ts | core | records child result deliveries and verdicts |
+| archiver.ts | core | Archives completed tasks after retention |
+| claim-recovery.ts | core | releases task claims orphaned by a crash |
+| dispatcher.ts | core | selects and claims the next task to run |
+| dispatch-utils.ts | util | device registry and task id generation |
+| lint.ts | util | checks task files for cycles and errors |
+| mutator.ts | core | serializes task mutations with locks and hooks |
+| parser.ts | adapter | re-exports the task file parser |
+| pending-tracker.ts | core | tracks dispatched tasks and their status |
+| store.ts | adapter | re-exports the task store and git lock |
+| recommendation/ | subdir | extracts implied tasks from project notes |
+| system/ | subdir | task CLI, state machine and file locking |

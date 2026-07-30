@@ -1,4 +1,4 @@
-import test from 'node:test';
+import { test } from 'vitest';
 import assert from 'node:assert/strict';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
@@ -62,8 +62,9 @@ function makeDeps(projectId: string, root: string): UiServiceDeps {
     runningExecutions: { getAll: () => [] } as any,
     costSummary: async () => ({ today: 0, week: 0, month: 0, total: 0, byMode: {} as any, byProject: {}, byTrigger: {}, bySource: {}, byBackend: {}, tokens: {} as any, entryCount: 0, dailyBudget: 0, forecastToday: 0, dailyCost: [], byTriggerScoped: {} }),
     bus: { subscribe: () => ({ unsubscribe: () => {} }), publish: () => {} } as any,
-    createDirectSession: async () => ({ sessionId: '', sessionName: '' }),
+    createDirectSession: async () => ({ sessionId: '', sessionName: '', channel: '' }),
     cancelSessionRun: async () => 0,
+    switchSessionProfile: async () => ({ ok: true, name: '', currentBackend: '', targetBackend: '', backendChanged: false }),
     clientRegistry: { getOnlineDevices: () => [], isDeviceOnline: () => false, getMachineRegistry: () => ({}) },
     adapter: { getProjectConduits: async () => ({}) } as any,
   };
@@ -86,6 +87,17 @@ test('memory.tree lists real top-level files and memory dirs with entry counts',
   assert.equal(dirByName['knowledge'], 1);
   assert.equal(dirByName['decisions'], 1);
   assert.ok(!('patterns' in dirByName)); // patterns/ absent → omitted
+
+  // Each dir now enumerates its real .md entries (mobile 1j accordion), sorted, with entryCount === entries.length.
+  const experiments = tree.dirs.find((d) => d.name === 'experiments')!;
+  assert.deepEqual(
+    experiments.entries.map((e) => e.name),
+    ['EXP-001.md', 'EXP-002.md'], // index.md / CORTEX.md excluded, name-sorted
+  );
+  assert.equal(experiments.entryCount, experiments.entries.length);
+  const exp1 = experiments.entries.find((e) => e.name === 'EXP-001.md')!;
+  assert.equal(exp1.sizeBytes, Buffer.byteLength('exp1'));
+  assert.ok(typeof exp1.modifiedAt === 'string' && exp1.modifiedAt.length > 0);
 });
 
 // ── (2) file returns real content ────────────────────────────────────────────

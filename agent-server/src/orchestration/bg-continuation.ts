@@ -1,10 +1,10 @@
-// input:  ContinuationSink contract (agent-adapter) + OutputStream + AgentResult
-// output: buildContinuationSink + scope/feature gating helpers
-// pos:    CC background-task continuation orchestration (merge into reply + waiting status)
+// input:  continuation contract, output stream, result, tool/context callbacks
+// output: background sink forwarding text, tools, context, and terminal state
+// pos:    Claude continuation sink and hold gates
 // >>> If I am updated, update my header comment and the parent folder's CORTEX.md <<<
 
 import type { OutputStream } from '@platform/index.js';
-import type { AgentResult } from '@core/types/agent-types.js';
+import type { AgentResult, ContextUsage } from '@core/types/agent-types.js';
 import type { ContinuationSink } from '../agent-adapter/types.js';
 import { isBgContinuationEnabled } from '../agent-adapter/bg-wait.js';
 
@@ -15,7 +15,11 @@ export interface ContinuationSinkDeps {
   /** Optional callback for tool_use events from the continuation turn. When set,
    *  forwarded to the ContinuationSink so the adapter can route continuation tool
    *  calls to the originating turn's ToolTrace (Slack tool traces + history). */
-  onToolUse?: ((name: string, input: any) => void) | null;
+  onToolUse?: ((name: string, input: any, toolUseId?: string) => void) | null;
+  /** Optional full normalized result callback paired to onToolUse by toolUseId. */
+  onToolResult?: ((toolUseId: string, content: string, isError: boolean) => void) | null;
+  /** Optional context snapshot callback for the spontaneous provider call. */
+  onContextUsage?: ((usage: ContextUsage) => void) | null;
   /** Called when the continuation result still has background work remaining (chained /
    *  undelivered tasks): keep the status waiting with the combined remaining count. The
    *  split lets the caller re-arm the bg-wait-guard (grace vs max-wait). */
@@ -42,6 +46,8 @@ export function buildContinuationSink(deps: ContinuationSinkDeps): ContinuationS
   return {
     onAssistantText: (text: string) => deps.stream.emitText(text),
     onToolUse: deps.onToolUse || undefined,
+    onToolResult: deps.onToolResult || undefined,
+    onContextUsage: deps.onContextUsage || undefined,
     onResult: (result: AgentResult) => {
       if (result.backgroundInterrupted) { (deps.onInterrupted ?? deps.onComplete)(result); return; }
       if (result.rateLimited) { deps.onRateLimited(result); return; }
@@ -74,4 +80,27 @@ export { isBgContinuationEnabled };
 /** Scope gate: only interactive user conduits (Slack / Feishu), never thread/dispatch. */
 export function isInteractiveChannel(channel: string): boolean {
   return !!channel && (channel.startsWith('slack:') || channel.startsWith('feishu:'));
+}
+
+/** Scope gate for the Web UI hold: the `web:` conduit. Kept SEPARATE from isInteractiveChannel
+ *  because the two holds render their "waiting" state through different surfaces — Slack/Feishu
+ *  edit a status message (lifecycle.ts), web keeps the session.status event stream live and
+ *  streams the continuation as session.message events (web-bg-hold.ts). */
+export function isWebChannel(channel: string): boolean {
+  return !!channel && channel.startsWith('web:');
+}
+
+/** Single gate for the WEB background-task hold (agent-runner uses it): feature enabled + web
+ *  channel + not rate-limited + sink capability + work remaining. Mirrors shouldHoldForBg but
+ *  scoped to `web:` so web sessions do not fall through both hold paths (the original gap:
+ *  a web turn ending with a live background task silently dropped the continuation). */
+export function shouldHoldWebForBg(
+  result: { pendingBackgroundTasks?: number; undeliveredBackgroundTasks?: number; rateLimited?: boolean } | null | undefined,
+  channel: string,
+  canRegisterSink: boolean,
+): boolean {
+  if (!isBgContinuationEnabled() || !isWebChannel(channel) || !canRegisterSink) return false;
+  if (!result || result.rateLimited) return false;
+  const remaining = (result.pendingBackgroundTasks ?? 0) + (result.undeliveredBackgroundTasks ?? 0);
+  return remaining > 0;
 }

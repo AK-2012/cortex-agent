@@ -1,79 +1,102 @@
-// input:  conversation-history-repo (summarizeToolInputForHistory), a thread step's streamed events
-// output: createStepTranscriptBuffer + flushStepTranscript + HistoryWriter/StepTranscriptEvent types
-// pos:    records a thread step's FULL conversation transcript into conversation-history, so thread
-//         sessions render in the UI (sessions.transcript). A thread step's sessionId is only known
-//         AFTER the agent runs, so events are buffered during the step and flushed keyed by the
-//         resolved sessionId. Mirrors the direct path's per-event appends (agent-runner).
+// input:  conversation history, DEBUG gate, thread step's normalized id-correlated events
+// output: incremental transcript recorder with optional lossless prompt/tool result persistence
+// pos:    thread-step transcript writes/live hints keyed by the slot's stable track sessionId
 // >>> If I am updated, update my header comment and the parent folder's CORTEX.md <<<
 
 import { summarizeToolInputForHistory } from '@store/conversation-history-repo.js';
+import { createLogger } from '@core/log.js';
+import { isDebugMode } from '@core/debug-mode.js';
 
-/** The subset of ConversationHistoryRepo the flush needs — injectable for tests. */
+const log = createLogger('thread-transcript');
+
+/** The subset of ConversationHistoryRepo the recorder needs — injectable for tests. */
 export interface HistoryWriter {
-  appendUser(sessionId: string, opts: { text: string }): Promise<void>;
-  appendAssistant(sessionId: string, opts: { text: string }): Promise<void>;
-  appendTool(sessionId: string, opts: { toolName: string; toolInput?: string }): Promise<void>;
+  appendUser(sessionId: string, opts: { text: string; ts?: string; agentMessage?: string }): Promise<void>;
+  appendAssistant(sessionId: string, opts: { text: string; ts?: string }): Promise<void>;
+  appendTool(sessionId: string, opts: { toolName: string; toolInput?: string; ts?: string; toolUseId?: string; fullInput?: unknown }): Promise<void>;
+  appendToolResult(sessionId: string, opts: { toolUseId: string; content: string; isError: boolean }): Promise<void>;
 }
 
-/** A buffered step event (assistant text or a tool call). */
-export interface StepTranscriptEvent {
-  role: 'assistant' | 'tool';
-  text?: string;
-  toolName?: string;
-  toolInput?: string;
-}
-
-/** One persisted transcript event, passed to the optional live-publish callback. */
+/** One persisted transcript event, passed to the optional live-publish callback. `ts` is shared
+ *  with the history entry so the web UI's de-dup (transcript query vs live tail) keys match. */
 export interface PersistedTranscriptEvent {
   role: 'user' | 'assistant' | 'tool';
+  ts: string;
   text?: string;
   toolName?: string;
   toolInput?: string;
 }
 
-export interface StepTranscriptBuffer {
-  readonly events: StepTranscriptEvent[];
+export interface StepTranscriptRecorder {
+  recordUser(text: string): void;
   recordAssistant(text: string): void;
-  recordTool(name: string, input: any): void;
+  recordTool(name: string, input: any, toolUseId?: string): void;
+  /** DEBUG-only result sidecar; no-op when the process-wide mode was disabled at creation. */
+  recordToolResult(toolUseId: string, content: string, isError: boolean): void;
+  /** Resolves once every append issued so far has settled. Never rejects — a failed
+   *  append is logged and skipped, later events still persist. */
+  settle(): Promise<void>;
 }
 
-/** Create an in-memory buffer for a single thread step. The step's streamed assistant messages
- *  and tool calls are appended here (in emission order) and flushed once the step's sessionId is
- *  known. Tool inputs are summarized on capture (same rule as the direct path). */
-export function createStepTranscriptBuffer(): StepTranscriptBuffer {
-  const events: StepTranscriptEvent[] = [];
-  return {
-    events,
-    recordAssistant(text: string): void {
-      events.push({ role: 'assistant', text });
-    },
-    recordTool(name: string, input: any): void {
-      events.push({ role: 'tool', toolName: name, toolInput: summarizeToolInputForHistory(input) });
-    },
-  };
-}
-
-/** Persist a completed step's transcript keyed by its resolved sessionId. The step prompt opens
- *  the turn (appendUser), then the buffered assistant/tool events flush in emission order. The
- *  optional onEvent callback fires per persisted event (incl. the opening user turn) for live UI
- *  publishing. Writes are awaited in order so the JSONL line order matches emission order. */
-export async function flushStepTranscript(
+/** Create a live per-event recorder for a single thread step, keyed by the step's track
+ *  sessionId. Each record*() call publishes synchronously (emission order) via `onEvent` and
+ *  chains the history append behind the previous one (per-recorder order = emission order). */
+export function createStepTranscriptRecorder(
   history: HistoryWriter,
   sessionId: string,
-  prompt: string,
-  buffer: StepTranscriptBuffer,
   onEvent?: (ev: PersistedTranscriptEvent) => void,
-): Promise<void> {
-  await history.appendUser(sessionId, { text: prompt });
-  onEvent?.({ role: 'user', text: prompt });
+  onDebugUpdated?: () => void,
+): StepTranscriptRecorder {
+  let chain: Promise<void> = Promise.resolve();
+  const debugEnabled = isDebugMode();
 
-  for (const ev of buffer.events) {
-    if (ev.role === 'assistant') {
-      await history.appendAssistant(sessionId, { text: ev.text ?? '' });
-      onEvent?.({ role: 'assistant', text: ev.text ?? '' });
-    } else {
-      await history.appendTool(sessionId, { toolName: ev.toolName ?? '', toolInput: ev.toolInput ?? '' });
-      onEvent?.({ role: 'tool', toolName: ev.toolName ?? '', toolInput: ev.toolInput ?? '' });
-    }
+  function push(ev: PersistedTranscriptEvent, append: () => Promise<void>): void {
+    onEvent?.(ev);
+    chain = chain
+      .then(append)
+      .then(() => {
+        if (debugEnabled && (ev.role === 'user' || ev.role === 'tool')) onDebugUpdated?.();
+      })
+      .catch((e) => {
+        log.error(`step transcript append failed (${ev.role}, session ${sessionId.substring(0, 8)}):`, (e as Error).message);
+      });
   }
+
+  return {
+    recordUser(text: string): void {
+      const ts = new Date().toISOString();
+      push({ role: 'user', ts, text }, () => history.appendUser(sessionId, {
+        text,
+        ts,
+        ...(debugEnabled ? { agentMessage: text } : {}),
+      }));
+    },
+    recordAssistant(text: string): void {
+      const ts = new Date().toISOString();
+      push({ role: 'assistant', ts, text }, () => history.appendAssistant(sessionId, { text, ts }));
+    },
+    recordTool(name: string, input: any, toolUseId = ''): void {
+      const ts = new Date().toISOString();
+      const toolInput = summarizeToolInputForHistory(input);
+      push({ role: 'tool', ts, toolName: name, toolInput },
+        () => history.appendTool(sessionId, {
+          toolName: name,
+          toolInput,
+          ts,
+          ...(debugEnabled ? { toolUseId, fullInput: input } : {}),
+        }));
+    },
+    recordToolResult(toolUseId: string, content: string, isError: boolean): void {
+      if (!debugEnabled) return;
+      chain = chain
+        .then(() => history.appendToolResult(sessionId, { toolUseId, content, isError }))
+        .then(() => { onDebugUpdated?.(); })
+        .catch((e) => {
+          log.error(`step transcript append failed (tool-result, session ${sessionId.substring(0, 8)}):`, (e as Error).message);
+        });
+    },
+    settle(): Promise<void> {
+      return chain;
+    },
+  };
 }

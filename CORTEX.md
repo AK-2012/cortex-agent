@@ -8,9 +8,9 @@ Cortex is an autonomous research agent system for robotics and AI/ML. It runs as
 |-----------|---------|
 | `agent-server/` | Main server application (TypeScript, Node.js >=20). Slack/Feishu bot, LLM orchestration, scheduling, task system, MCP tools. See [agent-server/CORTEX.md](agent-server/CORTEX.md). |
 | `client/` | Remote agent client (TypeScript, Node.js >=20). Connects to agent-server via WebSocket, executes bash/read/write/edit/glob/grep commands locally, supports cortex-run for long-running task execution. See [client/src/CORTEX.md](client/src/CORTEX.md). |
-| `web/` | Web SPA (Vite + React 18, tRPC client). Built to `web/dist` which is served same-origin by agent-server's in-core Web UI transport-host (`platform/ui-http`, opt-in via `CORTEX_UI_HTTP`) and by the desktop shell. On publish, `web/dist` is staged into the server package (prepack) and shipped in its `files`. |
+| `web/` | Web SPA (Vite + React 18, tRPC client), including active-only provider throttle status on desktop and mobile Projects. Built to `web/dist`, served by the in-core UI host and desktop shell. |
 | `desktop/` | Tauri v2 desktop shell. Loads `web/dist` via asset protocol in a native webview. Exposes `get_connection_config` / `set_connection_config` Tauri commands plus `window.__CORTEX_DESKTOP_CONFIG` for injecting `{serverUrl, token}` into the SPA. See [desktop/CORTEX.md](desktop/CORTEX.md). |
-| `packages/` | Shared packages: `ui-contract` (re-exported tRPC types + the `AppRouter` type re-export for the web SPA). The Web UI transport (tRPC AppRouter binding + HTTP/SSE host + SPA serving) lives in-core in `agent-server` (`domain/ui-service` + `platform/ui-http` + `entry/start-ui-http`), loaded on demand behind `CORTEX_UI_HTTP`. |
+| `packages/` | Shared/deployment packages: `ui-contract` provides Web UI tRPC types; `deepseek-relay-worker` is the authenticated, fixed-upstream Cloudflare Worker used when lab2 cannot reach DeepSeek directly. |
 | `context/` | Structured knowledge repository for research projects (experiments, knowledge entries, patterns). |
 | `tmp/` | Experiment artifacts, analysis scripts, logs, and working files. |
 | `.claude/` | Claude Code configuration (settings.json, hooks, plans). |
@@ -22,13 +22,13 @@ The server follows a six-layer structure (`agent-server/src/`):
 | Layer | Directory | Purpose |
 |-------|-----------|---------|
 | L0 | `core/` | Zero-dependency utilities: types, path constants, async-mutex, CLI utils, task parser |
-| L1 | `store/` | Persistence: 12 JSON-based repositories with atomic writes |
+| L1 | `store/` | Persistence: 13 JSON-based repositories with atomic writes |
 | L2 | `events/` | Event bus: typed EventBus, daily-rolling JSONL logger, replay CLI |
 | L3 | `domain/` | Business logic: agents, sessions, tasks, executions, costs, scheduling, memory, remote clients, threads, MCP |
-| L4 | `orchestration/` | Message routing, agent runner, thread executor, lifecycle, 14 !command handlers, interactions |
+| L4 | `orchestration/` | Message routing, agent runner, lifecycle, 15 !commands, interactions |
 | L5 | `entry/` | Entry points: app.ts (composition root), daemon.ts (process supervisor), CLI |
 
-The server supports three LLM backends via `agent-adapter/`: Claude Code, Codex, and PI. Platform adapters in `platform/` support Slack and Feishu/Lark.
+The server supports two LLM backends via `agent-adapter/`: Claude Code and PI. Platform adapters in `platform/` support Slack and Feishu/Lark.
 
 ## Client Architecture
 
@@ -41,7 +41,7 @@ The client (`client/src/`) is a lightweight WebSocket daemon that:
 
 | File | Purpose |
 |------|---------|
-| `agent-server/package.json` | npm package, dependencies, scripts, binaries (cortex, cortex-run, cortex-task) |
+| `agent-server/package.json` | npm package, dependencies, scripts, binaries (cortex, cortex-hook, cortex-run, cortex-task) |
 | `agent-server/tsconfig.json` | TypeScript config (ES2022, NodeNext) |
 | `agent-server/defaults/` | Shipped default config, context templates, plugins, hooks, prompts, rules |
 | `agent-server/tests/` | 45+ test files covering all major subsystems |
@@ -54,10 +54,11 @@ The client (`client/src/`) is a lightweight WebSocket daemon that:
 | `profiles.json` | Named agent profile list |
 | `budget.json` | Daily/monthly budget limits |
 | `costs.jsonl` | Per-call cost records (90-day rolling) |
-| `schedules.json` | Persistent scheduled task list |
+| `data/schedules.json` | Scheduled tasks |
+| `data/provider-state.json` | Provider throttle windows and provider-attributed resume queue |
 | `sessions.json` | Channel-to-agent session mapping |
 | `executions.json` | Unified execution registry |
-| `thread-templates.json` | Agent definitions and orchestration templates |
+| `config/thread-templates/` | Thread config directory: one JSON file per entity under `agents/`, `templates/`, and `shells/` (a legacy single-file config is still read as a fallback and split into this directory on startup) |
 | `threads.json` | Active and historical thread state |
 | `tasks/` | Project task queues (TASKS.yaml per project) |
 | `logs/` | Daemon and LLM logs |
@@ -83,10 +84,10 @@ Bugfixes follow the same TDD discipline with an extra step: write a **regression
 ### Test Locations
 
 Tests live colocated near source or in `tests/` directories:
-- `agent-server/tests/` — server tests (Node built-in runner with `tsx`)
-- `client/` — client tests (if added)
+- `agent-server/tests/` — server tests (vitest; `vitest.config.ts` + `vitest.integration.config.ts`)
+- `client/` — client tests (Node built-in runner with `tsx`)
 
-Run server tests: `cd agent-server && npm test`
+Run server tests: `cd agent-server && npm test`. The maintained suite favors runtime behavior, contracts, persistence, concurrency, and error paths over fixed visual values, export inventories, or source-text assertions.
 
 ### When TDD Does Not Apply
 

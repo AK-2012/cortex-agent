@@ -1,4 +1,4 @@
-import test from 'node:test';
+import { test } from 'vitest';
 import assert from 'node:assert/strict';
 import { handleCreateSession } from '../../../src/domain/ui-service/mutate/sessions.js';
 import type { UiServiceDeps } from '../../../src/domain/ui-service/types.js';
@@ -10,7 +10,7 @@ function makeDeps(sink: CreateCall[], sessionId = 'sess-new'): UiServiceDeps {
     projectStore: { getDefault: () => ({ id: 'general', name: 'general', kind: 'general', contextDir: '/g' }) },
     createDirectSession: async (opts: { projectId: string }) => {
       sink.push(opts);
-      return { sessionId, sessionName: 'cortex-new' };
+      return { sessionId, sessionName: 'cortex-new', channel: `web:${sessionId}` };
     },
   } as unknown as UiServiceDeps;
 }

@@ -1,6 +1,6 @@
 // input:  @sinclair/typebox
-// output: ExtensionAPI / ExtensionContext / ToolDefinition types stub
-// pos:    Minimal TS type stub for @mariozechner/pi-coding-agent
+// output: PI extension, model registry, event, and tool stubs
+// pos:    Minimal TS type stub for the PI extension API
 // >>> If I am updated, update my header comment and the parent folder's CORTEX.md <<<
 
 import type { TSchema, Static } from '@sinclair/typebox';
@@ -32,6 +32,30 @@ export interface SessionManager {
   getSessionFile(): string | undefined;
 }
 
+export interface ExtensionModel {
+  id: string;
+  api: string;
+  provider: string;
+  baseUrl: string;
+  headers?: Record<string, string>;
+  maxTokens: number;
+}
+
+export type ResolvedRequestAuth = {
+  ok: true;
+  apiKey?: string;
+  headers?: Record<string, string>;
+  env?: Record<string, string>;
+} | {
+  ok: false;
+  error: string;
+};
+
+export interface ExtensionModelRegistry {
+  getAvailable(): ExtensionModel[];
+  getApiKeyAndHeaders(model: ExtensionModel): Promise<ResolvedRequestAuth>;
+}
+
 export interface ExtensionContext {
   signal: AbortSignal | undefined;
   cwd: string;
@@ -39,6 +63,9 @@ export interface ExtensionContext {
   ui: ExtensionUIContext;
   /** Session manager (read-only). Available on ExtensionContext per PI types.d.ts L206. */
   sessionManager?: SessionManager;
+  /** Active model and registry exposed to extension handlers. */
+  model?: ExtensionModel;
+  modelRegistry?: ExtensionModelRegistry;
 }
 
 /** Event fired by PI before a built-in or registered tool is executed. Input is mutable. */
@@ -88,6 +115,7 @@ export interface ToolDefinition<TParams extends TSchema = TSchema, TDetails = un
 
 export interface ExtensionAPI {
   on(event: 'before_agent_start', handler: (event: BeforeAgentStartEvent, ctx: ExtensionContext) => any): void;
+  on(event: 'session_start', handler: (event: SessionStartEvent, ctx: ExtensionContext) => any): void;
   on(event: 'session_shutdown', handler: (event: SessionShutdownEvent, ctx: ExtensionContext) => any): void;
   on(event: 'tool_call', handler: (event: ToolCallEvent, ctx: ExtensionContext) => Promise<ToolCallReturn> | ToolCallReturn): void;
   on(event: 'tool_result', handler: (event: ToolResultEvent, ctx: ExtensionContext) => Promise<void> | void): void;
@@ -100,6 +128,12 @@ export interface ExtensionAPI {
 export interface BeforeAgentStartEvent {
   prompt?: string;
   systemPrompt?: string;
+}
+
+export interface SessionStartEvent {
+  type: 'session_start';
+  reason: 'startup' | 'reload' | 'new' | 'resume' | 'fork';
+  previousSessionFile?: string;
 }
 
 export interface SessionShutdownEvent {

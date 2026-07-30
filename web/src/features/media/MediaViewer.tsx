@@ -1,0 +1,249 @@
+// input:  image/video items, source/download/zoom hooks, and pinned-preview state
+// output: media-viewer context plus mounted full-screen preview behavior
+// pos:    shared desktop/mobile modal; Lightbox chrome stays module-internal
+// >>> If I am updated, update my header comment and the parent folder's CORTEX.md <<<
+
+import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useBackDismiss } from '@/mobile/use-back-dismiss';
+import { usePinnedPreview } from './PinnedPreviewProvider';
+import { useDownloadFile } from './useDownloadFile';
+import { useMediaSrc } from './useMediaSrc';
+import { useZoom } from './useZoom';
+import type { MediaKind } from './media-kind';
+
+// Shared full-screen media lightbox (modal) — the single previewer for every image/video surface on
+// web AND mobile: the composer's attachment preview, a sent user message's photo/video, and an
+// agent-sent image/video. Opening a preview NEVER opens a new browser tab; it raises this in-app modal
+// (scrim + centered media + close/download). One instance is mounted per shell (AppShell / MobileShell)
+// and opened from anywhere via `useMediaViewer().openMedia(item)`.
+//
+// The modal is the DEFAULT mode. Where a dock host exists (the desktop workbench — see
+// `PinnedPreviewProvider`), the lightbox also offers ◧ "pin": the preview leaves the modal and docks
+// to the right of the chat, and from then on `openMedia` swaps the docked pane's content instead of
+// raising this modal. Unpinning (the pane's ×) restores the modal mode.
+
+export interface MediaItem {
+  kind: MediaKind;
+  name: string;
+  /** Workspace-relative `workspace/…` path → authenticated blob fetch (sent messages / agent files). */
+  path?: string;
+  /** A ready object URL (a local composer File preview) — used directly, not fetched. */
+  url?: string;
+}
+
+interface MediaViewerContextValue {
+  openMedia: (item: MediaItem) => void;
+  close: () => void;
+}
+
+// Default to a no-op for callers outside a mounted provider; real open/close behavior is supplied
+// by MediaViewerProvider in each shell.
+const MediaViewerContext = createContext<MediaViewerContextValue>({ openMedia: () => {}, close: () => {} });
+
+const mono = "'IBM Plex Mono',monospace";
+
+function Lightbox({ item, onClose, onPin }: { item: MediaItem; onClose: () => void; onPin?: () => void }): JSX.Element {
+  // Resolve the source: a local composer preview already has an object URL; a workspace file is
+  // fetched with auth into one (revoked on close / change) — shared with the docked preview pane.
+  const { src, failed } = useMediaSrc(item);
+  const dl = useDownloadFile();
+  const { containerRef, contentRef, style: zoomStyle, isZoomed, resetZoom } = useZoom({ mode: 'transform', minScale: 1, maxScale: 8 });
+
+  // Android hardware back (and browser back) close the lightbox instead of navigating a route.
+  useBackDismiss(onClose);
+
+  // Esc closes; lock body scroll while open.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', onKey);
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      window.removeEventListener('keydown', onKey);
+      document.body.style.overflow = prevOverflow;
+    };
+  }, [onClose]);
+
+  const onDownload = (): void => {
+    if (item.path) {
+      dl(item.path, item.name);
+    } else if (item.url) {
+      const a = document.createElement('a');
+      a.href = item.url;
+      a.download = item.name;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+    }
+  };
+
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label={item.name}
+      onClick={() => { if (!isZoomed) onClose(); else resetZoom(); }}
+      style={{
+        position: 'fixed',
+        inset: 0,
+        zIndex: 4000,
+        background: 'rgba(10,12,16,.88)',
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: 'max(24px, env(safe-area-inset-top)) 16px max(24px, env(safe-area-inset-bottom))',
+        boxSizing: 'border-box',
+        animation: 'cxfade .18s ease both',
+      }}
+    >
+      {/* Top action bar — pin + download + close. Stops propagation so bar clicks don't close the modal. */}
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          position: 'absolute',
+          top: 'max(14px, env(safe-area-inset-top))',
+          right: 14,
+          display: 'flex',
+          gap: 10,
+          zIndex: 2,
+        }}
+      >
+        {onPin && (
+          <span
+            role="button"
+            title="Pin preview beside the chat"
+            onClick={onPin}
+            style={{
+              width: 38,
+              height: 38,
+              borderRadius: 10,
+              background: 'rgba(255,255,255,.12)',
+              color: 'var(--ink-solid-fg)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              fontSize: 15,
+              cursor: 'pointer',
+            }}
+          >
+            ◧
+          </span>
+        )}
+        <span
+          role="button"
+          title="Download"
+          onClick={onDownload}
+          style={{
+            width: 38,
+            height: 38,
+            borderRadius: 10,
+            background: 'rgba(255,255,255,.12)',
+            color: 'var(--ink-solid-fg)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            fontSize: 16,
+            cursor: 'pointer',
+          }}
+        >
+          ↓
+        </span>
+        <span
+          role="button"
+          title="Close"
+          onClick={onClose}
+          style={{
+            width: 38,
+            height: 38,
+            borderRadius: 10,
+            background: 'rgba(255,255,255,.12)',
+            color: 'var(--ink-solid-fg)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            fontSize: 18,
+            cursor: 'pointer',
+          }}
+        >
+          ×
+        </span>
+      </div>
+
+      {/* Media stage — touch target for zoom gestures covers full area; transform on inner wrapper. */}
+      <div
+        ref={containerRef}
+        onClick={(e) => { e.stopPropagation(); if (!isZoomed) return; }}
+        style={{ maxWidth: '94vw', maxHeight: '84vh', width: '94vw', height: '84vh', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}
+      >
+        {failed ? (
+          <div style={{ color: 'var(--proto-faint)', font: `500 12px ${mono}` }}>Failed to load {item.name}</div>
+        ) : !src ? (
+          <div style={{ color: 'var(--proto-muted-2)', font: `500 12px ${mono}` }}>Loading…</div>
+        ) : item.kind === 'video' ? (
+          <video
+            src={src}
+            controls
+            autoPlay
+            playsInline
+            style={{ maxWidth: '94vw', maxHeight: '84vh', borderRadius: 10, background: '#000' }}
+          />
+        ) : (
+          <div ref={contentRef} style={{ ...zoomStyle, display: 'inline-block' }}>
+            <img
+              src={src}
+              alt={item.name}
+              draggable={false}
+              style={{ maxWidth: '94vw', maxHeight: '84vh', objectFit: 'contain', display: 'block' }}
+            />
+          </div>
+        )}
+      </div>
+
+      {/* Filename caption */}
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{ position: 'absolute', bottom: 'max(16px, env(safe-area-inset-bottom))', left: 0, right: 0, textAlign: 'center', color: 'rgba(255,255,255,.72)', font: `500 11px ${mono}`, padding: '0 20px', pointerEvents: 'none' }}
+      >
+        {item.name}
+      </div>
+    </div>
+  );
+}
+
+export function MediaViewerProvider({ children }: { children: ReactNode }): JSX.Element {
+  const [item, setItem] = useState<MediaItem | null>(null);
+  const pinnedPreview = usePinnedPreview();
+  // While a docked preview is active, a preview click swaps the pane's content — no modal.
+  const openMedia = useCallback(
+    (next: MediaItem) => {
+      if (pinnedPreview.active) {
+        pinnedPreview.show(next);
+        return;
+      }
+      setItem(next);
+    },
+    [pinnedPreview],
+  );
+  const close = useCallback(() => setItem(null), []);
+  const value = useMemo(() => ({ openMedia, close }), [openMedia, close]);
+  // Pinning hands the open item over to the docked pane and dismisses the modal.
+  const onPin = pinnedPreview.canPin
+    ? () => {
+        pinnedPreview.pin(item);
+        setItem(null);
+      }
+    : undefined;
+  return (
+    <MediaViewerContext.Provider value={value}>
+      {children}
+      {item && <Lightbox item={item} onClose={close} onPin={onPin} />}
+    </MediaViewerContext.Provider>
+  );
+}
+
+export function useMediaViewer(): MediaViewerContextValue {
+  return useContext(MediaViewerContext);
+}

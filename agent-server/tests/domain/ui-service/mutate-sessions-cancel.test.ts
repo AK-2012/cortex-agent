@@ -1,4 +1,4 @@
-import test from 'node:test';
+import { test } from 'vitest';
 import assert from 'node:assert/strict';
 import { handleCancelSession } from '../../../src/domain/ui-service/mutate/sessions.js';
 import type { UiServiceDeps } from '../../../src/domain/ui-service/types.js';
@@ -10,6 +10,7 @@ function makeDeps(session: Session | null, sink: CancelCall[], killed: number): 
   return {
     sessionStore: { listByProject: async () => [], listByOrigin: async () => [], listResumable: async () => [], getById: async () => session },
     cancelSessionRun: async (opts: { channel: string }) => { sink.push(opts); return killed; },
+    switchSessionProfile: async () => ({ ok: true, name: '', currentBackend: '', targetBackend: '', backendChanged: false }),
   } as unknown as UiServiceDeps;
 }
 

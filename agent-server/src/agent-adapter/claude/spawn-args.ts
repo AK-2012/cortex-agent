@@ -1,12 +1,25 @@
-// input:  ClaudeSpawnOptions + channel/session env
-// output: buildSpawnArgs + buildClaudeEnv pure functions
-// pos:    Construct Claude CLI argv and process environment variables
-// >>> If I am updated, update my header comment and the parent folder's CORTEX.md <<<
+// input:  Claude options, scoped MCP paths, hooks, environment
+// output: Claude CLI arguments and authoritative child environment
+// pos:    Claude process spawn configuration
+// >>> 一旦我被更新，务必更新我的开头注释与所属文件夹 CORTEX.md <<<
 
-import { DEFAULT_TOOLS, MCP_CONFIG, CORE_MCP_CONFIG, TUI_MCP_CONFIG, SLACK_MCP_CONFIG, FEISHU_MCP_CONFIG, TUI_TOOLS, TUI_STRIP_TOOLS } from './defaults.js';
-// CORE_MCP_CONFIG is the thread/core marker: callers set mcpConfigPath to it for template thread
-// sessions (remote_* only). buildSpawnArgs uses identity against it to decide whether to layer the
-// TUI bridge server on top.
+import {
+  CORE_MCP_CONFIG,
+  DEFAULT_TOOLS,
+  FEISHU_MCP_CONFIG,
+  MANAGER_QA_MCP_CONFIG,
+  MCP_CONFIG,
+  SLACK_MCP_CONFIG,
+  TASKS_MCP_CONFIG,
+  THREAD_MCP_CONFIG,
+  TUI_BRIDGE_TOOLS,
+  TUI_MCP_CONFIG,
+  TUI_STRIP_TOOLS,
+  TUI_TOOLS,
+  WEB_MCP_CONFIG,
+} from './defaults.js';
+// CORE_MCP_CONFIG is the thread marker: callers set mcpConfigPath to it for template sessions.
+// buildSpawnArgs then layers task monitoring, manager answers, and thread control onto that base.
 import { buildHooksSettings } from './hooks-builder.js';
 
 /**
@@ -25,43 +38,67 @@ export interface ClaudeSpawnOptions {
   outputStyle?: string | null;
   needsResume: boolean;
   sessionId: string;
-  /** Override MCP config path. Thread sessions pass CORE_MCP_CONFIG (remote_* only). */
+  /** Override MCP config path. Thread sessions pass CORE_MCP_CONFIG as their marker. */
   mcpConfigPath?: string;
   /** Layer the cortex-slack MCP server on top of the base config. Set by the adapter for sessions
-   *  that originate from Slack (channel carries the `slack:` prefix). Ignored for thread/core
-   *  sessions (CORE_MCP_CONFIG), which must stay on the core server set only. */
+   *  that originate from Slack (channel carries the `slack:` prefix). Ignored for thread sessions. */
   loadSlackMcp?: boolean;
   /** Layer the cortex-feishu MCP server on top of the base config. Set by the adapter for sessions
-   *  that originate from Feishu (channel carries the `feishu:` prefix). Ignored for thread/core
-   *  sessions (CORE_MCP_CONFIG), which must stay on the core server set only. */
+   *  that originate from Feishu (channel carries the `feishu:` prefix). Ignored for thread sessions. */
   loadFeishuMcp?: boolean;
+  /** Layer the cortex-web MCP server on top of the base config. Set by the adapter for sessions that
+   *  originate from the Web UI (channel carries the `web:` prefix), enabling the send_file tool.
+   *  Ignored for thread sessions. */
+  loadWebMcp?: boolean;
+  /** Thinking level from the profile's `thinking` field → `--effort <level>`
+   *  (low/medium/high/xhigh/max). Absent → no flag. */
+  thinking?: string | null;
   /** Extra CLI options from profile (e.g. {"--thinking": "xhigh"}). */
   extraOption?: Record<string, string> | null;
   /** DR-0012: select adapter mode. Default 'print' preserves -p stream-json behavior. */
   mode?: ClaudeSpawnMode;
+  /** True for user-message-initiated sessions (not thread/scheduled pipeline workers). In print
+   *  mode, such sessions additionally get the cortex-tui-bridge MCP interaction tools
+   *  (cortex_plan_enter/exit, cortex_ask_user) because the native EnterPlanMode/ExitPlanMode/
+   *  AskUserQuestion are filtered out by headless `-p`. Thread/core sessions never get them. */
+  isUserInitiated?: boolean;
+}
+
+/**
+ * Kill switch for token-level assistant streaming (`CORTEX_STREAM_DELTAS=0`). Read at call time, so
+ * a daemon restart is enough to flip it. When off, print mode drops `--include-partial-messages`
+ * and the CLI emits no `stream_event` lines at all — the delta pipeline goes dark at the source.
+ * Only the literal `0` disables; anything else (unset included) keeps streaming on.
+ */
+export function isStreamDeltasEnabled(): boolean {
+  return process.env.CORTEX_STREAM_DELTAS !== '0';
 }
 
 export function buildSpawnArgs(options: ClaudeSpawnOptions): string[] {
   const mode: ClaudeSpawnMode = options.mode ?? 'print';
-  // MCP server selection is identical to print mode: the base config follows the caller's
-  // mcpConfigPath (CORE_MCP_CONFIG for thread/core sessions) and otherwise the full MCP_CONFIG
-  // (cortex-core + cortex-ext). TUI mode additionally layers the cortex-tui-bridge server on top
-  // (its cortex_plan_*/cortex_ask_user tools replace the native EnterPlanMode/ExitPlanMode/
-  // AskUserQuestion), EXCEPT for thread/core sessions — threads run no plan/ask interactions and
-  // must stay on the core server set only. `--mcp-config` is variadic, so we pass both files.
-  const isCoreOnly = options.mcpConfigPath === CORE_MCP_CONFIG;
+  // Direct sessions use the full config (core + tasks + manager answers + ext). Template threads
+  // compose isolated core + tasks + manager-answer + thread-control privilege layers.
+  // The interaction bridge and platform-specific servers remain direct-session-only.
+  const isThreadSession = options.mcpConfigPath === CORE_MCP_CONFIG;
+  const wantsInteractionBridge = !isThreadSession
+    && (mode === 'tui' || (mode === 'print' && !!options.isUserInitiated));
   const baseMcpConfig = options.mcpConfigPath || MCP_CONFIG;
-  const mcpConfigs: string[] = [baseMcpConfig];
-  if (mode === 'tui' && !isCoreOnly) mcpConfigs.push(TUI_MCP_CONFIG);
+  const mcpConfigs: string[] = isThreadSession
+    ? [baseMcpConfig, TASKS_MCP_CONFIG, MANAGER_QA_MCP_CONFIG, THREAD_MCP_CONFIG]
+    : [baseMcpConfig];
+  if (wantsInteractionBridge) mcpConfigs.push(TUI_MCP_CONFIG);
   // Slack-originated sessions additionally layer the cortex-slack server (slack_send_file tool).
   // Suppressed for thread/core sessions, which run no file-sending work and stay on the core set only.
-  if (options.loadSlackMcp && !isCoreOnly) mcpConfigs.push(SLACK_MCP_CONFIG);
+  if (options.loadSlackMcp && !isThreadSession) mcpConfigs.push(SLACK_MCP_CONFIG);
   // Feishu-originated sessions additionally layer the cortex-feishu server (Feishu document tools).
   // Suppressed for thread/core sessions, which run no document work and stay on the core set only.
-  if (options.loadFeishuMcp && !isCoreOnly) mcpConfigs.push(FEISHU_MCP_CONFIG);
+  if (options.loadFeishuMcp && !isThreadSession) mcpConfigs.push(FEISHU_MCP_CONFIG);
+  // Web-UI-originated sessions additionally layer the cortex-web server (send_file tool).
+  // Suppressed for thread/core sessions, which stay on the core set only.
+  if (options.loadWebMcp && !isThreadSession) mcpConfigs.push(WEB_MCP_CONFIG);
   // TUI tool whitelist swaps the three native interaction tools for their MCP bridge equivalents;
   // thread/core TUI sessions have no bridge server, so they fall back to the standard tool set.
-  const toolsDefault = (mode === 'tui' && !isCoreOnly) ? TUI_TOOLS : DEFAULT_TOOLS;
+  const toolsDefault = (mode === 'tui' && !isThreadSession) ? TUI_TOOLS : DEFAULT_TOOLS;
 
   const args: string[] = [];
 
@@ -72,7 +109,21 @@ export function buildSpawnArgs(options: ClaudeSpawnOptions): string[] {
       '--input-format', 'stream-json',
       '--output-format', 'stream-json',
       '--verbose',
+      // Echo every user message back as a `user` event carrying `isReplay: true`, at the moment
+      // the CLI CONSUMES it rather than when it was written. That echo is the delivery
+      // ack for a mid-turn injected message — the only signal that distinguishes "queued in the
+      // CLI" from "in the model's view". Only the injection ack consumes these events; every other
+      // `user` handler ignores replays (they are otherwise indistinguishable from the tool_result
+      // carriers print mode already emits).
+      '--replay-user-messages',
     );
+    // Token-level streaming: adds `stream_event` lines (message_start / content_block_start /
+    // content_block_delta / …) on top of the complete `assistant` / `result` events, which are
+    // unchanged — the addition is purely incremental, so every existing parser stays correct.
+    // It is what lets the Web UI show text as it is generated instead of waiting for the whole
+    // block (measured gap on a long reply: first delta at ~3.5s vs the complete event at ~25s).
+    // TUI mode reads the session jsonl, not stdout, so the flag would be pure overhead there.
+    if (isStreamDeltasEnabled()) args.push('--include-partial-messages');
   }
   // TUI mode: strip native interaction tools (AskUserQuestion / EnterPlanMode / ExitPlanMode)
   // from ALL sessions (user messages and threads alike). These tools require stdin/stdout
@@ -80,6 +131,13 @@ export function buildSpawnArgs(options: ClaudeSpawnOptions): string[] {
   let effectiveTools = options.tools || toolsDefault;
   if (mode === 'tui' && options.tools) {
     effectiveTools = options.tools.split(',').filter(t => !TUI_STRIP_TOOLS.has(t)).join(',');
+  }
+  // Print mode, user-initiated non-thread sessions: append the cortex-tui-bridge interaction tools.
+  // The native EnterPlanMode/ExitPlanMode/AskUserQuestion are dropped by headless -p regardless of
+  // the allowlist, so these MCP equivalents are the only way plan/ask reaches the user. TUI mode
+  // already carries them via TUI_TOOLS, so only the print branch needs the append.
+  if (mode === 'print' && wantsInteractionBridge) {
+    effectiveTools = [effectiveTools, ...TUI_BRIDGE_TOOLS].filter(Boolean).join(',');
   }
 
   // Both modes: permission bypass + MCP + tools
@@ -91,6 +149,8 @@ export function buildSpawnArgs(options: ClaudeSpawnOptions): string[] {
   if (options.systemPrompt) args.push('--system-prompt', options.systemPrompt);
   if (options.appendSystemPrompt) args.push('--append-system-prompt', options.appendSystemPrompt);
   if (options.model) args.push('--model', options.model);
+  // Before extraOption so an explicit extraOption {"--effort": ...} still wins (CLI last-wins).
+  if (options.thinking) args.push('--effort', options.thinking);
   if (options.claudeAgent) args.push('--agent', options.claudeAgent);
   if (options.pluginDirs) {
     for (const dir of options.pluginDirs) args.push('--plugin-dir', dir);
@@ -115,9 +175,11 @@ export interface CortexAgentContext {
   profile?: string | null;
   project?: string | null;
   sessionName?: string | null;
+  /** Stable Cortex tracking id (decoupled from the backend session id) → CORTEX_SESSION_ID. */
+  trackSessionId?: string | null;
   /** Cortex execution record id, surfaced as CORTEX_EXECUTION_ID to subprocess env. */
   executionId?: string | null;
-  /** When true, load only core MCP server (remote_* tools). */
+  /** When true, load the restricted thread MCP composition. */
   useCoreMcp?: boolean;
   /** Recursion depth of the owning thread, surfaced as CORTEX_THREAD_DEPTH so the thread_start
    *  MCP tool can forward it and the daemon-side depth guard can cap nested thread spawning. */
@@ -158,7 +220,9 @@ export function buildClaudeEnv(
   env.SLACK_CHANNEL = channel;
   env.FEISHU_CHANNEL = channel;
   env.SLACK_BOT_TOKEN = process.env.SLACK_BOT_TOKEN;
-  env.CORTEX_SESSION_ID = sessionId;
+  // CORTEX_SESSION_ID is the stable Cortex tracking id (session-activity log routing + MCP context),
+  // NOT the backend CLI's self-assigned session id. Falls back to the backend id when unset (threads).
+  env.CORTEX_SESSION_ID = context?.trackSessionId ?? sessionId;
   if (callbackSource) env.CORTEX_CALLBACK_SOURCE = callbackSource;
   if (scheduleTaskId) env.CORTEX_SCHEDULE_TASK_ID = scheduleTaskId;
   if (anthropicBaseUrl) env.ANTHROPIC_BASE_URL = anthropicBaseUrl;

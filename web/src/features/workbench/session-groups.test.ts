@@ -1,11 +1,13 @@
 import { describe, it, expect } from 'vitest';
 import type { SessionInfo } from '@cortex-agent/ui-contract';
+import { en } from '@/i18n';
 import { groupSessions, sessionMeta, projectInitials } from './session-groups';
 
 function mk(p: Partial<SessionInfo> & { sessionId: string }): SessionInfo {
   const created = p.createdAt ?? '2026-07-06T00:00:00.000Z';
   return {
     sessionId: p.sessionId,
+    backendSessionId: p.backendSessionId ?? null,
     name: p.name ?? p.sessionId,
     projectId: p.projectId ?? 'proj',
     backend: p.backend ?? 'claude',
@@ -15,6 +17,13 @@ function mk(p: Partial<SessionInfo> & { sessionId: string }): SessionInfo {
     lastUsedAt: p.lastUsedAt ?? created,
     resumable: p.resumable ?? true,
     label: p.label ?? null,
+    profileName: p.profileName ?? null,
+    running: p.running ?? false,
+    backgroundRunning: p.backgroundRunning ?? false,
+    awaitingInput: p.awaitingInput ?? false,
+    numTurns: p.numTurns ?? null,
+    costUsd: p.costUsd ?? null,
+    unread: p.unread ?? false,
   };
 }
 
@@ -68,13 +77,13 @@ describe('groupSessions', () => {
 
 describe('sessionMeta', () => {
   it('renders HH:MM of the effective timestamp (local)', () => {
-    expect(sessionMeta(mk({ sessionId: 'a', lastUsedAt: todayMorning.toISOString() }))).toBe('07:05');
-    expect(sessionMeta(mk({ sessionId: 'b', lastUsedAt: yesterday.toISOString() }))).toBe('21:38');
+    expect(sessionMeta(en, mk({ sessionId: 'a', lastUsedAt: todayMorning.toISOString() }))).toBe('07:05');
+    expect(sessionMeta(en, mk({ sessionId: 'b', lastUsedAt: yesterday.toISOString() }))).toBe('21:38');
   });
 
   it('appends "· from schedule" for scheduled sessions', () => {
     const s = mk({ sessionId: 's', kind: 'scheduled', lastUsedAt: new Date(2026, 6, 6, 7, 31).toISOString() });
-    expect(sessionMeta(s)).toBe('07:31 · from schedule');
+    expect(sessionMeta(en, s)).toBe('07:31 · from schedule');
   });
 });
 
@@ -90,5 +99,38 @@ describe('projectInitials', () => {
 
   it('handles empty / degenerate ids', () => {
     expect(projectInitials('')).toBe('?');
+  });
+});
+
+describe('groupSessions unread ordering', () => {
+  it('floats unread sessions to the top of their group, keeping recency order within each half', () => {
+    const now = new Date('2026-07-06T12:00:00.000Z');
+    const groups = groupSessions(
+      [
+        mk({ sessionId: 'read-new', lastUsedAt: '2026-07-06T11:00:00.000Z' }),
+        mk({ sessionId: 'unread-old', lastUsedAt: '2026-07-06T08:00:00.000Z', unread: true }),
+        mk({ sessionId: 'unread-new', lastUsedAt: '2026-07-06T10:00:00.000Z', unread: true }),
+        mk({ sessionId: 'read-old', lastUsedAt: '2026-07-06T07:00:00.000Z' }),
+      ],
+      now,
+    );
+    expect(groups[0].label).toBe('TODAY');
+    expect(groups[0].items.map((s) => s.sessionId)).toEqual([
+      'unread-new', 'unread-old', 'read-new', 'read-old',
+    ]);
+  });
+
+  it('unread ordering stays inside each day group (no cross-group hoisting)', () => {
+    const now = new Date('2026-07-06T12:00:00.000Z');
+    const groups = groupSessions(
+      [
+        mk({ sessionId: 'today-read', lastUsedAt: '2026-07-06T09:00:00.000Z' }),
+        mk({ sessionId: 'yesterday-unread', lastUsedAt: '2026-07-05T09:00:00.000Z', unread: true }),
+      ],
+      now,
+    );
+    expect(groups.map((g) => g.label)).toEqual(['TODAY', 'YESTERDAY']);
+    expect(groups[0].items[0].sessionId).toBe('today-read');
+    expect(groups[1].items[0].sessionId).toBe('yesterday-unread');
   });
 });

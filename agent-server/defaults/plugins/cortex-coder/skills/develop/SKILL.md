@@ -40,6 +40,32 @@ Wrote code before writing a test? Delete the code. Write the test. Watch it fail
 
 ---
 
+## What to Test — and What Not To
+
+TDD mandates a failing test first; this section governs which tests are worth writing at all. A test earns its place by being able to fail on a real bug: **if you cannot name the bug that would make it fail, do not write it.**
+
+Test these (behavior the suite must own):
+- Behavior contracts at module boundaries: inputs → outputs/effects.
+- State machines and lifecycle transitions, including illegal-transition rejections.
+- Persistence and concurrency: atomic writes, mutex serialization, recovery paths.
+- Protocol/format translation: adapter normalization, parsers, serializers.
+- Error paths that guard real regressions.
+- Anything that runs unattended.
+
+Do NOT write:
+- Assertions restating constants or config literals back at themselves. If the shape is the contract, collapse to one whole-object equality.
+- Verbatim help/usage text matching — test routing and exit codes instead.
+- Tests of a test double's trivial surface, or of third-party library behavior.
+- Higher-layer re-assertions of values a lower layer already pins (a view re-asserting vm output; a CLI re-proving the mutator's semantics). The higher layer tests only what it adds: argv parsing, exit codes, routing, render slots — plus ONE thin wiring round-trip.
+- Local re-implementations of production logic asserted against themselves — such tests cannot fail.
+
+Placement and cost discipline:
+- One behavior, one test, at the lowest layer that owns the logic.
+- Extend the module's existing test file; a new file is for a new module.
+- Prefer fake timers or bounded polls on observable state over fixed real sleeps; never bind fixed ports; a per-test mkdtemp is fine, but do not spawn subprocesses or listeners when a direct call exercises the same contract.
+
+---
+
 ## Mode: Feature
 
 ### Step 1: Understand
@@ -165,9 +191,10 @@ When implementing against a specification (an experiment protocol or a scoped ta
 - Parameters, seeds, and data paths live in committed files: a config file (YAML/JSON), argparse/CLI defaults, or named constants with clear names.
 - Runtime-only configuration (launch-line flags, shell env vars) is **not** an acceptable source of truth — the run must be reproducible from the committed SHA alone.
 
-### Full-suite pass before handoff
-- If the project has a test suite, run it after implementing and again after committing, using the project's own command (`npm test`, `pytest`, `make test`, …).
-- Run **every** configured stage — unit tests, linters or architecture checks, integration tests, regression suites. A single red test or lint violation means you are not done.
+### Scoped tests while iterating, full suite once before handoff
+- While iterating, run only the tests scoped to what you changed (e.g. `pnpm exec vitest run <test-file>`, `pytest <file>`) — do NOT run the full suite on every edit-test cycle. Full-suite runs are expensive and machine-wide serialized; frequency is what overloads the box.
+- After the final commit, run the full suite ONCE with the project's own command (`npm test`, `pytest`, `make test`, …), covering **every** configured stage — unit tests, linters or architecture checks, integration tests, regression suites. A single red test or lint violation means you are not done.
+- Record the green SHA (the commit the full suite passed on) plus the pass counts in your implementation summary. A downstream reviewer at the same SHA may verify against this record instead of re-running the full suite; if you change anything after the green run, the full suite must be re-run.
 - If failures pre-existed your change, note them explicitly in the summary; you must still confirm no NEW failures were introduced.
 
 ### Commit & handoff

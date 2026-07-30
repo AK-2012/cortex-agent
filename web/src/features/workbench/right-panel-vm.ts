@@ -1,10 +1,18 @@
-// Pure view-model helpers for the workbench right panel (Threads/Tasks/Machines), rebuilt 1:1 from
-// prototype.dc.html L1091–1276 + its component script (pill() L1838–1849, thread/step VMs L2160–2328).
-// Framework-free so the mapping from real tRPC DTOs → the prototype's exact values is unit-tested in
-// isolation (TDD). Consumed by RightPanel.tsx / RightThreadCard.tsx.
+// input:  ui-contract DTOs, nested-thread helpers
+// output: task-linked metadata and right-panel status view models
+// pos:    Pure view-model helpers for the workbench right panel
+// >>> If I am updated, update my header comment and CORTEX.md <<<
 
-import type { ThreadInfo, ThreadStepDetail, ThreadDetail, TaskInfo } from '@cortex-agent/ui-contract';
+import type {
+  ThreadInfo,
+  ThreadStepDetail,
+  ThreadDetail,
+  ThreadDispatchInfo,
+  MachineInfo,
+} from '@cortex-agent/ui-contract';
 import { treeMaxLevel, MAX_LEVEL } from '@/features/thread/nested-threads';
+
+type ThreadSubtaskInfo = ThreadDetail['subtasks'][number];
 
 export interface Pill {
   bg: string;
@@ -63,6 +71,28 @@ export function stepMeta(step: ThreadStepDetail): string {
   return parts.join(' · ');
 }
 
+export type ActivityTone = 'running' | 'done' | 'failed' | 'idle';
+export interface ActivityState { label: string; tone: ActivityTone }
+
+export function cortexRunLabel(run: ThreadDispatchInfo): string {
+  return run.runName ? `cortex-run ${run.runName}` : 'cortex-run';
+}
+
+export function runActivity(status: string): ActivityState {
+  if (status === 'running') return { label: 'Running', tone: 'running' };
+  if (status === 'completed') return { label: 'Done', tone: 'done' };
+  if (status === 'failed' || status === 'cancelled') return { label: 'Failed', tone: 'failed' };
+  return { label: status || 'Unknown', tone: 'idle' };
+}
+
+export function subtaskActivity(task: ThreadSubtaskInfo): ActivityState {
+  if (task.status === 'done') return { label: 'Done', tone: 'done' };
+  if (task.blockedBy) return { label: 'Blocked', tone: 'failed' };
+  if (task.claimedBy) return { label: 'Running', tone: 'running' };
+  if (task.actionable) return { label: 'Open', tone: 'idle' };
+  return { label: 'Waiting', tone: 'idle' };
+}
+
 /** Relative age of an ISO timestamp: "just now" / "42m" / "3h" / "2d". */
 export function formatAge(iso: string, now: number): string {
   const diffS = Math.max(0, Math.round((now - Date.parse(iso)) / 1000));
@@ -75,9 +105,10 @@ export function formatAge(iso: string, now: number): string {
   return `${d}d`;
 }
 
-/** Thread card meta line "thr_8f2c · step 3/4 · 42m" (prototype expThread.metaLine). */
+/** Thread card meta line "thr_8f2c · task a293 · step 3/4 · 42m". */
 export function threadMetaLine(info: ThreadInfo, now: number): string {
   const parts: string[] = [info.id];
+  if (info.taskId) parts.push(`task ${info.taskId}`);
   if (info.currentStep) parts.push(`step ${info.currentStep.index + 1}/${info.totalSteps}`);
   parts.push(formatAge(info.createdAt, now));
   return parts.join(' · ');
@@ -98,9 +129,9 @@ export function depthInfo(detail: ThreadDetail): DepthInfo {
   return { filled, total: MAX_LEVEL, text: `${filled}/${MAX_LEVEL}` };
 }
 
-/** Count of actionable open tasks (prototype actionableCount / Tasks-tab count). */
-export function actionableCount(tasks: TaskInfo[]): number {
-  return tasks.filter((t) => t.actionable).length;
+/** Count of machines currently online (the Machines-tab badge = online, not total). */
+export function onlineMachineCount(machines: MachineInfo[] | undefined): number {
+  return machines ? machines.filter((m) => m.online).length : 0;
 }
 
 /**

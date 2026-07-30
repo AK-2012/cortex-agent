@@ -3,7 +3,7 @@
 // pos:    verifies store/outbound-queue.ts WAL guarantees
 // >>> If I am updated, update my header comment and the parent folder's CORTEX.md <<<
 
-import test from 'node:test';
+import { test, beforeAll, afterAll } from 'vitest';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -16,11 +16,11 @@ import type { Destination, MessageRef, MessageContent, PlatformCapabilities, Pos
 
 let tmpDir: string;
 
-test.before(async () => {
+beforeAll(async () => {
   tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'cortex-outbound-queue-test-'));
 });
 
-test.after(async () => {
+afterAll(async () => {
   await fs.rm(tmpDir, { recursive: true, force: true });
 });
 
@@ -165,6 +165,21 @@ test('OutboundQueue - recover with missing WAL file returns 0', async () => {
   const queue = new OutboundQueue({ walPath, adapter: createMockAdapter() });
   const count = await queue.recover();
   assert.equal(count, 0);
+});
+
+// A full disk truncates an append mid-line; the next append starts at the truncated offset and
+// glues two records into one unparseable line. recover() must skip it, not reject — it is awaited
+// from the unguarded startup path, so throwing here aborts the rest of server boot.
+test('OutboundQueue - recover skips a torn WAL line instead of throwing', async () => {
+  const walPath = path.join(tmpDir, `outbound-wal-torn-${_testIdx++}.jsonl`);
+  const good1 = { op: 'enqueue', id: 'a', ts: new Date().toISOString(), type: 'post', channel: 'c1', text: 'first', status: 'pending' };
+  const good2 = { op: 'enqueue', id: 'b', ts: new Date().toISOString(), type: 'post', channel: 'c2', text: 'second', status: 'pending' };
+  const torn = '{"op":"enqueue","id":"truncated","ts":"2026-07-28T21:41:05.412Z","type":"post","channel":"","text":"cut off here';
+  await fs.writeFile(walPath, `${JSON.stringify(good1)}\n${torn}\n${JSON.stringify(good2)}\n`, 'utf8');
+
+  const queue = new OutboundQueue({ walPath, adapter: createMockAdapter() });
+  const count = await queue.recover();
+  assert.equal(count, 2, 'both intact entries recover; only the torn line is dropped');
 });
 
 // ── drain: sends pending entries via adapter ───────────────────

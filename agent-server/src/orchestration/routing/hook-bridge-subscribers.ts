@@ -7,10 +7,11 @@
 import type { EventBus, CortexEvent } from '@events/index.js';
 import type { Destination, PlatformAdapter, OutputStream } from '@platform/index.js';
 import { createLogger } from '@core/log.js';
-import { buildPlanApprovalContent } from '@platform/index.js';
+import { buildPlanApprovalContent, askLevelIcon } from '@platform/index.js';
 import * as askUserQuestion from '@orch/interactions/ask-user-question.js';
 import { sendPlanToSlack } from '@orch/interactions/plan-handler.js';
 import type { PlanApprovals } from '@orch/interactions/plan-approvals.js';
+import { interactionRecords as defaultInteractionRecords, type InteractionRecords } from '@orch/interactions/interaction-records.js';
 import { resolveRequest as resolveHookRequest, getStreamingCallback } from './hook-bridge.js';
 
 const log = createLogger('hook-bridge');
@@ -19,13 +20,37 @@ export function registerHookBridgeSubscribers(
   bus: EventBus,
   adapter: PlatformAdapter,
   planApprovals: PlanApprovals,
+  interactions: InteractionRecords = defaultInteractionRecords,
 ): void {
   bus.subscribe('ask-user.requested', async (e) => {
     const ev = e as Extract<CortexEvent, { type: 'ask-user.requested' }>;
     if (ev.dryRun) return; // smoke-test: event is journalled, skip Slack post
     try {
-      const group = askUserQuestion.createHookGroup(ev.requestId, ev.channel, ev.sessionId, ev.questions, ev.extensionUiId, ev.threadId ?? null);
+      const group = askUserQuestion.createHookGroup(ev.requestId, ev.channel, ev.sessionId, ev.questions, ev.extensionUiId, ev.threadId ?? null, ev.level ?? null);
       askUserQuestion.registerHookResolver(ev.requestId, (data) => resolveHookRequest(ev.requestId, data));
+
+      // Web UI (web: conduit) has no PlatformAdapter — persist the interaction entity;
+      // the create() publishes session.interaction and the frontend renders the card
+      // from the transcript (web-interactions-redesign).
+      if (ev.channel.startsWith('web:')) {
+        const webSessionId = ev.channel.slice(4);
+        await interactions.create({
+          id: ev.requestId,
+          sessionId: webSessionId,
+          channel: ev.channel,
+          kind: 'ask-user',
+          payload: {
+            questions: group.questions.map((q: any) => ({
+              question: q.question,
+              header: q.header,
+              options: q.options || [],
+              multiSelect: !!q.multiSelect,
+            })),
+            ...(ev.level ? { level: ev.level } : {}),
+          },
+        });
+        return;
+      }
 
       // Inline-modal platforms (Feishu) render the question form as an inline card,
       // so the intermediate "Answer" summary card + click is redundant — post the
@@ -44,7 +69,8 @@ export function registerHookBridgeSubscribers(
       // streamingCb is fetched only to extract the stream reference — not invoked directly for AskUser
       const streamingCb = getStreamingCallback(ev.channel);
       const stream = (streamingCb as any)?.stream as OutputStream | undefined;
-      const text = `Questions (${group.questions.length})`;
+      const levelIcon = askLevelIcon(ev.level ?? null);
+      const text = `${levelIcon ? `${levelIcon} ` : ''}Questions (${group.questions.length})`;
       const richBlocks = askUserQuestion.buildQuestionGroupBlocks(group);
       // Route through stream when available so standalone post flushes pending appends
       // and resets stream state — without this, messages emitted after the form would
@@ -67,6 +93,24 @@ export function registerHookBridgeSubscribers(
     const ev = e as Extract<CortexEvent, { type: 'plan.submitted' }>;
     if (ev.dryRun) return; // smoke-test: event is journalled, skip Slack post + approval registration
     try {
+      // Web UI: persist the interaction entity with a FULL plan-content snapshot (no
+      // PlatformAdapter for web: conduits). planApprovals stays the live resolver map.
+      if (ev.channel.startsWith('web:')) {
+        const webSessionId = ev.channel.slice(4);
+        planApprovals.register(ev.requestId, { channel: ev.channel, sessionId: webSessionId, extensionUiId: ev.extensionUiId ?? null, threadId: ev.threadId ?? null });
+        await interactions.create({
+          id: ev.requestId,
+          sessionId: webSessionId,
+          channel: ev.channel,
+          kind: 'plan-approval',
+          payload: {
+            planContent: ev.planContent || '',
+            planFilePath: ev.toolInput?.plan_file_path ?? null,
+          },
+        });
+        return;
+      }
+
       const streamingCb = getStreamingCallback(ev.channel);
       const stream = (streamingCb as any)?.stream as OutputStream | undefined;
       const planDest: Destination = { type: 'interactive-reply', conduit: ev.channel, sessionId: ev.sessionId ?? '' };

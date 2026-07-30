@@ -1,24 +1,27 @@
-// input:  conversation-runner, agent-lifecycle, orch/channel-queue, orch/busy-tracker, orch/active-agents
-// output: AgentRunner — plain user-message path: session/status/ledger/callbacks + runConversation (no thread) [S8]
-// pos:    orch/ — sole plain user-message execution path
+// input:  conversation/context execution, lifecycle, queue, DEBUG stores
+// output: Provider-attributed runs, continuations, and transcripts
+// pos:    Sole plain user-message and injection path
 // >>> If I am updated, update my header comment and the parent folder's CORTEX.md <<<
 
 import * as path from 'path';
 import type { Destination, PlatformAdapter, MessageRef, DownloadedFile, IncomingMessage, PlatformFileRef, OutputStream } from '@platform/index.js';
 import { resolveDestinationConduit, SYNTHETIC_CALLBACK_SENDER } from '@platform/types.js';
-import type { AgentResult } from '@core/types/agent-types.js';
+import type { AgentResult, ChatNoticeLevel, ContextUsage, SessionContextUsage } from '@core/types/agent-types.js';
 import { conduitQueues, enqueue } from './conduit-queue.js';
 import { trackPendingTask } from './busy-tracker.js';
-import { getSessionAsync } from '@domain/sessions/session.js';
-import { sessionStore } from '@store/session-registry-repo.js';
+import * as crypto from 'node:crypto';
+import { getSessionAsync, setSessionAsync } from '@domain/sessions/session.js';
+import { sessionStore, effectiveBackendSessionId } from '@store/session-registry-repo.js';
 import { conversationLedger } from '@store/conversation-ledger-repo.js';
 import { conversationHistory, summarizeToolInputForHistory } from '@store/conversation-history-repo.js';
+import { pendingInjectionRepo } from '@store/pending-injection-repo.js';
 import { getActiveProfile, getDefaultAgent, resolveBackendForChannel } from '@domain/agents/index.js';
 import { registerNamedSession } from '@domain/sessions/session-lifecycle.js';
 import { handleAgentSuccess, handleAgentError, initTurnTracking } from './lifecycle.js';
 import { buildSessionTag, buildUserProcessingMessage, makeFallbackNotifier, makeStreamingMessageCallback, computeElapsed, writeStatus, sealStatus, buildStatusActionBlocks, buildSealedStatusActionBlocks, initStatusBlocks } from './status-helpers.js';
 import { readFileSync } from 'fs';
 import { createLogger } from '@core/log.js';
+import { isDebugMode } from '@core/debug-mode.js';
 import { Icons } from '../core/icons.js';
 import { t } from '../core/i18n.js';
 import { getOutboundQueue } from '@store/outbound-queue.js';
@@ -27,22 +30,32 @@ import { buildDurableHooks } from './durable-helpers.js';
 const log = createLogger('agent-runner');
 import { createToolTrace } from '@platform/index.js';
 import { setStreamingCallback, clearStreamingCallback, publishPlanSubmitted, publishAskUserRequested } from './routing/hook-bridge.js';
-import { publishSessionMessage } from './session-events.js';
-import { maybeNotifyCodexLowUsage } from '@domain/costs/codex-usage-monitor.js';
+import { publishSessionContextUsage, publishSessionDebugUpdated, publishSessionMessage, publishSessionMessageDelivered, publishSessionStatus, publishSessionTurn } from './session-events.js';
+import { createSessionDeltaStream } from './delta-coalescer.js';
+import { isInjectableMessage, tryInjectIntoLiveTurn, type MidTurnInjectDeps } from './mid-turn-inject.js';
+import { commitPendingInjection } from './pending-injection-recovery.js';
+import { getStreamingCallback } from './routing/hook-bridge.js';
+import { runningExecutions } from '@core/running-executions.js';
+import { bgHeldSessions } from '@core/bg-held-sessions.js';
 import { recordResume } from '@domain/costs/resume-registry.js';
+import { isProviderRateLimited } from '@domain/costs/rate-limit-throttle.js';
 import { getAgent } from '@domain/threads/index.js';
 import { runConversation } from './conversation-runner.js';
 import { tryAnswerFromHuman } from './manager-qa.js';
-import { shouldHoldForBg } from './bg-continuation.js';
+import { shouldHoldForBg, shouldHoldWebForBg } from './bg-continuation.js';
+import { holdWebForBg } from './web-bg-hold.js';
 import type { ContinuationSink } from '../agent-adapter/types.js';
 import { downloadFiles as downloadPlatformFiles } from './routing/file-handler.js';
-import { WORKSPACE_DIR } from '@core/utils.js';
+import { WORKSPACE_DIR, resolveWorkspaceRelPath } from '@core/utils.js';
 
 const TEMP_DIR = WORKSPACE_DIR;
 
 type Enqueuer = (channel: string, fn: () => Promise<void>) => boolean;
 type Tracker = (delta: number) => void;
 type Executor = (ctx: AgentRunnerCtx) => Promise<void>;
+/** Attempt mid-turn injection; true ⇒ the message was delivered into the live turn and must NOT
+ *  be queued. Injectable so the routing branch is testable without a live backend. */
+type Injector = (ctx: AgentRunnerCtx) => Promise<boolean>;
 
 interface AgentConfig {
   effectiveMessage: string;
@@ -59,7 +72,7 @@ interface AgentCallbacks {
   onFallback: (...args: any[]) => Promise<void>;
   onAssistantMsg: ((text: string) => void) & { stream?: OutputStream };
   onProgress: (progress: any) => void;
-  onToolUse: ((name: string, input: any) => void) | null;
+  onToolUse: ((name: string, input: any, toolUseId: string) => void) | null;
 }
 
 export interface AgentRunnerCtx {
@@ -77,11 +90,13 @@ export class AgentRunner {
   readonly _track: Tracker;
   /** Injectable for unit tests — allows verification of track(-1)-in-finally without spawning Claude. */
   readonly _execute: Executor;
+  readonly _tryInject: Injector;
 
-  constructor(opts: { enqueue?: Enqueuer; track?: Tracker; execute?: Executor } = {}) {
+  constructor(opts: { enqueue?: Enqueuer; track?: Tracker; execute?: Executor; tryInject?: Injector } = {}) {
     this._enqueue = opts.enqueue ?? enqueue;
     this._track = opts.track ?? trackPendingTask;
     this._execute = opts.execute ?? ((ctx) => this._executeReal(ctx));
+    this._tryInject = opts.tryInject ?? ((ctx) => this._tryInjectReal(ctx));
   }
 
   async route(ctx: AgentRunnerCtx): Promise<void> {
@@ -97,27 +112,102 @@ export class AgentRunner {
       await adapter.postMessage(dest, { text: `${Icons.ok} ${t('subtask.replyDelivered')}` }).catch(() => {});
       return;
     }
-    if (conduitQueues.has(channel)) {
-      await adapter.markQueued({ conduit: channel, messageId: message.ref.messageId }).catch(() => {});
-    }
+    // A plain user message arriving while this channel already has a live turn is delivered INTO
+    // that turn (backend stdin) rather than waiting behind it, when the backend can take it. The
+    // injection path then owns the message end-to-end — its own surfacing, delivery ack and busy
+    // bracket — so we return before the queue machinery. Everything it declines (no live turn,
+    // incapable backend, !command, synthetic wake, backend refusal) falls through to today's
+    // queue behaviour unchanged.
+    if (await this._tryInject(ctx)) return;
+    const markerRef = conduitQueues.has(channel)
+      ? { conduit: channel, messageId: message.ref.messageId }
+      : null;
+    if (markerRef) await adapter.markQueued(markerRef).catch(() => {});
     this._track(+1);
+    this._enqueue(channel, () => this._runQueued(ctx, markerRef));
+  }
 
-    this._enqueue(channel, async () => {
-      try {
-        await this._execute(ctx);
-      } finally {
-        this._track(-1);
-      }
-    });
+  private async _runQueued(ctx: AgentRunnerCtx, markerRef: MessageRef | null): Promise<void> {
+    try {
+      await this._execute(ctx);
+    } finally {
+      if (markerRef) await ctx.adapter.unmarkQueued(markerRef).catch(() => {});
+      this._track(-1);
+    }
+  }
+
+  /**
+   * Production mid-turn injection: resolve this channel's live turn and session, then hand the
+   * message to `mid-turn-inject`. Ordered cheapest-gate-first because route() is the hot path for
+   * every inbound message — the store lookups only run once a live turn is actually present.
+   */
+  private async _tryInjectReal(ctx: AgentRunnerCtx): Promise<boolean> {
+    try {
+      if (!isInjectableMessage({ text: ctx.userMessage || '', senderId: ctx.message.senderId })) return false;
+      if (!runningExecutions.hasChannel(ctx.channel)) return false;
+      const sessionId = await getSessionAsync(ctx.channel, resolveBackendForChannel(ctx.channel));
+      if (!sessionId) return false;
+      const sessionName = await sessionStore.lookupBySessionId(sessionId);
+      return tryInjectIntoLiveTurn(buildInjectDeps(sessionName, ctx.channel, ctx.adapter), {
+        channel: ctx.channel,
+        sessionId,
+        sessionName,
+        profileName: getActiveProfile(ctx.channel),
+        text: ctx.userMessage || '',
+        senderId: ctx.message.senderId,
+        messageId: ctx.message.ref.messageId,
+        attachments: ctx.message.webAttachments,
+      });
+    } catch (e) {
+      // Never let the injection attempt break routing — fall back to the queue.
+      log.warn('mid-turn injection attempt failed, falling back to the queue:', (e as Error).message);
+      return false;
+    }
   }
 
   private async _executeReal(ctx: AgentRunnerCtx): Promise<void> {
     const { message, channel, adapter, threadAnchorId, hasFiles, userMessage, agentMessage } = ctx;
     const downloadedFiles = await downloadFiles(message.files, hasFiles, adapter);
+    // Web-uploaded attachments are already on disk — map to DownloadedFile shape.
+    // The `path` field from upload is the UI-relative `workspace/attachments/...` alias for
+    // WORKSPACE_DIR's contents; resolveWorkspaceRelPath maps it to the real absolute path under
+    // WORKSPACE_DIR (= <DATA_DIR>/tmp). A malformed/escaping path resolves to null and is dropped,
+    // so a broken path is never handed to the agent as a bogus absolute file.
+    const allFiles = [
+      ...downloadedFiles,
+      ...(message.webAttachments ?? []).flatMap((a) => {
+        const localPath = resolveWorkspaceRelPath(a.path);
+        return localPath ? [{ localPath, mimetype: a.mimeType, name: a.name }] : [];
+      }),
+    ];
     const startTime = Date.now();
-    const sessionId = await getSessionAsync(channel, resolveBackendForChannel(channel));
-    const sessionName = await resolveSessionName(sessionId, channel, userMessage, adapter);
-    const dest: Destination = { type: 'interactive-reply', conduit: channel, sessionId: sessionId ?? '' };
+    const backend = resolveBackendForChannel(channel);
+    // `sessionId` here is the STABLE tracking id — sessions.json now binds channel → track id (not the
+    // backend id). Everything below (publish/history/status/Destination) keys on it. The backend
+    // resume target is resolved separately as `backendSessionId`. A channel with no bound session yet
+    // (fresh Slack/Feishu/etc.) mints + registers + binds a track id up front, unifying it with the
+    // web path (createDirectSession pre-registers) so publish/history always have a stable key.
+    let sessionId = await getSessionAsync(channel, backend);
+    let sessionName: string;
+    let backendSessionId: string | null;
+    let projectId: string;
+    if (sessionId) {
+      sessionName = await resolveSessionName(sessionId, channel, userMessage, adapter);
+      const rec = await sessionStore.getById(sessionId);
+      backendSessionId = rec ? effectiveBackendSessionId(rec) : null;
+      projectId = rec?.projectId ?? 'general';
+    } else {
+      sessionId = crypto.randomUUID();
+      projectId = (await adapter.resolveInboundProject(channel)) ?? 'general';
+      sessionName = await registerNamedSession(sessionStore, {
+        sessionId, channel, backend,
+        label: userMessage?.substring(0, 60) ?? null,
+        profileName: getActiveProfile(channel), projectId,
+      });
+      await setSessionAsync(channel, sessionId, backend); // bind channel → track id
+      backendSessionId = null; // fresh: the backend self-assigns its id on this first turn
+    }
+    const dest: Destination = { type: 'interactive-reply', conduit: channel, sessionId };
 
     // 1. Orchestration side effects (keep — ledger, status, hook-bridge)
     const statusText = buildUserProcessingMessage({ startTime, profileName: getActiveProfile(channel), sessionName, sessionId });
@@ -129,13 +219,31 @@ export class AgentRunner {
       richBlocks: buildSealedStatusActionBlocks(statusText, blocksTemplate),
     }, threadAnchorId ? { threadId: threadAnchorId } : undefined);
     const messageTs = message.ref.messageId;
-    await initTurnTracking(channel, sessionId, sessionName, messageTs, userMessage || '', statusMsg.messageId);
+    await initTurnTracking(channel, sessionId, backendSessionId, sessionName, messageTs, userMessage || '', statusMsg.messageId);
     // Backend-independent conversation history (keyed by sessionId, the TUI display source).
     // Record the user message now; assistant messages + tool calls are appended via the
     // callbacks below as they stream. Only when we have a sessionId to key by.
     if (sessionId) {
-      recordHistory(conversationHistory.appendUser(sessionId, { text: userMessage || '' }));
-      publishSessionMessage({ sessionId, channel, role: 'user', text: userMessage || '' });
+      // Share a single timestamp between the conversation-history entry and the EventBus
+      // event so the web UI's content-based de-dup (transcript query vs SSE live-tail)
+      // produces identical msgKeys for the same message.
+      const userTs = new Date().toISOString();
+      recordHistory(conversationHistory.appendUser(sessionId, {
+        text: userMessage || '',
+        ts: userTs,
+        attachments: message.webAttachments,
+      }));
+      publishSessionMessage({
+        sessionId,
+        channel,
+        role: 'user',
+        text: userMessage || '',
+        ts: userTs,
+        attachments: message.webAttachments,
+      });
+      // Give an unlabeled session a human-readable title from its first user message (web sessions are
+      // pre-registered without a label; this is the single unified place a session gets titled).
+      void ensureSessionLabel(sessionName, userMessage || '');
     }
     const onMessagePosted = (ref: MessageRef) => void conversationLedger.addResponseTs(channel, messageTs, ref.messageId).catch((e) => log.error(e));
     // 2. Build agent callbacks (streaming, fallback, progress)
@@ -147,14 +255,57 @@ export class AgentRunner {
 
     // 4. Run the conversation turn directly (no thread). The Cancel button is attached once the
     //    execution record exists (execution-scoped cancel), via onExecutionStarted.
+    // Emit the REAL running state for the S4 chat indicator: true now, false in the finally below.
+    if (sessionId) publishSessionStatus({ sessionId, channel, running: true });
     let capturedExecutionId: string | null = null;
+    // Web background-task hold: when set, the turn ended with a live background task and a
+    // ContinuationSink was registered to stream the spontaneous continuation. The hold owns the
+    // terminal running:false publish, so the finally below must NOT seal the session idle.
+    let webBgHeld = false;
+    // Token-level streaming for the Web chat. Null for every other surface (Slack / Feishu /
+    // Ink-TUI / threads) and when the feature is off, so those paths keep receiving complete
+    // messages only. Lives for the turn; sealed in the finally below.
+    const deltaStream = createSessionDeltaStream({ sessionId, channel });
+    const debugEnabled = isDebugMode();
+    const persistToolUse = (name: string, input: any, toolUseId: string): void => {
+      const toolInput = summarizeToolInputForHistory(input);
+      const ts = new Date().toISOString();
+      recordHistory(
+        conversationHistory.appendTool(sessionId, {
+          toolName: name,
+          toolInput,
+          ts,
+          ...(debugEnabled ? { toolUseId, fullInput: input } : {}),
+        }),
+        debugEnabled ? () => publishSessionDebugUpdated({ sessionId, channel }) : undefined,
+      );
+      publishSessionMessage({ sessionId, channel, role: 'tool', text: '', toolName: name, toolInput, ts });
+    };
+    const persistToolResult = debugEnabled
+      ? (toolUseId: string, content: string, isError: boolean): void => {
+          recordHistory(
+            conversationHistory.appendToolResult(sessionId, { toolUseId, content, isError }),
+            () => publishSessionDebugUpdated({ sessionId, channel }),
+          );
+        }
+      : null;
+    const persistContext = (usage: ContextUsage): Promise<void> => persistSessionContextUsage({
+      sessionName, sessionId, channel, usage,
+    });
+    const persistContinuationContext = (usage: ContextUsage): void => {
+      void persistContext(usage).catch((error) => {
+        log.warn('continuation context persistence failed:', (error as Error).message);
+      });
+    };
     try {
       const convResult = await runConversation({
         adapter, channel,
         userMessage: agentMessage,
-        existingSessionId: sessionId,
+        trackSessionId: sessionId,
+        projectId,
+        backendSessionId,
         sessionName,
-        files: downloadedFiles,
+        files: allFiles,
         startTime,
         trigger: 'user',
         onExecutionStarted: async (executionId) => {
@@ -166,23 +317,51 @@ export class AgentRunner {
           }).catch(() => {});
           initStatusBlocks(statusMsg, blocksTemplateWithExec);
         },
-        onAssistantMessage: (text: string) => {
+        onAssistantDelta: deltaStream ? (text: string, blockId: string) => deltaStream.onDelta(text, blockId) : null,
+        onAssistantMessage: (text: string, blockId?: string, noticeLevel?: ChatNoticeLevel) => {
+          // Drain this block's preview FIRST: the authoritative message must never be overtaken by
+          // a delta still sitting in the coalescer, or the UI would replace the row and then append
+          // a stale fragment to it.
+          if (blockId) deltaStream?.flush(blockId);
           callbacks.onAssistantMsg(text);
           if (sessionId && text) {
-            recordHistory(conversationHistory.appendAssistant(sessionId, { text }));
-            publishSessionMessage({ sessionId, channel, role: 'assistant', text });
+            const ts = new Date().toISOString();
+            recordHistory(conversationHistory.appendAssistant(sessionId, { text, ts, noticeLevel }));
+            publishSessionMessage({
+              sessionId, channel, role: 'assistant', text, ts,
+              ...(blockId ? { blockId } : {}),
+              ...(noticeLevel ? { noticeLevel } : {}),
+            });
           }
         },
-        onProgress: callbacks.onProgress,
+        onPromptBuilt: debugEnabled ? (prompt: string) => {
+          recordHistory(
+            conversationHistory.appendUserPrompt(sessionId, { agentMessage: prompt }),
+            () => publishSessionDebugUpdated({ sessionId, channel }),
+          );
+        } : null,
+        onProgress: (progress: any) => {
+          callbacks.onProgress(progress);
+          // S4 chat: surface the REAL agent-turn count live (snapshot on the running execution +
+          // `session.turn` delta) so the Web composer shows turns that grow as the agent works.
+          emitTurnProgress(
+            {
+              sessionId,
+              channel,
+              executionId: capturedExecutionId,
+              setNumTurns: (n) => { if (capturedExecutionId) runningExecutions.setNumTurns(capturedExecutionId, n); },
+              publish: (n) => { if (sessionId) publishSessionTurn({ sessionId, channel, numTurns: n }); },
+            },
+            progress,
+          );
+        },
+        onContextUsage: persistContext,
         onFallback: callbacks.onFallback,
         onToolUse: composeToolUse(
           composeToolUse(callbacks.onToolUse, interactiveCallbacks.onToolUse),
-          sessionId ? (name: string, input: any) => {
-            const toolInput = summarizeToolInputForHistory(input);
-            recordHistory(conversationHistory.appendTool(sessionId, { toolName: name, toolInput }));
-            publishSessionMessage({ sessionId, channel, role: 'tool', text: '', toolName: name, toolInput });
-          } : null,
+          persistToolUse,
         ),
+        onToolResult: persistToolResult,
         onPlanWritten: interactiveCallbacks.onPlanWritten,
         onAskUserQuestion: interactiveCallbacks.onAskUserQuestion,
       });
@@ -192,15 +371,41 @@ export class AgentRunner {
       // reply (handleAgentSuccess holds the status, registers a sink, and arms the bg-wait-guard).
       // Otherwise clear the callback as usual.
       const proc = convResult.agentProcess as { setContinuationSink?: (s: ContinuationSink) => void } | undefined;
-      const holdForBg = shouldHoldForBg(convResult.result, channel, typeof proc?.setContinuationSink === 'function');
+      const canSink = typeof proc?.setContinuationSink === 'function';
+      const holdForBg = shouldHoldForBg(convResult.result, channel, canSink);
       if (!holdForBg) clearStreamingCallback(channel);
-      await maybeNotifyCodexLowUsage({ adapter, result: convResult.result });
       await handleDefaultAgentResult({
         result: convResult.result, channel, adapter, statusMsg, startTime, userMessage,
         executionId: convResult.executionId,
-        sessionName, sessionId, threadAnchorId, messageTs, callbacks,
+        sessionName, sessionId, threadAnchorId, messageTs, callbacks, projectId,
+        continuationToolUse: composeToolUse(callbacks.onToolUse, persistToolUse),
+        continuationToolResult: persistToolResult,
+        continuationContextUsage: persistContinuationContext,
         registerContinuationSink: holdForBg ? (sink: ContinuationSink) => proc!.setContinuationSink!(sink) : null,
       });
+      // Web background-task hold: the Slack/Feishu status-message hold (above) never fires for a
+      // web: channel. Keep the session marked running+backgroundRunning and stream the spontaneous
+      // continuation as new session messages, instead of dropping it and sealing the session idle.
+      if (sessionId && shouldHoldWebForBg(convResult.result, channel, canSink)) {
+        const sid = sessionId;
+        webBgHeld = holdWebForBg({
+          result: convResult.result,
+          registerSink: (sink) => proc!.setContinuationSink!(sink),
+          // Stop during the hold: the cancel path finds the hold by channel in this registry and
+          // fires the abort to seal it (see core/bg-held-sessions.ts).
+          registerAbort: (abort) => bgHeldSessions.setAbort(sid, abort),
+          track: trackPendingTask,
+          publishStatus: ({ running, backgroundRunning }) => publishSessionStatus({ sessionId: sid, channel, running, backgroundRunning }),
+          publishAssistant: (text) => {
+            const ts = new Date().toISOString();
+            recordHistory(conversationHistory.appendAssistant(sid, { text, ts }));
+            publishSessionMessage({ sessionId: sid, channel, role: 'assistant', text, ts });
+          },
+          publishTool: persistToolUse,
+          publishToolResult: persistToolResult ?? undefined,
+          publishContextUsage: persistContinuationContext,
+        });
+      }
     } catch (error) {
       clearStreamingCallback(channel);
       await handleAgentError({
@@ -209,6 +414,13 @@ export class AgentRunner {
         executionId: capturedExecutionId,
         sessionName, sessionId, threadAnchorId, userMessageTs: messageTs, userMessage,
       });
+    } finally {
+      // The turn is over (successfully, in error, or cancelled): no preview may outlive it.
+      deltaStream?.dispose();
+      // Skip the idle seal when a web bg-hold is active — it owns the terminal running:false
+      // publish once the background work finishes (else the session flips to idle immediately and
+      // the spontaneous continuation is untracked).
+      if (sessionId && !webBgHeld) publishSessionStatus({ sessionId, channel, running: false });
     }
   }
 }
@@ -216,6 +428,52 @@ export class AgentRunner {
 export const agentRunner = new AgentRunner();
 
 // --- Helpers ---
+
+export interface SessionContextUsagePersistenceDeps {
+  now: () => string;
+  update: (sessionName: string, updates: { contextUsage: SessionContextUsage }) => Promise<void>;
+  publish: (snapshot: { sessionId: string; channel: string } & SessionContextUsage) => void;
+}
+
+const defaultContextUsagePersistence: SessionContextUsagePersistenceDeps = {
+  now: () => new Date().toISOString(),
+  update: (sessionName, updates) => sessionStore.updateSession(sessionName, updates),
+  publish: publishSessionContextUsage,
+};
+
+/** Persist first, then publish the identical live snapshot so query and event clients converge. */
+export async function persistSessionContextUsage(
+  input: { sessionName: string; sessionId: string; channel: string; usage: ContextUsage },
+  deps: SessionContextUsagePersistenceDeps = defaultContextUsagePersistence,
+): Promise<void> {
+  const contextUsage = { ...input.usage, updatedAt: deps.now() };
+  await deps.update(input.sessionName, { contextUsage });
+  deps.publish({ sessionId: input.sessionId, channel: input.channel, ...contextUsage });
+}
+
+/** Dependencies for {@link emitTurnProgress} — side effects injected for testability. */
+export interface TurnProgressDeps {
+  sessionId: string | null;
+  channel: string;
+  executionId: string | null;
+  /** Update the live agent-turn count on the running execution (snapshot for sessions.list). */
+  setNumTurns: (numTurns: number) => void;
+  /** Publish the `session.turn` delta for the live composer. */
+  publish: (numTurns: number) => void;
+}
+
+/**
+ * Translate an adapter `turn_progress`/`turn_complete` payload into the S4 chat's live agent-turn
+ * signals: update the running execution's numTurns snapshot (when an executionId is known) and
+ * publish a `session.turn` delta (when a sessionId is known). No-op unless `num_turns` is a finite
+ * number — a progress event without a turn count carries nothing to show. Exposed for unit testing.
+ */
+export function emitTurnProgress(deps: TurnProgressDeps, progress: { num_turns?: unknown } | null | undefined): void {
+  const n = progress?.num_turns;
+  if (typeof n !== 'number' || !Number.isFinite(n)) return;
+  if (deps.executionId) deps.setNumTurns(n);
+  if (deps.sessionId) deps.publish(n);
+}
 
 /** Exposed for unit testing. */
 export function resolveDefaultAgent(agentMessage: string, channel?: string): AgentConfig {
@@ -238,22 +496,83 @@ export function resolveDefaultAgent(agentMessage: string, channel?: string): Age
   };
 }
 
-async function handleDefaultAgentResult({ result, channel, adapter, statusMsg, startTime, userMessage, executionId, sessionName, sessionId, threadAnchorId, messageTs, callbacks, registerContinuationSink = null }: {
+async function handleDefaultAgentResult({ result, channel, adapter, statusMsg, startTime, userMessage, executionId, sessionName, sessionId, threadAnchorId, messageTs, callbacks, projectId, continuationToolUse, continuationToolResult, continuationContextUsage, registerContinuationSink = null }: {
   result: AgentResult; channel: string; adapter: PlatformAdapter; statusMsg: MessageRef; startTime: number;
   userMessage: string; executionId: string | null; sessionName: string; sessionId: string | null;
-  threadAnchorId: string | null; messageTs: string; callbacks: AgentCallbacks;
+  threadAnchorId: string | null; messageTs: string; callbacks: AgentCallbacks; projectId: string;
+  continuationToolUse: ((name: string, input: any, toolUseId: string) => void) | null;
+  continuationToolResult: ((toolUseId: string, content: string, isError: boolean) => void) | null;
+  continuationContextUsage: ((usage: ContextUsage) => void) | null;
   registerContinuationSink?: ((sink: ContinuationSink) => void) | null;
 }): Promise<void> {
   if (result?.rateLimited) {
     // Record the interrupted conversation so it auto-resumes when the rate-limit window
     // resets (rate-limit-throttle onResume → resume-dispatcher).
-    recordResume({ kind: 'direct', channel, userMessage, recordedAt: Date.now() });
+    if (isProviderRateLimited(result.rateLimitProvider)) {
+      recordResume({
+        kind: 'direct', provider: result.rateLimitProvider ?? null,
+        channel, userMessage, recordedAt: Date.now(),
+      });
+    }
     const { elapsedStr } = computeElapsed(startTime);
-    const fallbackText = `${Icons.warning} ${buildSessionTag(sessionName, sessionId)}Rate limited — all fallbacks exhausted (${elapsedStr})`;
-    await sealStatus(adapter, statusMsg, fallbackText, buildSealedStatusActionBlocks(fallbackText, { channel, sessionName, isDm: true }));
+    const rateLimitText = `${Icons.warning} ${buildSessionTag(sessionName, sessionId)}${t('status.rateLimitedExhausted')} (${elapsedStr})`;
+    await sealStatus(adapter, statusMsg, rateLimitText, buildSealedStatusActionBlocks(rateLimitText, { channel, sessionName, isDm: true }));
     return;
   }
-  await handleAgentSuccess({ result, channel, adapter, statusMsg, startTime, userMessage, executionId, trigger: 'user', sessionName, threadAnchorId, userMessageTs: messageTs, onAssistantMessage: callbacks.onAssistantMsg, onToolUse: callbacks.onToolUse, registerContinuationSink });
+  await handleAgentSuccess({ result, channel, adapter, statusMsg, startTime, userMessage, executionId, trigger: 'user', sessionName, threadAnchorId, userMessageTs: messageTs, projectId, onAssistantMessage: callbacks.onAssistantMsg, onToolUse: continuationToolUse, onToolResult: continuationToolResult, onContextUsage: continuationContextUsage, registerContinuationSink });
+}
+
+/**
+ * Production side-effect wiring for {@link tryInjectIntoLiveTurn} — the same history / bus /
+ * busy-gate seams `_executeReal` uses for an ordinary turn, so an injected message and a queued one
+ * land in the transcript identically.
+ */
+function buildInjectDeps(sessionName: string | null, channel: string, adapter: PlatformAdapter): MidTurnInjectDeps {
+  return {
+    getLiveExecutions: (channel) => runningExecutions.getByChannel(channel),
+    getStreamingCallback,
+    appendAssistant: (sessionId, o) => recordHistory(conversationHistory.appendAssistant(sessionId, o)),
+    appendTool: (sessionId, o) => recordHistory(
+      conversationHistory.appendTool(sessionId, o),
+      o.fullInput !== undefined ? () => publishSessionDebugUpdated({ sessionId, channel }) : undefined,
+    ),
+    appendToolResult: (sessionId, o) => recordHistory(
+      conversationHistory.appendToolResult(sessionId, o),
+      () => publishSessionDebugUpdated({ sessionId, channel }),
+    ),
+    publishMessage: publishSessionMessage,
+    publishDelivered: publishSessionMessageDelivered,
+    publishStatus: publishSessionStatus,
+    onContextUsage: (sessionId, usageChannel, usage) => {
+      if (!sessionName) return;
+      void persistSessionContextUsage({
+        sessionName, sessionId, channel: usageChannel, usage,
+      }).catch((error) => log.warn('injected continuation context persistence failed:', (error as Error).message));
+    },
+    persistPending: (record) => pendingInjectionRepo.add(record),
+    commitPending: (record) => commitPendingInjection(record),
+    markPending: (record) => adapter.markQueued({ conduit: record.channel, messageId: record.messageId }),
+    unmarkPending: (record) => adapter.unmarkQueued({ conduit: record.channel, messageId: record.messageId }),
+    track: trackPendingTask,
+    summarizeToolInput: (input) => summarizeToolInputForHistory(input),
+    captureDebug: isDebugMode(),
+    now: () => new Date().toISOString(),
+  };
+}
+
+/** Set a session's display label from its first user message when it has none yet (best-effort,
+ *  fire-and-forget). New Slack/inbound sessions already get a label at registration; web sessions are
+ *  created label-less (before any message), so this titles them on the first turn — the LeftRail then
+ *  shows the message text instead of the opaque `cortex-XXXX` name. */
+async function ensureSessionLabel(sessionName: string, userMessage: string): Promise<void> {
+  const text = userMessage.trim();
+  if (!text) return;
+  try {
+    const rec = await sessionStore.lookupSession(sessionName);
+    if (rec && (!rec.label || rec.label.trim() === '')) {
+      await sessionStore.updateSession(sessionName, { label: text.slice(0, 60) });
+    }
+  } catch { /* best-effort — the label is cosmetic */ }
 }
 
 export async function resolveSessionName(sessionId: string | null, channel: string, userMessage: string, adapter: PlatformAdapter): Promise<string> {
@@ -306,19 +625,19 @@ async function downloadFiles(files: PlatformFileRef[] | undefined, hasFiles: boo
 }
 
 /** Fire-and-forget history append; never let a logging write break the turn. */
-function recordHistory(p: Promise<unknown>): void {
-  void p.catch((e) => log.error('conversation-history write failed:', (e as Error).message));
+function recordHistory(p: Promise<unknown>, onPersisted?: () => void): void {
+  void p.then(() => onPersisted?.()).catch((e) => log.error('conversation-history write failed:', (e as Error).message));
 }
 
 /** Compose two optional onToolUse callbacks so both fire on each tool_use event. */
 function composeToolUse(
-  a: ((name: string, input: any) => void) | null,
-  b: ((name: string, input: any) => void) | null,
-): ((name: string, input: any) => void) | null {
+  a: ((name: string, input: any, toolUseId: string) => void) | null,
+  b: ((name: string, input: any, toolUseId: string) => void) | null,
+): ((name: string, input: any, toolUseId: string) => void) | null {
   if (!a && !b) return null;
   if (!a) return b;
   if (!b) return a;
-  return (name, input) => { a(name, input); b(name, input); };
+  return (name, input, toolUseId) => { a(name, input, toolUseId); b(name, input, toolUseId); };
 }
 
 /**
@@ -373,11 +692,11 @@ export function buildInteractiveCallbacks(channel: string, sessionId: string | n
       // pendingPlanContent comes from plan_written event (Write to a plan directory);
       // pendingExitPlanMode comes from tool_use event (LLM called exit_plan_mode directly).
       let planContent = pendingPlanContent ?? pendingExitPlanMode?.plan ?? '';
-      // When a plan file was written, read it for full content (args.plan is often just a summary).
-      if (pendingPlanPath && planContent.length < 200) {
-        try { const fc = readFileSync(pendingPlanPath, 'utf8'); if (fc.trim()) planContent = fc; } catch {}
+      // The file is the authoritative plan snapshot; ExitPlanMode.plan is often only a summary.
+      if (pendingPlanPath) {
+        try { const fileContent = readFileSync(pendingPlanPath, 'utf8'); if (fileContent.trim()) planContent = fileContent; } catch {}
       }
-      publishPlanSubmitted(requestId, channel, sessionId ?? '', planContent, event.toolUseId, threadId);
+      publishPlanSubmitted(requestId, channel, sessionId ?? '', planContent, pendingPlanPath, event.toolUseId, threadId);
       pendingPlanContent = null;
       pendingPlanPath = null;
       pendingExitPlanMode = null;

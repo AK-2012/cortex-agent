@@ -1,13 +1,13 @@
-// input:  Node test runner + facade.ts + rate-limit-throttle
-// output: allConfigsRateLimited + runAgent pre-flight skip tests
-// pos:    Validate facade pre-flight check and rate-limit-aware export
+// input:  facade.ts, rate-limit-throttle, MockAdapter
+// output: provider identity, exact pre-flight, notice regressions
+// pos:    Facade pre-flight policy tests
 // >>> If I am updated, update my header comment and the parent folder's CORTEX.md <<<
 //
 // Rate-limit-throttle is a mutable singleton (module-level state). Tests use regular
 // await import() (not importFresh) so facade imports the same module instance and
 // sees the injected state. _testReset() before/after each test prevents leakage.
 
-import test from 'node:test';
+import { test } from 'vitest';
 import assert from 'node:assert/strict';
 import { MockAdapter } from '../src/platform/testing.js';
 
@@ -33,7 +33,7 @@ async function initThrottle(modes: string[]) {
   for (let i = 0; i < modes.length; i++) {
     await rl.handleRateLimitEvent(
       { rateLimitType: 'five_hour', utilization: 0.95, resetsAt: baseReset + i * 60 },
-      modes[i],
+      { provider: 'anthropic', displayName: 'Anthropic', mode: modes[i] },
     );
   }
   return rl;
@@ -44,7 +44,7 @@ async function initThrottle(modes: string[]) {
 test('allConfigsRateLimited returns false when not throttled', async (t) => {
   const rl = await getRl();
   rl._testReset();
-  t.after(() => rl._testReset());
+  t.onTestFinished(() => rl._testReset());
 
   const facade = await import('../src/domain/agents/facade.js');
   assert.equal(facade.allConfigsRateLimited('plan'), false);
@@ -56,7 +56,7 @@ test('allConfigsRateLimited returns true when all modes in profile are rate-limi
   // plan profile: mode=plan, fallback=[{mode:api}, {mode:plan}]
   // Need plan and api both rate-limited
   const rl = await initThrottle(['plan', 'api']);
-  t.after(() => rl._testReset());
+  t.onTestFinished(() => rl._testReset());
 
   const facade = await import('../src/domain/agents/facade.js');
   assert.equal(facade.allConfigsRateLimited('plan'), true);
@@ -66,7 +66,7 @@ test('allConfigsRateLimited returns false when only some modes rate-limited', as
   // plan profile: mode=plan, fallback=[api, plan]
   // Only rate-limit plan — api still available
   const rl = await initThrottle(['plan']);
-  t.after(() => rl._testReset());
+  t.onTestFinished(() => rl._testReset());
 
   const facade = await import('../src/domain/agents/facade.js');
   assert.equal(facade.allConfigsRateLimited('plan'), false);
@@ -75,7 +75,7 @@ test('allConfigsRateLimited returns false when only some modes rate-limited', as
 test('allConfigsRateLimited returns false on unknown profile', async (t) => {
   await initThrottle(['plan']);
   const rl = await getRl();
-  t.after(() => rl._testReset());
+  t.onTestFinished(() => rl._testReset());
 
   const facade = await import('../src/domain/agents/facade.js');
   // Unknown profile — catch in resolveProfileConfig -> return false (conservative)
@@ -87,23 +87,30 @@ test('allConfigsRateLimited returns false on unknown profile', async (t) => {
 test('runAgent single-config path skips runAgentOnce when mode rate-limited', async (t) => {
   // scan profile has no fallback (single config, mode=plan)
   const rl = await initThrottle(['plan']);
-  t.after(() => rl._testReset());
+  t.onTestFinished(() => rl._testReset());
 
   const facade = await import('../src/domain/agents/facade.js');
-  const handle = facade.runAgent('test', { profileName: 'scan' });
+  const notices: Array<{ text: string; level?: string }> = [];
+  const handle = facade.runAgent('test', {
+    profileName: 'scan',
+    channel: 'web:rate-limit',
+    onAssistantMessage: (text, _blockId, level) => notices.push({ text, level }),
+  });
   const result = await handle.promise;
 
   assert.equal(result.rateLimited, true);
   assert.ok(result.rateLimitMessage?.includes('plan'));
+  assert.equal(result.rateLimitProvider, 'anthropic');
   // No adapter was spawned — synthetic return
   assert.equal(result.sessionId, null);
+  assert.deepEqual(notices, [{ text: 'Rate limited', level: 'error' }]);
 });
 
 test('runAgent fallback loop skips rate-limited configs and returns synthetic result when all exhausted', async (t) => {
   // plan profile: mode=plan, fallback=[mode=api, mode=plan]
   // Rate-limit both plan and api — all 3 configs skipped
   const rl = await initThrottle(['plan', 'api']);
-  t.after(() => rl._testReset());
+  t.onTestFinished(() => rl._testReset());
 
   const facade = await import('../src/domain/agents/facade.js');
   const handle = facade.runAgent('test', { profileName: 'plan' });
@@ -112,12 +119,38 @@ test('runAgent fallback loop skips rate-limited configs and returns synthetic re
   assert.equal(result.rateLimited, true);
   // Last attempted mode was 'plan' (third config)
   assert.ok(result.rateLimitMessage?.includes('plan'));
+  assert.equal(result.rateLimitProvider, 'anthropic');
   assert.equal(result.sessionId, null);
+});
+
+test('provider identity accepts arbitrary configured providers and generic backend fallback', async () => {
+  const facade = await import('../src/domain/agents/facade.js');
+  assert.equal(facade._test.resolveRateLimitProvider({ backend: 'pi', provider: 'provider-z' } as any), 'provider-z');
+  assert.equal(facade._test.resolveRateLimitProvider({ backend: 'custom-backend', provider: null } as any), 'custom-backend');
+});
+
+test('provider wrapper attributes results and retryable thrown errors', async () => {
+  const facade = await import('../src/domain/agents/facade.js');
+  const baseResult = {
+    sessionId: 's', total_cost_usd: 0, num_turns: 1,
+    rateLimited: false, rateLimitMessage: null, planFilePath: null,
+    enteredPlanMode: false, exitedPlanMode: false, finalOutput: null,
+  };
+  const wrappedResult = facade._test.withRateLimitProvider({
+    promise: Promise.resolve(baseResult), kill: () => false, sessionId: 's',
+  } as any, 'provider-z');
+  assert.equal((await wrappedResult.promise).rateLimitProvider, 'provider-z');
+
+  const error = new Error('rate limit exceeded');
+  const wrappedError = facade._test.withRateLimitProvider({
+    promise: Promise.reject(error), kill: () => false, sessionId: null,
+  } as any, 'provider-z');
+  await assert.rejects(wrappedError.promise, (caught: any) => caught.rateLimitProvider === 'provider-z');
 });
 
 test('runAgent fallback loop calls onFallback for each skipped config', async (t) => {
   const rl = await initThrottle(['plan', 'api']);
-  t.after(() => rl._testReset());
+  t.onTestFinished(() => rl._testReset());
 
   const facade = await import('../src/domain/agents/facade.js');
   const fallbackCalls: Array<{ current: any; next: any; result: any }> = [];

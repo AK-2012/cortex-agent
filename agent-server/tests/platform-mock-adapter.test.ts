@@ -1,9 +1,9 @@
 // input:  Node test runner + MockAdapter + adapter types
-// output: PlatformAdapter 17-method coverage tests
-// pos:    Verify MockAdapter records all interface methods
+// output: PlatformAdapter method coverage tests including marker add/remove
+// pos:    Verifies MockAdapter records the complete platform contract
 // >>> If I am updated, update my header comment and the parent folder's CORTEX.md <<<
 
-import test from 'node:test';
+import { test } from 'vitest';
 import assert from 'node:assert/strict';
 import { MockAdapter } from '../src/platform/testing.js';
 import type {
@@ -14,17 +14,6 @@ import type {
   Destination,
 } from '../src/platform/types.js';
 
-test('MockAdapter exposes platform name and default capability flags', () => {
-  const adapter = new MockAdapter();
-  assert.equal(adapter.name, 'mock');
-  assert.equal(adapter.capabilities.threads, true);
-  assert.equal(adapter.capabilities.messageEdit, true);
-  assert.equal(adapter.capabilities.modals, true);
-  assert.equal(adapter.capabilities.reactions, true);
-  assert.equal(adapter.capabilities.fileUpload, true);
-  assert.equal(adapter.capabilities.richFormatting, true);
-});
-
 test('MockAdapter capability overrides merge with defaults', () => {
   const adapter = new MockAdapter({ capabilities: { threads: false, maxMessageLength: 50 } });
   assert.equal(adapter.capabilities.threads, false);
@@ -32,21 +21,9 @@ test('MockAdapter capability overrides merge with defaults', () => {
   assert.equal(adapter.capabilities.modals, true);
 });
 
-test('MockAdapter supports capability config via constructor', () => {
-  const adapter = new MockAdapter({ capabilities: { threads: false } });
-  assert.equal(adapter.capabilities.threads, false);
-  assert.equal(adapter.capabilities.modals, true);
-});
-
 test('MockAdapter supports legacy partial-capability constructor arg (no wrapper object)', () => {
   const adapter = new MockAdapter({ threads: false });
   assert.equal(adapter.capabilities.threads, false);
-});
-
-test('MockAdapter start/stop resolve without side effects', async () => {
-  const adapter = new MockAdapter();
-  await assert.doesNotReject(adapter.start());
-  await assert.doesNotReject(adapter.stop());
 });
 
 test('postMessage records destination/content/threadId and returns unique ascending messageIds', async () => {
@@ -100,12 +77,14 @@ test('openModal records every opened modal with triggerId', async () => {
   assert.equal(adapter.modals[1].modal.callbackId, 'cb-2');
 });
 
-test('markQueued records its input', async () => {
+test('markQueued and unmarkQueued record symmetric marker operations', async () => {
   const adapter = new MockAdapter();
   const ref = await adapter.postMessage({ type: 'interactive-reply', conduit: 'C1', sessionId: '' }, { text: 'hi' });
   await adapter.markQueued(ref);
+  await adapter.unmarkQueued(ref);
 
   assert.deepEqual(adapter.marksQueued, [{ ref }]);
+  assert.deepEqual(adapter.marksUnqueued, [{ ref }]);
 });
 
 test('uploadFile records filePath + opts and downloadFile synthesises localPath', async () => {
@@ -223,6 +202,7 @@ test('reset() clears every recorded interaction list', async () => {
   await adapter.updateMessage(ref, { text: 'y' });
   await adapter.deleteMessage(ref);
   await adapter.markQueued(ref);
+  await adapter.unmarkQueued(ref);
   await adapter.uploadFile(dest, '/tmp/a');
   await adapter.openModal('t', { callbackId: 'cb', title: 'T', fields: [] });
 
@@ -231,6 +211,7 @@ test('reset() clears every recorded interaction list', async () => {
   assert.deepEqual(adapter.updated, []);
   assert.deepEqual(adapter.deleted, []);
   assert.deepEqual(adapter.marksQueued, []);
+  assert.deepEqual(adapter.marksUnqueued, []);
   assert.deepEqual(adapter.uploads, []);
   assert.deepEqual(adapter.modals, []);
 });

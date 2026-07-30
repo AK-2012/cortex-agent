@@ -1,10 +1,12 @@
-// input:  task-store, execution-registry, pending-task-tracker
-// output: taskDispatchRunner job runner — registers as 'task-dispatch'
-// pos:    programmatic task dispatch; provides cancelDispatchedTask for app.ts
+// input:  task store, thread runner, review reconciler
+// output: dispatch hooks, followups, failure quarantine
+// pos:    Starts dispatch threads for claimed tasks
+// >>> If I am updated, update my header comment and the parent folder's CORTEX.md <<<
 
 import * as os from 'node:os';
 import { register, ctx } from '../job-registry.js';
 import { createLogger } from '@core/log.js';
+import { emitCortexEvent } from '@core/hook-bus.js';
 import { Icons } from '../../../core/icons.js';
 import * as executionRegistry from '../../executions/registry.js';
 
@@ -13,7 +15,6 @@ import * as pendingTaskTracker from '../../tasks/pending-tracker.js';
 import { sessionStore } from '@store/session-registry-repo.js';
 import { getActiveProfile, getActiveBackend } from '../../agents/index.js';
 import { selectAndClaimTask, computeNextInterval, updateScheduleInterval } from '../../tasks/dispatcher.js';
-import { taskStore } from '../../tasks/store.js';
 import { taskMutator } from '../../tasks/mutator.js';
 import { createThread, detectSplitFromControl, clearPendingControl } from '../../threads/index.js';
 import { runThread as runThreadExec } from '../../threads/runner.js';
@@ -21,6 +22,7 @@ import { processSplitOutcome, processAbortOutcome, formatWorkerAbortReason } fro
 import { threadStore } from '@store/thread-repo.js';
 import { buildUserProcessingMessage, computeElapsed, buildSessionTag } from '@core/status-format.js';
 import { finalizeThreadSuccess } from './_shared.js';
+import { reconcileFailedDispatchThread } from './failed-dispatch-reconciliation.js';
 import type { PlatformAdapter, MessageRef } from '@platform/index.js';
 import { getOutboundQueue, durableUpdate, durablePost } from '@store/outbound-queue.js';
 
@@ -139,8 +141,6 @@ async function executeDispatchTask({ selected, selectedTask, channel, scheduleTa
     projectId: selectedTask.project,
     metadata: {
       scheduleTaskId, trigger: 'task-dispatch', profileOverride: effectiveProfile,
-      // DR-0014: persisted so a suspended parent's re-entry can rebuild the
-      // task-status-check onEnd hook (extraHooks are not persisted on ThreadRecord).
       taskId: selectedTask.id ?? null, taskProject: selectedTask.project ?? null,
       taskText: selectedTask.text ?? null,
       resumeDest: 'project-report',
@@ -148,27 +148,30 @@ async function executeDispatchTask({ selected, selectedTask, channel, scheduleTa
   });
 
   const icb = ctx.buildInteractiveCallbacks?.(channel, null);
+  void emitCortexEvent('cortex:dispatch.started', {
+    taskId: selectedTask.id,
+    project: selectedTask.project,
+    source: 'task-dispatch',
+    templateName: selected.template,
+  }).catch(() => {});
   const threadResult = await runThreadExec(thread.id, {
     adapter, channel: channel, threadAnchorId: statusMsg?.messageId || null, statusMsg, startTime,
     destination: { type: 'project-report', projectId: selectedTask.project || channel, trigger: 'task-dispatch', sessionId: '' },
     onToolUse: icb?.onToolUse ?? null, onPlanWritten: icb?.onPlanWritten ?? null, onAskUserQuestion: icb?.onAskUserQuestion ?? null,
-    // DR-0015 problem 2: block the owning task at abort time, BEFORE the onEnd task-status-check
-    // hook runs, so the hook sees a blocked task and does not unclaim it back to actionable.
+    // Block the owning task before lifecycle end hooks inspect task state.
     onAbort: async ({ taskId, reason }) => { await taskMutator.block(taskId, formatWorkerAbortReason(reason)); },
-    extraHooks: {
-      onEnd: {
-        command: 'node hooks/task-status-check.mjs',
-        args: [selectedTask.project, selectedTask.id],
-        timeout: 10000,
-      },
-    },
+  }).catch(async (error) => {
+    try {
+      await reconcileFailedDispatchThread(thread.id, selectedTask);
+    } catch (reconcileError) {
+      log.error(`Failed dispatch reconciliation: ${(reconcileError as Error).message}`);
+    }
+    throw error;
   });
   const result = threadResult.lastAgentResult as any;
 
-  // DR-0014: the thread suspended on child threads ([WAIT_CHILDREN]). Not a completion —
-  // keep the task claimed (thread-callback resumes the thread when children finish, and the
-  // rebuilt onEnd hook closes the task loop at true termination). Don't finalize, don't
-  // publish task.completed.
+  // A suspended thread is not complete. Keep the task claimed until resumed termination;
+  // do not finalize or publish task.completed.
   if (threadResult.thread?.status === 'waiting') {
     const nThreads = threadResult.thread.metadata?.waitingOn?.length ?? 0;
     const nTasks = threadResult.thread.metadata?.waitingOnTasks?.length ?? 0;
@@ -242,11 +245,8 @@ async function executeDispatchTask({ selected, selectedTask, channel, scheduleTa
     return { success: true, skipped: false, note: `[${selectedTask.project}] ${splitOutcome.note}` };
   }
 
-  // Rate-limit pause: the runner left the thread in 'rate_limited' and recorded it for
-  // auto-resume. Keep the task CLAIMED (do not unclaim → no fresh re-dispatch that would race
-  // the thread resume), don't publish task.completed, don't finalize. resume-dispatcher re-enters
-  // the same thread when the window resets, and its rebuilt onEnd task-status-check hook closes
-  // the task loop at true termination — mirrors the DR-0014 suspended-parent branch above.
+  // Rate-limit pause keeps the task claimed so a fresh dispatch cannot race the resumed thread.
+  // Do not publish completion or finalize until the resumed thread truly terminates.
   if (threadResult.thread?.status === 'rate_limited') {
     if (statusMsg) {
       // Persist the live status message so the post-resume settle can refresh it.
@@ -293,19 +293,23 @@ async function handleDispatchError(error: Error, selectedTask: Record<string, an
   const errChannel = channel;
   let blocked = false;
   let blockReason: string | null = null;
-  if (selectedTask?.task_hash) {
-    const taskHash: string = selectedTask.id;
-    const prev = dispatchFailureCounts.get(taskHash) || { count: 0, lastError: '' };
+  if (selectedTask?.id) {
+    const taskId: string = selectedTask.id;
+    const prev = dispatchFailureCounts.get(taskId) || { count: 0, lastError: '' };
     const next = { count: prev.count + 1, lastError: error.message };
-    dispatchFailureCounts.set(taskHash, next);
+    dispatchFailureCounts.set(taskId, next);
     if (next.count >= DISPATCH_FAILURE_QUARANTINE_THRESHOLD) {
       blockReason = sanitizeBlockReason(`dispatch-failed-${next.count}x: ${error.message}`);
       try {
-        await taskMutator.block(taskHash, blockReason);
-        blocked = true;
-        dispatchFailureCounts.delete(taskHash);
+        const blockResult = await taskMutator.block(taskId, blockReason);
+        if (blockResult.success) {
+          blocked = true;
+          dispatchFailureCounts.delete(taskId);
+        } else {
+          log.error(`Failed to auto-block task ${taskId}: ${blockResult.message}`);
+        }
       } catch (e) {
-        log.error(`Failed to auto-block task ${taskHash}: ${(e as Error).message}`);
+        log.error(`Failed to auto-block task ${taskId}: ${(e as Error).message}`);
       }
     }
   }

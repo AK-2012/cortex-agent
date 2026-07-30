@@ -1,7 +1,6 @@
-// input:  domain/agents (runAgent + config getters), domain/threads (agent-slot + prompt assembly),
-//         domain/executions/registry, core/running-executions, domain/projects
-// output: runConversation — executes a single plain user-conversation turn WITHOUT a thread
-// pos:    orch/ — dedicated execution path for plain user messages (replaces the default-thread wrapper)
+// input:  agent facade, prompt assembly, registries, project context
+// output: runConversation with prompt, context, notice, and tool callbacks
+// pos:    Plain user-turn execution without thread machinery
 // >>> If I am updated, update my header comment and the parent folder's CORTEX.md <<<
 //
 // Why this exists: plain user chat messages used to be wrapped in a `templateName:'default'`
@@ -13,13 +12,15 @@
 // (conversation ledger) are all thread-independent and handled by the caller (agent-runner).
 
 import type { Destination, PlatformAdapter, MessageRef, DownloadedFile } from '@platform/index.js';
-import type { AgentResult } from '@core/types/agent-types.js';
+import type { AgentResult, ChatNoticeLevel, ContextUsage } from '@core/types/agent-types.js';
 import {
-  runAgent, getClaudeMode, getActiveBackend, getActiveProfile, getDefaultAgent,
+  runAgent, getClaudeMode, getActiveProfile, getDefaultAgent, resolveBackendForChannel,
 } from '@domain/agents/index.js';
 import { resolveAgentSlotConfigByName, resolveSystemVars, buildConversationPrompt } from '@domain/threads/index.js';
-import * as executionRegistry from '@domain/executions/registry.js';
 import { projectStore } from '@domain/projects/index.js';
+import type { Project } from '@domain/projects/index.js';
+import * as executionRegistry from '@domain/executions/registry.js';
+import { sessionStore } from '@store/session-registry-repo.js';
 import { runningExecutions } from '../core/running-executions.js';
 
 export interface RunConversationOptions {
@@ -27,8 +28,14 @@ export interface RunConversationOptions {
   channel: string;
   /** The raw user message (without the default agent's directive). */
   userMessage: string;
-  /** Channel-level session to resume, or null for a fresh session. */
-  existingSessionId: string | null;
+  /** Stable Cortex tracking id for this session (UI identity, execution-record + publish key). */
+  trackSessionId: string;
+  /** The project this session is bound to (from the session registry record). Cost + execution
+   *  records are attributed to this project verbatim — no message-text re-derivation. */
+  projectId: string;
+  /** Backend resume target (the backend CLI's own session id), or null for a fresh session where the
+   *  backend self-assigns its id. Decoupled from {@link trackSessionId}. */
+  backendSessionId: string | null;
   /** Resolved session name for this turn. */
   sessionName: string;
   files: DownloadedFile[];
@@ -41,10 +48,17 @@ export interface RunConversationOptions {
   /** Fired once the execution record is created, before the agent starts — lets the caller
    *  attach an execution-scoped Cancel button to the status message. */
   onExecutionStarted?: (executionId: string) => void | Promise<void>;
-  onAssistantMessage?: ((text: string) => void) | null;
+  /** `blockId` identifies prior deltas; `noticeLevel` marks system-authored chat notices. */
+  onAssistantMessage?: ((text: string, blockId?: string, noticeLevel?: ChatNoticeLevel) => void) | null;
+  /** Incremental chunk of a block still being generated. Web chat only — see delta-coalescer. */
+  onAssistantDelta?: ((text: string, blockId: string) => void) | null;
   onProgress?: ((progress: any) => void) | null;
+  onContextUsage?: ((usage: ContextUsage) => void | Promise<void>) | null;
   onFallback?: ((...args: any[]) => Promise<void>) | null;
-  onToolUse?: ((name: string, input: any) => void) | null;
+  /** Receives the exact text passed to runAgent, after all fresh-session context is assembled. */
+  onPromptBuilt?: ((prompt: string) => void) | null;
+  onToolUse?: ((name: string, input: any, toolUseId: string) => void) | null;
+  onToolResult?: ((toolUseId: string, content: string, isError: boolean) => void) | null;
   onPlanWritten?: ((event: { path: string; content: string; toolUseId: string }) => void) | null;
   onAskUserQuestion?: ((event: any) => void) | null;
 }
@@ -55,6 +69,29 @@ export interface ConversationResult {
   /** Underlying agent process for the turn. Used by the background-task continuation path to
    *  register a ContinuationSink on the (Claude) session. Opaque to other consumers. */
   agentProcess?: unknown;
+}
+
+/**
+ * Decide whether (and which) project context to inject into the conversation prompt.
+ * Returns the {id, contextDir} pair for buildConversationPrompt, or null to inject nothing.
+ *
+ * Injection is deliberately narrow: only the FIRST turn (fresh backend session — resume keeps it
+ * in history) of a Web UI direct session (`web:` channel — the only path where the user explicitly
+ * binds the session to a project at create time), and only for real user projects (the `general`
+ * umbrella carries no signal). Unknown/deleted project ids inject nothing rather than a dead path.
+ */
+export function resolveConversationProject(args: {
+  channel: string;
+  projectId: string;
+  isFreshSession: boolean;
+  store?: Pick<typeof projectStore, 'get'>;
+}): { id: string; contextDir: string } | null {
+  const store = args.store ?? projectStore;
+  if (!args.isFreshSession) return null;
+  if (!args.channel.startsWith('web:')) return null;
+  const project: Project | undefined = store.get(args.projectId);
+  if (!project || project.kind === 'general') return null;
+  return { id: project.id, contextDir: project.contextDir };
 }
 
 /**
@@ -73,11 +110,20 @@ export async function runConversation(opts: RunConversationOptions): Promise<Con
   const agentConfig = resolveAgentSlotConfigByName(defaultAgentName);
   if (!agentConfig) throw new Error(`Unknown default agent: ${defaultAgentName}`);
 
-  // USER.md profile is injected only on a session's FIRST turn (existingSessionId === null).
+  // USER.md profile is injected only on a session's FIRST turn (no backend session yet).
   // Session resume keeps it in history thereafter, so re-sending it every turn just wastes tokens.
-  const isFreshSession = opts.existingSessionId === null;
-  const prompt = buildConversationPrompt(agentConfig, opts.userMessage, { includeUserContext: isFreshSession });
-  const project = projectStore.resolveFromMessage(opts.userMessage)?.id ?? 'general';
+  const isFreshSession = opts.backendSessionId === null;
+  const prompt = buildConversationPrompt(agentConfig, opts.userMessage, {
+    includeUserContext: isFreshSession,
+    // Web UI direct sessions are bound to a project at create time; tell the agent which one
+    // on the session's first turn (see resolveConversationProject for the exact gating).
+    project: resolveConversationProject({ channel: opts.channel, projectId: opts.projectId, isFreshSession }),
+  });
+  opts.onPromptBuilt?.(prompt);
+  // Attribute cost/execution to the session's bound project (from the registry record), NOT a
+  // re-derivation from the message text. A session created under project X stays project X even if
+  // no message ever mentions X literally (that mismatch previously dumped everything into 'general').
+  const project = opts.projectId;
 
   // Resolve profile: hardcoded agent profiles win; __active__ honors the optional override
   // (scheduler) then the channel's active profile.
@@ -86,14 +132,17 @@ export async function runConversation(opts: RunConversationOptions): Promise<Con
     : agentConfig.profile;
 
   const trigger = opts.trigger || 'user';
+  // Execution record's backend must reflect the channel's active profile (e.g. 'pi' for deepseek),
+  // not the global default — otherwise a pi turn is mislabeled 'claude'.
+  const channelBackend = resolveBackendForChannel(opts.channel);
   const execution = executionRegistry.startLocalExecution({
     kind: trigger === 'scheduled' ? 'scheduled' : 'local',
     channel: opts.channel,
     project,
     trigger,
-    backend: getActiveBackend(),
+    backend: channelBackend,
     billingMode: getClaudeMode(),
-    sessionId: opts.existingSessionId,
+    sessionId: opts.trackSessionId,
     label: prompt.substring(0, 60),
     scheduleTaskId: opts.scheduleTaskId || null,
     threadId: null,
@@ -105,7 +154,8 @@ export async function runConversation(opts: RunConversationOptions): Promise<Con
   const handle = runAgent(prompt, {
     channel: opts.channel,
     executionId: execution.id,
-    sessionId: opts.existingSessionId,
+    sessionId: opts.backendSessionId,   // backend resume target (null → backend self-assigns)
+    trackSessionId: opts.trackSessionId, // stable Cortex id → CORTEX_SESSION_ID
     sessionKey: null, // falls back to channel key in the adapter
     files: opts.files || [],
     profileName,
@@ -122,8 +172,11 @@ export async function runConversation(opts: RunConversationOptions): Promise<Con
     onFallback: opts.onFallback ?? null,
     isUserInitiated: true,
     onAssistantMessage: opts.onAssistantMessage,
+    onAssistantDelta: opts.onAssistantDelta ?? null,
     onProgress: opts.onProgress,
+    onContextUsage: opts.onContextUsage ?? null,
     onToolUse: opts.onToolUse,
+    onToolResult: opts.onToolResult ?? null,
     onPlanWritten: opts.onPlanWritten ?? null,
     onAskUserQuestion: opts.onAskUserQuestion ?? null,
   });
@@ -137,12 +190,30 @@ export async function runConversation(opts: RunConversationOptions): Promise<Con
     executionId: execution.id,
     kind: execution.kind,
     kill: () => handle.kill(),
-    backend: getActiveBackend(),
+    backend: channelBackend,
     agentProcess: handle.agentProcess,
     sessionId: handle.sessionId,
   });
 
-  const result = await handle.promise;
+  let result: AgentResult;
+  try {
+    result = await handle.promise;
+  } finally {
+    // Persist the backend resume target as soon as the turn settles — success OR interruption.
+    // The backend id is assigned at spawn (Claude `--session-id`), but was previously only
+    // persisted by handleAgentSuccess, so killing a session's FIRST turn (web Stop / !cancel /
+    // error) lost it and the next message started a brand-new backend session with no context.
+    // The backend writes its transcript incrementally during the interrupted turn, so persisting
+    // the id here lets the next turn `--resume` it (and the adapter's resolveResumeForPrint
+    // self-heals to a create when no transcript was written). Best-effort; success-path
+    // handleAgentSuccess still overwrites with the result's authoritative id.
+    if (isFreshSession && handle.sessionId) {
+      await sessionStore.updateSession(opts.sessionName, {
+        backendSessionId: handle.sessionId,
+        lastUsedAt: new Date().toISOString(),
+      }).catch(() => {});
+    }
+  }
 
   // Finalize the execution here (persistent record + registry teardown + balanced agent.* event)
   // so this function is self-contained and serves both the interactive path (agent-runner) and

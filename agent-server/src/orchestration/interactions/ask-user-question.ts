@@ -71,8 +71,9 @@ const pendingHookResolvers = new Map();
 
 /** Create a question group from a PreToolUse hook request (not from Claude output).
  *  @param extensionUiId — original PI extension_ui_request id; when set, tryResolveHook
- *         uses this for sendExtensionUiResponse instead of the hookRequestId. */
-function createHookGroup(requestId, channel, sessionId, questions, extensionUiId?: string, threadId?: string | null) {
+ *         uses this for sendExtensionUiResponse instead of the hookRequestId.
+ *  @param level — optional severity ('info'|'warning'|'error') rendered by the block builders. */
+function createHookGroup(requestId, channel, sessionId, questions, extensionUiId?: string, threadId?: string | null, level?: 'info' | 'warning' | 'error' | null) {
   const groupId = buildGroupId(sessionId, requestId);
   const group = {
     groupId,
@@ -84,6 +85,7 @@ function createHookGroup(requestId, channel, sessionId, questions, extensionUiId
     hookRequestId: requestId,
     extensionUiId: extensionUiId || null,
     threadId: threadId ?? null,
+    level: level ?? null,
     questions: questions.map((q, idx) => ({
       pendingId: buildPendingId(sessionId, requestId, idx),
       header: q.header,
@@ -194,6 +196,28 @@ async function sendMessages(result, channel, adapter: PlatformAdapter, messageTs
   return sentCount;
 }
 
+/** Return the first non-expired pending question group for a channel, or null. */
+function getGroupByChannel(channel: string): any | null {
+  for (const group of pendingAskUserQuestionGroups.values()) {
+    if (group.channel === channel && !isExpired(group)) return group;
+  }
+  return null;
+}
+
+/** Return the pending question group registered under a PreToolUse hook requestId, or null. */
+function getGroupByHookRequestId(requestId: string): any | null {
+  for (const group of pendingAskUserQuestionGroups.values()) {
+    if (group.hookRequestId === requestId) return group;
+  }
+  return null;
+}
+
+/** Delete the group registered under a hook requestId (TTL-expiry cleanup path). */
+function deleteGroupByHookRequestId(requestId: string): void {
+  const group = getGroupByHookRequestId(requestId);
+  if (group) deleteGroup(group.groupId);
+}
+
 export {
   sendMessages,
   formatGroupResponse,
@@ -201,6 +225,9 @@ export {
   buildQuestionModalDefinition,
   isExpired,
   getGroup,
+  getGroupByChannel,
+  getGroupByHookRequestId,
+  deleteGroupByHookRequestId,
   deleteGroup,
   getPendingQuestion,
   createHookGroup,

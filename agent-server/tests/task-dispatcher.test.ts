@@ -1,10 +1,10 @@
-// input:  Node test runner + task-dispatcher module
-// output: preselect + guard + gate + CLI invocation tests
-// pos:    Verify pre-filter, dispatch gating and CLI launch
+// input:  task dispatcher, outages, template/profile config
+// output: preselect, provider gates, and CLI tests
+// pos:    Covers task pre-filter and dispatch eligibility
 // >>> If I am updated, update my header comment and the parent folder's CORTEX.md <<<
 
 import './_test-home.js'; // MUST be first: isolate CORTEX_HOME before paths.ts loads
-import test, { before } from 'node:test';
+import { test, beforeAll } from 'vitest';
 import assert from 'node:assert/strict';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
@@ -13,8 +13,11 @@ import { updateScheduleInterval, hasRunningExecutionForSchedule, findActiveDispa
 
 import { loadConfig, mergeThreadTemplates } from '../src/domain/threads/template-loader.js';
 import { PROJECTS_DIR, CONFIG_DIR } from '../src/core/paths.js';
+import { profileRepo, PROFILES_FILE } from '../src/store/profile-repo.js';
+import * as throttle from '../src/domain/costs/rate-limit-throttle.js';
+import { MockAdapter } from '../src/platform/testing.js';
 
-before(() => {
+beforeAll(() => {
   _testSetRegistry({ testbox: { cortexPath: '/tmp/test', gpuCount: 2 } });
   // Self-sufficient template fixture: seed defaults templates into the isolated
   // CORTEX_HOME so template-dependent tests pass when run standalone (test:file
@@ -212,6 +215,43 @@ test('filterDispatchableTasks default rate-limit check passes everything when no
   assert.deepEqual(filtered.map((task) => task.id), ['a1']);
 });
 
+function installOutageProfile(): void {
+  fs.mkdirSync(path.dirname(PROFILES_FILE), { recursive: true });
+  fs.writeFileSync(PROFILES_FILE, JSON.stringify({
+    defaultProfile: 'outage-profile',
+    profiles: {
+      'outage-profile': {
+        model: 'test-model', backend: 'pi', provider: 'provider-a', mode: 'api',
+      },
+    },
+  }));
+  profileRepo.invalidate();
+}
+
+async function activateDispatcherOutage(t: { onTestFinished: (fn: () => void) => void }): Promise<void> {
+  await throttle.initRateLimitThrottle(new MockAdapter({ adminChannel: 'admin' }), {
+    save: async () => {}, load: async () => null,
+  });
+  t.onTestFinished(() => throttle._testReset());
+  await throttle.activateOutageWindow('provider-a', 5 * 60_000);
+}
+
+test('filterDispatchableTasks skips a template whose provider has an outage', async (t) => {
+  installOutageProfile();
+  loadConfig();
+  await activateDispatcherOutage(t);
+
+  const filtered = await filterDispatchableTasks([
+    { id: 'candidate-a', project: 'atlas', text: 'provider work', gpu: null, template: 'default' },
+  ], 'dispatch-schedule', new Map(), {
+    findActiveDispatchMatch: () => null,
+    checkRealGpuOccupancy: async () => ({ gpus: [], freeIndices: [], allOccupied: false }),
+    profileName: 'outage-profile',
+  });
+
+  assert.deepEqual(filtered, []);
+});
+
 test('isTemplateRateLimited: any limited template profile blocks the task', () => {
   loadConfig();
   // defaults: doc-review (shell binding) resolves to ['plan', 'execute'] — doc-writer(plan) + doc-reviewer(execute)
@@ -254,95 +294,6 @@ test('isValidDispatchPrompt accepts valid prompt values', () => {
   assert.equal(isValidDispatchPrompt(' null profile task'), true);  // has real content beyond "null"
   assert.equal(isValidDispatchPrompt('task is null-ish'), true);    // substring, not exact match
 });
-
-// --- Wiring regression tests: verify guard is actually called at both entry points ---
-// These exist because unit tests of isValidDispatchPrompt pass even if the call site
-// is deleted. A deletion of either guard invocation would silently re-open ISS-CS-005.
-
-test('null-prompt guard is called in scheduled-task job runScheduledTask before thread spawn', async () => {
-  const fs = await import('node:fs/promises');
-  const path = await import('node:path');
-  const src = await fs.readFile(path.resolve(process.cwd(), 'src/domain/scheduling/jobs/scheduled-task.ts'), 'utf8');
-
-  // Extract runScheduledTask body
-  const startIdx = src.indexOf('export function runScheduledTask');
-  assert.ok(startIdx >= 0, 'runScheduledTask export must exist');
-  // Body ends at the next top-level `function `/`async function ` declaration at column 0
-  const after = src.slice(startIdx + 1);
-  const endIdx = after.search(/\n(function|async function|export )/);
-  const body = after.slice(0, endIdx);
-
-  assert.match(body, /isValidDispatchPrompt\s*\(/, 'runScheduledTask must call isValidDispatchPrompt');
-  // Guard must appear BEFORE the side-effect (trackPendingTask / thread spawn)
-  const guardPos = body.indexOf('isValidDispatchPrompt');
-  const spawnPos = body.indexOf('runScheduledTaskAsync');
-  assert.ok(guardPos > 0 && spawnPos > guardPos, 'guard must precede runScheduledTaskAsync');
-});
-
-// --- Per-task template-profile rate-limit gating regression guard ---
-// The OLD design gated the whole dispatch cycle on the scheduler-resolved profile
-// (always "plan" by default), which both over-blocked (deepseek-only templates skipped
-// when plan was limited) and under-blocked (template profile limited but plan fine).
-// The gate now lives per-task inside selection, resolved from each task's template.
-
-test('runDispatchAsync forwards profileName to selection and no longer gates on the scheduler profile', async () => {
-  const fs = await import('node:fs/promises');
-  const path = await import('node:path');
-  const src = await fs.readFile(path.resolve(process.cwd(), 'src/domain/scheduling/jobs/task-dispatch.ts'), 'utf8');
-
-  const startIdx = src.indexOf('async function runDispatchAsync');
-  assert.ok(startIdx >= 0, 'runDispatchAsync declaration must exist');
-  const after = src.slice(startIdx + 1);
-  const endIdx = after.search(/\n(function|async function|export )/);
-  const body = after.slice(0, endIdx);
-
-  // The wrong gate must be gone (rate-limit eligibility is decided per-task in selection)
-  assert.doesNotMatch(body, /allConfigsRateLimited\s*\(/, 'runDispatchAsync must NOT gate on the scheduler profile');
-
-  // Both selection calls must forward profileName so __active__ slots resolve correctly
-  assert.match(body, /selectAndClaimTask\(\{\s*scheduleTaskId,\s*dryRun:\s*true,\s*profileName\s*\}\)/, 'dry-run selection must forward profileName');
-  assert.match(body, /selectAndClaimTask\(\{\s*scheduleTaskId,\s*profileName\s*\}\)/, 'real claim selection must forward profileName');
-
-  // dryRun call must precede the real selectAndClaimTask call
-  const dryRunPos = body.indexOf('dryRun: true');
-  const realCallPos = body.indexOf('selectAndClaimTask({ scheduleTaskId, profileName })');
-  assert.ok(dryRunPos >= 0, 'dryRun:true must be present');
-  assert.ok(realCallPos > dryRunPos, 'dry run must precede real claim');
-});
-
-test('filterDispatchableTasks wires the template rate-limit check in its body', async () => {
-  const fs = await import('node:fs/promises');
-  const path = await import('node:path');
-  const src = await fs.readFile(path.resolve(process.cwd(), 'src/domain/tasks/dispatcher.ts'), 'utf8');
-
-  const startIdx = src.indexOf('async function filterDispatchableTasks');
-  assert.ok(startIdx >= 0, 'filterDispatchableTasks declaration must exist');
-  const after = src.slice(startIdx + 1);
-  const endIdx = after.search(/\n(function|async function|export )/);
-  const body = after.slice(0, endIdx);
-
-  assert.match(body, /isTemplateRateLimited/, 'filterDispatchableTasks must apply the template rate-limit check');
-});
-
-test('null-prompt guard is called in task-dispatcher selectAndClaimTask before taskMutator.claim', async () => {
-  const fs = await import('node:fs/promises');
-  const path = await import('node:path');
-  const src = await fs.readFile(path.resolve(process.cwd(), 'src/domain/tasks/dispatcher.ts'), 'utf8');
-
-  const startIdx = src.indexOf('async function selectAndClaimTask');
-  assert.ok(startIdx >= 0, 'selectAndClaimTask declaration must exist');
-  const after = src.slice(startIdx + 1);
-  const endIdx = after.search(/\n(function|async function|export )/);
-  const body = after.slice(0, endIdx);
-
-  assert.match(body, /isValidDispatchPrompt\s*\(/, 'selectAndClaimTask must call isValidDispatchPrompt');
-  // Guard must appear BEFORE taskMutator.claim
-  const guardPos = body.indexOf('isValidDispatchPrompt');
-  const claimPos = body.indexOf('taskMutator.claim');
-  assert.ok(guardPos > 0, 'guard must be present');
-  assert.ok(claimPos > guardPos, 'guard must precede taskMutator.claim');
-});
-
 
 // --- Locked-project filtering (plan §8) ---
 

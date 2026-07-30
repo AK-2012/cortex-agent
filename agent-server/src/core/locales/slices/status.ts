@@ -16,16 +16,18 @@ export const statusEn = {
   'status.supersededByEdit': 'Superseded by edit',
   'status.retryEdited': 'edited',
   'status.retry': 'Retry',
-  'status.rateLimitedExhausted': 'Rate limited — all fallbacks exhausted',
+  'status.rateLimitedExhausted': 'Rate limited',
   'status.supersededSeeNewReply': 'see new reply',
   'status.processingAskResponse': 'Processing AskUserQuestion response...',
   'status.errorBody': 'Error: ${message}',
   // --- Turn-completion notification ---
   'notify.turnComplete': 'Turn complete',
   'notify.turnFailed': 'Turn failed',
-  // --- Context compaction notification ---
-  'notify.contextCompacted': 'Context auto-compacted (${trigger}${tokens}). Earlier conversation history has been summarized; please restate key information if needed.',
-  'notify.contextCompactedTokens': ', ~${preTokens} tokens before compaction',
+  // --- Semantic chat notices ---
+  'notify.contextCompacted': 'Context auto-compacted.',
+  'notify.agentFallback': 'Model fallback: ${from} → ${to}.',
+  'notify.backendSessionReset': 'Previous backend session was unavailable; started a fresh session.',
+  'notify.rateLimitAutoResume': 'Rate limited — this chat will resume automatically when the limit resets.',
   // --- Execution report ---
   'status.noRunningExecutions': 'No running executions.',
   'status.runningExecutions': 'Running executions: ${count}',
@@ -49,16 +51,18 @@ export const statusZh: Record<keyof typeof statusEn, string> = {
   'status.supersededByEdit': '已被编辑取代',
   'status.retryEdited': '已编辑',
   'status.retry': '重试',
-  'status.rateLimitedExhausted': '触发限流 — 所有回退已用尽',
+  'status.rateLimitedExhausted': '触发限流',
   'status.supersededSeeNewReply': '查看新回复',
   'status.processingAskResponse': '正在处理 AskUserQuestion 回复……',
   'status.errorBody': '错误：${message}',
   // --- Turn-completion notification ---
   'notify.turnComplete': '回合完成',
   'notify.turnFailed': '回合失败',
-  // --- Context compaction notification ---
-  'notify.contextCompacted': '上下文已自动压缩（${trigger}${tokens}）。早期对话历史已被摘要，如有需要请重述关键信息。',
-  'notify.contextCompactedTokens': '，压缩前 ~${preTokens} tokens',
+  // --- Semantic chat notices ---
+  'notify.contextCompacted': '上下文已自动压缩。',
+  'notify.agentFallback': '模型回退：${from} → ${to}。',
+  'notify.backendSessionReset': '之前的后端会话不可用，已启动新会话。',
+  'notify.rateLimitAutoResume': '触发限流，解除后此对话将自动续跑。',
   // --- Execution report ---
   'status.noRunningExecutions': '没有正在运行的执行。',
   'status.runningExecutions': '正在运行的执行：${count}',
