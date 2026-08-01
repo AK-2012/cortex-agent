@@ -22,8 +22,8 @@ const server = new McpServer({ name: 'cortex-ext', version: CORTEX_VERSION });
 
 registerCostTools(server);
 registerExecutionTools(server);
-registerContextTools(server, contextDeps);
-registerScheduleTools(server, contextDeps);
+registerContextTools(server);
+registerScheduleTools(server);
 
 // --- Exported tool name list (for verification) ---
 
