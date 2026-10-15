@@ -49,6 +49,7 @@ import {
 import { BgTaskTracker, routeLine } from './bg-task-tracker.js';
 import { ClaudeContextUsageTracker } from './context-usage.js';
 import { resolveAutoCompactWindow } from './compact-window.js';
+import { detectMemoryTrigger, enqueueMemoryReminder } from './memory-trigger.js';
 
 const log = createLogger('claude-bridge');
 
@@ -707,6 +708,15 @@ class ClaudeSession {
         // so that position is always 0 while the streamed index may be any number.
         const blockId = takeTextBlockId(this.streamDeltaState) ?? undefined;
         if (typeof turn.onAssistantMessage === 'function') turn.onAssistantMessage(block.text, blockId);
+
+        // Memory trigger: enqueue a sidecar reminder for the next PostToolUse hook to inject.
+        // Detection is server-side (full assistant text); injection is hook-side (additionalContext).
+        const matched = detectMemoryTrigger(block.text);
+        if (matched) {
+          enqueueMemoryReminder(this.sessionId, matched, DATA_DIR);
+        }
+        
+       
       }
     }
     if (typeof turn.onProgress === 'function') {
